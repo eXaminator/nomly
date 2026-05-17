@@ -154,6 +154,7 @@ app_setting
   --   shopping_list.default_length_days = "7"
   --   planner.days_visible              = "7"
   --   planner.start_weekday             = "1"  (ISO 1=Mon … 7=Sun)
+  --   api.require_bearer                = "false"
 ```
 
 ### 3.3 Invariants
@@ -288,18 +289,75 @@ For the user's checked selection:
 
 ### 4.6 Home Assistant integration
 
-- Token issuance in settings: enter a label → token shown once → only the hash is stored.
-- Endpoints under `/api/v1/`, bearer auth required:
-  - `GET /api/v1/shopping-lists` — all lists, with an `active: true` flag on the one that has `completed_at IS NULL`
-  - `GET /api/v1/shopping-lists/active` — convenience shortcut to the active list
-  - `GET /api/v1/shopping-lists/:id` — single list (active or historical)
-  - `POST /api/v1/shopping-lists/:id/items` — add an item (body references an existing `ingredient_id`, an existing `product_id`, or includes a `newProduct: { name, default_category_id? }` payload that creates and attaches a product)
-  - `PATCH /api/v1/shopping-lists/:id/items/:itemId` — toggle checked, edit qty/note
-  - `POST /api/v1/shopping-lists/:id/preview-meals` — body `{ start, length }`; returns the dialog preview per §4.3.1. Only valid for the active list.
-  - `POST /api/v1/shopping-lists/:id/add-meals` — body `{ start, length, selection: [{ mealPlanId, recipeIngredientIds: [...] }] }`; performs the merge-on-add per §4.3.2 and writes `shopping_list_meal` rows. Only valid for the active list.
-  - `POST /api/v1/shopping-lists/:id/complete` — set `completed_at`, create the next active list, return both ids. Only valid for the active list.
-  - `GET /api/v1/meal-plans?from&to`
-- These share the same service layer as the web UI; the API is a thin adapter.
+Two concrete use cases drive the API surface:
+
+1. **Voice-add to the shopping list.** From an HA voice assist intent like *"Setz Toilettenpapier auf die Einkaufsliste"*, HA calls a single endpoint with a free-text item name. The server resolves the name against existing ingredient and product aliases; on match it adds a reference, on miss it creates a new product. The response says which path was taken so HA can respond *"Vorhandener Eintrag hinzugefügt"* or *"Neues Produkt angelegt und hinzugefügt"*.
+2. **Today's / tomorrow's meals on a dashboard.** An HA template card fetches today's (or upcoming N days') planned meals — each with title, photo URL, description, scaled ingredient list, and instructions — and renders them. One round-trip per refresh.
+
+Token issuance in settings: enter a label → token shown once → only the hash is stored. Single token type, no scopes (v1).
+
+**Auth model.** Consistent with the LAN-trust posture: all `/api/v1/*` endpoints accept requests **with or without** a bearer token. A request that includes an `Authorization: Bearer …` header must present a valid, non-revoked token — invalid bearer is rejected with `401`. The web UI calls these same endpoints without a token; HA includes one for revocation/audit and so the deployment can later be locked down by flipping a single setting (`api.require_bearer` → true) that turns the bearer header into a hard requirement. WebSocket upgrades follow the same rule.
+
+Endpoints under `/api/v1/`:
+
+**Active list** — `/active/*` always addresses the row with `completed_at IS NULL`, so HA scripts never need to look up the id.
+
+  - `GET /api/v1/shopping-lists/active` — full active list with items.
+  - `POST /api/v1/shopping-lists/active/items` — add an item. Body is one of:
+    - `{ ingredient_id, quantity?, unit_id?, note? }` — existing ingredient
+    - `{ product_id, quantity?, unit_id?, note? }` — existing product
+    - `{ newProduct: { name, default_category_id? }, quantity?, unit_id?, note? }` — explicit new product
+    - `{ byName: "Toilettenpapier", quantity?, unit?, note? }` — **the voice-add path**: server searches `ingredient.name ∪ ingredient_alias.name ∪ product.name ∪ product_alias.name` (case-insensitive, exact match first then substring). If exactly one match, attach as that type. If no match, create a `product` with that canonical name and attach. If multiple matches, return `409` with the candidates and let the caller disambiguate.
+    - Response: the created item plus `resolved: { mode: "ingredient" | "product" | "createdProduct", refId, displayName }` so HA can speak a confirmation.
+    - `unit` (string) may be passed instead of `unit_id` and is resolved the same alias-aware way.
+  - `PATCH /api/v1/shopping-lists/active/items/:itemId` — toggle `checked`, edit `quantity` / `unit_id` / `note`.
+  - `DELETE /api/v1/shopping-lists/active/items/:itemId`.
+  - `POST /api/v1/shopping-lists/active/preview-meals` — body `{ start, length }`; returns the dialog preview per §4.3.1.
+  - `POST /api/v1/shopping-lists/active/add-meals` — body `{ start, length, selection: [{ mealPlanId, recipeIngredientIds: [...] }] }`; merge-on-add per §4.3.2; writes `shopping_list_meal` rows.
+  - `POST /api/v1/shopping-lists/active/complete` — close the active list, create the next one, return `{ closedId, nextActiveId }`.
+
+**Lists overall**
+  - `GET /api/v1/shopping-lists` — every list, with `active: true` flag on the open one.
+  - `GET /api/v1/shopping-lists/:id` — single list (active or historical).
+
+**Photos**
+  - `GET /api/v1/photos/:filename` — streams the binary from `data/photos/<filename>`. Returned `photoUrl` fields in other endpoints reference this path.
+
+**Meal plans** — all return nested recipe data shaped for dashboards (scaled `recipe_ingredient` quantities applied, `recipe.photo_path` materialized as an absolute `photoUrl` using the request's scheme+host).
+
+  - `GET /api/v1/meal-plans?from&to` — flat date range; `recipe` is nested.
+  - `GET /api/v1/meal-plans/today` — convenience: all meal plans where `date = today` in the server's timezone.
+  - `GET /api/v1/meal-plans/upcoming?days=N` (default N=2) — convenience: meal plans in `[today, today + N - 1]`, grouped by date.
+  - Response shape (single meal plan):
+    ```json
+    {
+      "id": 42,
+      "date": "2026-05-17",
+      "servings": 4,
+      "note": null,
+      "recipe": {
+        "id": 7,
+        "title": "Spaghetti Bolognese",
+        "description": "...",
+        "photoUrl": "http://nomly.local:3000/api/v1/photos/abc.webp",
+        "prepTimeMin": 15,
+        "cookTimeMin": 30,
+        "sections": [
+          {
+            "title": null,
+            "instructions": "1. ...",
+            "ingredients": [
+              { "name": "Hackfleisch", "quantity": 500, "unit": "g", "notes": null }
+            ]
+          }
+        ]
+      }
+    }
+    ```
+
+**Realtime parity.** Changes made via the HA API broadcast on the same WebSocket topics as web-UI mutations (Epic 8) — adding via voice instantly appears on the phone in the store.
+
+The API shares the same service layer as the web UI; the API is a thin adapter. The web UI uses the exact same `/active/*` routes so there is no second implementation to keep in sync.
 
 ## 5. Architecture
 
@@ -355,13 +413,16 @@ Topics: `shopping-list:<id>`, `meal-plan:<yyyy-ww>` (ISO week).
 - **Photo serving.** v1 serves photos via a Next route handler. If perf becomes a problem, revisit (CDN, image CDN, etc.).
 - **Mobile camera capture.** Standard `<input type="file" accept="image/*" capture="environment">` is expected to work; verify in Epic 2.
 - **Delete + concurrent edit conflict.** Default rule: delete wins. Refine in Epic 8 if a real conflict pattern emerges.
-- **WS auth.** v1 is LAN-trust, no auth on `/ws`. If the deployment ever escapes the LAN, the API-token mechanism from Epic 10 extends naturally to WS upgrade.
+- **WS auth.** `/ws` follows the same model as `/api/v1/*`: bearer accepted in the upgrade request (query string or `Authorization` header), validated if present, otherwise LAN-trust. The `api.require_bearer` setting affects it too.
 - **Per-supermarket category overrides.** Currently a product/ingredient has a single `default_category_id` and the supermarket's ordering of categories does the rest. If real shopping experience shows that the same product genuinely belongs to different aisles in different stores, add a `product_supermarket_category` (and `ingredient_supermarket_category`) override table. Deferred unless needed.
 - **Promote product → ingredient.** If a manually-added product turns out to be used in recipes, manual re-entry as an ingredient is the v1 path. A "promote" action can be added later.
 - **iCal refresh policy.** v1 fetches on planner load with a 5-minute in-memory cache and a manual refresh button. A background refresh job (e.g. every 15 minutes) is a future enhancement.
 - **DnD on mobile.** Drag-and-drop reorder is not always reliable on touch — Epic 3 intentionally avoids it for cross-day moves on mobile and falls back to an explicit "Verschieben" action with a date picker.
 - **Remove a meal's contribution from the active list.** With `shopping_list_meal` in place we know which meal plans contributed, but we don't track per-item provenance, so undoing one meal's contribution requires either re-deriving from all remaining meals (re-run merge) or storing item-level provenance. Deferred. Workaround: user manually edits/deletes the affected items.
 - **Edited meal plan after add.** If a user edits a `meal_plan` (changes recipe, portions, etc.) AFTER it has been folded into the active list, the list items do NOT update. The meal is in `shopping_list_meal` and won't reappear in the dialog. A "Mahlzeit aus Liste entfernen und neu hinzufügen" action would solve this — deferred along with the item above.
+- **HA push notifications.** v1 is pull-only — HA polls REST endpoints and reacts on its own schedule. A future enhancement could expose webhooks (e.g. "fire on item-checked") so HA can react instantly without polling. Deferred.
+- **Multiple HA token scopes.** v1 has a single token type that grants full API access. If the deployment grows beyond personal use, scoped tokens (read-only, shopping-only, …) become worthwhile. Deferred.
+- **Voice disambiguation.** If `byName` matches multiple ingredients/products, the API returns `409` with candidates. HA voice intents would have to handle that — for now the user picks via touch in the HA UI or just retypes with the canonical name. Document the behavior; revisit if it becomes a friction point.
 
 ## 7. Epics
 
@@ -416,7 +477,7 @@ Each epic is independently mergeable. Order reflects the critical path to a usab
 **Epic 4 — Shopping list (online)**
 - Pages: `/einkauf` (renders the active list), `/einkauf/verlauf` (history index), `/einkauf/[id]` (read-only view of a completed list).
 - Migration seeds the initial active list row; partial unique index enforces "exactly one active".
-- "Mahlzeiten hinzufügen" dialog per §4.3 — single dialog with date + length controls at the top and live-refreshing per-meal/per-ingredient checkbox preview below. Backed by `POST /api/v1/shopping-lists/:id/preview-meals` and `POST /api/v1/shopping-lists/:id/add-meals`.
+- "Mahlzeiten hinzufügen" dialog per §4.3 — single dialog with date + length controls at the top and live-refreshing per-meal/per-ingredient checkbox preview below. Backed by `POST /api/v1/shopping-lists/active/preview-meals` and `POST /api/v1/shopping-lists/active/add-meals`.
 - Merge-on-add algorithm per §4.3.2.
 - Item rows: ingredient/product name, qty + unit, note, checkbox, edit/delete affordances.
 - "Artikel hinzufügen" autocomplete searches `ingredient ∪ product` (with type label per result). Selecting an ingredient creates an item with `ingredient_id`; selecting a product creates one with `product_id`; typing a new name and confirming creates a new `product` (with optional category in the inline form) and attaches it.
@@ -461,8 +522,13 @@ Each epic is independently mergeable. Order reflects the critical path to a usab
 
 **Epic 10 — Home Assistant API**
 - `/einstellungen/api-tokens`: create (token shown once), revoke.
-- Auth middleware: reads `Authorization: Bearer <token>`, hashes, looks up active token. Updates `last_used_at`.
-- Endpoints per §4.6. JSON-only.
+- Auth middleware: if `Authorization: Bearer <token>` is present, hashes the token, looks it up, rejects if missing or revoked, otherwise updates `last_used_at` and continues. Missing header → continue (LAN-trust). The `api.require_bearer` setting (default `false`) flips this to "header required".
+- All endpoints per §4.6, JSON-only.
+- The `/active/*` shorthand: a small router-level helper resolves the active `shopping_list.id` once per request and delegates to the same handlers used by the id-based routes — no duplicated logic.
+- `byName` resolution: shared service function (also reused by the web-UI "Artikel hinzufügen" flow) so voice + manual go through identical matching. Multiple-match disambiguation returns `409` with the candidates so HA can ask a follow-up.
+- Meal-plan response shaper: a single mapper produces the nested recipe shape (with ingredient scaling and absolute `photoUrl`) and is reused for `/meal-plans`, `/meal-plans/today`, and `/meal-plans/upcoming`.
+- Photo URL builder reads `X-Forwarded-Proto` / `X-Forwarded-Host` if set (reverse proxy case), otherwise falls back to the direct request host. Document the reverse-proxy header requirement in the settings page.
+- Reference HA configuration snippets (REST sensors for today's meal, a `shopping_list_add` script using `rest_command`) are added to `docs/integrations/home-assistant.md` so the user can copy-paste.
 
 **Epic 11 — Familywall import**
 - Investigation phase produces a short doc on the extraction approach actually used.
@@ -488,7 +554,7 @@ Each epic is independently mergeable. Order reflects the critical path to a usab
 - **7** Airplane-mode mid-shop allows continued check/uncheck/qty edit; reconnect flushes the queue cleanly with no data loss.
 - **8** Two browser tabs on the same list reflect each other's checks within ~1s.
 - **9** A Chefkoch URL produces a complete recipe; a no-JSON-LD URL shows a clear "manual" prompt.
-- **10** `curl -H "Authorization: Bearer ..."` can read the active list, check an item, and add a new product item.
+- **10** With a bearer token: (a) `POST /shopping-lists/active/items` with `{ byName: "Toilettenpapier" }` creates a product and adds it, and the response identifies it as `createdProduct`; (b) repeating with `{ byName: "Toilettenpapier" }` resolves to the existing product and adds it again (response `mode: "product"`); (c) `{ byName: "Hackfleisch" }` (already an ingredient) resolves to `mode: "ingredient"`; (d) `GET /meal-plans/today` returns today's plans with `recipe.photoUrl` as an absolute URL, scaled ingredient quantities, and instructions; (e) the additions show up in real time on a web client subscribed to the active-list WebSocket topic.
 - **11** Familywall data lands as recipes with sections + ingredients; a re-run produces zero duplicates.
 - **12** With two iCal feeds configured (different colors) and one feed deliberately misconfigured, the planner shows valid events in their day-cells, the broken feed surfaces a warning chip, and the rest of the planner still works.
 
