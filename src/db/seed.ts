@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { sql, eq } from "drizzle-orm";
-import { db } from "./index";
+import { db } from "./index.ts";
 import {
   category,
   ingredient,
@@ -9,7 +9,7 @@ import {
   supermarket,
   unit,
   unitAlias,
-} from "./schema";
+} from "./schema.ts";
 
 type TandoorUnit = {
   name: string;

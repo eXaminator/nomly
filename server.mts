@@ -18,9 +18,9 @@ async function main() {
   const { WebSocketServer } = await import("ws");
   type WebSocket = import("ws").WebSocket;
   const { getIronSession } = await import("iron-session");
-  const { sessionOptions, isSessionLive } = await import("./src/lib/session");
-  type SessionData = import("./src/lib/session").SessionData;
-  const { extractBearer, verifyBearer } = await import("./src/lib/bearer");
+  const { sessionOptions, isSessionLive } = await import("./src/lib/session.ts");
+  type SessionData = import("./src/lib/session.ts").SessionData;
+  const { extractBearer, verifyBearer } = await import("./src/lib/bearer.ts");
 
   const port = parseInt(process.env.PORT ?? "3000", 10);
   const hostname = process.env.HOSTNAME ?? "0.0.0.0";

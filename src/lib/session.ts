@@ -1,6 +1,5 @@
-import { cookies } from "next/headers";
-import { getIronSession, type IronSession, type SessionOptions } from "iron-session";
-import { env } from "./env";
+import type { SessionOptions } from "iron-session";
+import { env } from "./env.ts";
 
 export type SessionData = {
   sub: string;
@@ -32,11 +31,6 @@ export function sessionOptions(): SessionOptions {
       maxAge: 60 * 60 * 24 * 90,
     },
   };
-}
-
-export async function getSession(): Promise<IronSession<Partial<SessionData>>> {
-  const store = await cookies();
-  return getIronSession<Partial<SessionData>>(store, sessionOptions());
 }
 
 /** Inactivity timeout: 30 days since last refresh. */

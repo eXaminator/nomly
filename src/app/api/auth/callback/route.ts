@@ -4,7 +4,8 @@ import * as client from "openid-client";
 import { unsealData } from "iron-session";
 import { getOidcConfig } from "@/lib/oidc";
 import { env } from "@/lib/env";
-import { getSession, type SessionData } from "@/lib/session";
+import { getSession } from "@/lib/server-session";
+import type { SessionData } from "@/lib/session";
 
 const STATE_COOKIE = "__nomly_oidc_state";
 

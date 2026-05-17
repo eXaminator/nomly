@@ -1,4 +1,4 @@
-import { runSeed } from "../src/db/seed";
+import { runSeed } from "../src/db/seed.ts";
 
 const counts = runSeed();
 console.log("Standarddaten geladen:");

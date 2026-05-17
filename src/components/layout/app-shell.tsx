@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { getSession } from "@/lib/session";
+import { getSession } from "@/lib/server-session";
 import { TopNav } from "./top-nav";
 import { BottomNav } from "./bottom-nav";
 import { UserMenu, UserMenuFallback } from "./user-menu";

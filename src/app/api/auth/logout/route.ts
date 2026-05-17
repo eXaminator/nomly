@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getSession } from "@/lib/session";
+import { getSession } from "@/lib/server-session";
 import { env } from "@/lib/env";
 
 async function clear(): Promise<NextResponse> {

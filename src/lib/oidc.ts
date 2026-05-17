@@ -1,5 +1,5 @@
 import * as client from "openid-client";
-import { env } from "./env";
+import { env } from "./env.ts";
 
 let cached: Promise<client.Configuration> | null = null;
 
