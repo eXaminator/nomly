@@ -18,7 +18,7 @@ Personal webapp combining a cookbook, a meal planner, and a shopping list, used 
 
 | Topic | Decision |
 |---|---|
-| Auth | OIDC (Authentik or any compliant IdP) is the primary mode; HTTP forward-auth is an alternate mode, selected by `AUTH_MODE` env var. **All authenticated users see the same data** — auth is a gate, not a partition. No user table. |
+| Auth | OIDC (Authentik or any compliant IdP). **All authenticated users see the same data** — auth is a gate, not a partition. No user table. |
 | API access for machines | `api_token` rows issued from settings UI; bearer tokens grant `/api/v1/*` access without an OIDC session. This is how HA connects. |
 | Deployment | Docker image published to `ghcr.io/examinator/nomly` via GitHub Actions on push to `main` and on tags. Docker Compose recipe in repo. Container runs as non-root, mounts `./data:/app/data` for SQLite DB and photos. |
 | UI language | German only. No i18n framework. |
@@ -297,7 +297,7 @@ Two concrete use cases drive the API surface:
 
 Token issuance in settings: enter a label → token shown once → only the hash is stored. Single token type, no scopes (v1).
 
-**Auth model.** Every request to `/api/v1/*` must present **either** a valid OIDC/forward-auth session cookie (this is how the web UI calls these endpoints) **or** a valid bearer token from `api_token` (this is how HA calls them). Anything else returns `401`. WebSocket upgrades on `/ws` use the same rule: session cookie passed automatically by the browser, or `Authorization: Bearer …` header / `?token=` query param for non-browser clients.
+**Auth model.** Every request to `/api/v1/*` must present **either** a valid OIDC session cookie (this is how the web UI calls these endpoints) **or** a valid bearer token from `api_token` (this is how HA calls them). Anything else returns `401`. WebSocket upgrades on `/ws` use the same rule: session cookie passed automatically by the browser, or `Authorization: Bearer …` header / `?token=` query param for non-browser clients.
 
 Endpoints under `/api/v1/`:
 
@@ -408,12 +408,9 @@ Topics: `shopping-list:<id>`, `meal-plan:<yyyy-ww>` (ISO week).
 
 ### 5.6 Authentication
 
-Two modes, picked by `AUTH_MODE` env var (default `oidc`):
+OIDC via `openid-client` (Node-side discovery + token exchange) + `iron-session` (encrypted, signed cookie session — no DB).
 
-**OIDC mode (`AUTH_MODE=oidc`)** — primary path.
-
-- Library: `openid-client` (Node-side discovery + token exchange) + `iron-session` (encrypted, signed cookie session — no DB).
-- Required env: `OIDC_ISSUER` (e.g. `https://auth.example.com/application/o/nomly/`), `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, `SESSION_SECRET` (≥ 32 chars), `BASE_URL` (used to build the redirect URI).
+- Required env: `OIDC_ISSUER` (e.g. `https://auth.example.com/application/o/nomly/`), `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, `SESSION_SECRET` (≥ 32 chars), `BASE_URL` (used to build the redirect URI). App refuses to start if any are missing (fail-loud).
 - Routes (unauthenticated by definition):
   - `GET /api/auth/login` — initiates the auth-code flow, stores PKCE verifier + state in a short-lived cookie, redirects to the issuer.
   - `GET /api/auth/callback` — verifies state, exchanges code for tokens, stores `{ sub, name, email, exp }` in the iron-session cookie, redirects to the original `?next=` path.
@@ -421,21 +418,13 @@ Two modes, picked by `AUTH_MODE` env var (default `oidc`):
 - Token refresh: when the session is older than `SESSION_REFRESH_AT` (e.g. 30 min) but inside the absolute lifetime, the middleware silently uses the stored refresh token to extend the session.
 - Identity is stored for display only (header avatar, audit log of API token actions). It is never used to filter data.
 
-**Forward-auth mode (`AUTH_MODE=forward`)** — alternate path.
+**Middleware** (`src/middleware.ts`)
 
-- Trust headers set by an upstream proxy (Authentik outpost, Traefik forward-auth, oauth2-proxy, …). Configurable header name via `AUTH_FORWARD_HEADER` (default `X-Authentik-Username`).
-- Middleware reads the header; presence = authenticated, absence = `401`.
-- Operator responsibility: ensure the app is not reachable except through the proxy (Docker network isolation, firewall) — otherwise auth is trivially bypassable. The README spells this out.
-
-**Common middleware.**
-
-- Runs as Next.js middleware (`src/middleware.ts`).
 - Bypasses: `/api/auth/*`, `/api/health`, `/_next/*`, static assets.
 - Order of checks:
   1. Session cookie (iron-session) → if valid → allow.
   2. Bearer token → if valid `api_token` → allow with a machine principal flag set on the request context.
-  3. Forward-auth header (if `AUTH_MODE=forward`) → allow.
-  4. Otherwise: if the request is HTML, redirect to `/api/auth/login?next=<path>`; if it's an API call, return `401` JSON.
+  3. Otherwise: if the request is HTML, redirect to `/api/auth/login?next=<path>`; if it's an API call, return `401` JSON.
 - Web UI mutations always go through path 1; HA mutations always through path 2.
 
 **Session cookie.** `__nomly_session`, `HttpOnly`, `Secure` (when `BASE_URL` is `https`), `SameSite=Lax`, signed and encrypted with `SESSION_SECRET`. Inactivity timeout 30 days; absolute timeout 90 days.
@@ -467,7 +456,7 @@ Each epic is independently mergeable. Order reflects the critical path to a usab
 
 | # | Epic | Depends on | One-line scope |
 |---|---|---|---|
-| 1 | **Foundation + Auth** | — | Custom server, full schema, base seeds, layout/nav shell, settings shell, **OIDC + forward-auth middleware gating every page and API call from day 1**, `/api/health`. |
+| 1 | **Foundation + Auth** | — | Custom server, full schema, base seeds, layout/nav shell, settings shell, **OIDC middleware gating every page and API call from day 1**, `/api/health`. |
 | 2 | **Recipes** | 1 | Recipe CRUD with multi-section model, inline ingredient/unit/category create, tags, photo upload, list/grid + detail, search. |
 | 3 | **Meal planner (UI)** | 2 | Two-column desktop with DnD (recipe list ↔ calendar, calendar ↔ calendar), configurable `days_visible` + `start_weekday`, mobile tap-to-add fallback. |
 | 4 | **Shopping list (online)** | 3 | Single active list, "Mahlzeiten hinzufügen" dialog (date + length + per-meal/per-ingredient checkboxes) with merge-on-add, supermarket UI filter, inline product create, "Liste abschließen" + history, check-off UI. |
@@ -491,8 +480,7 @@ Each epic is independently mergeable. Order reflects the critical path to a usab
   - `openid-client` + `iron-session` integrated.
   - Routes `/api/auth/login`, `/api/auth/callback`, `/api/auth/logout`.
   - `src/middleware.ts` enforces session-or-bearer on every non-bypass route. The bearer side is wired but only meaningful once Epic 10 adds the management UI (the table and middleware already work from day 1).
-  - `AUTH_MODE=forward` alternate mode implemented behind the same middleware.
-- Required env: `BASE_URL`, `SESSION_SECRET`, and (mode-dependent) OIDC_* or `AUTH_FORWARD_HEADER`. App refuses to start if required vars are missing for the selected mode (fail-loud).
+- Required env: `BASE_URL`, `SESSION_SECRET`, `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`. App refuses to start if any are missing (fail-loud).
 - `/api/health` route — returns `{ ok: true, version }`, bypasses auth (for the Docker healthcheck).
 - Layout: top nav with links to Rezepte, Plan, Einkauf, Einstellungen, plus a header user-menu showing the OIDC display name and a "Abmelden" action.
 - Empty `/einstellungen` page with sub-page placeholders.
@@ -598,8 +586,8 @@ Each epic is independently mergeable. Order reflects the critical path to a usab
 - `docker-compose.example.yml`:
   - `nomly` service from `ghcr.io/examinator/nomly:latest`, port mapping, `./data:/app/data` volume, env file reference.
   - Commented hints for connecting to an existing Authentik instance (issuer URL, client id/secret env vars).
-  - Optional `caddy` / `traefik` reverse-proxy stanza with forward-auth example (commented).
-- `.env.example` lists all required + optional vars (already exists; updated here with `BASE_URL`, `SESSION_SECRET`, OIDC_*, `AUTH_MODE`, `AUTH_FORWARD_HEADER`).
+  - Optional `caddy` / `traefik` reverse-proxy stanza for TLS termination (commented).
+- `.env.example` lists all required + optional vars (already exists; updated here with `BASE_URL`, `SESSION_SECRET`, `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`).
 - `.github/workflows/docker-publish.yml`:
   - Triggers on push to `main` and on tags `v*`.
   - Steps: checkout → set up Buildx → login to `ghcr.io` (via `GITHUB_TOKEN`) → `docker/build-push-action` with `linux/amd64,linux/arm64` (so the user can run on a Pi).
@@ -610,7 +598,7 @@ Each epic is independently mergeable. Order reflects the critical path to a usab
 
 ### 7.2 Success criteria (acceptance per epic)
 
-- **1** `npm run dev` with valid OIDC env vars boots the custom server; visiting `/` while logged out redirects to the configured Authentik login; after sign-in the German layout renders with the user's display name in the header; "Abmelden" clears the session. With `AUTH_MODE=forward` and a proxy injecting `X-Authentik-Username`, the same flow works with no redirect. `db:migrate` applies the full schema; seed creates units, categories, and the initial active shopping list. `/api/health` returns `200` without auth.
+- **1** `npm run dev` with valid OIDC env vars boots the custom server; visiting `/` while logged out redirects to the configured Authentik login; after sign-in the German layout renders with the user's display name in the header; "Abmelden" clears the session. `db:migrate` applies the full schema; seed creates units, categories, and the initial active shopping list. `/api/health` returns `200` without auth.
 - **2** A recipe with two named sections and ten ingredients (spanning two units of the same dimension) can be created, edited, viewed, deleted; photo upload renders correctly; ingredient autocomplete finds existing entries and creates new ones.
 - **3** On desktop, a recipe can be dragged from the right-hand list onto a day-cell to create a meal, and a meal can be dragged to another day to move; `days_visible` and `start_weekday` settings change the visible range; "Heute" resets to the configured origin. On mobile, tap-to-add still works and DnD is suppressed.
 - **4** End-to-end on the active list: the "Mahlzeiten hinzufügen" dialog opens with date/length controls and a live preview; changing the date refreshes the preview; deselecting a meal clears its ingredients (meal checkbox follows); deselecting one ingredient leaves the meal in indeterminate state; "Alle/Keine auswählen" toggles the whole preview; confirming merges the selection (overlapping `(ingredient, dimension)` items get summed into existing items, others created fresh); re-opening the dialog with the same range now hides the already-added meals; "Liste abschließen" closes the current list and a new empty active list appears with the history link showing the prior list read-only; adding "Toilettenpapier" inline creates a reusable `product` with its category preserved; the supermarket filter dropdown changes the on-screen grouping/order without touching the DB and survives a page reload (per device).
