@@ -191,19 +191,47 @@ app_setting
 
 ### 4.3 Shopping list generation
 
-- Setting `shopping_list.default_length_days` (default 7) lives in `app_setting`.
-- "Neue Einkaufsliste" → Startdatum (default heute) + Länge (default = setting) + optional Supermarkt → Erstellen.
-- The server:
-  1. Collects `meal_plan` rows in `[start, start + length - 1]`.
-  2. Expands each row to its `recipe_section.recipe_ingredient` set, scaling `quantity` by `servings_override / recipe.servings`.
-  3. Drops any line where the ingredient has `exclude_from_shopping_list = true`.
-  4. Groups remaining lines by `ingredient_id`, then sub-groups by `unit.dimension`.
-  5. Within each `(ingredient, dimension)` bucket, converts to the base unit and sums; formats output in the largest sensible unit (`1200g → 1,2 kg`).
-  6. Cross-dimension lines for the same ingredient remain separate but render under one ingredient header.
-  7. Open-ended lines (null quantity) collapse to a single line per `(ingredient, unit)` with the note preserved.
-- The merged result is materialized into `shopping_list_item` rows; each row snapshots `category_id` from `ingredient.default_category_id` at generation time.
-- Products are **not** added at generation time — they are appended manually to the list once created (see §4.4).
-- Once created, the list is decoupled from meal-plan edits.
+Two-step flow.
+
+**Step 1 — Range.** "Neue Einkaufsliste" → Startdatum (default heute) + Länge (default = setting `shopping_list.default_length_days`, default 7) + optional Supermarkt → "Weiter". A new server call returns a *preview*: all `meal_plan` rows in `[start, start + length - 1]`, each with its scaled `recipe_section.recipe_ingredient` set (quantity × `servings_override / recipe.servings`), already filtered to drop ingredients with `exclude_from_shopping_list = true`. Meals with zero remaining selectable ingredients after the filter are omitted from the preview.
+
+**Step 2 — Selection dialog.** Modal "Zutaten auswählen" shows the preview grouped per meal:
+
+```
+[ Alle auswählen ]  [ Keine auswählen ]
+
+▣ Mo, 19.05.  Spaghetti Bolognese (4 Portionen)
+   ▣ 500 g Hackfleisch
+   ▣ 1 Dose Tomaten
+   ▣ 200 g Spaghetti
+   ...
+
+▣ Di, 20.05.  Linsensuppe (2 Portionen)
+   ▣ 250 g Linsen
+   ▣ 1 Karotte
+   ...
+```
+
+- Every meal and every ingredient starts **checked** by default.
+- Each meal-card has its own checkbox in the header — toggling it sets every ingredient inside.
+- The two header buttons ("Alle auswählen" / "Keine auswählen") apply across the whole dialog.
+- If a meal's ingredients are all unchecked, the meal-card checkbox shows unchecked; a mixed state shows the indeterminate marker.
+- Confirm button "Einkaufsliste erstellen" is enabled whenever at least one ingredient is checked OR the user explicitly chose to create an empty list (separate "Leere Liste erstellen" link in the dialog footer for the case of no meals in range — see below).
+
+**Empty preview.** If no meals fall in the range (or all are filtered out), the dialog opens directly on the "Leere Liste erstellen" path with an explanatory note — the user can still create a list to add products to.
+
+**Step 3 — Server materialization.** On confirm, the server receives the set of checked `(meal_plan_id, recipe_ingredient_id)` pairs and runs the merge algorithm only over those:
+
+1. Groups by `ingredient_id`, sub-groups by `unit.dimension`.
+2. Within each `(ingredient, dimension)` bucket, converts to base unit and sums; formats output in the largest sensible unit (`1200g → 1,2 kg`).
+3. Cross-dimension lines for the same ingredient remain separate but render under one ingredient header.
+4. Open-ended lines (null quantity) collapse to a single line per `(ingredient, unit)` with the note preserved.
+
+The merged result is materialized into `shopping_list_item` rows; each row snapshots `category_id` from `ingredient.default_category_id` at generation time.
+
+**Products** are not part of step 2 — they are appended manually after the list exists (see §4.4).
+
+**Snapshot.** Once created, the list is decoupled from meal-plan edits.
 
 ### 4.4 Shopping in a store (offline + sync)
 
@@ -294,6 +322,7 @@ Topics: `shopping-list:<id>`, `meal-plan:<yyyy-ww>` (ISO week).
 - **Promote product → ingredient.** If a manually-added product turns out to be used in recipes, manual re-entry as an ingredient is the v1 path. A "promote" action can be added later.
 - **iCal refresh policy.** v1 fetches on planner load with a 5-minute in-memory cache and a manual refresh button. A background refresh job (e.g. every 15 minutes) is a future enhancement.
 - **DnD on mobile.** Drag-and-drop reorder is not always reliable on touch — Epic 3 intentionally avoids it for cross-day moves on mobile and falls back to an explicit "Verschieben" action with a date picker.
+- **Append meals to an existing list.** v1 generation is one-shot — once a list is materialized, new meal plans don't auto-add. A "Mahlzeiten zur Liste hinzufügen" action on an existing list (re-using the §4.3 selection dialog over a freshly picked range, merging into the existing items) is an obvious follow-up. Deferred; flag for revisit after first real use.
 
 ## 7. Epics
 
@@ -347,8 +376,11 @@ Each epic is independently mergeable. Order reflects the critical path to a usab
 
 **Epic 4 — Shopping list (online)**
 - Page `/einkauf` (list of lists) + `/einkauf/[id]` (single list).
-- Generation modal: start date (today default), length (setting default), optional supermarket.
-- Smart merge algorithm per §4.3.
+- Two-step generation per §4.3:
+  - Step 1: range modal (start date, length, optional supermarket) → calls `POST /api/v1/shopping-lists/preview` returning the scaled meal/ingredient preview.
+  - Step 2: selection dialog ("Zutaten auswählen") with per-meal cards, per-ingredient checkboxes, meal-level checkboxes (with indeterminate state), and global "Alle auswählen" / "Keine auswählen" buttons. All checked by default.
+  - Confirm calls `POST /api/v1/shopping-lists` with the checked set; server runs the smart merge over the selection only and materializes items.
+- Smart merge algorithm per §4.3 step 3.
 - Item rows: ingredient/product name, qty + unit, note, checkbox, edit/delete affordances.
 - "Artikel hinzufügen" autocomplete searches `ingredient ∪ product` (with type label per result). Selecting an ingredient creates an item with `ingredient_id`; selecting a product creates one with `product_id`; typing a new name and confirming creates a new `product` (with optional category in the inline form) and attaches it.
 - Introduces the JSON endpoints under `/api/v1/shopping-lists/*` per §4.6 shape — used here for web-UI mutations and consumed unchanged by Epic 7's offline queue and Epic 10's HA flow.
@@ -412,7 +444,7 @@ Each epic is independently mergeable. Order reflects the critical path to a usab
 - **1** `npm run dev` boots the custom server; `/` renders a German layout; `db:push` applies the full schema; seed creates units and categories.
 - **2** A recipe with two named sections and ten ingredients (spanning two units of the same dimension) can be created, edited, viewed, deleted; photo upload renders correctly; ingredient autocomplete finds existing entries and creates new ones.
 - **3** On desktop, a recipe can be dragged from the right-hand list onto a day-cell to create a meal, and a meal can be dragged to another day to move; `days_visible` and `start_weekday` settings change the visible range; "Heute" resets to the configured origin. On mobile, tap-to-add still works and DnD is suppressed.
-- **4** Generating a list across a week with overlapping recipes produces one merged item per `(ingredient, dimension)`; adding "Toilettenpapier" inline creates a `product` row that's reusable on a later list with its category preserved; checking persists; subsequent meal-plan edits do not mutate the list.
+- **4** The two-step generation works end-to-end: the range step previews all in-range meals with scaled ingredients; the selection dialog lets the user deselect a meal (clears all its ingredients), deselect a single ingredient (leaves the meal in indeterminate state), and use "Alle auswählen" / "Keine auswählen"; confirming with a partial selection produces a list that contains only those ingredients (and the smart merge collapses overlaps within the selection); adding "Toilettenpapier" inline creates a `product` row that's reusable on a later list with its category preserved; checking persists; subsequent meal-plan edits do not mutate the list; creating a list with no meals selected yields an empty list ready for product additions.
 - **5** Two supermarkets with different category orders flip the grouping/sort when toggled; both ingredient-items and product-items respect the supermarket's order.
 - **6** Merging ingredients moves all references and preserves all aliases; merging products does the same over `shopping_list_item.product_id`; delete-with-replacement rewires references; `exclude_from_shopping_list` hides those ingredients from newly generated lists.
 - **7** Airplane-mode mid-shop allows continued check/uncheck/qty edit; reconnect flushes the queue cleanly with no data loss.
