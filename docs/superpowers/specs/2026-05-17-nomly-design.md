@@ -12,7 +12,7 @@ Personal webapp combining a cookbook, a meal planner, and a shopping list, used 
 2. Plan meals on a calendar.
 3. Generate a shopping list for an upcoming window of days.
 4. Use the shopping list on a phone inside a supermarket — must work offline and stay live-synced with the other user when online.
-5. Expose a small REST API so Home Assistant can read and check off items on the active list.
+5. Expose a small REST API so Home Assistant can read and check off items on the shopping list.
 
 ## 2. Top-Level Decisions
 
@@ -34,8 +34,9 @@ Personal webapp combining a cookbook, a meal planner, and a shopping list, used 
 | Planner UX | Desktop = two-column (calendar left, recipe list right) with drag-and-drop. Mobile = single-column tap-to-add. Visible days and start weekday are configurable. |
 | iCal | Server-side fetch + parse of user-configured iCal URLs (`node-ical`); events shown alongside meals in the planner. |
 | Non-recipe products | Manually-added shopping items (toilet paper, batteries…) are first-class `product` entities — reusable across lists, with their own categories, aliases, and management UI. |
-| Shopping list cardinality | Exactly **one active list** at any time. Adding meals appends to it; "Liste abschließen" closes it and a fresh empty active list is created. Completed lists are kept as read-only history. |
-| Supermarket filter | Stored per-device in `localStorage`, not as a list property — different devices/users can hold different active filters. |
+| Shopping list | **One running list, forever.** No "create new list" / "complete list" / history concepts. Adding meals appends to it. Checked items render as grayed/strikethrough and stay visible for 24 h, then a background sweeper deletes them. Unchecked items stay until checked. |
+| Supermarket filter | Stored per-device in `localStorage` — different devices/users can hold different active filters. |
+| UI design | Mobile-first, touch-friendly, modern. Tailwind v4 + Radix UI primitives + shadcn-style component layer + `lucide-react` + `next-themes` (dark mode default) + `framer-motion` for transitions. See §5.7. |
 
 ## 3. Domain Model
 
@@ -114,14 +115,8 @@ supermarket_category
   id, supermarket_id (FK), category_id (FK), sort_order
   -- unique(supermarket_id, category_id)
 
-shopping_list
-  id, title (auto: "Einkaufsliste vom DD.MM.YYYY"),
-  created_at, completed_at (nullable)
-  -- exactly one row has completed_at IS NULL (the active list)
-  -- enforced by a partial unique index on (completed_at IS NULL)
-
-shopping_list_item
-  id, list_id (FK),
+shopping_item
+  id,
   ingredient_id (FK, nullable), product_id (FK, nullable),
   -- XOR: exactly one of ingredient_id / product_id is set
   quantity (decimal, nullable), unit_id (FK, nullable),
@@ -130,14 +125,19 @@ shopping_list_item
   checked (bool, default false), checked_at (nullable),
   note (nullable), sort_order,
   version (int, monotonic — for sync conflict resolution),
-  updated_at
+  created_at, updated_at
 
-shopping_list_meal
-  list_id (FK), meal_plan_id (FK), added_at
-  -- composite PK (list_id, meal_plan_id)
-  -- records which meal plans have already been folded into a list,
-  -- so the add-meals dialog can hide them and the system can't
-  -- double-count their ingredients.
+shopping_item_source
+  id,
+  item_id (FK shopping_item.id, ON DELETE CASCADE),
+  meal_plan_id (FK meal_plan.id, ON DELETE CASCADE),
+  recipe_ingredient_id (FK recipe_ingredient.id, ON DELETE CASCADE),
+  added_at
+  -- many-to-many between items and the meal_plan / recipe_ingredient
+  -- combos that contributed to them. Items merged from multiple meals
+  -- have multiple rows here. Manually-added items have none.
+  -- A meal_plan is "currently on the list" iff at least one row
+  -- references it (transitively, an item still exists).
 
 ical_feed
   id, name, url, color (hex, e.g. "#3b82f6"),
@@ -163,10 +163,11 @@ app_setting
 - An `ingredient`'s `name` and all its `ingredient_alias.name` rows are globally unique across the union — typing any of them resolves to exactly one ingredient. Same rule for `product`, `unit`, `category` within their own namespaces.
 - `ingredient` and `product` share no uniqueness constraint with each other — `"Salz"` could exist as both, though the merge tooling in Epic 6 makes it easy to clean up.
 - Every `recipe` has at least one `recipe_section`. A single-section recipe uses one section with `title = null` and the UI renders it flat.
-- `shopping_list_item.ingredient_id` and `shopping_list_item.product_id` are mutually exclusive (XOR): exactly one is set.
+- `shopping_item.ingredient_id` and `shopping_item.product_id` are mutually exclusive (XOR): exactly one is set.
 - `unit` conversions only sum within the same `dimension`. Cross-dimension entries for one ingredient render as separate lines under one ingredient header.
-- Exactly one `shopping_list` row has `completed_at IS NULL` — the **active list**. The first migration seeds it; "Liste abschließen" creates the next one in the same transaction that sets `completed_at` on the current one.
-- A `meal_plan` row is added to the active list at most once — `shopping_list_meal` is the truth source. Edits to a `meal_plan` after it has been added do NOT retroactively update the items it produced (it remains effectively snapshotted at add-time at the item level).
+- A `shopping_item` whose `checked = true` and `checked_at < now() - 24h` is eligible for deletion by the background sweeper (§4.4). Until then it stays on the list, rendered in a struck-through / muted style.
+- A `meal_plan` is "currently on the shopping list" iff `shopping_item_source` has a row referencing it (transitively, the item it produced still exists). When the last sourced item is purged or deleted, the meal naturally becomes addable again from the dialog.
+- Editing a `meal_plan` after its ingredients have been added does NOT retroactively update the items it produced. The items remain effectively snapshotted at add-time at the item level.
 
 ## 4. Key Flows
 
@@ -205,9 +206,9 @@ app_setting
 
 ### 4.3 Adding meals to the shopping list
 
-There is always exactly one active `shopping_list`. The `/einkauf` page renders that list directly — no "list of lists" UI in the main flow (a "Verlauf" link reveals completed lists read-only).
+There is **one running shopping list**, forever. The `/einkauf` page renders it directly — no completion flow, no history, no list IDs in URLs.
 
-**The "Mahlzeiten zur Einkaufsliste hinzufügen" dialog** is the single way to append meals to the active list. It owns the date selection:
+**The "Mahlzeiten zur Einkaufsliste hinzufügen" dialog** is the single way to append meals. It owns the date selection:
 
 ```
 Mahlzeiten zur Einkaufsliste hinzufügen
@@ -232,19 +233,20 @@ Startdatum: [ 19.05.2026 ▾ ]   Länge: [ 7 ] Tage
 
 - Startdatum defaults to today; Länge defaults to `shopping_list.default_length_days` (setting, default 7).
 - The preview below the controls refreshes live as the user changes date or length.
-- The preview is computed server-side per §4.3.1 below and contains only **eligible** meals — meal plans in `[start, start + length - 1]` that are not already in `shopping_list_meal` for the active list, scaled by `servings_override / recipe.servings`, with `exclude_from_shopping_list = true` ingredients pre-filtered out. Meals that have zero eligible ingredients left after filtering are hidden.
+- The preview is computed server-side per §4.3.1 and contains only **eligible** meals — meal plans in `[start, start + length - 1]` that are NOT currently on the shopping list (i.e. have no `shopping_item_source` row pointing at them, transitively no surviving item), scaled by `servings_override / recipe.servings`, with `exclude_from_shopping_list = true` ingredients pre-filtered out. Meals that have zero eligible ingredients after filtering are hidden.
 - Every meal and every ingredient starts **checked** by default.
 - Each meal-card's header checkbox toggles every ingredient inside; indeterminate state when only some are checked.
 - "Alle auswählen" / "Keine auswählen" header buttons apply across the entire current preview.
-- "Übernehmen" merges the checked ingredients into the active list (per §4.3.2) and inserts `shopping_list_meal` rows for the meal plans whose ingredients were included (even partially).
+- "Übernehmen" merges the checked ingredients into the running list (per §4.3.2) and inserts `shopping_item_source` rows linking each affected item back to the contributing `(meal_plan, recipe_ingredient)` pairs.
 - "Abbrechen" closes the dialog without changes.
-- Empty preview state: the dialog still opens, shows a "Keine Mahlzeiten in diesem Zeitraum" note, and offers "Abbrechen" (the user can still add products from the list page itself).
+- Empty preview state: the dialog still opens, shows a "Keine Mahlzeiten in diesem Zeitraum" note, and offers "Abbrechen" (the user can still add products directly from the list page).
+- On mobile this dialog renders as a full-height bottom sheet rather than a modal — see §5.7.
 
 #### 4.3.1 Preview computation
 
-For a given `(start_date, length_days, active_list_id)`:
+For a given `(start_date, length_days)`:
 
-1. `meal_plan` rows in `[start, start + length - 1]` whose id is NOT in `shopping_list_meal` for `active_list_id`.
+1. `meal_plan` rows in `[start, start + length - 1]` whose id is NOT referenced by any surviving `shopping_item_source` row.
 2. For each, expand `recipe_section.recipe_ingredient` and scale quantities by `servings_override / recipe.servings`.
 3. Drop lines where the ingredient has `exclude_from_shopping_list = true`.
 4. Drop meals that end up with no remaining lines.
@@ -257,27 +259,38 @@ For the user's checked selection:
 1. Group selected `(ingredient_id, unit.dimension)` pairs across the entire selection (NOT per meal — overlaps merge).
 2. Within each `(ingredient, dimension)` bucket, convert to the base unit and sum; format in the largest sensible unit (`1200g → 1,2 kg`).
 3. Open-ended lines (null quantity) within a bucket collapse to one line.
-4. For each merged bucket, look for an existing `shopping_list_item` on the active list with the same `(ingredient_id, unit.dimension)`:
-   - **Found:** add the new amount onto the existing item's quantity. Bump `version` and `updated_at`. `checked` stays as it was (a re-add of an already-checked item does NOT uncheck it; we treat a re-add as "still need more" and the user can decide).
-   - **Not found:** create a new `shopping_list_item` with `category_id` snapshotted from `ingredient.default_category_id`.
-5. Cross-dimension lines for the same ingredient remain separate but render under one ingredient header in the UI (no special DB representation — just a UI grouping by `ingredient_id` on render).
+4. For each merged bucket, look for an existing `shopping_item` with the same `(ingredient_id, unit.dimension)`:
+   - **Found and unchecked:** add the new amount onto the existing item's quantity. Bump `version` and `updated_at`.
+   - **Found and checked (within the 24 h grace window):** uncheck it (`checked = false`, clear `checked_at`), set quantity to the new amount, bump `version` / `updated_at`. Rationale: the user has decided they need this item again — re-add ⇒ reactivate.
+   - **Not found:** create a new `shopping_item` with `category_id` snapshotted from `ingredient.default_category_id`.
+5. For every affected item, insert one `shopping_item_source` row per contributing `(meal_plan, recipe_ingredient)` so the dialog can keep the meal hidden as long as anything from it survives.
+6. Cross-dimension lines for the same ingredient remain separate but render under one ingredient header in the UI (no special DB representation — just a UI grouping by `ingredient_id` on render).
 
 **Products** are not touched by this flow — they are appended manually via §4.4.
 
 ### 4.4 Shopping in a store (offline + sync)
 
-- `/einkauf` is the offline-capable page and renders the **active** list.
+- `/einkauf` is the offline-capable page and renders the single running list.
 - Top-bar controls on the page:
   - "Mahlzeiten hinzufügen" → opens the §4.3 dialog.
-  - "Artikel hinzufügen" → autocomplete across `ingredient ∪ product` (with type label per result). If nothing matches, "Als neues Produkt anlegen" creates a new `product` row inline (with optional category) and attaches it. New products are reusable on future lists and editable via Epic 6 management.
+  - "Artikel hinzufügen" → autocomplete across `ingredient ∪ product` (with type label per result). If nothing matches, "Als neues Produkt anlegen" creates a new `product` row inline (with optional category) and attaches it. New products are reusable later and editable via Epic 6 management.
   - **Supermarkt-Filter** dropdown — persists per device in `localStorage` (key `nomly.shopping.supermarketId`). When set, items group by `category` and sort by that supermarket's `sort_order`; when unset, items sort by ingredient/product name. The setting is purely a view filter — never written to the database, so two devices can hold different filters simultaneously.
-  - "Liste abschließen" → confirm dialog, then transactionally: set `completed_at = now()` on the active list AND insert a new active list. The page reloads showing the empty new list. The completed list is now visible read-only via "Verlauf".
-- "Verlauf" link routes to `/einkauf/verlauf` — a chronological list of completed `shopping_list` rows, each click opens a read-only view at `/einkauf/[id]`.
-- First visit (while online) caches the active list payload to IndexedDB and the app shell to the service worker cache.
+
+**Item lifecycle and display.**
+
+- Unchecked items render fully styled, sorted per the active supermarket filter.
+- Checked items render with a strike-through, reduced opacity, and a "rückgängig" affordance. They remain in the same position so the user can see what's been grabbed without losing context.
+- A background sweeper inside the custom server (`server.ts`, fires every 60 minutes) deletes items where `checked = true AND checked_at < now() - INTERVAL '24 hours'`. Each deletion broadcasts on the WS so connected clients update in real time.
+- The same sweep cleans up orphaned `shopping_item_source` rows (cascade handles this automatically) and, transitively, makes the contributing meal plans eligible for re-add in the §4.3 dialog.
+- The sweeper also runs once at app boot (so a restarted container catches up).
+
+**Mutation transport and sync.**
+
+- First visit (while online) caches the list payload to IndexedDB and the app shell to the service worker cache.
 - Every mutation (check, uncheck, edit qty/unit/note, add item, delete) writes to IndexedDB first and is sent to the server, queued if offline. The transport evolves across epics: Epic 7 ships with HTTP `POST`/`PATCH` to the existing REST endpoints; Epic 8 swaps to a WebSocket mutate frame on the same protocol shape and adds live peer broadcast.
 - Each mutation carries a client-generated `mutationId` and the item's last-known `version`. The server applies LWW per item: a mutation with a stale `version` is reconciled (the server's current state wins for the conflicting field) and the merged state is returned (and, from Epic 8, broadcast).
 - On reconnect, the queue flushes FIFO. Server idempotency dedupes by `mutationId`.
-- From Epic 8 onward, all clients subscribed to the list topic receive item updates in real time.
+- From Epic 8 onward, all clients subscribed to the `shopping` topic receive item updates in real time.
 
 ### 4.5 iCal calendar feeds
 
@@ -301,25 +314,20 @@ Token issuance in settings: enter a label → token shown once → only the hash
 
 Endpoints under `/api/v1/`:
 
-**Active list** — `/active/*` always addresses the row with `completed_at IS NULL`, so HA scripts never need to look up the id.
+**Shopping list** — there is exactly one running list. Endpoints are unscoped:
 
-  - `GET /api/v1/shopping-lists/active` — full active list with items.
-  - `POST /api/v1/shopping-lists/active/items` — add an item. Body is one of:
+  - `GET /api/v1/shopping` — full list with items. Items include `checked` and `checked_at` so the caller can render the 24 h grace state.
+  - `POST /api/v1/shopping/items` — add an item. Body is one of:
     - `{ ingredient_id, quantity?, unit_id?, note? }` — existing ingredient
     - `{ product_id, quantity?, unit_id?, note? }` — existing product
     - `{ newProduct: { name, default_category_id? }, quantity?, unit_id?, note? }` — explicit new product
     - `{ byName: "Toilettenpapier", quantity?, unit?, note? }` — **the voice-add path**: server searches `ingredient.name ∪ ingredient_alias.name ∪ product.name ∪ product_alias.name` (case-insensitive, exact match first then substring). If exactly one match, attach as that type. If no match, create a `product` with that canonical name and attach. If multiple matches, return `409` with the candidates and let the caller disambiguate.
-    - Response: the created item plus `resolved: { mode: "ingredient" | "product" | "createdProduct", refId, displayName }` so HA can speak a confirmation.
+    - Response: the created or reactivated item plus `resolved: { mode: "ingredient" | "product" | "createdProduct", refId, displayName }` and `action: "created" | "incremented" | "reactivated"` so HA can speak a tailored confirmation.
     - `unit` (string) may be passed instead of `unit_id` and is resolved the same alias-aware way.
-  - `PATCH /api/v1/shopping-lists/active/items/:itemId` — toggle `checked`, edit `quantity` / `unit_id` / `note`.
-  - `DELETE /api/v1/shopping-lists/active/items/:itemId`.
-  - `POST /api/v1/shopping-lists/active/preview-meals` — body `{ start, length }`; returns the dialog preview per §4.3.1.
-  - `POST /api/v1/shopping-lists/active/add-meals` — body `{ start, length, selection: [{ mealPlanId, recipeIngredientIds: [...] }] }`; merge-on-add per §4.3.2; writes `shopping_list_meal` rows.
-  - `POST /api/v1/shopping-lists/active/complete` — close the active list, create the next one, return `{ closedId, nextActiveId }`.
-
-**Lists overall**
-  - `GET /api/v1/shopping-lists` — every list, with `active: true` flag on the open one.
-  - `GET /api/v1/shopping-lists/:id` — single list (active or historical).
+  - `PATCH /api/v1/shopping/items/:itemId` — toggle `checked` (sets/clears `checked_at`), edit `quantity` / `unit_id` / `note`.
+  - `DELETE /api/v1/shopping/items/:itemId` — immediate hard delete (no 24 h grace).
+  - `POST /api/v1/shopping/preview-meals` — body `{ start, length }`; returns the dialog preview per §4.3.1.
+  - `POST /api/v1/shopping/add-meals` — body `{ start, length, selection: [{ mealPlanId, recipeIngredientIds: [...] }] }`; merge-on-add per §4.3.2; writes `shopping_item_source` rows.
 
 **Photos**
   - `GET /api/v1/photos/:filename` — streams the binary from `data/photos/<filename>`. Returned `photoUrl` fields in other endpoints reference this path.
@@ -377,22 +385,24 @@ One Node process. Boots Drizzle, opens SQLite (WAL), starts the WS hub, then han
 ### 5.2 WebSocket protocol (initial sketch)
 
 ```
-client → server  { "op": "subscribe", "topic": "shopping-list:42" }
-client → server  { "op": "mutate", "topic": "shopping-list:42",
+client → server  { "op": "subscribe", "topic": "shopping" }
+client → server  { "op": "mutate", "topic": "shopping",
                    "mutationId": "uuid", "type": "check",
                    "itemId": 17, "version": 4 }
 server → client  { "op": "applied", "mutationId": "uuid",
                    "item": { ...new state... } }
-server → all     { "op": "broadcast", "topic": "shopping-list:42",
+server → all     { "op": "broadcast", "topic": "shopping",
                    "item": { ... } }
+server → all     { "op": "broadcast", "topic": "shopping",
+                   "deleted": [itemId, ...] }   // from sweeper or explicit delete
 ```
 
-Topics: `shopping-list:<id>`, `meal-plan:<yyyy-ww>` (ISO week).
+Topics: `shopping` (the one running list), `meal-plan:<yyyy-ww>` (ISO week).
 
 ### 5.3 Client state
 
 - **Most pages**: TanStack Query for fetch caching and revalidation.
-- **Shopping list page**: bypasses Query for live state — a small store (Zustand or hand-rolled) backed by IndexedDB. `useShoppingList(listId)` hydrates from IndexedDB, subscribes to the WS topic, and exposes mutators that write locally → enqueue WS message → reconcile broadcasts.
+- **Shopping list page**: bypasses Query for live state — a small store (Zustand or hand-rolled) backed by IndexedDB. `useShoppingList()` hydrates from IndexedDB, subscribes to the `shopping` WS topic, and exposes mutators that write locally → enqueue WS message → reconcile broadcasts.
 
 ### 5.4 PWA / service worker
 
@@ -429,6 +439,50 @@ OIDC via `openid-client` (Node-side discovery + token exchange) + `iron-session`
 
 **Session cookie.** `__nomly_session`, `HttpOnly`, `Secure` (when `BASE_URL` is `https`), `SameSite=Lax`, signed and encrypted with `SESSION_SECRET`. Inactivity timeout 30 days; absolute timeout 90 days.
 
+### 5.7 UI design language
+
+**Mobile-first, touch-friendly, modern.** The shopping list is used one-handed in a noisy store; the planner is used at a desk or on a tablet. Both must feel built for their context, not retrofitted.
+
+**Tooling baseline**
+
+- Tailwind v4 — utility layer.
+- Radix UI primitives — unstyled accessible bases for Dialog, DropdownMenu, Checkbox, Switch, Popover, ToggleGroup, Tabs, Toast, ScrollArea.
+- `shadcn/ui`-style component layer copied into `src/components/ui/*` — owned, restyleable, no runtime dep beyond Radix + Tailwind.
+- `lucide-react` — icon set.
+- `framer-motion` — transitions for page changes, dialog open/close, swipe gestures, list reordering.
+- `next-themes` — light / dark / system, with dark as the default for in-store readability.
+- `vaul` (or Radix Dialog with mobile variant) — bottom-sheet pattern on mobile.
+- `@dnd-kit/core` already chosen for the planner (Epic 3) — also covers swipe gestures via the modifiers/listeners API; no separate gesture lib needed for v1.
+
+**Layout principles**
+
+- Mobile is the primary form factor for shopping, planning, and recipe browsing-while-cooking. Desktop is secondary.
+- Single-column layouts on `< md`. Two-column appears only where it genuinely helps (planner DnD).
+- Persistent bottom-nav on mobile for the four main areas: Rezepte, Plan, Einkauf, Einstellungen. Top header collapses to a slim avatar + page title.
+- Desktop: same four areas as a top nav.
+
+**Touch targets and gestures**
+
+- Every tappable element ≥ 44 × 44 CSS px.
+- Spacing minimum 8 px between adjacent tappables.
+- Hover-only affordances are forbidden — every desktop hover state has an equivalent always-visible touch affordance.
+- Shopping list items support swipe-to-check (swipe right) and swipe-to-delete (swipe left) on touch, with the same actions available as visible buttons on desktop.
+- Long-press is reserved for "edit" / "open detail" on cards where a tap is reserved for the primary action.
+
+**Type, color, motion**
+
+- System font stack with `font-feature-settings: 'cv11', 'ss01'` if available; falls back to `-apple-system`, `Segoe UI`, etc.
+- A small palette: one accent (warm, food-friendly — likely an amber / spice tone), neutrals, and semantic red / green / amber for state. Defined in Tailwind theme.
+- Dark mode is the default. The "Einstellungen" page exposes the toggle.
+- All transitions are short (120 – 240 ms) and ease-out. No bouncy springs by default. Motion respects `prefers-reduced-motion`.
+
+**Composition rules for every epic**
+
+- Use Radix primitives as the base for any interactive widget. No raw `<dialog>` / `<details>` / custom click-outside logic.
+- New components live under `src/components/<feature>/` and reuse the shared UI layer in `src/components/ui/*`.
+- A component file does one thing and is ≤ ~200 lines of TSX. Split when it grows.
+- Every form uses the same shared field components (Input, Textarea, Select, Combobox, Switch, etc.) for consistency.
+
 ## 6. Open Questions & Deferred
 
 - **Familywall extraction path.** Decide between (a) authenticated web scrape, (b) mobile-API capture via mitmproxy, (c) screen-record + manual transcription. Investigation is Epic 11; concrete approach picked there.
@@ -442,8 +496,8 @@ OIDC via `openid-client` (Node-side discovery + token exchange) + `iron-session`
 - **Promote product → ingredient.** If a manually-added product turns out to be used in recipes, manual re-entry as an ingredient is the v1 path. A "promote" action can be added later.
 - **iCal refresh policy.** v1 fetches on planner load with a 5-minute in-memory cache and a manual refresh button. A background refresh job (e.g. every 15 minutes) is a future enhancement.
 - **DnD on mobile.** Drag-and-drop reorder is not always reliable on touch — Epic 3 intentionally avoids it for cross-day moves on mobile and falls back to an explicit "Verschieben" action with a date picker.
-- **Remove a meal's contribution from the active list.** With `shopping_list_meal` in place we know which meal plans contributed, but we don't track per-item provenance, so undoing one meal's contribution requires either re-deriving from all remaining meals (re-run merge) or storing item-level provenance. Deferred. Workaround: user manually edits/deletes the affected items.
-- **Edited meal plan after add.** If a user edits a `meal_plan` (changes recipe, portions, etc.) AFTER it has been folded into the active list, the list items do NOT update. The meal is in `shopping_list_meal` and won't reappear in the dialog. A "Mahlzeit aus Liste entfernen und neu hinzufügen" action would solve this — deferred along with the item above.
+- **Remove a meal's contribution from the list.** `shopping_item_source` records which `(meal_plan, recipe_ingredient)` pairs contributed to each item, so a "Mahlzeit aus Liste entfernen" action is now mechanically possible (delete items where the only sources reference this meal; decrement quantity where other sources also contribute). Deferred — interface design and edge cases (partially-checked items) need a real-use signal first.
+- **Edited meal plan after add.** If a user edits a `meal_plan` (changes recipe, portions, etc.) AFTER its ingredients have been folded into the list, the items do NOT update. The meal stays hidden from the dialog as long as any sourced item survives. Workaround: manually edit the affected items, or check + wait for the 24 h purge to free the meal for re-add.
 - **HA push notifications.** v1 is pull-only — HA polls REST endpoints and reacts on its own schedule. A future enhancement could expose webhooks (e.g. "fire on item-checked") so HA can react instantly without polling. Deferred.
 - **Per-user data.** v1 has no user table; everyone authenticated sees the same data. If a future use case ("private notes per user", "favorites") emerges, a `user` table keyed by OIDC `sub` plus per-feature ownership columns would be the natural addition. Deferred.
 - **Multi-arch image cost.** Building `linux/arm64` via QEMU on a GitHub-hosted runner is slow (~5–10 min). If it becomes a bottleneck, drop arm64 from the default workflow and add a separate scheduled or manual job for it.
@@ -459,7 +513,7 @@ Each epic is independently mergeable. Order reflects the critical path to a usab
 | 1 | **Foundation + Auth** | — | Custom server, full schema, base seeds, layout/nav shell, settings shell, **OIDC middleware gating every page and API call from day 1**, `/api/health`. |
 | 2 | **Recipes** | 1 | Recipe CRUD with multi-section model, inline ingredient/unit/category create, tags, photo upload, list/grid + detail, search. |
 | 3 | **Meal planner (UI)** | 2 | Two-column desktop with DnD (recipe list ↔ calendar, calendar ↔ calendar), configurable `days_visible` + `start_weekday`, mobile tap-to-add fallback. |
-| 4 | **Shopping list (online)** | 3 | Single active list, "Mahlzeiten hinzufügen" dialog (date + length + per-meal/per-ingredient checkboxes) with merge-on-add, supermarket UI filter, inline product create, "Liste abschließen" + history, check-off UI. |
+| 4 | **Shopping list (online)** | 3 | Single running list, "Mahlzeiten hinzufügen" dialog (date + length + per-meal/per-ingredient checkboxes) with merge-on-add and 24 h-grace reactivation, supermarket UI filter, inline product create, struck-through check display + 60-minute sweeper that purges after 24 h. |
 | 5 | **Supermarkets** | 4 | Supermarket CRUD, per-supermarket category ordering, filter-and-sort on shopping list. |
 | 6 | **Ingredient / product / unit / category management** | 2, 4 | Settings sub-pages: CRUD, alias management, multi-select merge, delete-with-replacement, `exclude_from_shopping_list` toggle (ingredients only). |
 | 7 | **Offline shopping list (PWA)** | 4 | Manifest, service worker, IndexedDB-backed state, optimistic mutations, FIFO offline queue, offline indicator. |
@@ -482,7 +536,8 @@ Each epic is independently mergeable. Order reflects the critical path to a usab
   - `src/middleware.ts` enforces session-or-bearer on every non-bypass route. The bearer side is wired but only meaningful once Epic 10 adds the management UI (the table and middleware already work from day 1).
 - Required env: `BASE_URL`, `SESSION_SECRET`, `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`. App refuses to start if any are missing (fail-loud).
 - `/api/health` route — returns `{ ok: true, version }`, bypasses auth (for the Docker healthcheck).
-- Layout: top nav with links to Rezepte, Plan, Einkauf, Einstellungen, plus a header user-menu showing the OIDC display name and a "Abmelden" action.
+- Layout: mobile bottom-nav + desktop top-nav with the four main areas (Rezepte, Plan, Einkauf, Einstellungen). Header carries the page title and an avatar/menu with display name + "Abmelden".
+- UI tooling installed and wired per §5.7 (Tailwind v4, Radix UI primitives, shadcn-style `src/components/ui/*` scaffold, `lucide-react`, `framer-motion`, `next-themes`, `vaul`). Dark mode default; system theme toggle available in Einstellungen.
 - Empty `/einstellungen` page with sub-page placeholders.
 
 **Epic 2 — Recipes**
@@ -508,15 +563,15 @@ Each epic is independently mergeable. Order reflects the critical path to a usab
 - Calendar day-cells host both meals (this epic) and iCal events (Epic 12) — Epic 3 should reserve a render slot for events so Epic 12 only needs to add the data source.
 
 **Epic 4 — Shopping list (online)**
-- Pages: `/einkauf` (renders the active list), `/einkauf/verlauf` (history index), `/einkauf/[id]` (read-only view of a completed list).
-- Migration seeds the initial active list row; partial unique index enforces "exactly one active".
-- "Mahlzeiten hinzufügen" dialog per §4.3 — single dialog with date + length controls at the top and live-refreshing per-meal/per-ingredient checkbox preview below. Backed by `POST /api/v1/shopping-lists/active/preview-meals` and `POST /api/v1/shopping-lists/active/add-meals`.
-- Merge-on-add algorithm per §4.3.2.
-- Item rows: ingredient/product name, qty + unit, note, checkbox, edit/delete affordances.
+- Page: `/einkauf` only. No history, no per-list pages.
+- "Mahlzeiten hinzufügen" dialog per §4.3 (a bottom sheet on mobile, modal on desktop) — date + length controls + live-refreshing per-meal/per-ingredient checkbox preview. Backed by `POST /api/v1/shopping/preview-meals` and `POST /api/v1/shopping/add-meals`.
+- Merge-on-add algorithm per §4.3.2, including the "reactivate within 24 h grace" rule.
+- Item rows: ingredient/product name, qty + unit, note, checkbox, edit/delete affordances. Swipe-right = check, swipe-left = delete on touch (per §5.7).
+- Checked items render struck-through and muted but remain in place; "Rückgängig" affordance to uncheck.
+- Background sweeper in `server.ts` deletes items with `checked = true AND checked_at < now() - 24h` every 60 minutes; runs once at boot. Broadcasts deletions on the `shopping` WS topic.
 - "Artikel hinzufügen" autocomplete searches `ingredient ∪ product` (with type label per result). Selecting an ingredient creates an item with `ingredient_id`; selecting a product creates one with `product_id`; typing a new name and confirming creates a new `product` (with optional category in the inline form) and attaches it.
 - Supermarket filter dropdown in the page header; selection persists in `localStorage` (key `nomly.shopping.supermarketId`).
-- "Liste abschließen" button + confirm; transactional close-and-create-next.
-- Introduces the JSON endpoints under `/api/v1/shopping-lists/*` per §4.6 — used here for web-UI mutations and consumed unchanged by Epic 7's offline queue and Epic 10's HA flow.
+- Introduces the JSON endpoints under `/api/v1/shopping/*` per §4.6 — used here for web-UI mutations and consumed unchanged by Epic 7's offline queue and Epic 10's HA flow.
 
 **Epic 5 — Supermarkets**
 - `/einstellungen/supermaerkte`: list + add/edit/delete.
@@ -526,25 +581,27 @@ Each epic is independently mergeable. Order reflects the critical path to a usab
 **Epic 6 — Ingredient / product / unit / category management**
 - `/einstellungen/zutaten`: paginated/searchable list with columns name, aliases (chip list), default category, exclude flag.
 - Edit form: rename, add/remove aliases, set default category, toggle `exclude_from_shopping_list`.
-- Multi-select merge (ingredients): choose ≥2, click "zusammenführen", pick the row to keep; others' names + aliases become aliases of the kept row; all `recipe_ingredient.ingredient_id` and `shopping_list_item.ingredient_id` refs update in an atomic transaction.
+- Multi-select merge (ingredients): choose ≥2, click "zusammenführen", pick the row to keep; others' names + aliases become aliases of the kept row; all `recipe_ingredient.ingredient_id` and `shopping_item.ingredient_id` refs update in an atomic transaction.
 - Delete (ingredient): prompt for optional replacement; if chosen, rewire references; if not, remove references (recipes and lists affected are listed in the confirm dialog).
-- `/einstellungen/produkte`: analogous screen for `product` (name, aliases, default category). No "exclude" flag — products only land on lists via manual add anyway. Merge + delete-with-replacement work over `shopping_list_item.product_id` refs.
+- `/einstellungen/produkte`: analogous screen for `product` (name, aliases, default category). No "exclude" flag — products only land on the list via manual add anyway. Merge + delete-with-replacement work over `shopping_item.product_id` refs.
 - Analogous (lighter) screens for `/einstellungen/einheiten` and `/einstellungen/kategorien` — merge on units must check for incompatible `dimension` (refuse) and align `factor` math.
 
 **Epic 7 — Offline shopping list (PWA)**
 - `public/manifest.webmanifest` + icons.
 - Service worker registered from app shell; install/activate/fetch handlers per §5.4.
-- IndexedDB store: `shopping_lists` (full payload per list id) + `mutation_queue`.
-- `useShoppingList(id)` hook: hydrate from IDB → fetch fresh if online → reconcile → return state + mutators.
-- Mutators write to IDB and POST/PATCH to JSON endpoints under `/api/v1/shopping-lists/active/*`. Requests carry the existing session cookie automatically. Mutations queue if offline.
+- IndexedDB stores: `shopping_items` (the full list payload) + `mutation_queue`.
+- `useShoppingList()` hook: hydrate from IDB → fetch fresh if online → reconcile → return state + mutators.
+- Mutators write to IDB and POST/PATCH to JSON endpoints under `/api/v1/shopping/*`. Requests carry the existing session cookie automatically. Mutations queue if offline.
 - "Offline" banner with queued-mutation count.
-- Note: this epic does **not** introduce WebSockets. It ships a fully working offline-first experience that polls or revalidates on focus/reconnect. Epic 8 then swaps the transport to WS and adds peer push.
+- Note: this epic does **not** introduce WebSockets. It ships a fully working offline-first experience that revalidates on focus / reconnect. Epic 8 then swaps the transport to WS and adds peer push, including the sweeper's delete broadcasts.
 
 **Epic 8 — Realtime sync**
 - WS hub: topic → set of sockets; broadcast helper.
+- Single `shopping` topic for the running list (no per-list ids). `meal-plan:<yyyy-ww>` reserved for the planner.
 - Mutation transport switches from HTTP (Epic 7) to WS `mutate` frames; HTTP endpoints stay live as fallback and as the HA-facing API.
 - Server applies mutations transactionally, bumps `version`, broadcasts updated item to all topic subscribers.
-- Client reconciler: when a broadcast arrives with `version > local.version`, replace local item; if local has uncommitted mutation for the same item, replay the local mutation on top of the broadcast.
+- The sweeper from Epic 4 also publishes `{ deleted: [...] }` broadcasts when it removes items.
+- Client reconciler: when a broadcast arrives with `version > local.version`, replace local item; if local has uncommitted mutation for the same item, replay the local mutation on top of the broadcast. Deletion broadcasts remove items from the IndexedDB cache.
 - Heartbeat ping/pong every 30s; reconnect with exponential backoff.
 
 **Epic 9 — Recipe URL import**
@@ -601,13 +658,13 @@ Each epic is independently mergeable. Order reflects the critical path to a usab
 - **1** `npm run dev` with valid OIDC env vars boots the custom server; visiting `/` while logged out redirects to the configured Authentik login; after sign-in the German layout renders with the user's display name in the header; "Abmelden" clears the session. `db:migrate` applies the full schema; seed creates units, categories, and the initial active shopping list. `/api/health` returns `200` without auth.
 - **2** A recipe with two named sections and ten ingredients (spanning two units of the same dimension) can be created, edited, viewed, deleted; photo upload renders correctly; ingredient autocomplete finds existing entries and creates new ones.
 - **3** On desktop, a recipe can be dragged from the right-hand list onto a day-cell to create a meal, and a meal can be dragged to another day to move; `days_visible` and `start_weekday` settings change the visible range; "Heute" resets to the configured origin. On mobile, tap-to-add still works and DnD is suppressed.
-- **4** End-to-end on the active list: the "Mahlzeiten hinzufügen" dialog opens with date/length controls and a live preview; changing the date refreshes the preview; deselecting a meal clears its ingredients (meal checkbox follows); deselecting one ingredient leaves the meal in indeterminate state; "Alle/Keine auswählen" toggles the whole preview; confirming merges the selection (overlapping `(ingredient, dimension)` items get summed into existing items, others created fresh); re-opening the dialog with the same range now hides the already-added meals; "Liste abschließen" closes the current list and a new empty active list appears with the history link showing the prior list read-only; adding "Toilettenpapier" inline creates a reusable `product` with its category preserved; the supermarket filter dropdown changes the on-screen grouping/order without touching the DB and survives a page reload (per device).
+- **4** End-to-end on the running list: the "Mahlzeiten hinzufügen" dialog opens with date/length controls and a live preview (full-height bottom sheet on mobile); changing the date refreshes the preview; deselecting a meal clears its ingredients; deselecting one ingredient leaves the meal in indeterminate state; "Alle/Keine auswählen" toggles the whole preview; confirming merges the selection (overlapping `(ingredient, dimension)` items get summed into existing unchecked items, items in the 24 h grace state get reactivated, otherwise new items are created); re-opening the dialog with the same range now hides those meals; checking an item renders it struck-through but visible; the background sweeper (run manually via test hook or by faking `checked_at` 25 h in the past) removes checked items, which in turn frees their source meals to reappear in the dialog; adding "Toilettenpapier" inline creates a reusable `product` with its category preserved; the supermarket filter dropdown changes the on-screen grouping/order without touching the DB and survives a page reload (per device); swipe-right checks an item on touch, swipe-left deletes it.
 - **5** Two supermarkets with different category orders flip the grouping/sort when toggled; both ingredient-items and product-items respect the supermarket's order.
-- **6** Merging ingredients moves all references and preserves all aliases; merging products does the same over `shopping_list_item.product_id`; delete-with-replacement rewires references; `exclude_from_shopping_list` hides those ingredients from newly generated lists.
+- **6** Merging ingredients moves all references and preserves all aliases; merging products does the same over `shopping_item.product_id`; delete-with-replacement rewires references; `exclude_from_shopping_list` keeps those ingredients off future add-meals flows.
 - **7** Airplane-mode mid-shop allows continued check/uncheck/qty edit; reconnect flushes the queue cleanly with no data loss.
-- **8** Two browser tabs on the same list reflect each other's checks within ~1s.
+- **8** Two browser tabs on the running list reflect each other's checks within ~1s; when the sweeper deletes an aged-out item, both tabs lose it without a manual refresh.
 - **9** A Chefkoch URL produces a complete recipe; a no-JSON-LD URL shows a clear "manual" prompt.
-- **10** With a bearer token: (a) `POST /shopping-lists/active/items` with `{ byName: "Toilettenpapier" }` creates a product and adds it, and the response identifies it as `createdProduct`; (b) repeating with `{ byName: "Toilettenpapier" }` resolves to the existing product and adds it again (response `mode: "product"`); (c) `{ byName: "Hackfleisch" }` (already an ingredient) resolves to `mode: "ingredient"`; (d) `GET /meal-plans/today` returns today's plans with `recipe.photoUrl` as an absolute URL, scaled ingredient quantities, and instructions; (e) the additions show up in real time on a web client subscribed to the active-list WebSocket topic.
+- **10** With a bearer token: (a) `POST /shopping/items` with `{ byName: "Toilettenpapier" }` creates a product and adds it, and the response identifies it as `createdProduct` / `action: created`; (b) repeating the same call returns `action: incremented` (or `reactivated` if the previous item is in the 24 h grace state); (c) `{ byName: "Hackfleisch" }` (already an ingredient) resolves to `mode: "ingredient"`; (d) `GET /meal-plans/today` returns today's plans with `recipe.photoUrl` as an absolute URL, scaled ingredient quantities, and instructions; (e) the additions show up in real time on a web client subscribed to the `shopping` WebSocket topic.
 - **11** Familywall data lands as recipes with sections + ingredients; a re-run produces zero duplicates.
 - **12** With two iCal feeds configured (different colors) and one feed deliberately misconfigured, the planner shows valid events in their day-cells, the broken feed surfaces a warning chip, and the rest of the planner still works.
 - **13** A push to `main` triggers the workflow; the resulting `ghcr.io/examinator/nomly:latest` image (amd64 + arm64) starts under Docker Compose with the example file + an env file pointing at Authentik; on first start, migrations apply and the seed runs; the healthcheck passes; the user can log in via Authentik and reach `/`; a tag `v0.1.0` produces additional version-tagged images.
