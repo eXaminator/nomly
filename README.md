@@ -1,36 +1,47 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# nomly
 
-## Getting Started
+Personal cookbook, meal planner, and shopping list. Self-hosted for two users
+behind any OIDC IdP (Authentik, Keycloak, …).
 
-First, run the development server:
+## Quick start (Docker Compose)
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+curl -O https://raw.githubusercontent.com/eXaminator/nomly/main/docker-compose.example.yml
+mv docker-compose.example.yml docker-compose.yml
+curl -O https://raw.githubusercontent.com/eXaminator/nomly/main/.env.example
+cp .env.example .env
+# Edit .env: set BASE_URL, SESSION_SECRET (>= 32 chars), and your OIDC
+# issuer/client credentials. For Authentik, point OIDC_ISSUER at
+# https://auth.your-domain.tld/application/o/nomly/ and copy the client
+# id/secret from Authentik's "OAuth2/OpenID Provider" settings.
+docker compose up -d
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+The image is published at `ghcr.io/examinator/nomly:latest` (and version-tagged
+on releases). Migrations apply automatically on container start; seed data
+(Tandoor's open-tandoor-data snapshot) does NOT run unless you click
+"Standarddaten laden" in Einstellungen.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+The SQLite database and uploaded photos live under `./data` — back that up
+and you've backed up everything.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Development
 
-## Learn More
+```bash
+npm install
+cp .env.example .env.local   # point OIDC_ISSUER at a real IdP for the login flow
+npm run db:generate           # regenerate migrations if you've edited the schema
+npm run db:migrate            # apply migrations to ./data/nomly.db
+npm run dev                   # boots the custom server on :3000
+```
 
-To learn more about Next.js, take a look at the following resources:
+`npm test` runs the Vitest suite. `npm run typecheck` and `npm run lint`
+mirror what CI checks.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Tech
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Next.js 16 (App Router, Turbopack) with a custom server in `server.mts` that
+also hosts a `/ws` WebSocket upgrade gate. TypeScript, Tailwind v4, Radix UI +
+shadcn-style component layer, `better-sqlite3` + Drizzle ORM, OIDC via
+`openid-client` + `iron-session`. See `docs/superpowers/specs/` for the design
+spec and `THIRD_PARTY_NOTICES.md` for vendored data attribution.

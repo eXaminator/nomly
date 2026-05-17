@@ -1,0 +1,24 @@
+**/node_modules
+.next
+# Runtime data is mounted at /app/data — never copy it in. The seed snapshot
+# is the one exception (vendored alongside the source).
+data/*
+!data/seed
+.git
+.github
+.env
+.env.*
+!.env.example
+.DS_Store
+*.log
+coverage
+.vscode
+.idea
+.next/cache
+tests
+vitest.config.ts
+docker-compose.example.yml
+Dockerfile
+README.md
+THIRD_PARTY_NOTICES.md
+docs

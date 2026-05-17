@@ -1,5 +1,7 @@
 import Link from "next/link";
 import { AppShell } from "@/components/layout/app-shell";
+
+export const dynamic = "force-dynamic";
 import {
   Card,
   CardContent,
