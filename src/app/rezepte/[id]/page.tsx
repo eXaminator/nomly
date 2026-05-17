@@ -1,0 +1,158 @@
+import Link from "next/link";
+import { notFound } from "next/navigation";
+import { Clock, ExternalLink, Pencil, Users } from "lucide-react";
+import { AppShell } from "@/components/layout/app-shell";
+import { Button } from "@/components/ui/button";
+import { getRecipe } from "@/lib/recipes/service";
+import { renderMarkdown } from "@/lib/markdown";
+
+export const dynamic = "force-dynamic";
+
+function formatQuantity(q: number | null): string {
+  if (q === null) return "";
+  const rounded = Math.round(q * 100) / 100;
+  return new Intl.NumberFormat("de-DE", { maximumFractionDigits: 2 }).format(rounded);
+}
+
+export default async function RecipeViewPage({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
+  const { id: rawId } = await params;
+  const id = Number(rawId);
+  if (!Number.isInteger(id) || id <= 0) notFound();
+  const recipe = getRecipe(id);
+  if (!recipe) notFound();
+
+  const descriptionHtml = renderMarkdown(recipe.description);
+
+  return (
+    <AppShell>
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex-1">
+          <h1 className="text-3xl font-semibold tracking-tight">{recipe.title}</h1>
+          <div className="mt-2 flex flex-wrap items-center gap-4 text-sm text-[var(--color-muted-fg)]">
+            <span className="inline-flex items-center gap-1.5">
+              <Users className="size-4" />
+              {recipe.servings} Portion{recipe.servings === 1 ? "" : "en"}
+            </span>
+            {recipe.prepTimeMin ? (
+              <span className="inline-flex items-center gap-1.5">
+                <Clock className="size-4" />
+                Vorbereitung {recipe.prepTimeMin} Min.
+              </span>
+            ) : null}
+            {recipe.cookTimeMin ? (
+              <span className="inline-flex items-center gap-1.5">
+                <Clock className="size-4" />
+                Kochzeit {recipe.cookTimeMin} Min.
+              </span>
+            ) : null}
+            {recipe.sourceUrl ? (
+              <a
+                href={recipe.sourceUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1.5 underline underline-offset-2 hover:text-[var(--color-fg)]"
+              >
+                <ExternalLink className="size-4" />
+                Quelle
+              </a>
+            ) : null}
+          </div>
+          {recipe.tags.length > 0 ? (
+            <div className="mt-3 flex flex-wrap gap-1.5">
+              {recipe.tags.map((t) => (
+                <span
+                  key={t}
+                  className="rounded-full bg-[var(--color-muted)] px-2.5 py-0.5 text-xs text-[var(--color-fg)]"
+                >
+                  {t}
+                </span>
+              ))}
+            </div>
+          ) : null}
+        </div>
+        <Button asChild variant="outline">
+          <Link href={`/rezepte/${recipe.id}/bearbeiten`}>
+            <Pencil className="size-4" />
+            Bearbeiten
+          </Link>
+        </Button>
+      </div>
+
+      {recipe.photoPath ? (
+        <div className="mt-6 overflow-hidden rounded-[var(--radius)] border border-[var(--color-border)]">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={`/api/v1/${recipe.photoPath}`}
+            alt={recipe.title}
+            className="aspect-[16/9] w-full object-cover"
+          />
+        </div>
+      ) : null}
+
+      {descriptionHtml ? (
+        <div
+          className="prose prose-sm mt-6 max-w-none text-[var(--color-fg)] dark:prose-invert"
+          dangerouslySetInnerHTML={{ __html: descriptionHtml }}
+        />
+      ) : null}
+
+      <div className="mt-8 grid gap-8 lg:grid-cols-[20rem_1fr]">
+        <aside className="space-y-6">
+          {recipe.sections.map((section) => (
+            <div key={section.id}>
+              {section.title ? (
+                <h3 className="text-sm font-semibold uppercase tracking-wider text-[var(--color-muted-fg)]">
+                  {section.title}
+                </h3>
+              ) : null}
+              <ul className="mt-2 space-y-1 text-sm text-[var(--color-fg)]">
+                {section.ingredients.map((ing) => (
+                  <li key={ing.id} className="flex gap-2">
+                    <span className="min-w-12 font-mono text-[var(--color-muted-fg)]">
+                      {formatQuantity(ing.quantity)} {ing.unitName ?? ""}
+                    </span>
+                    <span className="flex-1">
+                      {ing.ingredientName}
+                      {ing.notes ? (
+                        <span className="text-[var(--color-muted-fg)]"> – {ing.notes}</span>
+                      ) : null}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </aside>
+
+        <article className="space-y-8">
+          {recipe.sections.map((section) => {
+            const html = renderMarkdown(section.instructions);
+            return (
+              <section key={section.id}>
+                {section.title ? (
+                  <h2 className="text-xl font-semibold tracking-tight text-[var(--color-fg)]">
+                    {section.title}
+                  </h2>
+                ) : null}
+                {html ? (
+                  <div
+                    className="prose prose-sm mt-2 max-w-none text-[var(--color-fg)] dark:prose-invert"
+                    dangerouslySetInnerHTML={{ __html: html }}
+                  />
+                ) : (
+                  <p className="mt-2 text-sm text-[var(--color-muted-fg)]">
+                    Keine Anleitung erfasst.
+                  </p>
+                )}
+              </section>
+            );
+          })}
+        </article>
+      </div>
+    </AppShell>
+  );
+}
