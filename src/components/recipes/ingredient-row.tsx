@@ -25,20 +25,11 @@ async function searchUnits(q: string): Promise<SelectSearchItem[]> {
   }));
 }
 
-let unitCache: SelectSearchItem[] | null = null;
-async function loadAllUnits(): Promise<SelectSearchItem[]> {
-  if (unitCache) return unitCache;
-  // The seed ships 14ish units — fetching every common letter as a wide
-  // search returns them all, no separate "list" endpoint needed.
-  const seen = new Map<number, SelectSearchItem>();
-  for (const q of ["a", "e", "g", "l", "u"]) {
-    const items = await searchUnits(q);
-    for (const i of items) seen.set(i.id, i);
-  }
-  unitCache = Array.from(seen.values()).sort((a, b) =>
-    a.name.localeCompare(b.name, "de"),
-  );
-  return unitCache;
+async function loadDefaultUnits(): Promise<SelectSearchItem[]> {
+  // GET /api/v1/units with no query returns every unit ordered by usage
+  // frequency in recipe_ingredient (most-used first), so this is what
+  // populates the picker on open.
+  return searchUnits("");
 }
 
 type Props = {
@@ -50,7 +41,7 @@ type Props = {
 export function IngredientRow({ value, onChange, onRemove }: Props) {
   const [defaultUnits, setDefaultUnits] = React.useState<SelectSearchItem[]>([]);
   React.useEffect(() => {
-    void loadAllUnits().then(setDefaultUnits);
+    void loadDefaultUnits().then(setDefaultUnits);
   }, []);
 
   return (

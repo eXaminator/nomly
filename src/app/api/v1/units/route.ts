@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { createUnit, searchUnits } from "@/lib/autocomplete";
+import {
+  createUnit,
+  listUnitsByUsage,
+  searchUnits,
+} from "@/lib/autocomplete";
 
 const createSchema = z.object({
   name: z.string().min(1),
@@ -9,7 +13,11 @@ const createSchema = z.object({
 
 export async function GET(request: Request) {
   const q = new URL(request.url).searchParams.get("q") ?? "";
-  return NextResponse.json({ items: searchUnits(q) });
+  // No query → return every unit sorted by how often it shows up in recipes
+  // (with name as the alphabetical tiebreaker), so the most-used ones float
+  // to the top of the picker. Query → fall back to LIKE-based search.
+  const items = q.trim().length === 0 ? listUnitsByUsage() : searchUnits(q);
+  return NextResponse.json({ items });
 }
 
 export async function POST(request: Request) {

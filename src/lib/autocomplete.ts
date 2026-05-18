@@ -1,10 +1,11 @@
-import { asc, eq, like } from "drizzle-orm";
+import { asc, desc, eq, like, sql } from "drizzle-orm";
 import { db } from "../db/index.ts";
 import {
   category,
   categoryAlias,
   ingredient,
   ingredientAlias,
+  recipeIngredient,
   unit,
   unitAlias,
 } from "../db/schema.ts";
@@ -81,6 +82,26 @@ export function searchUnits(query: string): AutocompleteHit[] {
     .all();
 
   return mergeHits(canonical, aliasHits, q);
+}
+
+/**
+ * Returns every unit ordered by how often it appears in
+ * `recipe_ingredient` (descending), name as a tiebreaker. Used to seed the
+ * unit picker so the most-used units bubble to the top.
+ */
+export function listUnitsByUsage(): Array<AutocompleteHit & { usageCount: number }> {
+  const rows = db
+    .select({
+      id: unit.id,
+      name: unit.name,
+      usageCount: sql<number>`count(${recipeIngredient.id})`.as("usage_count"),
+    })
+    .from(unit)
+    .leftJoin(recipeIngredient, eq(recipeIngredient.unitId, unit.id))
+    .groupBy(unit.id)
+    .orderBy(desc(sql`usage_count`), asc(unit.name))
+    .all();
+  return rows.map((r) => ({ id: r.id, name: r.name, usageCount: r.usageCount }));
 }
 
 export function searchCategories(query: string): AutocompleteHit[] {
