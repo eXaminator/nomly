@@ -45,6 +45,9 @@ export type ImportedIngredient = {
    *  null when it'll be created on save. */
   ingredientId: number | null;
   ingredientMatch: IngredientMatch;
+  /** Canonical name of the matched ingredient — only set when the typed
+   *  name differs from the canonical (i.e. we matched via an alias). */
+  canonicalIngredientName: string | null;
   notes: string | null;
 };
 
@@ -217,18 +220,22 @@ function resolveUnit(
   return { resolved: null, match: "empty", rawUnit: null };
 }
 
-type IngredientLookup = Map<string, number>;
+type IngredientLookupHit = { id: number; canonicalName: string };
+type IngredientLookup = Map<string, IngredientLookupHit>;
 
 function buildIngredientLookup(): IngredientLookup {
-  const lookup = new Map<string, number>();
+  const lookup: IngredientLookup = new Map();
   const canonical = db
     .select({ id: ingredient.id, name: ingredient.name })
     .from(ingredient)
     .all();
-  for (const i of canonical) lookup.set(i.name.toLowerCase(), i.id);
+  for (const i of canonical) {
+    lookup.set(i.name.toLowerCase(), { id: i.id, canonicalName: i.name });
+  }
   const aliases = db
     .select({
       id: ingredient.id,
+      canonicalName: ingredient.name,
       aliasName: ingredientAlias.name,
     })
     .from(ingredientAlias)
@@ -236,7 +243,9 @@ function buildIngredientLookup(): IngredientLookup {
     .all();
   for (const a of aliases) {
     const key = a.aliasName.toLowerCase();
-    if (!lookup.has(key)) lookup.set(key, a.id);
+    if (!lookup.has(key)) {
+      lookup.set(key, { id: a.id, canonicalName: a.canonicalName });
+    }
   }
   return lookup;
 }
@@ -244,11 +253,20 @@ function buildIngredientLookup(): IngredientLookup {
 function resolveIngredientName(
   lookup: IngredientLookup,
   rawName: string,
-): { id: number | null; match: IngredientMatch } {
-  const key = rawName.trim().toLowerCase();
+): {
+  id: number | null;
+  match: IngredientMatch;
+  canonicalName: string | null;
+} {
+  const trimmed = rawName.trim();
+  const key = trimmed.toLowerCase();
   const hit = lookup.get(key);
-  if (hit !== undefined) return { id: hit, match: "existing" };
-  return { id: null, match: "new" };
+  if (hit === undefined) return { id: null, match: "new", canonicalName: null };
+  // Only surface the canonical when it differs from what the user typed —
+  // otherwise the pill would just echo the same word.
+  const canonicalName =
+    hit.canonicalName.toLowerCase() === key ? null : hit.canonicalName;
+  return { id: hit.id, match: "existing", canonicalName };
 }
 
 void sql; // kept for future tuning; the import side reads everything via JS.
@@ -363,6 +381,7 @@ export async function importRecipeFromUrl(
       name,
       ingredientId: ingredientResolution.id,
       ingredientMatch: ingredientResolution.match,
+      canonicalIngredientName: ingredientResolution.canonicalName,
       notes: parsed.notes,
     };
   });

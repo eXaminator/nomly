@@ -10,7 +10,9 @@ type Hit = { ingredientId: number; name: string; canonicalName?: string };
 
 type Props = {
   value: string;
-  onChange: (next: string) => void;
+  /** Called with the picked / typed name. `canonical` is set when the value
+   *  is an alias of a known ingredient (so the parent can render a pill). */
+  onChange: (next: string, canonical?: string | null) => void;
   placeholder?: string;
   className?: string;
 };
@@ -74,7 +76,13 @@ export function IngredientNameInput({
   const dropdownVisible = open && items.length > 0;
 
   function pick(item: Hit) {
-    onChange(item.name);
+    // If the item came from an alias hit (canonicalName !== name), surface
+    // the canonical so the parent can render the "= canonical" pill.
+    const canonical =
+      item.canonicalName && item.canonicalName !== item.name
+        ? item.canonicalName
+        : null;
+    onChange(item.name, canonical);
     setOpen(false);
     // Keep focus on the input so the user can keep tabbing.
     inputRef.current?.focus();
@@ -109,7 +117,9 @@ export function IngredientNameInput({
             placeholder={placeholder ?? "Zutat"}
             onFocus={() => setOpen(true)}
             onChange={(e) => {
-              onChange(e.target.value);
+              // Typing invalidates a previously-set canonical — pass `null`
+              // so the parent clears the pill.
+              onChange(e.target.value, null);
               if (!open) setOpen(true);
             }}
             onKeyDown={onKeyDown}

@@ -206,6 +206,7 @@ export function getRecipe(id: number): RecipeView | null {
     sectionId: number;
     ingredientId: number;
     ingredientName: string;
+    canonicalIngredientName: string;
     quantity: number | null;
     unitId: number | null;
     unitName: string | null;
@@ -223,6 +224,7 @@ export function getRecipe(id: number): RecipeView | null {
             // Display name: user's picked alias if set, otherwise the
             // canonical ingredient name.
             ingredientName: sql<string>`coalesce(${recipeIngredient.displayName}, ${ingredientTable.name})`,
+            canonicalIngredientName: ingredientTable.name,
             quantity: recipeIngredient.quantity,
             unitId: recipeIngredient.unitId,
             unitName: unitTable.name,
@@ -269,6 +271,7 @@ export function getRecipe(id: number): RecipeView | null {
           id: i.id,
           ingredientId: i.ingredientId,
           ingredientName: i.ingredientName,
+          canonicalIngredientName: i.canonicalIngredientName,
           quantity: i.quantity,
           unitId: i.unitId,
           unitName: i.unitName,

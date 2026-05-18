@@ -44,6 +44,7 @@ type ImportedRecipeResponse = {
       name: string;
       ingredientId: number | null;
       ingredientMatch: "existing" | "new";
+      canonicalIngredientName: string | null;
       notes: string | null;
     }>;
   }>;
@@ -77,6 +78,7 @@ function importedToDraft(
               {
                 uid: crypto.randomUUID(),
                 name: "",
+                canonicalName: null,
                 quantity: "",
                 unit: null,
                 notes: "",
@@ -97,6 +99,7 @@ function importedToDraft(
               return {
                 uid: crypto.randomUUID(),
                 name: i.name,
+                canonicalName: i.canonicalIngredientName,
                 quantity: i.quantity === null ? "" : String(i.quantity),
                 unit: i.unit ? { id: i.unit.id, name: i.unit.name } : null,
                 notes: i.notes ?? "",

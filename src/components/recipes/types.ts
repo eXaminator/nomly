@@ -25,6 +25,11 @@ export type DraftIngredient = {
   /** Freeform name — resolved server-side to an existing ingredient by
    *  case-insensitive canonical/alias match, or auto-created on save. */
   name: string;
+  /** Canonical ingredient name (the row that `name` resolves to via alias).
+   *  Populated when loading an existing recipe or after an alias match in
+   *  autocomplete; shown as a small pill under the input when it differs
+   *  from `name`. Cleared as soon as the user edits the field. */
+  canonicalName: string | null;
   quantity: string;
   unit: ComboboxItem | null;
   notes: string;
@@ -54,6 +59,7 @@ export function emptyIngredient(): DraftIngredient {
   return {
     uid: crypto.randomUUID(),
     name: "",
+    canonicalName: null,
     quantity: "",
     unit: null,
     notes: "",
@@ -97,6 +103,7 @@ export function emptyRecipe(): DraftRecipe {
           {
             uid: "initial-ingredient",
             name: "",
+            canonicalName: null,
             quantity: "",
             unit: null,
             notes: "",

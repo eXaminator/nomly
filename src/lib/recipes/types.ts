@@ -40,7 +40,12 @@ export type RecipeListItem = {
 export type RecipeIngredientView = {
   id: number;
   ingredientId: number;
+  /** Whatever the user picked or typed at save time (recipe_ingredient.
+   *  display_name OR ingredient.name fallback). */
   ingredientName: string;
+  /** ingredient.name — the canonical row. May be the same string as
+   *  ingredientName; the UI hides the badge in that case. */
+  canonicalIngredientName: string;
   quantity: number | null;
   unitId: number | null;
   unitName: string | null;

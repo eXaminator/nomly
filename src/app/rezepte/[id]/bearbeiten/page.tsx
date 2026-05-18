@@ -43,6 +43,13 @@ export default async function EditRecipePage({
       ingredients: s.ingredients.map((i) => ({
         uid: crypto.randomUUID(),
         name: i.ingredientName,
+        // Only carry the canonical when it differs from the displayed name —
+        // matches the import path's behaviour.
+        canonicalName:
+          i.canonicalIngredientName.toLowerCase() ===
+          i.ingredientName.toLowerCase()
+            ? null
+            : i.canonicalIngredientName,
         quantity: i.quantity === null ? "" : String(i.quantity),
         unit: i.unitId !== null && i.unitName ? { id: i.unitId, name: i.unitName } : null,
         notes: i.notes ?? "",

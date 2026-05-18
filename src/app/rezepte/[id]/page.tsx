@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { Clock, ExternalLink, Pencil, Users } from "lucide-react";
 import { AppShell } from "@/components/layout/app-shell";
 import { Button } from "@/components/ui/button";
+import { IngredientLine } from "@/components/recipes/ingredient-line";
 import { getRecipe } from "@/lib/recipes/service";
 import { renderMarkdown } from "@/lib/markdown";
 
@@ -116,7 +117,10 @@ export default async function RecipeViewPage({
                       {formatQuantity(ing.quantity)} {ing.unitName ?? ""}
                     </span>
                     <span className="flex-1">
-                      {ing.ingredientName}
+                      <IngredientLine
+                        displayName={ing.ingredientName}
+                        canonicalName={ing.canonicalIngredientName}
+                      />
                       {ing.notes ? (
                         <span className="text-[var(--color-muted-fg)]"> – {ing.notes}</span>
                       ) : null}

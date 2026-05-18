@@ -113,16 +113,26 @@ export function IngredientRow({ value, onChange, onRemove }: Props) {
       <div className="col-span-2 flex flex-col gap-1 md:col-span-1">
         <IngredientNameInput
           value={value.name}
-          onChange={(name) =>
+          onChange={(name, canonical) =>
             onChange({
               ...value,
               name,
+              // When `canonical` is undefined, leave the existing value
+              // alone (the user is still typing in-place); when it's an
+              // explicit `null` the input is telling us to clear it; when
+              // it's a string, an alias was picked.
+              canonicalName:
+                canonical === undefined ? value.canonicalName : canonical,
               importAnnotation: clearAnnotationOn(value.importAnnotation, "ingredient"),
             })
           }
           placeholder="Zutat"
         />
-        <IngredientBadge annotation={value.importAnnotation} />
+        <IngredientBadge
+          annotation={value.importAnnotation}
+          canonicalName={value.canonicalName}
+          displayName={value.name}
+        />
       </div>
       <Input
         placeholder="Notiz (z. B. fein gehackt)"
@@ -154,21 +164,41 @@ function annotationShowsAnything(a: ImportAnnotation): boolean {
 
 function IngredientBadge({
   annotation,
+  canonicalName,
+  displayName,
 }: {
   annotation: ImportAnnotation | undefined;
+  canonicalName: string | null;
+  displayName: string;
 }) {
-  if (!annotation?.ingredientIsNew) return null;
-  return (
-    <span
-      className={cn(
-        "inline-flex w-fit items-center gap-1 rounded-full bg-[color-mix(in_srgb,var(--color-warning),var(--color-bg)_82%)] px-2 py-0.5 text-xs font-medium text-[var(--color-warning)]",
-      )}
-      title="Zutat existiert noch nicht und wird beim Speichern angelegt."
-    >
-      <Sparkles className="size-3" />
-      Neu
-    </span>
-  );
+  if (annotation?.ingredientIsNew) {
+    return (
+      <span
+        className={cn(
+          "inline-flex w-fit items-center gap-1 rounded-full bg-[color-mix(in_srgb,var(--color-warning),var(--color-bg)_82%)] px-2 py-0.5 text-xs font-medium text-[var(--color-warning)]",
+        )}
+        title="Zutat existiert noch nicht und wird beim Speichern angelegt."
+      >
+        <Sparkles className="size-3" />
+        Neu
+      </span>
+    );
+  }
+  if (
+    canonicalName &&
+    canonicalName.trim().length > 0 &&
+    canonicalName.toLowerCase() !== displayName.trim().toLowerCase()
+  ) {
+    return (
+      <span
+        className="inline-flex w-fit max-w-full items-center gap-1 truncate rounded-full bg-[var(--color-muted)] px-2 py-0.5 text-xs text-[var(--color-muted-fg)]"
+        title={`Zugeordnet zu „${canonicalName}".`}
+      >
+        = {canonicalName}
+      </span>
+    );
+  }
+  return null;
 }
 
 function UnitBadge({
