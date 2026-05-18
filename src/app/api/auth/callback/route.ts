@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import * as client from "openid-client";
 import { unsealData } from "iron-session";
-import { getOidcConfig } from "@/lib/oidc";
+import { buildRedirectUri, getOidcConfig } from "@/lib/oidc";
 import { env } from "@/lib/env";
 import { getSession } from "@/lib/server-session";
 import type { SessionData } from "@/lib/session";
@@ -32,7 +32,14 @@ export async function GET(request: Request) {
 
   const config = await getOidcConfig();
 
-  const tokens = await client.authorizationCodeGrant(config, new URL(request.url), {
+  // Reassemble the callback URL using BASE_URL so it matches the redirect_uri
+  // we sent during /authorize — Next sees the raw host header (e.g.
+  // 0.0.0.0:3000 when bound that way), but the IdP only knows BASE_URL.
+  const incoming = new URL(request.url);
+  const callbackUrl = new URL(buildRedirectUri());
+  for (const [k, v] of incoming.searchParams) callbackUrl.searchParams.set(k, v);
+
+  const tokens = await client.authorizationCodeGrant(config, callbackUrl, {
     pkceCodeVerifier: stateData.codeVerifier,
     expectedState: stateData.state,
     expectedNonce: stateData.nonce,

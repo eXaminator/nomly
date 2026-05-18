@@ -35,11 +35,18 @@ export type ButtonProps = React.ButtonHTMLAttributes<HTMLButtonElement> &
   VariantProps<typeof buttonVariants> & { asChild?: boolean };
 
 export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
-  ({ className, variant, size, asChild = false, ...props }, ref) => {
+  (
+    { className, variant, size, asChild = false, type, ...props },
+    ref,
+  ) => {
     const Comp = asChild ? Slot : "button";
+    // Default to type="button" so a button nested in a form doesn't accidentally
+    // submit. The form's actual submit button opts in explicitly.
+    const resolvedType = asChild ? undefined : (type ?? "button");
     return (
       <Comp
         ref={ref}
+        type={resolvedType}
         className={cn(buttonVariants({ variant, size, className }))}
         {...props}
       />

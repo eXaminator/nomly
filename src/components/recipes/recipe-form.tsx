@@ -147,8 +147,19 @@ export function RecipeForm({ initial, recipeId, tagSuggestions }: Props) {
     }
   }
 
+  // Enter on a text input would otherwise trigger implicit form submission.
+  // We only want the explicit "Rezept anlegen" button to submit, so swallow
+  // Enter for everything except <textarea> and the submit button itself.
+  function onFormKeyDown(e: React.KeyboardEvent<HTMLFormElement>) {
+    if (e.key !== "Enter") return;
+    const t = e.target as HTMLElement;
+    if (t.tagName === "TEXTAREA") return;
+    if (t instanceof HTMLButtonElement && t.type === "submit") return;
+    e.preventDefault();
+  }
+
   return (
-    <form onSubmit={onSubmit} className="space-y-6">
+    <form onSubmit={onSubmit} onKeyDown={onFormKeyDown} className="space-y-6">
       <div className="rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-card)] p-4 md:p-6">
         <div className="grid gap-4 md:grid-cols-2">
           <div className="md:col-span-2">
@@ -276,7 +287,10 @@ export function RecipeForm({ initial, recipeId, tagSuggestions }: Props) {
             Rezept löschen
           </Button>
         ) : null}
-        <Button type="submit" disabled={saving}>
+        <Button
+          type="submit"
+          disabled={saving}
+        >
           {saving ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}
           {recipeId ? "Änderungen speichern" : "Rezept anlegen"}
         </Button>

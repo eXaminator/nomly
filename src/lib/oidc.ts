@@ -9,7 +9,7 @@ export function getOidcConfig(): Promise<client.Configuration> {
       new URL(env.OIDC_ISSUER),
       env.OIDC_CLIENT_ID,
       undefined,
-      client.ClientSecretPost(env.OIDC_CLIENT_SECRET),
+      client.ClientSecretBasic(env.OIDC_CLIENT_SECRET),
     );
   }
   return cached;

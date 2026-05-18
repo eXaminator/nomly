@@ -81,10 +81,10 @@ async function main() {
 
   server.on("upgrade", async (req, socket, head) => {
     const url = req.url ?? "";
-    if (!url.startsWith("/ws")) {
-      socket.destroy();
-      return;
-    }
+    // Only handle our /ws endpoint. Next.js attaches its own upgrade listener
+    // for /_next/webpack-hmr (and similar) in dev — we must not interfere by
+    // destroying the socket, just let those listeners handle the request.
+    if (!url.startsWith("/ws")) return;
     const authorized = await isUpgradeAuthorized(req);
     if (!authorized) {
       socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");

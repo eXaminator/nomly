@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Image as ImageIcon, Loader2, Upload, X } from "lucide-react";
+import { Check, Image as ImageIcon, Loader2, Upload, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 type Props = {
@@ -13,10 +13,12 @@ export function PhotoUpload({ value, onChange }: Props) {
   const inputRef = React.useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const [justUploaded, setJustUploaded] = React.useState(false);
 
   async function handleFile(file: File) {
     setError(null);
     setUploading(true);
+    setJustUploaded(false);
     try {
       const form = new FormData();
       form.set("photo", file);
@@ -27,19 +29,26 @@ export function PhotoUpload({ value, onChange }: Props) {
       }
       const data = (await res.json()) as { path: string };
       onChange(data.path);
+      setJustUploaded(true);
+      window.setTimeout(() => setJustUploaded(false), 2000);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Upload fehlgeschlagen");
     } finally {
       setUploading(false);
-      if (inputRef.current) inputRef.current.value = "";
     }
+  }
+
+  function openPicker() {
+    inputRef.current?.click();
   }
 
   return (
     <div className="space-y-2">
       <div className="flex items-start gap-4">
         <div className="flex h-32 w-32 shrink-0 items-center justify-center overflow-hidden rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-muted)]">
-          {value ? (
+          {uploading ? (
+            <Loader2 className="size-8 animate-spin text-[var(--color-muted-fg)]" />
+          ) : value ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
               src={`/api/v1/${value}`}
@@ -56,16 +65,19 @@ export function PhotoUpload({ value, onChange }: Props) {
             type="file"
             accept="image/*"
             capture="environment"
-            className="hidden"
+            className="sr-only"
+            tabIndex={-1}
+            aria-hidden="true"
             onChange={(e) => {
               const file = e.target.files?.[0];
               if (file) void handleFile(file);
+              // Reset so picking the same file again still triggers onChange.
+              e.target.value = "";
             }}
           />
           <Button
-            type="button"
             variant="outline"
-            onClick={() => inputRef.current?.click()}
+            onClick={openPicker}
             disabled={uploading}
           >
             {uploading ? (
@@ -77,14 +89,23 @@ export function PhotoUpload({ value, onChange }: Props) {
           </Button>
           {value ? (
             <Button
-              type="button"
               variant="ghost"
               size="sm"
-              onClick={() => onChange(null)}
+              onClick={() => {
+                onChange(null);
+                setJustUploaded(false);
+              }}
+              disabled={uploading}
             >
               <X className="size-4" />
               Foto entfernen
             </Button>
+          ) : null}
+          {justUploaded ? (
+            <p className="inline-flex items-center gap-1 text-xs text-[var(--color-success)]">
+              <Check className="size-3.5" />
+              Foto hochgeladen
+            </p>
           ) : null}
           {error ? (
             <p className="text-xs text-[var(--color-danger)]">{error}</p>

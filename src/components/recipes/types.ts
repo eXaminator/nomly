@@ -46,6 +46,15 @@ export function emptySection(): DraftSection {
   };
 }
 
+/**
+ * Initial state for the "neues Rezept" form. Uses deterministic UIDs so
+ * server-rendered HTML and the first client render produce the same htmlFor /
+ * id attributes — random UUIDs would diverge and abort React hydration,
+ * silently breaking every event handler in the form (including
+ * `Abschnitt hinzufügen` and `PhotoUpload`'s file picker). Items the user
+ * adds at runtime stay on `crypto.randomUUID()` because those callsites only
+ * fire client-side.
+ */
 export function emptyRecipe(): DraftRecipe {
   return {
     title: "",
@@ -56,6 +65,21 @@ export function emptyRecipe(): DraftRecipe {
     sourceUrl: "",
     photoPath: null,
     tags: [],
-    sections: [emptySection()],
+    sections: [
+      {
+        uid: "initial-section",
+        title: "",
+        instructions: "",
+        ingredients: [
+          {
+            uid: "initial-ingredient",
+            ingredient: null,
+            quantity: "",
+            unit: null,
+            notes: "",
+          },
+        ],
+      },
+    ],
   };
 }
