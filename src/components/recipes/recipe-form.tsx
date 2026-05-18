@@ -6,7 +6,7 @@ import { Loader2, Plus, Save, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
+import { MarkdownEditor } from "@/components/ui/markdown-editor";
 import { PhotoUpload } from "./photo-upload";
 import { SectionEditor } from "./section-editor";
 import { TagInput } from "./tag-input";
@@ -175,11 +175,11 @@ export function RecipeForm({ initial, recipeId, tagSuggestions }: Props) {
           </div>
           <div className="md:col-span-2">
             <Label htmlFor="description">Beschreibung (Markdown, optional)</Label>
-            <Textarea
+            <MarkdownEditor
               id="description"
               value={draft.description}
-              onChange={(e) => setDraft({ ...draft, description: e.target.value })}
-              rows={3}
+              onChange={(description) => setDraft({ ...draft, description })}
+              rows={4}
               className="mt-1.5"
             />
           </div>

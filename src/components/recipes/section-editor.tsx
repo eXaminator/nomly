@@ -3,8 +3,8 @@
 import { ArrowDown, ArrowUp, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
+import { MarkdownEditor } from "@/components/ui/markdown-editor";
 import { IngredientRow } from "./ingredient-row";
 import {
   emptyIngredient,
@@ -121,12 +121,12 @@ export function SectionEditor({
         <Label htmlFor={`section-instructions-${section.uid}`}>
           Anleitung (Markdown)
         </Label>
-        <Textarea
+        <MarkdownEditor
           id={`section-instructions-${section.uid}`}
           rows={8}
           placeholder="1. ..."
           value={section.instructions}
-          onChange={(e) => onChange({ ...section, instructions: e.target.value })}
+          onChange={(instructions) => onChange({ ...section, instructions })}
           className="mt-1.5"
         />
       </div>
