@@ -278,11 +278,11 @@ export function MarkdownEditor({
   );
 
   const minHeight = `${rows * 1.5 + 1}rem`;
-  // Only switch CodeMirror's theme prop after mount — its value is part of
-  // the rendered className, and using a client-only value on the first
-  // render would mismatch SSR's HTML.
-  const cmTheme: "dark" | "light" =
-    mounted && resolvedTheme === "dark" ? "dark" : "light";
+  // `mounted` flag avoids the next-themes hydration mismatch; resolvedTheme
+  // is read only for symmetry — actual theming is driven by our CSS vars in
+  // editorTheme, so nothing else depends on this value yet.
+  void mounted;
+  void resolvedTheme;
 
   return (
     <div
@@ -374,7 +374,11 @@ export function MarkdownEditor({
             onChange={onChange}
             extensions={extensions}
             placeholder={placeholder}
-            theme={cmTheme}
+            // `none` skips the bundled dark/light theme wrappers that paint
+            // their own background on `.cm-editor` and clash with our card
+            // colours. Our editorTheme inside `extensions` drives all of the
+            // editor's visual styling via the app's CSS variables.
+            theme="none"
             basicSetup={{
               lineNumbers: false,
               foldGutter: false,
