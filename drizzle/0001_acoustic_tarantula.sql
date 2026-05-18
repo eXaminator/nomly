@@ -1,0 +1,1 @@
+ALTER TABLE `recipe_ingredient` ADD `display_name` text;

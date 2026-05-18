@@ -120,6 +120,14 @@ export const recipeIngredient = sqliteTable(
     ingredientId: integer("ingredient_id")
       .notNull()
       .references(() => ingredient.id, { onDelete: "restrict" }),
+    /**
+     * The name the user picked or typed for this row — e.g. "Tomaten" even
+     * though `ingredient_id` points at the canonical "Tomate". The recipe
+     * view uses this for display; the shopping-list merge logic uses
+     * `ingredient_id` so aliased rows still merge with their canonical
+     * counterparts.
+     */
+    displayName: text("display_name"),
     quantity: real("quantity"),
     unitId: integer("unit_id").references(() => unit.id, { onDelete: "set null" }),
     notes: text("notes"),

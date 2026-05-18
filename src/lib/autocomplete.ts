@@ -20,13 +20,27 @@ export type AutocompleteHit = {
   matchedAlias?: string;
 };
 
+export type IngredientSuggestion = {
+  ingredientId: number;
+  /** The label the user sees (and that becomes the input value when picked). */
+  name: string;
+  /** When this entry came from an alias, the canonical ingredient name. */
+  canonicalName?: string;
+};
+
 const LIMIT = 20;
 
 function buildLikePattern(query: string): string {
   return `%${query.replace(/[%_]/g, "\\$&")}%`;
 }
 
-export function searchIngredients(query: string): AutocompleteHit[] {
+/**
+ * Returns ingredient-name suggestions where canonical names and aliases are
+ * both first-class entries. Picking an alias (e.g. "Tomaten") sets the user's
+ * input to that alias name; storage will still resolve the row to the
+ * canonical ingredient ("Tomate") via {@link findIngredientByName} on save.
+ */
+export function searchIngredients(query: string): IngredientSuggestion[] {
   const q = norm(query);
   if (q.length === 0) return [];
   const pattern = buildLikePattern(q);
@@ -41,9 +55,9 @@ export function searchIngredients(query: string): AutocompleteHit[] {
 
   const aliasHits = db
     .select({
-      id: ingredient.id,
-      name: ingredient.name,
-      matchedAlias: ingredientAlias.name,
+      ingredientId: ingredient.id,
+      canonicalName: ingredient.name,
+      aliasName: ingredientAlias.name,
     })
     .from(ingredientAlias)
     .innerJoin(ingredient, eq(ingredient.id, ingredientAlias.ingredientId))
@@ -52,7 +66,34 @@ export function searchIngredients(query: string): AutocompleteHit[] {
     .limit(LIMIT)
     .all();
 
-  return mergeHits(canonical, aliasHits, q);
+  const merged: IngredientSuggestion[] = [
+    ...canonical.map((c) => ({ ingredientId: c.id, name: c.name })),
+    ...aliasHits.map((a) => ({
+      ingredientId: a.ingredientId,
+      name: a.aliasName,
+      canonicalName: a.canonicalName,
+    })),
+  ];
+
+  // De-duplicate (canonical "Tomate" + alias "Tomate" → keep one), case-
+  // insensitive on the display label.
+  const seen = new Map<string, IngredientSuggestion>();
+  for (const m of merged) {
+    const key = m.name.toLowerCase();
+    if (!seen.has(key)) seen.set(key, m);
+  }
+
+  return Array.from(seen.values())
+    .sort((a, b) => rankSuggestion(a, q) - rankSuggestion(b, q))
+    .slice(0, LIMIT);
+}
+
+function rankSuggestion(s: IngredientSuggestion, query: string): number {
+  const n = s.name.toLowerCase();
+  const q = query.toLowerCase();
+  if (n === q) return 0;
+  if (n.startsWith(q)) return 1;
+  return 2;
 }
 
 export function searchUnits(query: string): AutocompleteHit[] {

@@ -108,11 +108,15 @@ function writeSections(
     const sectionId = sectionRow[0].id;
 
     section.ingredients.forEach((ing, iIdx) => {
-      const ingredientId = resolveIngredient(tx, ing.ingredientName);
+      const trimmedName = ing.ingredientName.trim();
+      const ingredientId = resolveIngredient(tx, trimmedName);
       tx.insert(recipeIngredient)
         .values({
           sectionId,
           ingredientId,
+          // Preserve the exact name the user picked (canonical OR alias)
+          // so it survives the round-trip on the recipe view + edit page.
+          displayName: trimmedName,
           quantity: ing.quantity,
           unitId: ing.unitId,
           notes: ing.notes,
@@ -216,7 +220,9 @@ export function getRecipe(id: number): RecipeView | null {
             id: recipeIngredient.id,
             sectionId: recipeIngredient.sectionId,
             ingredientId: recipeIngredient.ingredientId,
-            ingredientName: ingredientTable.name,
+            // Display name: user's picked alias if set, otherwise the
+            // canonical ingredient name.
+            ingredientName: sql<string>`coalesce(${recipeIngredient.displayName}, ${ingredientTable.name})`,
             quantity: recipeIngredient.quantity,
             unitId: recipeIngredient.unitId,
             unitName: unitTable.name,

@@ -6,7 +6,7 @@ import { Loader2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/cn";
 
-type Hit = { id: number; name: string; matchedAlias?: string };
+type Hit = { ingredientId: number; name: string; canonicalName?: string };
 
 type Props = {
   value: string;
@@ -131,7 +131,7 @@ export function IngredientNameInput({
           <ul className="max-h-72 overflow-auto py-1" role="listbox">
             {items.map((item, idx) => (
               <li
-                key={item.id}
+                key={`${item.ingredientId}-${item.name}`}
                 role="option"
                 aria-selected={idx === activeIdx}
                 onMouseDown={(e) => {
@@ -147,9 +147,9 @@ export function IngredientNameInput({
                 )}
               >
                 <span className="flex-1 truncate">{item.name}</span>
-                {item.matchedAlias && item.matchedAlias !== item.name ? (
+                {item.canonicalName && item.canonicalName !== item.name ? (
                   <span className="truncate text-xs text-[var(--color-muted-fg)]">
-                    ≈ {item.matchedAlias}
+                    ≈ {item.canonicalName}
                   </span>
                 ) : null}
               </li>
