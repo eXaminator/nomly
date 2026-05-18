@@ -77,12 +77,12 @@ export class ImportError extends Error {
   }
 }
 
-type UnitLookup = {
+export type UnitLookup = {
   byNameOrAlias: Map<string, { id: number; name: string }>;
   byCanonicalName: Map<string, { id: number; name: string }>;
 };
 
-function buildUnitLookup(): UnitLookup {
+export function buildUnitLookup(): UnitLookup {
   const byNameOrAlias = new Map<string, { id: number; name: string }>();
   const byCanonicalName = new Map<string, { id: number; name: string }>();
   const canonical = db
@@ -112,13 +112,13 @@ function buildUnitLookup(): UnitLookup {
   return { byNameOrAlias, byCanonicalName };
 }
 
-type ResolveUnitResult = {
+export type ResolveUnitResult = {
   resolved: { id: number; name: string } | null;
   match: UnitMatch;
   rawUnit: string | null;
 };
 
-function resolveUnit(
+export function resolveUnit(
   lookup: UnitLookup,
   rawUnitName: string | null,
   quantity: number | null,
@@ -149,10 +149,10 @@ function resolveUnit(
   return { resolved: null, match: "empty", rawUnit: null };
 }
 
-type IngredientLookupHit = { id: number; canonicalName: string };
-type IngredientLookup = Map<string, IngredientLookupHit>;
+export type IngredientLookupHit = { id: number; canonicalName: string };
+export type IngredientLookup = Map<string, IngredientLookupHit>;
 
-function buildIngredientLookup(): IngredientLookup {
+export function buildIngredientLookup(): IngredientLookup {
   const lookup: IngredientLookup = new Map();
   const canonical = db
     .select({ id: ingredient.id, name: ingredient.name })
@@ -179,7 +179,7 @@ function buildIngredientLookup(): IngredientLookup {
   return lookup;
 }
 
-function resolveIngredientName(
+export function resolveIngredientName(
   lookup: IngredientLookup,
   rawName: string,
 ): {
@@ -219,7 +219,7 @@ function pickResolvedImageUrl(
   }
 }
 
-async function downloadAndStoreImage(
+export async function downloadAndStoreImage(
   imgUrl: URL,
 ): Promise<PhotoPath | null> {
   try {

@@ -38,6 +38,33 @@ npm run dev                   # boots the custom server on :3000
 `npm test` runs the Vitest suite. `npm run typecheck` and `npm run lint`
 mirror what CI checks.
 
+## Bulk-import from Familywall
+
+One-shot migration tool for users coming from Familywall. Drives a headless
+Chromium session through the user's account, walks every recipe, and writes
+them into nomly's local DB. Idempotent — re-runs skip recipes already
+present (matched on title + original source URL). No links back to
+Familywall are ever stored.
+
+```bash
+# First-time setup: fetch the Chromium binary Playwright needs.
+npx playwright install chromium
+
+# Run with credentials via env vars (recommended — keeps them out of shell
+# history). DATABASE_URL defaults to ./data/nomly.db.
+FAMILYWALL_EMAIL=me@example.tld FAMILYWALL_PASSWORD='…' \
+  npm run import:familywall
+
+# Or pass them on the command line.
+npm run import:familywall -- --email me@example.tld --password '…'
+
+# Useful flags for first runs:
+npm run import:familywall -- --headed --limit 1 --dry-run
+```
+
+Prints one line per recipe (`imported (id 12)` / `skipped` / `failed`) and a
+final summary. Use `--headed` whenever a CAPTCHA or 2FA prompt is expected.
+
 ## Tech
 
 Next.js 16 (App Router, Turbopack) with a custom server in `server.mts` that

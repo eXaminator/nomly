@@ -12,6 +12,7 @@
     "test": "vitest run",
     "seed": "node scripts/seed.ts",
     "migrate": "node scripts/migrate.mts",
+    "import:familywall": "node scripts/import-familywall.mts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",
@@ -65,6 +66,7 @@
     "drizzle-kit": "^0.31.10",
     "eslint": "^9",
     "eslint-config-next": "16.2.6",
+    "playwright": "^1.60.0",
     "tailwindcss": "^4",
     "typescript": "^5",
     "vitest": "^4.1.6"
