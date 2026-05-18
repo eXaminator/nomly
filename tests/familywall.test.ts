@@ -199,4 +199,19 @@ describe("transformFamilywallRecipe", () => {
     expect(ing.unitId).toBe(1); // g
     expect(ing.ingredientName).toBe("Mehl");
   });
+
+  it("parses '1½tsp' as quantity 1.5 + tsp", () => {
+    const lookups = makeLookups();
+    lookups.units.byNameOrAlias.set("tsp", { id: 5, name: "TL" });
+    lookups.units.byNameOrAlias.set("teaspoon", { id: 5, name: "TL" });
+    const out = transformFamilywallRecipe(
+      makeRaw({ ingredients: ["1½tsp Salz"] }),
+      lookups,
+      null,
+    );
+    const ing = out.sections[0].ingredients[0];
+    expect(ing.quantity).toBe(1.5);
+    expect(ing.unitId).toBe(5); // TL
+    expect(ing.ingredientName).toBe("Salz");
+  });
 });
