@@ -118,6 +118,22 @@ async function firstVisible(page: Page, candidates: string[]) {
   return null;
 }
 
+async function waitForFirstVisible(
+  page: Page,
+  candidates: string[],
+  timeoutMs: number,
+) {
+  // Race every candidate against the timeout — whichever shows up first wins.
+  // Playwright's `or()` would also work, but we want per-attempt logging.
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const found = await firstVisible(page, candidates);
+    if (found) return found;
+    await delay(200);
+  }
+  return null;
+}
+
 async function firstExisting(page: Page, candidates: string[]) {
   for (const sel of candidates) {
     const locator = page.locator(sel).first();
@@ -126,10 +142,31 @@ async function firstExisting(page: Page, candidates: string[]) {
   return null;
 }
 
+/**
+ * Familywall ships OneTrust's cookie banner; in a fresh browser context
+ * it overlays the form. We click "Accept all" if present, then carry on.
+ * No-op if the banner isn't there.
+ */
+async function dismissConsent(page: Page) {
+  const buttons = [
+    "#onetrust-accept-btn-handler",
+    "button:has-text('Alle akzeptieren')",
+    "button:has-text('Accept all')",
+    "button:has-text('Accept All Cookies')",
+  ];
+  const btn = await firstVisible(page, buttons);
+  if (btn) {
+    await btn.click().catch(() => {});
+    // The OneTrust SDK animates out; give it a beat so the form is clickable.
+    await delay(300);
+  }
+}
+
 async function login(page: Page, email: string, password: string) {
   await page.goto(FAMILYWALL_LOGIN_URL, { waitUntil: "domcontentloaded" });
-  const emailField = await firstVisible(page, SELECTORS.loginEmail);
-  const pwField = await firstVisible(page, SELECTORS.loginPassword);
+  await dismissConsent(page);
+  const emailField = await waitForFirstVisible(page, SELECTORS.loginEmail, 15_000);
+  const pwField = await waitForFirstVisible(page, SELECTORS.loginPassword, 15_000);
   if (!emailField || !pwField) {
     throw new Error(
       "Login form not found on " + FAMILYWALL_LOGIN_URL +
