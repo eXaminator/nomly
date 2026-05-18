@@ -1,4 +1,10 @@
 "use client";
+/* eslint-disable react-hooks/refs --
+ * CodeMirror needs us to keep editor state outside React's render flow.
+ * The ref + closure pattern below is read inside event callbacks that only
+ * fire on user interaction, never during render — the lint rule is
+ * conservative and produces false positives here.
+ */
 
 import * as React from "react";
 import {
@@ -12,6 +18,14 @@ import {
   ListOrdered,
   Pencil,
 } from "lucide-react";
+import { useTheme } from "next-themes";
+import CodeMirror, { type ReactCodeMirrorRef } from "@uiw/react-codemirror";
+import { markdown } from "@codemirror/lang-markdown";
+import { EditorView, keymap } from "@codemirror/view";
+import { Prec } from "@codemirror/state";
+// keymap import is kept for the shortcut keymap (Mod-b/i/k) below.
+import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
+import { tags } from "@lezer/highlight";
 import { cn } from "@/lib/cn";
 import { renderMarkdown } from "@/lib/markdown";
 
@@ -30,6 +44,41 @@ type ToolbarOp =
   | { kind: "heading" }
   | { kind: "link" };
 
+const markdownHighlight = HighlightStyle.define([
+  { tag: tags.heading1, fontSize: "1.5em", fontWeight: "700" },
+  { tag: tags.heading2, fontSize: "1.3em", fontWeight: "700" },
+  { tag: tags.heading3, fontSize: "1.15em", fontWeight: "700" },
+  { tag: tags.heading, fontWeight: "700" },
+  { tag: tags.strong, fontWeight: "700" },
+  { tag: tags.emphasis, fontStyle: "italic" },
+  { tag: tags.strikethrough, textDecoration: "line-through" },
+  { tag: tags.monospace, fontFamily: "var(--font-mono)" },
+  { tag: tags.url, color: "var(--color-accent)", textDecoration: "underline" },
+  { tag: tags.link, color: "var(--color-accent)" },
+  { tag: tags.processingInstruction, color: "var(--color-muted-fg)" },
+  { tag: tags.contentSeparator, color: "var(--color-muted-fg)" },
+]);
+
+const editorTheme = EditorView.theme({
+  "&": {
+    fontSize: "0.875rem",
+    backgroundColor: "transparent",
+  },
+  ".cm-content": {
+    fontFamily:
+      "var(--font-sans), -apple-system, 'Segoe UI', system-ui, sans-serif",
+    color: "var(--color-fg)",
+    caretColor: "var(--color-fg)",
+    padding: "0.5rem 0.75rem",
+  },
+  ".cm-focused": { outline: "none" },
+  ".cm-line": { padding: "0 0" },
+  ".cm-cursor": { borderLeftColor: "var(--color-fg)" },
+  "&.cm-focused .cm-selectionBackground, ::selection": {
+    backgroundColor: "color-mix(in srgb, var(--color-accent) 30%, transparent)",
+  },
+});
+
 export function MarkdownEditor({
   value,
   onChange,
@@ -38,149 +87,202 @@ export function MarkdownEditor({
   id,
   className,
 }: Props) {
-  const textareaRef = React.useRef<HTMLTextAreaElement>(null);
+  const cmRef = React.useRef<ReactCodeMirrorRef>(null);
   const [mode, setMode] = React.useState<"edit" | "preview">("edit");
+  const { resolvedTheme } = useTheme();
+  const [mounted, setMounted] = React.useState(false);
+  React.useEffect(() => {
+    // Flip a "mounted" flag so we only read client-only state (resolvedTheme)
+    // after hydration. This is a classic next-themes pattern.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setMounted(true);
+  }, []);
 
   function applyOp(op: ToolbarOp) {
-    const ta = textareaRef.current;
-    if (!ta) return;
-    const start = ta.selectionStart;
-    const end = ta.selectionEnd;
-    const before = value.slice(0, start);
-    const selected = value.slice(start, end);
-    const after = value.slice(end);
-
-    let nextValue = value;
-    let nextStart = start;
-    let nextEnd = end;
+    const view = cmRef.current?.view;
+    if (!view) return;
+    const sel = view.state.selection.main;
+    const before = sel.from;
+    const after = sel.to;
+    const selected = view.state.sliceDoc(before, after);
 
     if (op.kind === "wrap") {
       const inner = selected || op.placeholder;
-      nextValue = `${before}${op.left}${inner}${op.right}${after}`;
-      nextStart = before.length + op.left.length;
-      nextEnd = nextStart + inner.length;
+      view.dispatch({
+        changes: { from: before, to: after, insert: op.left + inner + op.right },
+        selection: {
+          anchor: before + op.left.length,
+          head: before + op.left.length + inner.length,
+        },
+      });
     } else if (op.kind === "linePrefix") {
-      // Toggle the prefix on every line of the current selection. If a single
-      // empty line, insert at cursor.
-      const { lineStart, lineEnd, lines } = extractLines(value, start, end);
+      const startLine = view.state.doc.lineAt(before);
+      const endLine = view.state.doc.lineAt(after);
+      const text = view.state.sliceDoc(startLine.from, endLine.to);
+      const lines = text.split("\n");
       const allPrefixed = lines.every(
         (l) => l.startsWith(op.prefix) || l.length === 0,
       );
       const transformed = lines
         .map((l) => {
           if (l.length === 0) return op.prefix.trim();
-          return allPrefixed
-            ? l.slice(op.prefix.length)
-            : `${op.prefix}${l}`;
+          return allPrefixed ? l.slice(op.prefix.length) : `${op.prefix}${l}`;
         })
         .join("\n");
-      nextValue =
-        value.slice(0, lineStart) + transformed + value.slice(lineEnd);
-      nextStart = lineStart;
-      nextEnd = lineStart + transformed.length;
+      view.dispatch({
+        changes: { from: startLine.from, to: endLine.to, insert: transformed },
+        selection: {
+          anchor: startLine.from,
+          head: startLine.from + transformed.length,
+        },
+      });
     } else if (op.kind === "heading") {
-      const { lineStart, lineEnd, lines } = extractLines(value, start, end);
+      const startLine = view.state.doc.lineAt(before);
+      const endLine = view.state.doc.lineAt(after);
+      const text = view.state.sliceDoc(startLine.from, endLine.to);
+      const lines = text.split("\n");
       const transformed = lines
         .map((l) => {
           const stripped = l.replace(/^#{1,6}\s*/, "");
           const current = l.match(/^(#{1,6})\s*/)?.[1].length ?? 0;
-          const nextLevel = current >= 3 ? 0 : current + 1;
-          return nextLevel === 0 ? stripped : `${"#".repeat(nextLevel)} ${stripped}`;
+          const next = current >= 3 ? 0 : current + 1;
+          return next === 0 ? stripped : `${"#".repeat(next)} ${stripped}`;
         })
         .join("\n");
-      nextValue =
-        value.slice(0, lineStart) + transformed + value.slice(lineEnd);
-      nextStart = lineStart;
-      nextEnd = lineStart + transformed.length;
+      view.dispatch({
+        changes: { from: startLine.from, to: endLine.to, insert: transformed },
+        selection: {
+          anchor: startLine.from,
+          head: startLine.from + transformed.length,
+        },
+      });
     } else if (op.kind === "link") {
       const label = selected || "Link-Text";
       const url = "https://";
-      nextValue = `${before}[${label}](${url})${after}`;
-      // Place caret over the URL so the user can paste/replace immediately.
-      const linkStart = before.length + 1 + label.length + 2;
-      nextStart = linkStart;
-      nextEnd = linkStart + url.length;
-    }
-
-    onChange(nextValue);
-    requestAnimationFrame(() => {
-      ta.focus();
-      ta.setSelectionRange(nextStart, nextEnd);
-    });
-  }
-
-  /**
-   * Pressing Enter inside a list item inserts the next marker on the new
-   * line; pressing Enter on a marker-only line exits the list (clears the
-   * line). Returns true when the event was handled. Shift+Enter inserts a
-   * plain newline (default browser behaviour) so the user can still escape
-   * if they want to.
-   */
-  function handleListContinuation(
-    e: React.KeyboardEvent<HTMLTextAreaElement>,
-  ): boolean {
-    const ta = e.currentTarget;
-    if (ta.selectionStart !== ta.selectionEnd) return false;
-    const pos = ta.selectionStart;
-    const before = value.slice(0, pos);
-    const after = value.slice(pos);
-    const lineStart = before.lastIndexOf("\n") + 1;
-    const currentLine = before.slice(lineStart);
-    // Match optional indent + bullet/ordered marker + rest of the line.
-    const m = currentLine.match(/^(\s*)([-*+]\s+|(\d+)\.\s+)(.*)$/);
-    if (!m) return false;
-    const [, indent, marker, ordinal, content] = m;
-
-    if (content.length === 0) {
-      // Empty marker line → exit the list by removing the whole line.
-      e.preventDefault();
-      const nextValue = value.slice(0, lineStart) + after;
-      onChange(nextValue);
-      requestAnimationFrame(() => {
-        ta.focus();
-        ta.setSelectionRange(lineStart, lineStart);
+      const inserted = `[${label}](${url})`;
+      const urlStart = before + 1 + label.length + 2;
+      view.dispatch({
+        changes: { from: before, to: after, insert: inserted },
+        selection: { anchor: urlStart, head: urlStart + url.length },
       });
-      return true;
     }
-
-    // Continue: newline + indent + next marker. For ordered lists, increment.
-    const nextMarker = ordinal
-      ? `${parseInt(ordinal, 10) + 1}${marker.slice(ordinal.length)}`
-      : marker;
-    const insert = `\n${indent}${nextMarker}`;
-    e.preventDefault();
-    const nextValue = before + insert + after;
-    onChange(nextValue);
-    const caret = pos + insert.length;
-    requestAnimationFrame(() => {
-      ta.focus();
-      ta.setSelectionRange(caret, caret);
-    });
-    return true;
+    view.focus();
   }
 
-  function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
-    if (e.key === "Enter" && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
-      if (handleListContinuation(e)) return;
-    }
-    if (!(e.ctrlKey || e.metaKey)) return;
-    const key = e.key.toLowerCase();
-    if (key === "b") {
-      e.preventDefault();
-      applyOp({ kind: "wrap", left: "**", right: "**", placeholder: "Fett" });
-    } else if (key === "i") {
-      e.preventDefault();
-      applyOp({ kind: "wrap", left: "_", right: "_", placeholder: "Kursiv" });
-    } else if (key === "k") {
-      e.preventDefault();
-      applyOp({ kind: "link" });
-    }
-  }
+  // Enter inside a list item inserts the next marker; on an empty marker
+  // line it exits the list (clears the marker). The lang-markdown extension
+  // does insertion but not exit, so we run our own handler at Prec.highest
+  // and only fall through when neither case applies.
+  const listKeymap = React.useMemo(
+    () =>
+      Prec.highest(
+        keymap.of([
+          {
+            key: "Enter",
+            run: (view) => {
+              const sel = view.state.selection.main;
+              if (sel.from !== sel.to) return false;
+              const line = view.state.doc.lineAt(sel.from);
+              const m = line.text.match(/^(\s*)([-*+]\s+|(\d+)\.\s+)(.*)$/);
+              if (!m) return false;
+              const [, indent, marker, ordinal, content] = m;
+              if (content.length === 0) {
+                view.dispatch({
+                  changes: { from: line.from, to: line.to, insert: "" },
+                });
+                return true;
+              }
+              const nextMarker = ordinal
+                ? `${parseInt(ordinal, 10) + 1}${marker.slice(ordinal.length)}`
+                : marker;
+              const insert = `\n${indent}${nextMarker}`;
+              view.dispatch({
+                changes: { from: sel.from, to: sel.from, insert },
+                selection: { anchor: sel.from + insert.length },
+              });
+              return true;
+            },
+          },
+        ]),
+      ),
+    [],
+  );
+
+  // applyOp closes over the latest cmRef, which we want to stay current. Keep
+  // a stable function via useRef + a getter so the keymap below doesn't
+  // re-create extensions on every render.
+  const applyOpRef = React.useRef(applyOp);
+  React.useEffect(() => {
+    applyOpRef.current = applyOp;
+  });
+  const callApplyOp = React.useCallback(
+    (op: ToolbarOp) => applyOpRef.current(op),
+    [],
+  );
+
+  const shortcutKeymap = React.useMemo(
+    () =>
+      Prec.high(
+        keymap.of([
+          {
+            key: "Mod-b",
+            run: () => {
+              callApplyOp({
+                kind: "wrap",
+                left: "**",
+                right: "**",
+                placeholder: "Fett",
+              });
+              return true;
+            },
+          },
+          {
+            key: "Mod-i",
+            run: () => {
+              callApplyOp({
+                kind: "wrap",
+                left: "_",
+                right: "_",
+                placeholder: "Kursiv",
+              });
+              return true;
+            },
+          },
+          {
+            key: "Mod-k",
+            run: () => {
+              callApplyOp({ kind: "link" });
+              return true;
+            },
+          },
+        ]),
+      ),
+    [callApplyOp],
+  );
+
+  const extensions = React.useMemo(
+    () => [
+      markdown(),
+      syntaxHighlighting(markdownHighlight),
+      editorTheme,
+      EditorView.lineWrapping,
+      listKeymap,
+      shortcutKeymap,
+    ],
+    [listKeymap, shortcutKeymap],
+  );
 
   const previewHtml = React.useMemo(
     () => (mode === "preview" ? renderMarkdown(value) : null),
     [mode, value],
   );
+
+  const minHeight = `${rows * 1.5 + 1}rem`;
+  // Only switch CodeMirror's theme prop after mount — its value is part of
+  // the rendered className, and using a client-only value on the first
+  // render would mismatch SSR's HTML.
+  const cmTheme: "dark" | "light" =
+    mounted && resolvedTheme === "dark" ? "dark" : "light";
 
   return (
     <div
@@ -265,24 +367,35 @@ export function MarkdownEditor({
         </div>
       </div>
       {mode === "edit" ? (
-        <textarea
-          ref={textareaRef}
-          id={id}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          onKeyDown={onKeyDown}
-          rows={rows}
-          placeholder={placeholder}
-          className="block w-full resize-y bg-transparent px-3 py-2 font-mono text-sm leading-relaxed text-[var(--color-fg)] placeholder:text-[var(--color-muted-fg)] focus:outline-none"
-          spellCheck
-        />
+        <div id={id} style={{ minHeight }}>
+          <CodeMirror
+            ref={cmRef}
+            value={value}
+            onChange={onChange}
+            extensions={extensions}
+            placeholder={placeholder}
+            theme={cmTheme}
+            basicSetup={{
+              lineNumbers: false,
+              foldGutter: false,
+              highlightActiveLine: false,
+              highlightActiveLineGutter: false,
+              dropCursor: true,
+              indentOnInput: false,
+              bracketMatching: false,
+              autocompletion: false,
+              searchKeymap: false,
+            }}
+            style={{ minHeight }}
+          />
+        </div>
       ) : (
         <div
           className={cn(
             "prose prose-sm max-w-none px-3 py-2 text-[var(--color-fg)] dark:prose-invert",
-            !previewHtml && "text-[var(--color-muted-fg)] italic",
+            !previewHtml && "italic text-[var(--color-muted-fg)]",
           )}
-          style={{ minHeight: `${rows * 1.5}rem` }}
+          style={{ minHeight }}
           dangerouslySetInnerHTML={
             previewHtml
               ? { __html: previewHtml }
@@ -312,9 +425,6 @@ function ToolbarButton({
       type="button"
       title={label}
       aria-label={label}
-      // Don't steal focus from the textarea on click — otherwise the user's
-      // selection is gone by the time onClick runs and we lose the wrapping
-      // target. preventDefault on mousedown is the canonical fix.
       onMouseDown={(e) => e.preventDefault()}
       onClick={onClick}
       disabled={disabled}
@@ -332,13 +442,4 @@ function ToolbarButton({
 
 function ToolbarDivider() {
   return <div className="mx-1 h-5 w-px bg-[var(--color-border)]" />;
-}
-
-function extractLines(value: string, start: number, end: number) {
-  let lineStart = start;
-  while (lineStart > 0 && value[lineStart - 1] !== "\n") lineStart -= 1;
-  let lineEnd = end;
-  while (lineEnd < value.length && value[lineEnd] !== "\n") lineEnd += 1;
-  const lines = value.slice(lineStart, lineEnd).split("\n");
-  return { lineStart, lineEnd, lines };
 }
