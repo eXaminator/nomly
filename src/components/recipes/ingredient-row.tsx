@@ -1,13 +1,17 @@
 "use client";
 
+import * as React from "react";
 import { Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Combobox, type ComboboxItem } from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
+import {
+  SelectSearch,
+  type SelectSearchItem,
+} from "@/components/ui/select-search";
 import { IngredientNameInput } from "./ingredient-name-input";
 import type { DraftIngredient } from "./types";
 
-async function searchUnits(q: string): Promise<ComboboxItem[]> {
+async function searchUnits(q: string): Promise<SelectSearchItem[]> {
   const r = await fetch(`/api/v1/units?q=${encodeURIComponent(q)}`);
   if (!r.ok) return [];
   const data = (await r.json()) as {
@@ -21,6 +25,22 @@ async function searchUnits(q: string): Promise<ComboboxItem[]> {
   }));
 }
 
+let unitCache: SelectSearchItem[] | null = null;
+async function loadAllUnits(): Promise<SelectSearchItem[]> {
+  if (unitCache) return unitCache;
+  // The seed ships 14ish units — fetching every common letter as a wide
+  // search returns them all, no separate "list" endpoint needed.
+  const seen = new Map<number, SelectSearchItem>();
+  for (const q of ["a", "e", "g", "l", "u"]) {
+    const items = await searchUnits(q);
+    for (const i of items) seen.set(i.id, i);
+  }
+  unitCache = Array.from(seen.values()).sort((a, b) =>
+    a.name.localeCompare(b.name, "de"),
+  );
+  return unitCache;
+}
+
 type Props = {
   value: DraftIngredient;
   onChange: (next: DraftIngredient) => void;
@@ -28,6 +48,11 @@ type Props = {
 };
 
 export function IngredientRow({ value, onChange, onRemove }: Props) {
+  const [defaultUnits, setDefaultUnits] = React.useState<SelectSearchItem[]>([]);
+  React.useEffect(() => {
+    void loadAllUnits().then(setDefaultUnits);
+  }, []);
+
   return (
     <div className="grid grid-cols-[5rem_8rem_1fr_auto] gap-2 md:grid-cols-[5rem_8rem_1fr_1fr_auto]">
       <Input
@@ -37,10 +62,11 @@ export function IngredientRow({ value, onChange, onRemove }: Props) {
         onChange={(e) => onChange({ ...value, quantity: e.target.value })}
         aria-label="Menge"
       />
-      <Combobox
+      <SelectSearch
         value={value.unit}
         onChange={(unit) => onChange({ ...value, unit })}
         search={searchUnits}
+        defaultItems={defaultUnits}
         placeholder="Einheit"
       />
       <IngredientNameInput
