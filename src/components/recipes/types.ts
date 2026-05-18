@@ -1,5 +1,25 @@
 import type { ComboboxItem } from "@/components/ui/combobox";
 
+/**
+ * Per-row state surfaced after a URL import: what matched, what didn't,
+ * what we defaulted. The form renders small badges off these flags so the
+ * user can see at a glance which rows need attention. Cleared as soon as
+ * the user edits the relevant field (handled in `IngredientRow`).
+ */
+export type ImportAnnotation = {
+  /** True when the ingredient name didn't match any existing row — it'll be
+   *  created when the recipe is saved. */
+  ingredientIsNew: boolean;
+  /** "ok" — the unit resolved cleanly via the alias table.
+   *  "synonym" — resolved via the import synonym map (e.g. tablespoon→EL).
+   *  "defaulted" — no unit was parsed; we defaulted to Stück.
+   *  "unresolved" — a unit token was parsed but didn't resolve.
+   *  "empty" — no quantity, no unit. */
+  unitState: "ok" | "synonym" | "defaulted" | "unresolved" | "empty";
+  /** When unitState is "unresolved", the raw token from the source page. */
+  rawUnit: string | null;
+};
+
 export type DraftIngredient = {
   uid: string;
   /** Freeform name — resolved server-side to an existing ingredient by
@@ -8,6 +28,7 @@ export type DraftIngredient = {
   quantity: string;
   unit: ComboboxItem | null;
   notes: string;
+  importAnnotation?: ImportAnnotation;
 };
 
 export type DraftSection = {

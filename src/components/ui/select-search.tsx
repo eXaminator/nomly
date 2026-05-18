@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import * as Popover from "@radix-ui/react-popover";
-import { Check, ChevronDown, Loader2, Search, X } from "lucide-react";
+import { Check, ChevronDown, Loader2, Plus, Search, X } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { Input } from "./input.tsx";
 
@@ -23,6 +23,11 @@ export type SelectSearchProps = {
   /** Optional list shown immediately when the popover opens with no query. */
   defaultItems?: SelectSearchItem[];
   emptyHint?: string;
+  /** When provided, the dropdown shows a "+ … anlegen" row when the typed
+   *  query has no exact match. Receives the trimmed name and must return the
+   *  freshly-created item (the parent is responsible for the HTTP call). */
+  onCreate?: (name: string) => Promise<SelectSearchItem>;
+  createLabelPrefix?: string;
 };
 
 const DEBOUNCE_MS = 150;
@@ -42,14 +47,40 @@ export function SelectSearch({
   disabled,
   defaultItems = [],
   emptyHint = "Keine Treffer.",
+  onCreate,
+  createLabelPrefix = "anlegen",
 }: SelectSearchProps) {
   const [open, setOpen] = React.useState(false);
   const [query, setQuery] = React.useState("");
   const [items, setItems] = React.useState<SelectSearchItem[]>(defaultItems);
   const [loading, setLoading] = React.useState(false);
+  const [creating, setCreating] = React.useState(false);
   const [activeIdx, setActiveIdx] = React.useState(0);
   const reqRef = React.useRef(0);
   const inputRef = React.useRef<HTMLInputElement>(null);
+
+  const trimmedQuery = query.trim();
+  const exactMatch = React.useMemo(() => {
+    if (trimmedQuery.length === 0) return null;
+    const q = trimmedQuery.toLowerCase();
+    return items.find((i) => i.name.toLowerCase() === q) ?? null;
+  }, [items, trimmedQuery]);
+  const canCreate = Boolean(
+    onCreate && trimmedQuery.length > 0 && !exactMatch && !creating,
+  );
+  const totalRows = items.length + (canCreate ? 1 : 0);
+
+  async function handleCreate() {
+    if (!onCreate || !canCreate) return;
+    setCreating(true);
+    try {
+      const created = await onCreate(trimmedQuery);
+      onChange(created);
+      setOpen(false);
+    } finally {
+      setCreating(false);
+    }
+  }
 
   React.useEffect(() => {
     if (!open) return;
@@ -93,8 +124,11 @@ export function SelectSearch({
   }
 
   function onKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
-    if (items.length === 0) {
-      if (e.key === "Escape") {
+    if (totalRows === 0) {
+      if (e.key === "Enter" && canCreate) {
+        e.preventDefault();
+        void handleCreate();
+      } else if (e.key === "Escape") {
         e.preventDefault();
         setOpen(false);
       }
@@ -102,13 +136,17 @@ export function SelectSearch({
     }
     if (e.key === "ArrowDown") {
       e.preventDefault();
-      setActiveIdx((i) => Math.min(i + 1, items.length - 1));
+      setActiveIdx((i) => Math.min(i + 1, totalRows - 1));
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
       setActiveIdx((i) => Math.max(i - 1, 0));
     } else if (e.key === "Enter") {
       e.preventDefault();
-      commit(items[activeIdx]);
+      if (activeIdx < items.length) {
+        commit(items[activeIdx]);
+      } else if (canCreate) {
+        void handleCreate();
+      }
     } else if (e.key === "Escape") {
       e.preventDefault();
       setOpen(false);
@@ -181,45 +219,66 @@ export function SelectSearch({
               autoComplete="off"
               spellCheck={false}
             />
-            {loading ? (
+            {loading || creating ? (
               <Loader2 className="absolute right-3 top-1/2 size-4 -translate-y-1/2 animate-spin text-[var(--color-muted-fg)]" />
             ) : null}
           </div>
           <ul className="max-h-72 overflow-auto py-1" role="listbox">
-            {items.length === 0 ? (
+            {items.length === 0 && !canCreate ? (
               <li className="px-3 py-2 text-sm text-[var(--color-muted-fg)]">
-                {query.trim().length === 0 ? "Tippen, um zu suchen…" : emptyHint}
+                {trimmedQuery.length === 0 ? "Tippen, um zu suchen…" : emptyHint}
               </li>
-            ) : (
-              items.map((item, idx) => (
-                <li
-                  key={item.id}
-                  role="option"
-                  aria-selected={idx === activeIdx}
-                  onMouseDown={(e) => {
-                    e.preventDefault();
-                    commit(item);
-                  }}
-                  onMouseEnter={() => setActiveIdx(idx)}
-                  className={cn(
-                    "flex cursor-pointer items-center gap-2 px-3 py-2 text-sm",
-                    idx === activeIdx
-                      ? "bg-[var(--color-muted)] text-[var(--color-fg)]"
-                      : "text-[var(--color-fg)] hover:bg-[var(--color-muted)]",
-                  )}
-                >
-                  <span className="flex-1 truncate">{item.name}</span>
-                  {item.detail ? (
-                    <span className="truncate text-xs text-[var(--color-muted-fg)]">
-                      {item.detail}
-                    </span>
-                  ) : null}
-                  {value?.id === item.id ? (
-                    <Check className="size-4 text-[var(--color-accent)]" />
-                  ) : null}
-                </li>
-              ))
-            )}
+            ) : null}
+            {items.map((item, idx) => (
+              <li
+                key={item.id}
+                role="option"
+                aria-selected={idx === activeIdx}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  commit(item);
+                }}
+                onMouseEnter={() => setActiveIdx(idx)}
+                className={cn(
+                  "flex cursor-pointer items-center gap-2 px-3 py-2 text-sm",
+                  idx === activeIdx
+                    ? "bg-[var(--color-muted)] text-[var(--color-fg)]"
+                    : "text-[var(--color-fg)] hover:bg-[var(--color-muted)]",
+                )}
+              >
+                <span className="flex-1 truncate">{item.name}</span>
+                {item.detail ? (
+                  <span className="truncate text-xs text-[var(--color-muted-fg)]">
+                    {item.detail}
+                  </span>
+                ) : null}
+                {value?.id === item.id ? (
+                  <Check className="size-4 text-[var(--color-accent)]" />
+                ) : null}
+              </li>
+            ))}
+            {canCreate ? (
+              <li
+                role="option"
+                aria-selected={activeIdx === items.length}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  void handleCreate();
+                }}
+                onMouseEnter={() => setActiveIdx(items.length)}
+                className={cn(
+                  "flex cursor-pointer items-center gap-2 border-t border-[var(--color-border)] px-3 py-2 text-sm",
+                  activeIdx === items.length
+                    ? "bg-[var(--color-muted)]"
+                    : "hover:bg-[var(--color-muted)]",
+                )}
+              >
+                <Plus className="size-4 text-[var(--color-accent)]" />
+                <span className="flex-1 truncate text-[var(--color-fg)]">
+                  „{trimmedQuery}“ {createLabelPrefix}
+                </span>
+              </li>
+            ) : null}
           </ul>
         </Popover.Content>
       </Popover.Portal>

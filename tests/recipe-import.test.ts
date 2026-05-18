@@ -84,6 +84,18 @@ describe("parseIngredientString", () => {
       notes: null,
     });
   });
+  it("averages a fraction-int range", () => {
+    const r = parseIngredientString("1/2-1 cup peanut butter");
+    expect(r.quantity).toBeCloseTo(0.75, 3);
+    expect(r.unitName).toBe("cup");
+    expect(r.name).toBe("peanut butter");
+  });
+  it("averages an int → mixed-fraction range across token boundaries", () => {
+    const r = parseIngredientString("1- 1 1/2 teaspoons sea salt");
+    expect(r.quantity).toBeCloseTo(1.25, 3);
+    expect(r.unitName).toBe("teaspoons");
+    expect(r.name).toBe("sea salt");
+  });
   it("leaves unitless ingredients alone", () => {
     expect(parseIngredientString("3 Eier")).toEqual({
       quantity: 3,

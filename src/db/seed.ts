@@ -66,6 +66,121 @@ const volumeFactorToMl: Record<string, number> = {
   us_cup: 236.5882365,
 };
 
+/**
+ * Curated English (and a few alternate German) aliases for common kitchen
+ * staples that show up in imported recipes. Keys are the alias label, values
+ * are the canonical German `ingredient.name` already in the seed. Each entry
+ * is inserted as an `ingredient_alias` row on the matching ingredient when
+ * the user clicks "Standarddaten laden" — purely additive, idempotent, and
+ * skipped when the canonical name isn't present yet.
+ */
+const englishIngredientAliases: Record<string, string> = {
+  // Aromatics
+  onion: "Zwiebel",
+  onions: "Zwiebel",
+  "red onion": "Zwiebel",
+  "yellow onion": "Zwiebel",
+  shallot: "Schalotte",
+  shallots: "Schalotte",
+  garlic: "Knoblauch",
+  "garlic clove": "Knoblauchzehe",
+  "garlic cloves": "Knoblauchzehe",
+  ginger: "Ingwer",
+  "fresh ginger": "Ingwer",
+  // Salt / pepper / sugar
+  salt: "Salz",
+  "sea salt": "Salz",
+  "kosher salt": "Salz",
+  pepper: "schwarzer Pfeffer",
+  "black pepper": "schwarzer Pfeffer",
+  "ground pepper": "schwarzer Pfeffer",
+  sugar: "Zucker",
+  "white sugar": "Zucker",
+  "granulated sugar": "Zucker",
+  // Oils, fats, dairy
+  "olive oil": "Olivenöl",
+  "vegetable oil": "Pflanzenöl",
+  "sunflower oil": "Sonnenblumenöl",
+  "coconut oil": "Kokosnussöl",
+  butter: "Butter",
+  milk: "Milch",
+  cream: "Sahne",
+  "heavy cream": "Sahne",
+  yogurt: "Joghurt",
+  // Pantry
+  flour: "Allzweckmehl",
+  "all-purpose flour": "Allzweckmehl",
+  "all purpose flour": "Allzweckmehl",
+  water: "Wasser",
+  egg: "Ei (L)",
+  eggs: "Ei (L)",
+  honey: "Honig",
+  vinegar: "Essig",
+  "apple cider vinegar": "Essig, Apfel-",
+  "soy sauce": "Sojasauce",
+  // Produce
+  tomato: "Tomate",
+  tomatoes: "Tomate",
+  "tomato paste": "Tomatenmark",
+  "canned tomatoes": "Dosentomate",
+  "diced tomatoes": "Dosentomate",
+  carrot: "Karotte",
+  carrots: "Karotte",
+  potato: "Kartoffel",
+  potatoes: "Kartoffel",
+  "sweet potato": "Süßkartoffel",
+  "sweet potatoes": "Süßkartoffel",
+  celery: "Sellerie",
+  cucumber: "Gurke",
+  "bell pepper": "Paprika",
+  "red pepper": "Paprika",
+  chili: "Chili",
+  "chili pepper": "Chili",
+  spinach: "Spinat",
+  mushroom: "Champignon",
+  mushrooms: "Champignon",
+  lemon: "Zitrone",
+  lime: "Limette",
+  // Herbs
+  basil: "Basilikum",
+  parsley: "Petersilie",
+  cilantro: "Koriander",
+  coriander: "Koriander",
+  thyme: "Thymian",
+  rosemary: "Rosmarin",
+  mint: "Minze",
+  // Spices
+  paprika: "Paprika",
+  "smoked paprika": "Paprika",
+  cumin: "Kreuzkümmel",
+  "ground cumin": "Kreuzkümmel",
+  cinnamon: "Zimt",
+  nutmeg: "Muskatnuss",
+  // Meat / fish
+  chicken: "Hähnchenbrust",
+  "chicken breast": "Hähnchenbrust",
+  beef: "Rindfleisch",
+  pork: "Schweinefleisch",
+  // Legumes & grains
+  rice: "Reis",
+  pasta: "Nudeln",
+  spaghetti: "Spaghetti",
+  bread: "Brot",
+  chickpeas: "Kichererbsen",
+  garbanzo: "Kichererbsen",
+  garbanzos: "Kichererbsen",
+  // Misc
+  "peanut butter": "Erdnussbutter",
+  peanut: "Erdnuss",
+  peanuts: "Erdnuss",
+  "coconut milk": "Kokosmilch",
+  "vegetable broth": "Gemüsebrühe",
+  "vegetable stock": "Gemüsebrühe",
+  "chicken broth": "Hühnerbrühe",
+  "chicken stock": "Hühnerbrühe",
+  "beef broth": "Rinderbrühe",
+};
+
 // Top-up units the app expects even if the snapshot lacks them. The current
 // Tandoor snapshot already contains EL/TL/Prise, but this guarantees they
 // exist after any snapshot replacement (§7.1 Epic 1).
@@ -285,6 +400,31 @@ export function runSeed(): SeedCounts {
             // Globally-unique alias collided with another namespace; skip.
           }
         }
+      }
+    }
+
+    // -- English aliases for common ingredients --
+    // After Tandoor data has been loaded, layer English labels onto the
+    // canonical German entries. Each alias is inserted only when both the
+    // canonical row exists and the alias isn't already in use somewhere.
+    for (const [aliasName, canonicalName] of Object.entries(
+      englishIngredientAliases,
+    )) {
+      const id = ingredientIdByName.get(lower(canonicalName));
+      if (id === undefined) continue;
+      const exists = tx
+        .select({ id: ingredientAlias.id })
+        .from(ingredientAlias)
+        .where(eq(ingredientAlias.name, aliasName))
+        .get();
+      if (exists) continue;
+      try {
+        tx.insert(ingredientAlias)
+          .values({ ingredientId: id, name: aliasName })
+          .run();
+        counts.ingredients.aliasesAdded += 1;
+      } catch {
+        // Alias name collides with another globally-unique row; skip.
       }
     }
   });

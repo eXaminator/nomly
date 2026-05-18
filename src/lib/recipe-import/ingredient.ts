@@ -52,89 +52,78 @@ function normalize(s: string): string {
   return s.replace(/\s+/g, " ").trim();
 }
 
+const NUMERIC_TOKEN_RE = /^[\d./,\-–½¼¾⅓⅔⅛⅜⅝⅞]+$/;
+
+function parseSingleNumericToken(t: string): number | null {
+  // Unicode fraction glyph alone or attached to a whole number: "1½", "½"
+  const glyph = /^(\d+)?([½¼¾⅓⅔⅛⅜⅝⅞])$/.exec(t);
+  if (glyph) {
+    const whole = glyph[1] ? parseInt(glyph[1], 10) : 0;
+    return whole + FRACTIONS[glyph[2]];
+  }
+  // ASCII fraction: 1/2
+  const frac = /^(\d+)\/(\d+)$/.exec(t);
+  if (frac) {
+    const den = parseInt(frac[2], 10);
+    if (den <= 0) return null;
+    return parseInt(frac[1], 10) / den;
+  }
+  // Decimal / integer: 1.5, 1,5, 100
+  const num = /^(\d+(?:[.,]\d+)?)$/.exec(t);
+  if (num) return parseFloat(num[1].replace(",", "."));
+  return null;
+}
+
 /**
- * Try to consume a number from the start of `tokens` (mutates by shifting).
- * Handles `1`, `1.5`, `1,5`, `1/2`, `1 1/2`, `½`, `1 ½`, ranges `100-200`
- * (averaged), and a leading "ca." that's stripped.
+ * Evaluate a sequence of numeric tokens as a single quantity, summing them
+ * (handles mixed fractions like "1 1/2" or "1 ½"). Returns null if any
+ * token can't be parsed.
+ */
+function evaluateNumericSequence(tokens: string[]): number | null {
+  if (tokens.length === 0) return null;
+  let total = 0;
+  for (const t of tokens) {
+    const v = parseSingleNumericToken(t);
+    if (v === null) return null;
+    total += v;
+  }
+  return total;
+}
+
+/**
+ * Try to consume a quantity from the start of `tokens` (mutates by shifting).
+ * Handles `1`, `1.5`, `1,5`, `1/2`, `1 1/2`, `½`, `1 ½`, ranges like
+ * `100-200`, `1/2-1`, `1- 1 1/2` (averaged), and a leading "ca." that's
+ * stripped.
  */
 function consumeQuantity(tokens: string[]): number | null {
   if (tokens.length === 0) return null;
-  // Strip leading "ca." / "ca" / "etwa".
+  // Strip leading approximation markers.
   if (/^(ca\.?|etwa|about|approx\.?)$/i.test(tokens[0])) tokens.shift();
   if (tokens.length === 0) return null;
 
-  let total = 0;
-  let consumed = false;
-
-  while (tokens.length > 0) {
-    const t = tokens[0];
-
-    // Unicode fraction glyph (½, ¼, …) alone or attached to a number.
-    const fractionGlyphMatch = /^([0-9]+)?([½¼¾⅓⅔⅛⅜⅝⅞])$/.exec(t);
-    if (fractionGlyphMatch) {
-      const whole = fractionGlyphMatch[1] ? parseInt(fractionGlyphMatch[1], 10) : 0;
-      total += whole + FRACTIONS[fractionGlyphMatch[2]];
-      tokens.shift();
-      consumed = true;
-      // Don't grab another number — fractions terminate the qty.
-      break;
-    }
-
-    // ASCII fraction: 1/2
-    const fracMatch = /^(\d+)\/(\d+)$/.exec(t);
-    if (fracMatch) {
-      const num = parseInt(fracMatch[1], 10);
-      const den = parseInt(fracMatch[2], 10);
-      if (den > 0) {
-        total += num / den;
-        tokens.shift();
-        consumed = true;
-        break;
-      }
-    }
-
-    // Range: 100-200 → average.
-    const rangeMatch = /^(\d+(?:[.,]\d+)?)\s*[-–]\s*(\d+(?:[.,]\d+)?)$/.exec(t);
-    if (rangeMatch) {
-      const lo = parseFloat(rangeMatch[1].replace(",", "."));
-      const hi = parseFloat(rangeMatch[2].replace(",", "."));
-      total += (lo + hi) / 2;
-      tokens.shift();
-      consumed = true;
-      break;
-    }
-
-    // Decimal / integer: 1.5, 1,5, 100
-    const numMatch = /^(\d+(?:[.,]\d+)?)$/.exec(t);
-    if (numMatch) {
-      total += parseFloat(numMatch[1].replace(",", "."));
-      tokens.shift();
-      consumed = true;
-      // Look ahead one token for a follow-up fraction ("1 ½" or "1 1/2").
-      const next = tokens[0];
-      if (next) {
-        if (/^[½¼¾⅓⅔⅛⅜⅝⅞]$/.test(next)) {
-          total += FRACTIONS[next];
-          tokens.shift();
-          break;
-        }
-        if (/^\d+\/\d+$/.test(next)) {
-          const fm = /^(\d+)\/(\d+)$/.exec(next)!;
-          const den = parseInt(fm[2], 10);
-          if (den > 0) {
-            total += parseInt(fm[1], 10) / den;
-            tokens.shift();
-            break;
-          }
-        }
-      }
-      break;
-    }
-
-    break;
+  // Grab every leading numeric-looking token so we can decide if they form a
+  // range (with embedded dashes) or a single value.
+  const numericRun: string[] = [];
+  while (tokens.length > 0 && NUMERIC_TOKEN_RE.test(tokens[0])) {
+    numericRun.push(tokens.shift()!);
   }
+  if (numericRun.length === 0) return null;
 
-  return consumed ? Math.round(total * 1000) / 1000 : null;
+  // Reassemble the run as a single string so dashes inside (or between)
+  // tokens become a single normalised separator.
+  const expr = numericRun.join(" ");
+  const parts = expr.split(/\s*[-–]\s*/).filter((p) => p.length > 0);
+  if (parts.length === 0) return null;
+
+  const values: number[] = [];
+  for (const p of parts) {
+    const v = evaluateNumericSequence(p.split(/\s+/).filter(Boolean));
+    if (v !== null) values.push(v);
+  }
+  if (values.length === 0) return null;
+  const avg = values.reduce((a, b) => a + b, 0) / values.length;
+  return Math.round(avg * 1000) / 1000;
 }
 
 function tokenize(input: string): string[] {

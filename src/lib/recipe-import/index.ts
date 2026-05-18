@@ -1,6 +1,11 @@
 import { eq, sql } from "drizzle-orm";
 import { db } from "../../db/index.ts";
-import { unit, unitAlias } from "../../db/schema.ts";
+import {
+  ingredient,
+  ingredientAlias,
+  unit,
+  unitAlias,
+} from "../../db/schema.ts";
 import { fetchUrl, FetchError } from "./fetch.ts";
 import {
   asImageUrl,
@@ -14,12 +19,32 @@ import { parseIsoDurationToMinutes } from "./duration.ts";
 import { parseIngredientString } from "./ingredient.ts";
 import { savePhotoBuffer, type PhotoPath } from "../photos.ts";
 
+export type IngredientMatch = "existing" | "new";
+export type UnitMatch =
+  /** unit string was parsed and matched an existing unit by name/alias */
+  | "matched"
+  /** unit string was parsed but matched via the synonym map (e.g. tablespoon → EL) */
+  | "synonym"
+  /** no unit string parsed but a quantity was, so we defaulted to Stück */
+  | "defaulted"
+  /** parsed a unit token, didn't match anything */
+  | "unresolved"
+  /** neither a parsed unit nor a sensible default (e.g. "Salz nach Geschmack") */
+  | "empty";
+
 export type ImportedIngredient = {
   quantity: number | null;
-  /** Resolved canonical unit (case-insensitive on name + alias). null when
-   *  the parsed unit token didn't match anything we have. */
+  /** Best-effort resolved unit. `id` null when we couldn't match anything;
+   *  the UI uses {@link unitMatch} + {@link rawUnit} to render appropriately. */
   unit: { id: number; name: string } | null;
+  unitMatch: UnitMatch;
+  /** The unit token the parser saw, when we couldn't resolve it. */
+  rawUnit: string | null;
   name: string;
+  /** id of an existing ingredient when the name matched (canonical or alias),
+   *  null when it'll be created on save. */
+  ingredientId: number | null;
+  ingredientMatch: IngredientMatch;
   notes: string | null;
 };
 
@@ -52,17 +77,92 @@ export class ImportError extends Error {
 }
 
 /**
- * Cache the unit table for the lifetime of one import call. The list is tiny
- * (~14 rows seeded) and we look up every ingredient against it.
+ * Synonyms that should map a parsed unit token to one of our canonical units.
+ * Lookup is case-insensitive; the value is the canonical `unit.name` to fetch
+ * from the DB. Anything not in here falls through to the alias table and then
+ * to the "unresolved" path.
  */
-function buildUnitLookup(): Map<string, { id: number; name: string }> {
-  const lookup = new Map<string, { id: number; name: string }>();
+const UNIT_SYNONYMS: Record<string, string> = {
+  // tablespoon
+  tablespoon: "EL",
+  tablespoons: "EL",
+  tbsp: "EL",
+  tbs: "EL",
+  esslöffel: "EL",
+  eßlöffel: "EL",
+  // teaspoon
+  teaspoon: "TL",
+  teaspoons: "TL",
+  tsp: "TL",
+  teelöffel: "TL",
+  // cup
+  cup: "Cup",
+  cups: "Cup",
+  tasse: "Cup",
+  tassen: "Cup",
+  // metric mass
+  gram: "g",
+  grams: "g",
+  gramm: "g",
+  kilogram: "kg",
+  kilograms: "kg",
+  kilogramm: "kg",
+  milligram: "mg",
+  milligrams: "mg",
+  // metric volume
+  milliliter: "ml",
+  milliliters: "ml",
+  millilitre: "ml",
+  millilitres: "ml",
+  liter: "l",
+  liters: "l",
+  litre: "l",
+  litres: "l",
+  // imperial
+  ounce: "oz",
+  ounces: "oz",
+  pound: "lb",
+  pounds: "lb",
+  lbs: "lb",
+  "fluid ounce": "fl oz",
+  "fluid ounces": "fl oz",
+  "fl-oz": "fl oz",
+  // counts
+  piece: "Stück",
+  pieces: "Stück",
+  stk: "Stück",
+  "stk.": "Stück",
+  st: "Stück",
+  stueck: "Stück",
+  // pinch
+  pinch: "Prise",
+  prisen: "Prise",
+  dash: "Prise",
+  // can / bottle / etc.
+  can: "Dose",
+  cans: "Dose",
+  dosen: "Dose",
+  bottle: "Flasche",
+  bottles: "Flasche",
+  flaschen: "Flasche",
+};
+
+type UnitLookup = {
+  byNameOrAlias: Map<string, { id: number; name: string }>;
+  byCanonicalName: Map<string, { id: number; name: string }>;
+};
+
+function buildUnitLookup(): UnitLookup {
+  const byNameOrAlias = new Map<string, { id: number; name: string }>();
+  const byCanonicalName = new Map<string, { id: number; name: string }>();
   const canonical = db
     .select({ id: unit.id, name: unit.name })
     .from(unit)
     .all();
   for (const u of canonical) {
-    lookup.set(u.name.toLowerCase(), { id: u.id, name: u.name });
+    const lower = u.name.toLowerCase();
+    byNameOrAlias.set(lower, { id: u.id, name: u.name });
+    byCanonicalName.set(lower, { id: u.id, name: u.name });
   }
   const aliases = db
     .select({
@@ -75,22 +175,80 @@ function buildUnitLookup(): Map<string, { id: number; name: string }> {
     .all();
   for (const a of aliases) {
     const key = a.aliasName.toLowerCase();
-    if (!lookup.has(key)) {
-      lookup.set(key, { id: a.id, name: a.canonicalName });
+    if (!byNameOrAlias.has(key)) {
+      byNameOrAlias.set(key, { id: a.id, name: a.canonicalName });
     }
+  }
+  return { byNameOrAlias, byCanonicalName };
+}
+
+type ResolveUnitResult = {
+  resolved: { id: number; name: string } | null;
+  match: UnitMatch;
+  rawUnit: string | null;
+};
+
+function resolveUnit(
+  lookup: UnitLookup,
+  rawUnitName: string | null,
+  quantity: number | null,
+): ResolveUnitResult {
+  if (rawUnitName) {
+    const key = rawUnitName.toLowerCase();
+    const direct = lookup.byNameOrAlias.get(key);
+    if (direct) return { resolved: direct, match: "matched", rawUnit: null };
+
+    const synonym = UNIT_SYNONYMS[key];
+    if (synonym) {
+      const viaSynonym = lookup.byCanonicalName.get(synonym.toLowerCase());
+      if (viaSynonym) {
+        return { resolved: viaSynonym, match: "synonym", rawUnit: null };
+      }
+    }
+    return { resolved: null, match: "unresolved", rawUnit: rawUnitName };
+  }
+  // No unit token. Default to Stück for "3 Eier"-style entries.
+  if (quantity !== null && quantity > 0) {
+    const stueck = lookup.byCanonicalName.get("stück");
+    if (stueck) {
+      return { resolved: stueck, match: "defaulted", rawUnit: null };
+    }
+  }
+  return { resolved: null, match: "empty", rawUnit: null };
+}
+
+type IngredientLookup = Map<string, number>;
+
+function buildIngredientLookup(): IngredientLookup {
+  const lookup = new Map<string, number>();
+  const canonical = db
+    .select({ id: ingredient.id, name: ingredient.name })
+    .from(ingredient)
+    .all();
+  for (const i of canonical) lookup.set(i.name.toLowerCase(), i.id);
+  const aliases = db
+    .select({
+      id: ingredient.id,
+      aliasName: ingredientAlias.name,
+    })
+    .from(ingredientAlias)
+    .innerJoin(ingredient, eq(ingredient.id, ingredientAlias.ingredientId))
+    .all();
+  for (const a of aliases) {
+    const key = a.aliasName.toLowerCase();
+    if (!lookup.has(key)) lookup.set(key, a.id);
   }
   return lookup;
 }
 
-function resolveUnit(
-  lookup: Map<string, { id: number; name: string }>,
-  rawUnitName: string | null,
-): { resolved: { id: number; name: string } | null; unresolvedToken: string | null } {
-  if (!rawUnitName) return { resolved: null, unresolvedToken: null };
-  const key = rawUnitName.toLowerCase();
+function resolveIngredientName(
+  lookup: IngredientLookup,
+  rawName: string,
+): { id: number | null; match: IngredientMatch } {
+  const key = rawName.trim().toLowerCase();
   const hit = lookup.get(key);
-  if (hit) return { resolved: hit, unresolvedToken: null };
-  return { resolved: null, unresolvedToken: rawUnitName };
+  if (hit !== undefined) return { id: hit, match: "existing" };
+  return { id: null, match: "new" };
 }
 
 void sql; // kept for future tuning; the import side reads everything via JS.
@@ -187,19 +345,25 @@ export async function importRecipeFromUrl(
 
   const ingredientStrings = asStringList(recipe.recipeIngredient);
   const unitLookup = buildUnitLookup();
+  const ingredientLookup = buildIngredientLookup();
   const ingredients: ImportedIngredient[] = ingredientStrings.map((raw) => {
     const parsed = parseIngredientString(raw);
-    const { resolved, unresolvedToken } = resolveUnit(unitLookup, parsed.unitName);
-    // If a unit token was parsed but didn't resolve, append it to notes so
-    // the user can still see what the source said.
-    const notesParts = [unresolvedToken, parsed.notes].filter(
-      (n): n is string => typeof n === "string" && n.length > 0,
+    const { resolved, match: unitMatch, rawUnit } = resolveUnit(
+      unitLookup,
+      parsed.unitName,
+      parsed.quantity,
     );
+    const name = parsed.name || raw.trim();
+    const ingredientResolution = resolveIngredientName(ingredientLookup, name);
     return {
       quantity: parsed.quantity,
       unit: resolved,
-      name: parsed.name || raw.trim(),
-      notes: notesParts.join(" – ") || null,
+      unitMatch,
+      rawUnit,
+      name,
+      ingredientId: ingredientResolution.id,
+      ingredientMatch: ingredientResolution.match,
+      notes: parsed.notes,
     };
   });
 
