@@ -29,6 +29,8 @@ export type CrawlOptions = {
   baseUrl?: string;
   /** Per-page navigation timeout. Default 30 s. */
   pageTimeoutMs?: number;
+  /** Emit selector diagnostics (URLs, anchor counts, data-testids). */
+  debug?: boolean;
 };
 
 export type CrawlSink = (recipe: FamilywallRawRecipe) => Promise<void> | void;
@@ -186,22 +188,80 @@ async function login(page: Page, email: string, password: string) {
   ]);
 }
 
-async function listRecipeUrls(page: Page, limit?: number): Promise<string[]> {
+async function listRecipeUrls(
+  page: Page,
+  limit?: number,
+  debug = false,
+): Promise<string[]> {
+  if (debug) console.log(`[familywall] post-login URL: ${page.url()}`);
+
   // Try the most likely direct URL first.
   await page
     .goto(FAMILYWALL_RECIPES_URL, { waitUntil: "domcontentloaded" })
-    .catch(() => {});
+    .catch((e) => {
+      if (debug) console.log(`[familywall] direct nav failed: ${e}`);
+    });
 
   // If that redirected us off the recipes section (e.g. straight to the
   // home page because we're not actually on the recipes route), look for a
   // recipes-nav element and click it.
   if (!page.url().includes("recipe") && !page.url().includes("rezept")) {
+    if (debug) {
+      console.log(
+        `[familywall] direct URL didn't land on recipes (now at ${page.url()}), looking for nav link`,
+      );
+    }
     const nav = await firstVisible(page, SELECTORS.recipesNav);
     if (nav) {
+      if (debug) console.log("[familywall] clicking recipes nav");
       await nav.click().catch(() => {});
+    } else if (debug) {
+      console.log("[familywall] no recipes-nav link visible");
     }
   }
   await page.waitForLoadState("networkidle").catch(() => {});
+  if (debug) console.log(`[familywall] recipes index URL: ${page.url()}`);
+
+  if (debug) {
+    // Dump a structural fingerprint of the current page so we can refine
+    // selectors without a second round-trip.
+    const fingerprint = await page.evaluate(() => {
+      const counts: Record<string, number> = {};
+      for (const sel of [
+        "a[href*='fw2_recipe.php']",
+        "a[href*='recipe']",
+        "a[href*='rezept']",
+        "[data-testid]",
+        "main a",
+        "article",
+        "[class*='recipe' i]",
+        "[class*='card' i]",
+      ]) {
+        counts[sel] = document.querySelectorAll(sel).length;
+      }
+      const sampleAnchors = Array.from(document.querySelectorAll("a[href]"))
+        .slice(0, 20)
+        .map((a) => (a as HTMLAnchorElement).href);
+      const dataTestIds = Array.from(
+        new Set(
+          Array.from(document.querySelectorAll("[data-testid]"))
+            .map((n) => n.getAttribute("data-testid"))
+            .filter(Boolean) as string[],
+        ),
+      ).slice(0, 30);
+      return {
+        title: document.title,
+        bodyClass: document.body?.className ?? "",
+        counts,
+        sampleAnchors,
+        dataTestIds,
+      };
+    });
+    console.log(
+      "[familywall] page fingerprint:",
+      JSON.stringify(fingerprint, null, 2),
+    );
+  }
 
   // Familywall paginates recipes; we keep scrolling until the count stops
   // growing or we hit the limit.
@@ -339,7 +399,7 @@ export async function withFamilywallCrawler(
     });
     const page = await ctx.newPage();
     await login(page, options.email, options.password);
-    const urls = await listRecipeUrls(page, options.limit);
+    const urls = await listRecipeUrls(page, options.limit, options.debug);
     let current = 0;
     for (const url of urls) {
       current += 1;

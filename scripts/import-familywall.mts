@@ -24,6 +24,7 @@ Optional:
   --limit <n>          Process at most <n> recipes
   --dry-run            Parse + transform, but skip every DB write
   --headed             Show the browser window (default: headless)
+  --debug              Emit selector diagnostics (URLs, anchor counts, etc.)
   --help               Print this help
 
 The CLI writes to the same SQLite DB the running server uses
@@ -43,6 +44,7 @@ async function main() {
         limit: { type: "string" },
         "dry-run": { type: "boolean", default: false },
         headed: { type: "boolean", default: false },
+        debug: { type: "boolean", default: false },
         help: { type: "boolean", default: false },
       },
       allowPositionals: false,
@@ -101,6 +103,7 @@ async function main() {
     password,
     limit,
     headed: parsed.values.headed,
+    debug: parsed.values.debug,
     dryRun: parsed.values["dry-run"],
     onRecipe: ({ title, outcome, recipeId, error }) => {
       printed += 1;
