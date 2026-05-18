@@ -133,7 +133,14 @@ function tokenize(input: string): string[] {
     .replace(/(?<!\d),|,(?!\d)/g, " , ")
     .replace(/([;()])/g, " $1 ")
     // Split unicode fractions touching numbers: "1½" → "1 ½"
-    .replace(/(\d)([½¼¾⅓⅔⅛⅜⅝⅞])/g, "$1 $2");
+    .replace(/(\d)([½¼¾⅓⅔⅛⅜⅝⅞])/g, "$1 $2")
+    // Split digits attached to letters so "500g" or "1/2tsp" still parses
+    // as quantity + unit. Doesn't touch number formats themselves (the
+    // decimal-comma exception above runs first, and dots inside numbers
+    // are matched by NUMERIC_TOKEN_RE later).
+    .replace(/(\d)([a-zA-ZäöüÄÖÜß])/g, "$1 $2")
+    // Same for a fraction glyph followed by a unit letter ("½tsp" → "½ tsp").
+    .replace(/([½¼¾⅓⅔⅛⅜⅝⅞])([a-zA-ZäöüÄÖÜß])/g, "$1 $2");
   return padded.split(/\s+/).filter((t) => t.length > 0);
 }
 

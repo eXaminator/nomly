@@ -177,6 +177,36 @@ async function extractCurrentDetail(
     ) as HTMLImageElement | null;
     const imageUrl = imgEl?.src || null;
 
+    // Favorite ("bester Moment") — the heart icon's title swaps between
+    // "Als bester Moment gekennzeichnet" (marked) and "Mir gefällt dieser
+    // Post" (unmarked), so the title text alone tells us the state.
+    let isFavorite = false;
+    for (const icon of Array.from(detail.querySelectorAll("icon"))) {
+      const t = icon.getAttribute("title") || "";
+      if (
+        t === "Als bester Moment gekennzeichnet" ||
+        t === "Marked as best moment"
+      ) {
+        isFavorite = true;
+        break;
+      }
+    }
+
+    // Category chips become tags. Familywall prefixes each with an emoji
+    // (e.g. "🍚 Reis"); strip leading emoji + whitespace so the resulting
+    // tags match plain user-created ones.
+    const tags = Array.from(detail.querySelectorAll(".mp-category"))
+      .map((el) => (el as HTMLElement).innerText.replace(/\s+/g, " ").trim())
+      .map((t) =>
+        t
+          .replace(
+            /^[\p{Extended_Pictographic}‍️\u{1F3FB}-\u{1F3FF}]+\s*/u,
+            "",
+          )
+          .trim(),
+      )
+      .filter((t) => t.length > 0);
+
     function parseMins(t: string): number | null {
       const trimmed = t.replace(/\s+/g, " ").trim();
       if (!trimmed) return null;
@@ -312,6 +342,8 @@ async function extractCurrentDetail(
       instructions,
       imageUrl,
       sourceUrl,
+      isFavorite,
+      tags,
     };
   });
 }

@@ -21,11 +21,34 @@ import {
 import type { RecipeInput } from "../recipes/types.ts";
 import type { FamilywallRawRecipe } from "./types.ts";
 
+/**
+ * Render the step list as a markdown ordered list. Always uses `1.`, `2.`,
+ * … even when there's a single step — that way the rendered recipe shows
+ * the same structure regardless of how many steps Familywall had, and the
+ * markdown editor parses it as a proper ordered list.
+ */
 function joinInstructions(steps: string[]): string {
-  const cleaned = steps.map((s) => s.trim()).filter((s) => s.length > 0);
+  const cleaned = steps
+    .map((s) => s.replace(/\s+/g, " ").trim())
+    .filter((s) => s.length > 0);
   if (cleaned.length === 0) return "";
-  if (cleaned.length === 1) return cleaned[0];
   return cleaned.map((s, i) => `${i + 1}. ${s}`).join("\n");
+}
+
+const FAVORITE_TAG = "Familywall-Favorit";
+
+function dedupeTags(tags: Iterable<string>): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const t of tags) {
+    const trimmed = t.trim();
+    if (!trimmed) continue;
+    const key = trimmed.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(trimmed);
+  }
+  return out;
 }
 
 export function transformFamilywallRecipe(
@@ -76,7 +99,10 @@ export function transformFamilywallRecipe(
     // separate field) is allowed here.
     sourceUrl: raw.sourceUrl?.trim() || null,
     photoPath,
-    tags: [],
+    tags: dedupeTags([
+      ...raw.tags,
+      ...(raw.isFavorite ? [FAVORITE_TAG] : []),
+    ]),
     sections: [
       {
         title: null,

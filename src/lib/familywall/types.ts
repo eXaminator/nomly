@@ -24,6 +24,14 @@ export type FamilywallRawRecipe = {
   /** Optional photo URL — resolved later by the orchestrator (which has
    *  the Playwright context's cookies for authenticated CDN fetches). */
   imageUrl: string | null;
+  /** True when Familywall has the recipe marked as a "bester Moment"
+   *  (= favorite). The transform converts this into a "Familywall-Favorit"
+   *  tag the user can filter on. */
+  isFavorite: boolean;
+  /** Category labels from the recipe's `.mp-category` chips, with the
+   *  leading emoji + whitespace stripped so they match plain user tags
+   *  (e.g. "🍚 Reis" → "Reis"). */
+  tags: string[];
 };
 
 export type FamilywallImportSummary = {

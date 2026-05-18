@@ -41,6 +41,8 @@ function makeRaw(over: Partial<FamilywallRawRecipe> = {}): FamilywallRawRecipe {
     instructions: ["Anbraten.", "Schmoren."],
     sourceUrl: null,
     imageUrl: null,
+    isFavorite: false,
+    tags: [],
     ...over,
   };
 }
@@ -137,5 +139,64 @@ describe("transformFamilywallRecipe", () => {
       null,
     );
     expect(out.title).toBe("Importiertes Rezept");
+  });
+
+  it("single instruction step still renders as a numbered list", () => {
+    const out = transformFamilywallRecipe(
+      makeRaw({ instructions: ["Nur ein Schritt."] }),
+      makeLookups(),
+      null,
+    );
+    expect(out.sections[0].instructions).toBe("1. Nur ein Schritt.");
+  });
+
+  it("normalises whitespace inside each step", () => {
+    const out = transformFamilywallRecipe(
+      makeRaw({ instructions: ["  Anbraten.\n  Schmoren.  ", "Servieren."] }),
+      makeLookups(),
+      null,
+    );
+    expect(out.sections[0].instructions).toBe(
+      "1. Anbraten. Schmoren.\n2. Servieren.",
+    );
+  });
+
+  it("isFavorite adds the Familywall-Favorit tag", () => {
+    const out = transformFamilywallRecipe(
+      makeRaw({ isFavorite: true }),
+      makeLookups(),
+      null,
+    );
+    expect(out.tags).toEqual(["Familywall-Favorit"]);
+  });
+
+  it("category tags from the raw recipe are forwarded", () => {
+    const out = transformFamilywallRecipe(
+      makeRaw({ tags: ["Reis", "Vegan"], isFavorite: true }),
+      makeLookups(),
+      null,
+    );
+    expect(out.tags).toEqual(["Reis", "Vegan", "Familywall-Favorit"]);
+  });
+
+  it("dedupes tags case-insensitively", () => {
+    const out = transformFamilywallRecipe(
+      makeRaw({ tags: ["Vegan", "vegan", " Vegan "] }),
+      makeLookups(),
+      null,
+    );
+    expect(out.tags).toEqual(["Vegan"]);
+  });
+
+  it("parses '500g' (no space) as a quantity + unit", () => {
+    const out = transformFamilywallRecipe(
+      makeRaw({ ingredients: ["500g Mehl"] }),
+      makeLookups(),
+      null,
+    );
+    const ing = out.sections[0].ingredients[0];
+    expect(ing.quantity).toBe(500);
+    expect(ing.unitId).toBe(1); // g
+    expect(ing.ingredientName).toBe("Mehl");
   });
 });
