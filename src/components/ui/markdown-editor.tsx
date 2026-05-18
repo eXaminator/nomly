@@ -109,7 +109,60 @@ export function MarkdownEditor({
     });
   }
 
+  /**
+   * Pressing Enter inside a list item inserts the next marker on the new
+   * line; pressing Enter on a marker-only line exits the list (clears the
+   * line). Returns true when the event was handled. Shift+Enter inserts a
+   * plain newline (default browser behaviour) so the user can still escape
+   * if they want to.
+   */
+  function handleListContinuation(
+    e: React.KeyboardEvent<HTMLTextAreaElement>,
+  ): boolean {
+    const ta = e.currentTarget;
+    if (ta.selectionStart !== ta.selectionEnd) return false;
+    const pos = ta.selectionStart;
+    const before = value.slice(0, pos);
+    const after = value.slice(pos);
+    const lineStart = before.lastIndexOf("\n") + 1;
+    const currentLine = before.slice(lineStart);
+    // Match optional indent + bullet/ordered marker + rest of the line.
+    const m = currentLine.match(/^(\s*)([-*+]\s+|(\d+)\.\s+)(.*)$/);
+    if (!m) return false;
+    const [, indent, marker, ordinal, content] = m;
+
+    if (content.length === 0) {
+      // Empty marker line → exit the list by removing the whole line.
+      e.preventDefault();
+      const nextValue = value.slice(0, lineStart) + after;
+      onChange(nextValue);
+      requestAnimationFrame(() => {
+        ta.focus();
+        ta.setSelectionRange(lineStart, lineStart);
+      });
+      return true;
+    }
+
+    // Continue: newline + indent + next marker. For ordered lists, increment.
+    const nextMarker = ordinal
+      ? `${parseInt(ordinal, 10) + 1}${marker.slice(ordinal.length)}`
+      : marker;
+    const insert = `\n${indent}${nextMarker}`;
+    e.preventDefault();
+    const nextValue = before + insert + after;
+    onChange(nextValue);
+    const caret = pos + insert.length;
+    requestAnimationFrame(() => {
+      ta.focus();
+      ta.setSelectionRange(caret, caret);
+    });
+    return true;
+  }
+
   function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (e.key === "Enter" && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
+      if (handleListContinuation(e)) return;
+    }
     if (!(e.ctrlKey || e.metaKey)) return;
     const key = e.key.toLowerCase();
     if (key === "b") {
