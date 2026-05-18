@@ -16,7 +16,9 @@ export type ImportAnnotation = {
    *  "unresolved" — a unit token was parsed but didn't resolve.
    *  "empty" — no quantity, no unit. */
   unitState: "ok" | "synonym" | "defaulted" | "unresolved" | "empty";
-  /** When unitState is "unresolved", the raw token from the source page. */
+  /** The non-canonical unit token that the importer saw, when it differs
+   *  from the resolved canonical (synonym match) or couldn't be resolved
+   *  at all (unresolved). Null for direct matches and defaulted rows. */
   rawUnit: string | null;
 };
 

@@ -199,13 +199,23 @@ function resolveUnit(
   if (rawUnitName) {
     const key = rawUnitName.toLowerCase();
     const direct = lookup.byNameOrAlias.get(key);
-    if (direct) return { resolved: direct, match: "matched", rawUnit: null };
+    if (direct) {
+      // Direct match: the imported token may still be a (case-insensitive)
+      // alias that doesn't equal the canonical — surface it as `rawUnit`
+      // so the UI can show the import-time spelling alongside the resolved
+      // canonical (e.g. "Cups" → Cup).
+      const rawUnit =
+        rawUnitName.toLowerCase() === direct.name.toLowerCase()
+          ? null
+          : rawUnitName;
+      return { resolved: direct, match: "matched", rawUnit };
+    }
 
     const synonym = UNIT_SYNONYMS[key];
     if (synonym) {
       const viaSynonym = lookup.byCanonicalName.get(synonym.toLowerCase());
       if (viaSynonym) {
-        return { resolved: viaSynonym, match: "synonym", rawUnit: null };
+        return { resolved: viaSynonym, match: "synonym", rawUnit: rawUnitName };
       }
     }
     return { resolved: null, match: "unresolved", rawUnit: rawUnitName };

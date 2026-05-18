@@ -85,12 +85,12 @@ function importedToDraft(
               },
             ]
           : s.ingredients.map<DraftIngredient>((i) => {
-              // "synonym" and "matched" are both fine outcomes — collapse to "ok"
-              // so the badge layer only highlights what needs attention.
+              // Keep the original "synonym" outcome on the annotation so
+              // the UI can render the "ursprünglich: …" pill under the
+              // unit dropdown. "matched" collapses to "ok" — direct
+              // alias hits are uninteresting to surface.
               const unitState: ImportAnnotation["unitState"] =
-                i.unitMatch === "matched" || i.unitMatch === "synonym"
-                  ? "ok"
-                  : i.unitMatch;
+                i.unitMatch === "matched" ? "ok" : i.unitMatch;
               const annotation: ImportAnnotation = {
                 ingredientIsNew: i.ingredientMatch === "new",
                 unitState,
