@@ -1,5 +1,8 @@
 export type RecipeIngredientInput = {
-  ingredientId: number;
+  /** Freeform ingredient name. The service resolves it case-insensitively
+   *  against existing ingredient/alias names and inserts a new ingredient
+   *  if nothing matches. */
+  ingredientName: string;
   quantity: number | null;
   unitId: number | null;
   notes: string | null;

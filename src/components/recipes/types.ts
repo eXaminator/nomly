@@ -2,7 +2,9 @@ import type { ComboboxItem } from "@/components/ui/combobox";
 
 export type DraftIngredient = {
   uid: string;
-  ingredient: ComboboxItem | null;
+  /** Freeform name — resolved server-side to an existing ingredient by
+   *  case-insensitive canonical/alias match, or auto-created on save. */
+  name: string;
   quantity: string;
   unit: ComboboxItem | null;
   notes: string;
@@ -30,7 +32,7 @@ export type DraftRecipe = {
 export function emptyIngredient(): DraftIngredient {
   return {
     uid: crypto.randomUUID(),
-    ingredient: null,
+    name: "",
     quantity: "",
     unit: null,
     notes: "",
@@ -73,7 +75,7 @@ export function emptyRecipe(): DraftRecipe {
         ingredients: [
           {
             uid: "initial-ingredient",
-            ingredient: null,
+            name: "",
             quantity: "",
             unit: null,
             notes: "",

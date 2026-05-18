@@ -42,7 +42,7 @@ export default async function EditRecipePage({
       instructions: s.instructions,
       ingredients: s.ingredients.map((i) => ({
         uid: crypto.randomUUID(),
-        ingredient: { id: i.ingredientId, name: i.ingredientName },
+        name: i.ingredientName,
         quantity: i.quantity === null ? "" : String(i.quantity),
         unit: i.unitId !== null && i.unitName ? { id: i.unitId, name: i.unitName } : null,
         notes: i.notes ?? "",

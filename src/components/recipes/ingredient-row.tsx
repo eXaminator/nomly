@@ -4,34 +4,8 @@ import { Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Combobox, type ComboboxItem } from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
+import { IngredientNameInput } from "./ingredient-name-input";
 import type { DraftIngredient } from "./types";
-
-async function searchIngredients(q: string): Promise<ComboboxItem[]> {
-  const r = await fetch(`/api/v1/ingredients?q=${encodeURIComponent(q)}`);
-  if (!r.ok) return [];
-  const data = (await r.json()) as {
-    items: Array<{ id: number; name: string; matchedAlias?: string }>;
-  };
-  return data.items.map((i) => ({
-    id: i.id,
-    name: i.name,
-    detail: i.matchedAlias && i.matchedAlias !== i.name ? `≈ ${i.matchedAlias}` : undefined,
-  }));
-}
-
-async function createIngredient(name: string): Promise<ComboboxItem> {
-  const r = await fetch("/api/v1/ingredients", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ name }),
-  });
-  if (!r.ok) {
-    const err = (await r.json().catch(() => ({}))) as { error?: string };
-    throw new Error(err.error ?? `HTTP ${r.status}`);
-  }
-  const data = (await r.json()) as { id: number; name: string };
-  return { id: data.id, name: data.name };
-}
 
 async function searchUnits(q: string): Promise<ComboboxItem[]> {
   const r = await fetch(`/api/v1/units?q=${encodeURIComponent(q)}`);
@@ -42,23 +16,9 @@ async function searchUnits(q: string): Promise<ComboboxItem[]> {
   return data.items.map((i) => ({
     id: i.id,
     name: i.name,
-    detail: i.matchedAlias && i.matchedAlias !== i.name ? `≈ ${i.matchedAlias}` : undefined,
+    detail:
+      i.matchedAlias && i.matchedAlias !== i.name ? `≈ ${i.matchedAlias}` : undefined,
   }));
-}
-
-async function createUnit(name: string): Promise<ComboboxItem> {
-  // Inline-created units default to count dimension; richer edits live in Epic 7.
-  const r = await fetch("/api/v1/units", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ name, dimension: "count" }),
-  });
-  if (!r.ok) {
-    const err = (await r.json().catch(() => ({}))) as { error?: string };
-    throw new Error(err.error ?? `HTTP ${r.status}`);
-  }
-  const data = (await r.json()) as { id: number; name: string };
-  return { id: data.id, name: data.name };
 }
 
 type Props = {
@@ -81,14 +41,11 @@ export function IngredientRow({ value, onChange, onRemove }: Props) {
         value={value.unit}
         onChange={(unit) => onChange({ ...value, unit })}
         search={searchUnits}
-        onCreate={createUnit}
         placeholder="Einheit"
       />
-      <Combobox
-        value={value.ingredient}
-        onChange={(ingredient) => onChange({ ...value, ingredient })}
-        search={searchIngredients}
-        onCreate={createIngredient}
+      <IngredientNameInput
+        value={value.name}
+        onChange={(name) => onChange({ ...value, name })}
         placeholder="Zutat"
         className="col-span-2 md:col-span-1"
       />
@@ -100,7 +57,6 @@ export function IngredientRow({ value, onChange, onRemove }: Props) {
         className="col-span-3 md:col-span-1"
       />
       <Button
-        type="button"
         variant="ghost"
         size="icon"
         onClick={onRemove}

@@ -7,6 +7,7 @@ import {
   recipeTag,
   tag,
   ingredient as ingredientTable,
+  ingredientAlias as ingredientAliasTable,
   unit as unitTable,
 } from "../../db/schema.ts";
 import type {
@@ -50,6 +51,44 @@ function resolveTags(tx: Tx, names: string[]): number[] {
   return ids;
 }
 
+/**
+ * Resolve a freeform ingredient name to an existing row, or insert a new one.
+ * Matches case-insensitively against `ingredient.name` first, then against
+ * `ingredient_alias.name`. The newly-created row preserves the user's casing.
+ */
+function resolveIngredient(tx: Tx, rawName: string): number {
+  const cleaned = norm(rawName);
+  if (cleaned.length === 0) {
+    throw new Error("ingredient name is required");
+  }
+  const lowered = cleaned.toLowerCase();
+
+  const canonical = tx
+    .select({ id: ingredientTable.id })
+    .from(ingredientTable)
+    .where(sql`lower(${ingredientTable.name}) = ${lowered}`)
+    .get();
+  if (canonical) return canonical.id;
+
+  const aliased = tx
+    .select({ id: ingredientTable.id })
+    .from(ingredientAliasTable)
+    .innerJoin(
+      ingredientTable,
+      eq(ingredientTable.id, ingredientAliasTable.ingredientId),
+    )
+    .where(sql`lower(${ingredientAliasTable.name}) = ${lowered}`)
+    .get();
+  if (aliased) return aliased.id;
+
+  const inserted = tx
+    .insert(ingredientTable)
+    .values({ name: cleaned })
+    .returning({ id: ingredientTable.id })
+    .all();
+  return inserted[0].id;
+}
+
 function writeSections(
   tx: Tx,
   recipeId: number,
@@ -69,10 +108,11 @@ function writeSections(
     const sectionId = sectionRow[0].id;
 
     section.ingredients.forEach((ing, iIdx) => {
+      const ingredientId = resolveIngredient(tx, ing.ingredientName);
       tx.insert(recipeIngredient)
         .values({
           sectionId,
-          ingredientId: ing.ingredientId,
+          ingredientId,
           quantity: ing.quantity,
           unitId: ing.unitId,
           notes: ing.notes,

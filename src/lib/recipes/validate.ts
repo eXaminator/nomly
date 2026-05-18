@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 const ingredientSchema = z.object({
-  ingredientId: z.number().int().positive(),
+  ingredientName: z.string().min(1, "Zutat ist erforderlich"),
   quantity: z.number().nullable(),
   unitId: z.number().int().positive().nullable(),
   notes: z.string().nullable(),

@@ -32,9 +32,10 @@ function toNumberOrNull(raw: string): number | null {
 }
 
 function ingredientToPayload(ing: DraftIngredient) {
-  if (!ing.ingredient) return null;
+  const name = ing.name.trim();
+  if (name.length === 0) return null;
   return {
-    ingredientId: ing.ingredient.id,
+    ingredientName: name,
     quantity: toNumberOrNull(ing.quantity),
     unitId: ing.unit?.id ?? null,
     notes: ing.notes.trim() || null,
@@ -102,16 +103,7 @@ export function RecipeForm({ initial, recipeId, tagSuggestions }: Props) {
     }
     const payload = buildPayload(draft);
     if (payload.sections.every((s) => s.ingredients.length === 0)) {
-      const dropped = draft.sections.flatMap((s, sIdx) =>
-        s.ingredients
-          .map((ing, iIdx) => ({ ing, sIdx, iIdx }))
-          .filter(({ ing }) => ing.ingredient === null),
-      );
-      setError(
-        dropped.length > 0
-          ? "Mindestens eine Zutat erfassen. Hinweis: getippter Text in einem Zutaten-Feld wird nur übernommen, wenn du einen Vorschlag aus der Liste auswählst."
-          : "Mindestens eine Zutat erfassen.",
-      );
+      setError("Mindestens eine Zutat erfassen.");
       return;
     }
 
