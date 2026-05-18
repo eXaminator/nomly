@@ -200,6 +200,18 @@ describe("transformFamilywallRecipe", () => {
     expect(ing.ingredientName).toBe("Mehl");
   });
 
+  it("parses '.5 cup' as quantity 0.5 + cup", () => {
+    const out = transformFamilywallRecipe(
+      makeRaw({ ingredients: [".5 cup Mehl"] }),
+      makeLookups(),
+      null,
+    );
+    const ing = out.sections[0].ingredients[0];
+    expect(ing.quantity).toBe(0.5);
+    expect(ing.unitId).toBe(4); // Cup
+    expect(ing.ingredientName).toBe("Mehl");
+  });
+
   it("parses '1½tsp' as quantity 1.5 + tsp", () => {
     const lookups = makeLookups();
     lookups.units.byNameOrAlias.set("tsp", { id: 5, name: "TL" });

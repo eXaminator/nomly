@@ -68,8 +68,9 @@ function parseSingleNumericToken(t: string): number | null {
     if (den <= 0) return null;
     return parseInt(frac[1], 10) / den;
   }
-  // Decimal / integer: 1.5, 1,5, 100
-  const num = /^(\d+(?:[.,]\d+)?)$/.exec(t);
+  // Decimal / integer, with or without a leading whole part:
+  //   1.5, 1,5, 100, .5, ,5
+  const num = /^(\d+(?:[.,]\d+)?|[.,]\d+)$/.exec(t);
   if (num) return parseFloat(num[1].replace(",", "."));
   return null;
 }
