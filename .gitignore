@@ -46,6 +46,10 @@ next-env.d.ts
 *.db-journal
 *.db-wal
 *.db-shm
-/data/
+# Runtime data dir is bind-mounted in production — never commit its
+# contents. The seed snapshots vendored alongside the source code are the
+# one exception.
+/data/*
+!/data/seed/
 .playwright-mcp/
 editor-bottom-border.png
