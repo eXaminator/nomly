@@ -238,7 +238,7 @@ function UnitBadge({
         className="inline-flex w-fit max-w-full items-center gap-1 truncate rounded-full bg-[var(--color-muted)] px-2 py-0.5 text-xs text-[var(--color-muted-fg)]"
         title={`Importiert als „${annotation.rawUnit}".`}
       >
-        ursprünglich: {annotation.rawUnit}
+        {annotation.rawUnit}
       </span>
     );
   }
