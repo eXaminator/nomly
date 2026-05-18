@@ -21,10 +21,8 @@ import { savePhotoBuffer, type PhotoPath } from "../photos.ts";
 
 export type IngredientMatch = "existing" | "new";
 export type UnitMatch =
-  /** unit string was parsed and matched an existing unit by name/alias */
+  /** unit string was parsed and matched an existing unit by name or alias */
   | "matched"
-  /** unit string was parsed but matched via the synonym map (e.g. tablespoon → EL) */
-  | "synonym"
   /** no unit string parsed but a quantity was, so we defaulted to Stück */
   | "defaulted"
   /** parsed a unit token, didn't match anything */
@@ -79,77 +77,6 @@ export class ImportError extends Error {
   }
 }
 
-/**
- * Synonyms that should map a parsed unit token to one of our canonical units.
- * Lookup is case-insensitive; the value is the canonical `unit.name` to fetch
- * from the DB. Anything not in here falls through to the alias table and then
- * to the "unresolved" path.
- */
-const UNIT_SYNONYMS: Record<string, string> = {
-  // tablespoon
-  tablespoon: "EL",
-  tablespoons: "EL",
-  tbsp: "EL",
-  tbs: "EL",
-  esslöffel: "EL",
-  eßlöffel: "EL",
-  // teaspoon
-  teaspoon: "TL",
-  teaspoons: "TL",
-  tsp: "TL",
-  teelöffel: "TL",
-  // cup
-  cup: "Cup",
-  cups: "Cup",
-  tasse: "Cup",
-  tassen: "Cup",
-  // metric mass
-  gram: "g",
-  grams: "g",
-  gramm: "g",
-  kilogram: "kg",
-  kilograms: "kg",
-  kilogramm: "kg",
-  milligram: "mg",
-  milligrams: "mg",
-  // metric volume
-  milliliter: "ml",
-  milliliters: "ml",
-  millilitre: "ml",
-  millilitres: "ml",
-  liter: "l",
-  liters: "l",
-  litre: "l",
-  litres: "l",
-  // imperial
-  ounce: "oz",
-  ounces: "oz",
-  pound: "lb",
-  pounds: "lb",
-  lbs: "lb",
-  "fluid ounce": "fl oz",
-  "fluid ounces": "fl oz",
-  "fl-oz": "fl oz",
-  // counts
-  piece: "Stück",
-  pieces: "Stück",
-  stk: "Stück",
-  "stk.": "Stück",
-  st: "Stück",
-  stueck: "Stück",
-  // pinch
-  pinch: "Prise",
-  prisen: "Prise",
-  dash: "Prise",
-  // can / bottle / etc.
-  can: "Dose",
-  cans: "Dose",
-  dosen: "Dose",
-  bottle: "Flasche",
-  bottles: "Flasche",
-  flaschen: "Flasche",
-};
-
 type UnitLookup = {
   byNameOrAlias: Map<string, { id: number; name: string }>;
   byCanonicalName: Map<string, { id: number; name: string }>;
@@ -200,23 +127,15 @@ function resolveUnit(
     const key = rawUnitName.toLowerCase();
     const direct = lookup.byNameOrAlias.get(key);
     if (direct) {
-      // Direct match: the imported token may still be a (case-insensitive)
-      // alias that doesn't equal the canonical — surface it as `rawUnit`
-      // so the UI can show the import-time spelling alongside the resolved
-      // canonical (e.g. "Cups" → Cup).
+      // The imported token may still differ from the canonical (alias hit
+      // or different casing/plural) — surface it as `rawUnit` so the UI can
+      // show the import-time spelling alongside the resolved canonical
+      // (e.g. "tablespoon" → EL, "Cups" → Cup).
       const rawUnit =
         rawUnitName.toLowerCase() === direct.name.toLowerCase()
           ? null
           : rawUnitName;
       return { resolved: direct, match: "matched", rawUnit };
-    }
-
-    const synonym = UNIT_SYNONYMS[key];
-    if (synonym) {
-      const viaSynonym = lookup.byCanonicalName.get(synonym.toLowerCase());
-      if (viaSynonym) {
-        return { resolved: viaSynonym, match: "synonym", rawUnit: rawUnitName };
-      }
     }
     return { resolved: null, match: "unresolved", rawUnit: rawUnitName };
   }

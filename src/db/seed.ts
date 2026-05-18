@@ -181,6 +181,72 @@ const englishIngredientAliases: Record<string, string> = {
   "beef broth": "Rinderbrühe",
 };
 
+/**
+ * English / German aliases for the canonical units shipped by Tandoor. Each
+ * entry is `aliasName → canonicalUnitName`. Added as `unit_alias` rows the
+ * next time "Standarddaten laden" runs — additive, idempotent, skipped when
+ * the canonical unit isn't in the seed. Once present, both the import
+ * resolver AND the in-form autocomplete pick them up automatically.
+ */
+const englishUnitAliases: Record<string, string> = {
+  // tablespoon
+  tablespoon: "EL",
+  tablespoons: "EL",
+  tbsp: "EL",
+  tbs: "EL",
+  esslöffel: "EL",
+  eßlöffel: "EL",
+  // teaspoon
+  teaspoon: "TL",
+  teaspoons: "TL",
+  tsp: "TL",
+  teelöffel: "TL",
+  // cup
+  cup: "Cup",
+  cups: "Cup",
+  tasse: "Cup",
+  tassen: "Cup",
+  // metric mass
+  gram: "g",
+  grams: "g",
+  gramm: "g",
+  kilogram: "kg",
+  kilograms: "kg",
+  kilogramm: "kg",
+  // metric volume
+  milliliter: "ml",
+  milliliters: "ml",
+  millilitre: "ml",
+  millilitres: "ml",
+  liter: "l",
+  liters: "l",
+  litre: "l",
+  litres: "l",
+  // imperial
+  ounce: "oz",
+  ounces: "oz",
+  pound: "lb",
+  pounds: "lb",
+  lbs: "lb",
+  "fluid ounce": "fl oz",
+  "fluid ounces": "fl oz",
+  // counts
+  piece: "Stück",
+  pieces: "Stück",
+  stk: "Stück",
+  "stk.": "Stück",
+  st: "Stück",
+  stueck: "Stück",
+  // pinch
+  pinch: "Prise",
+  dash: "Prise",
+  // can / bottle
+  can: "Dose",
+  cans: "Dose",
+  bottle: "Flasche",
+  bottles: "Flasche",
+};
+
 // Top-up units the app expects even if the snapshot lacks them. The current
 // Tandoor snapshot already contains EL/TL/Prise, but this guarantees they
 // exist after any snapshot replacement (§7.1 Epic 1).
@@ -311,6 +377,26 @@ export function runSeed(): SeedCounts {
         .all();
       unitIdByName.set(top.name.toLowerCase(), inserted[0].id);
       counts.units.added += 1;
+    }
+
+    // -- English / German unit aliases --
+    // Layered on the canonical unit rows so the in-form autocomplete and
+    // the import resolver both pick them up via a plain alias lookup.
+    for (const [aliasName, canonicalName] of Object.entries(englishUnitAliases)) {
+      const id = unitIdByName.get(lower(canonicalName));
+      if (id === undefined) continue;
+      const exists = tx
+        .select({ id: unitAlias.id })
+        .from(unitAlias)
+        .where(eq(unitAlias.name, aliasName))
+        .get();
+      if (exists) continue;
+      try {
+        tx.insert(unitAlias).values({ unitId: id, name: aliasName }).run();
+        counts.units.aliasesAdded += 1;
+      } catch {
+        // Alias name collides with another globally-unique row; skip.
+      }
     }
 
     // -- Categories --

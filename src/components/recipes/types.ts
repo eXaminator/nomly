@@ -10,15 +10,14 @@ export type ImportAnnotation = {
   /** True when the ingredient name didn't match any existing row — it'll be
    *  created when the recipe is saved. */
   ingredientIsNew: boolean;
-  /** "ok" — the unit resolved cleanly via the alias table.
-   *  "synonym" — resolved via the import synonym map (e.g. tablespoon→EL).
+  /** "ok" — the unit resolved cleanly.
    *  "defaulted" — no unit was parsed; we defaulted to Stück.
    *  "unresolved" — a unit token was parsed but didn't resolve.
    *  "empty" — no quantity, no unit. */
-  unitState: "ok" | "synonym" | "defaulted" | "unresolved" | "empty";
+  unitState: "ok" | "defaulted" | "unresolved" | "empty";
   /** The non-canonical unit token that the importer saw, when it differs
-   *  from the resolved canonical (synonym match) or couldn't be resolved
-   *  at all (unresolved). Null for direct matches and defaulted rows. */
+   *  from the resolved canonical (an alias hit) or couldn't be resolved
+   *  at all. Null for clean direct matches and defaulted rows. */
   rawUnit: string | null;
 };
 

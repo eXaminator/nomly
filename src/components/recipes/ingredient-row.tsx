@@ -232,7 +232,7 @@ function UnitBadge({
       </span>
     );
   }
-  if (annotation.unitState === "synonym" && annotation.rawUnit) {
+  if (annotation.unitState === "ok" && annotation.rawUnit) {
     return (
       <span
         className="inline-flex w-fit max-w-full items-center gap-1 truncate rounded-full bg-[var(--color-muted)] px-2 py-0.5 text-xs text-[var(--color-muted-fg)]"

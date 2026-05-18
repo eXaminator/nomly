@@ -34,12 +34,7 @@ type ImportedRecipeResponse = {
     ingredients: Array<{
       quantity: number | null;
       unit: { id: number; name: string } | null;
-      unitMatch:
-        | "matched"
-        | "synonym"
-        | "defaulted"
-        | "unresolved"
-        | "empty";
+      unitMatch: "matched" | "defaulted" | "unresolved" | "empty";
       rawUnit: string | null;
       name: string;
       ingredientId: number | null;
@@ -85,10 +80,9 @@ function importedToDraft(
               },
             ]
           : s.ingredients.map<DraftIngredient>((i) => {
-              // Keep the original "synonym" outcome on the annotation so
-              // the UI can render the "ursprünglich: …" pill under the
-              // unit dropdown. "matched" collapses to "ok" — direct
-              // alias hits are uninteresting to surface.
+              // "matched" collapses to "ok"; UnitBadge separately shows the
+              // import-time spelling whenever rawUnit is set (alias hits
+              // where the typed token differs from the canonical).
               const unitState: ImportAnnotation["unitState"] =
                 i.unitMatch === "matched" ? "ok" : i.unitMatch;
               const annotation: ImportAnnotation = {
