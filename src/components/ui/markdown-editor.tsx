@@ -71,7 +71,7 @@ const editorTheme = EditorView.theme({
     caretColor: "var(--color-fg)",
     padding: "0.5rem 0.75rem",
   },
-  ".cm-focused": { outline: "none" },
+  "&.cm-focused": { outline: "none" },
   ".cm-line": { padding: "0 0" },
   ".cm-cursor": { borderLeftColor: "var(--color-fg)" },
   "&.cm-focused .cm-selectionBackground, ::selection": {
