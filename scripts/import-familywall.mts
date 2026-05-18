@@ -34,18 +34,40 @@ async function main() {
   // Load .env / .env.local before anything reads process.env.
   nextEnv.loadEnvConfig(process.cwd(), true);
 
-  const parsed = parseArgs({
-    options: {
-      email: { type: "string" },
-      password: { type: "string" },
-      limit: { type: "string" },
-      "dry-run": { type: "boolean", default: false },
-      headed: { type: "boolean", default: false },
-      help: { type: "boolean", default: false },
-    },
-    allowPositionals: false,
-    strict: true,
-  });
+  let parsed;
+  try {
+    parsed = parseArgs({
+      options: {
+        email: { type: "string" },
+        password: { type: "string" },
+        limit: { type: "string" },
+        "dry-run": { type: "boolean", default: false },
+        headed: { type: "boolean", default: false },
+        help: { type: "boolean", default: false },
+      },
+      allowPositionals: false,
+      strict: true,
+    });
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException).code;
+    if (
+      code === "ERR_PARSE_ARGS_UNEXPECTED_POSITIONAL" ||
+      code === "ERR_PARSE_ARGS_UNKNOWN_OPTION"
+    ) {
+      console.error("[familywall] couldn't parse arguments.");
+      console.error(
+        "[familywall] When using npm, separate the script flags with `--`:",
+      );
+      console.error(
+        "  npm run import:familywall -- --email me@example.tld --password '…'",
+      );
+      console.error(
+        "[familywall] Without the `--`, npm consumes the flags before they reach the script.",
+      );
+      process.exit(2);
+    }
+    throw e;
+  }
 
   if (parsed.values.help) {
     console.log(HELP);
