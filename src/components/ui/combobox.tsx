@@ -172,6 +172,14 @@ export function Combobox({
               setQuery(e.target.value);
               if (!open) setOpen(true);
             }}
+            onBlur={() => {
+              // Auto-commit when the typed text matches a result exactly.
+              // Clicking on a popover option uses onMouseDown+preventDefault
+              // so this onBlur never races with explicit selection.
+              if (exactMatch) {
+                commit(exactMatch);
+              }
+            }}
             onKeyDown={onKeyDown}
           />
           {loading || creating ? (
