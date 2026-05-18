@@ -12,7 +12,12 @@
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
 import type { FamilywallRawRecipe } from "./types.ts";
 
-const FAMILYWALL_BASE = "https://app.familywall.com";
+const FAMILYWALL_BASE = "https://www.familywall.com";
+const FAMILYWALL_LOGIN_URL = `${FAMILYWALL_BASE}/fw2_signin.php`;
+/** Best guess for the post-login recipes index. If the user's account
+ *  redirects this to the home page we fall back to clicking a recipes-nav
+ *  link from wherever the post-login redirect dropped us. */
+const FAMILYWALL_RECIPES_URL = `${FAMILYWALL_BASE}/fw2_recipes.php`;
 
 export type CrawlOptions = {
   email: string;
@@ -42,20 +47,45 @@ async function delay(ms: number): Promise<void> {
  * the live site.
  */
 const SELECTORS = {
-  loginEmail: ["input[type=email]", "input[name=email]", "#email"],
-  loginPassword: ["input[type=password]", "input[name=password]", "#password"],
+  // Verified against https://www.familywall.com/fw2_signin.php on 2026-05-18:
+  // <input id="identifier" name="a00identifier"> for email,
+  // <input name="a00password"> for password,
+  // submit button with text "Anmelden".
+  loginEmail: [
+    "#identifier",
+    "input[name='a00identifier']",
+    "input[type=email]",
+  ],
+  loginPassword: [
+    "input[name='a00password']",
+    "input[type=password]",
+  ],
   loginSubmit: [
     "button[type=submit]",
     "input[type=submit]",
     "button:has-text('Anmelden')",
     "button:has-text('Sign in')",
   ],
+  /** Anything reachable from the post-login nav that talks about recipes.
+   *  We try links with `fw2_recipes`-style hrefs first, then fall back to
+   *  text-based matches. */
   recipesNav: [
+    "a[href*='fw2_recipes']",
     "a[href*='recipes']",
+    "a[href*='rezept']",
     "nav a:has-text('Rezepte')",
     "nav a:has-text('Recipes')",
+    "a:has-text('Rezepte')",
+    "a:has-text('Recipes')",
   ],
-  recipeCard: ["a[href*='recipe/']", "[data-testid='recipe-card']"],
+  // Selectors below are still best-effort guesses until we see the real
+  // post-login DOM. The orchestrator surfaces failures per-recipe so a
+  // mismatch here doesn't tank the whole run.
+  recipeCard: [
+    "a[href*='fw2_recipe.php']",
+    "a[href*='recipe/']",
+    "[data-testid='recipe-card']",
+  ],
   recipeTitle: ["h1", "[data-testid='recipe-title']"],
   recipeDescription: ["[data-testid='recipe-description']", ".recipe-description"],
   recipeServings: ["[data-testid='recipe-servings']", ".recipe-servings"],
@@ -97,39 +127,44 @@ async function firstExisting(page: Page, candidates: string[]) {
 }
 
 async function login(page: Page, email: string, password: string) {
-  await page.goto(FAMILYWALL_BASE);
+  await page.goto(FAMILYWALL_LOGIN_URL, { waitUntil: "domcontentloaded" });
   const emailField = await firstVisible(page, SELECTORS.loginEmail);
   const pwField = await firstVisible(page, SELECTORS.loginPassword);
   if (!emailField || !pwField) {
     throw new Error(
-      "Login form not found — Familywall's layout may have changed or you're already logged in.",
+      "Login form not found on " + FAMILYWALL_LOGIN_URL +
+        " — Familywall's layout may have changed.",
     );
   }
   await emailField.fill(email);
   await pwField.fill(password);
   const submit = await firstVisible(page, SELECTORS.loginSubmit);
-  if (submit) {
-    await submit.click();
-  } else {
-    await pwField.press("Enter");
-  }
-  // Wait for any post-login element to appear. We use the recipes-nav link
-  // as the canary, with a generous timeout in case a CAPTCHA is interposed
-  // (the user solves it in --headed mode).
-  const nav = page.locator(SELECTORS.recipesNav.join(", ")).first();
-  await nav.waitFor({ timeout: 60_000 });
+  // The signin form on www.familywall.com uses method="get" but has JS that
+  // intercepts submit; wait for the URL to leave the signin page either way.
+  await Promise.all([
+    page.waitForURL((url) => !url.toString().includes("fw2_signin.php"), {
+      timeout: 60_000,
+    }),
+    submit ? submit.click() : pwField.press("Enter"),
+  ]);
 }
 
 async function listRecipeUrls(page: Page, limit?: number): Promise<string[]> {
-  // Navigate to the recipes index. If the nav-click doesn't land us there
-  // we try a direct URL.
-  const nav = await firstVisible(page, SELECTORS.recipesNav);
-  if (nav) {
-    await nav.click().catch(() => {});
-  } else {
-    await page.goto(`${FAMILYWALL_BASE}/recipes`);
+  // Try the most likely direct URL first.
+  await page
+    .goto(FAMILYWALL_RECIPES_URL, { waitUntil: "domcontentloaded" })
+    .catch(() => {});
+
+  // If that redirected us off the recipes section (e.g. straight to the
+  // home page because we're not actually on the recipes route), look for a
+  // recipes-nav element and click it.
+  if (!page.url().includes("recipe") && !page.url().includes("rezept")) {
+    const nav = await firstVisible(page, SELECTORS.recipesNav);
+    if (nav) {
+      await nav.click().catch(() => {});
+    }
   }
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("networkidle").catch(() => {});
 
   // Familywall paginates recipes; we keep scrolling until the count stops
   // growing or we hit the limit.
