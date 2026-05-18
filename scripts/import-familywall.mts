@@ -2,29 +2,25 @@ import nextEnv from "@next/env";
 import { parseArgs } from "node:util";
 
 // Familywall import CLI:
-//   npm run import:familywall -- [flags]
+//   npm run import:familywall -- --email <e> --password <p> [flags]
 //
 // Flags:
-//   --email <e>        Familywall account email
-//   --password <p>     Familywall account password
+//   --email <e>        Familywall account email (required)
+//   --password <p>     Familywall account password (required)
 //   --limit <n>        Cap recipes processed (handy for first runs)
 //   --dry-run          Crawl + transform but never write to the DB
 //   --headed           Show the Chromium window
 //   --help             Print this help
 //
-// Env fallback (preferred for the password since it stays out of shell
-// history):
-//   FAMILYWALL_EMAIL, FAMILYWALL_PASSWORD
-//
 // First-time setup: `npx playwright install chromium`.
 
-const HELP = `Usage: npm run import:familywall -- [flags]
+const HELP = `Usage: npm run import:familywall -- --email <e> --password <p> [flags]
 
-Flags:
+Required:
   --email <e>          Familywall account email
-                       (falls back to $FAMILYWALL_EMAIL)
   --password <p>       Familywall account password
-                       (falls back to $FAMILYWALL_PASSWORD)
+
+Optional:
   --limit <n>          Process at most <n> recipes
   --dry-run            Parse + transform, but skip every DB write
   --headed             Show the browser window (default: headless)
@@ -56,13 +52,10 @@ async function main() {
     process.exit(0);
   }
 
-  const email = parsed.values.email ?? process.env.FAMILYWALL_EMAIL ?? "";
-  const password =
-    parsed.values.password ?? process.env.FAMILYWALL_PASSWORD ?? "";
+  const email = parsed.values.email ?? "";
+  const password = parsed.values.password ?? "";
   if (!email || !password) {
-    console.error(
-      "[familywall] missing credentials. Pass --email/--password or set FAMILYWALL_EMAIL/FAMILYWALL_PASSWORD.",
-    );
+    console.error("[familywall] missing credentials. Pass --email and --password.");
     process.exit(2);
   }
   const limit = parsed.values.limit ? parseInt(parsed.values.limit, 10) : undefined;

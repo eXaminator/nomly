@@ -50,16 +50,13 @@ Familywall are ever stored.
 # First-time setup: fetch the Chromium binary Playwright needs.
 npx playwright install chromium
 
-# Run with credentials via env vars (recommended — keeps them out of shell
-# history). DATABASE_URL defaults to ./data/nomly.db.
-FAMILYWALL_EMAIL=me@example.tld FAMILYWALL_PASSWORD='…' \
-  npm run import:familywall
-
-# Or pass them on the command line.
+# DATABASE_URL defaults to ./data/nomly.db. Pass --email and --password
+# on every invocation.
 npm run import:familywall -- --email me@example.tld --password '…'
 
 # Useful flags for first runs:
-npm run import:familywall -- --headed --limit 1 --dry-run
+npm run import:familywall -- --email me@example.tld --password '…' \
+  --headed --limit 1 --dry-run
 ```
 
 Prints one line per recipe (`imported (id 12)` / `skipped` / `failed`) and a
