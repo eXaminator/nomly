@@ -1,12 +1,41 @@
 /**
  * Playwright-driven Familywall crawler. Logs in once with the provided
- * credentials, enumerates recipes, and yields one {@link FamilywallRawRecipe}
- * per recipe. Selectors live here — they're the part that will need
- * iteration against the real DOM (the user runs `--headed --limit 1
- * --dry-run` first to verify).
+ * credentials, walks every recipe in the user's recipebox by clicking
+ * each entry in the master-detail list, and yields one
+ * {@link FamilywallRawRecipe} per recipe.
  *
- * The yielded objects are still raw strings; pure-function normalisation
+ * The yielded objects are raw strings; pure-function normalisation
  * happens in {@link transformFamilywallRecipe}.
+ *
+ * DOM structure (verified 2026-05-18 against www.familywall.com):
+ *
+ * - Login page: https://www.familywall.com/fw2_signin.php
+ *   - email input `#identifier` (name="a00identifier")
+ *   - password input `name="a00password"`
+ *   - submit button text "Anmelden"
+ *   - OneTrust cookie banner overlays the form on first visit.
+ *
+ * - Recipe list: https://www.familywall.com/recipebox.php
+ *   - Master-detail SPA. Recipes are `<flexrow class="border-pane mp-recipe">`
+ *     elements inside `<flexcol class="mp-recipe-list">`. There are no `<a>`
+ *     hrefs; clicking sets the URL to `?id=recipe%2F<id>` and renders the
+ *     detail in the right pane (`#recipeDetail`).
+ *   - All recipes are loaded into the DOM up front — no pagination/scroll.
+ *
+ * - Detail pane (`#recipeDetail`):
+ *   - Title: `<flexauto class="h1 line">`
+ *   - Image: `.mp-recipe-header-imgcontainer img` (served from api.familywall.com)
+ *   - Metadata table: `<table class="mp-recipe-times">` with rows of
+ *     `<td class="recipe-field-name">label</td><td>value</td>`. Labels are
+ *     localised — German ("Zubereitungszeit", "Kochzeit", "Portionen",
+ *     "Ansehen auf") or English. The "Ansehen auf"/"View on" row contains
+ *     the original source URL as an `<a href>`.
+ *   - Description / Zutaten / Anweisungen sections: each is a
+ *     `<flexauto class="border-pane">` (or `<div class="border-pane">`)
+ *     containing a `<p>` heading with the section name and one or more
+ *     content children (a `<p>` for description, a `<ul>` for ingredients,
+ *     a `<p>` or `<ol>` for instructions). Each section also contains a
+ *     `<div class="rb-button">` add-button which we filter out.
  */
 
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
@@ -14,22 +43,15 @@ import type { FamilywallRawRecipe } from "./types.ts";
 
 const FAMILYWALL_BASE = "https://www.familywall.com";
 const FAMILYWALL_LOGIN_URL = `${FAMILYWALL_BASE}/fw2_signin.php`;
-/** Best guess for the post-login recipes index. If the user's account
- *  redirects this to the home page we fall back to clicking a recipes-nav
- *  link from wherever the post-login redirect dropped us. */
-const FAMILYWALL_RECIPES_URL = `${FAMILYWALL_BASE}/fw2_recipes.php`;
+const FAMILYWALL_RECIPES_URL = `${FAMILYWALL_BASE}/recipebox.php`;
 
 export type CrawlOptions = {
   email: string;
   password: string;
   headed?: boolean;
-  /** Cap the number of recipes processed (handy for first runs). */
   limit?: number;
-  /** Override the base URL — useful if the user's deployment differs. */
-  baseUrl?: string;
-  /** Per-page navigation timeout. Default 30 s. */
   pageTimeoutMs?: number;
-  /** Emit selector diagnostics (URLs, anchor counts, data-testids). */
+  /** Emit structural diagnostics. */
   debug?: boolean;
 };
 
@@ -40,75 +62,6 @@ const POLITE_DELAY_MS = 500;
 async function delay(ms: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms));
 }
-
-/**
- * Locator candidates tried in order until one is visible. Familywall's
- * markup changes over time and varies by locale; keeping a small fallback
- * list here means a small breakage doesn't kill the whole crawl. The user
- * will inevitably need to refine these once they run the script against
- * the live site.
- */
-const SELECTORS = {
-  // Verified against https://www.familywall.com/fw2_signin.php on 2026-05-18:
-  // <input id="identifier" name="a00identifier"> for email,
-  // <input name="a00password"> for password,
-  // submit button with text "Anmelden".
-  loginEmail: [
-    "#identifier",
-    "input[name='a00identifier']",
-    "input[type=email]",
-  ],
-  loginPassword: [
-    "input[name='a00password']",
-    "input[type=password]",
-  ],
-  loginSubmit: [
-    "button[type=submit]",
-    "input[type=submit]",
-    "button:has-text('Anmelden')",
-    "button:has-text('Sign in')",
-  ],
-  /** Anything reachable from the post-login nav that talks about recipes.
-   *  We try links with `fw2_recipes`-style hrefs first, then fall back to
-   *  text-based matches. */
-  recipesNav: [
-    "a[href*='fw2_recipes']",
-    "a[href*='recipes']",
-    "a[href*='rezept']",
-    "nav a:has-text('Rezepte')",
-    "nav a:has-text('Recipes')",
-    "a:has-text('Rezepte')",
-    "a:has-text('Recipes')",
-  ],
-  // Selectors below are still best-effort guesses until we see the real
-  // post-login DOM. The orchestrator surfaces failures per-recipe so a
-  // mismatch here doesn't tank the whole run.
-  recipeCard: [
-    "a[href*='fw2_recipe.php']",
-    "a[href*='recipe/']",
-    "[data-testid='recipe-card']",
-  ],
-  recipeTitle: ["h1", "[data-testid='recipe-title']"],
-  recipeDescription: ["[data-testid='recipe-description']", ".recipe-description"],
-  recipeServings: ["[data-testid='recipe-servings']", ".recipe-servings"],
-  recipeIngredients: [
-    "[data-testid='recipe-ingredient']",
-    ".recipe-ingredient",
-    "ul.ingredients li",
-  ],
-  recipeInstructions: [
-    "[data-testid='recipe-step']",
-    ".recipe-step",
-    "ol.instructions li",
-  ],
-  recipeImage: ["img.recipe-photo", "[data-testid='recipe-photo'] img", "main img"],
-  recipeSourceLink: [
-    "a[data-testid='recipe-source']",
-    "a.recipe-source",
-    "a:has-text('Quelle')",
-    "a:has-text('Source')",
-  ],
-};
 
 async function firstVisible(page: Page, candidates: string[]) {
   for (const sel of candidates) {
@@ -125,8 +78,6 @@ async function waitForFirstVisible(
   candidates: string[],
   timeoutMs: number,
 ) {
-  // Race every candidate against the timeout — whichever shows up first wins.
-  // Playwright's `or()` would also work, but we want per-attempt logging.
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const found = await firstVisible(page, candidates);
@@ -136,19 +87,6 @@ async function waitForFirstVisible(
   return null;
 }
 
-async function firstExisting(page: Page, candidates: string[]) {
-  for (const sel of candidates) {
-    const locator = page.locator(sel).first();
-    if ((await locator.count()) > 0) return locator;
-  }
-  return null;
-}
-
-/**
- * Familywall ships OneTrust's cookie banner; in a fresh browser context
- * it overlays the form. We click "Accept all" if present, then carry on.
- * No-op if the banner isn't there.
- */
 async function dismissConsent(page: Page) {
   const buttons = [
     "#onetrust-accept-btn-handler",
@@ -159,7 +97,6 @@ async function dismissConsent(page: Page) {
   const btn = await firstVisible(page, buttons);
   if (btn) {
     await btn.click().catch(() => {});
-    // The OneTrust SDK animates out; give it a beat so the form is clickable.
     await delay(300);
   }
 }
@@ -167,19 +104,29 @@ async function dismissConsent(page: Page) {
 async function login(page: Page, email: string, password: string) {
   await page.goto(FAMILYWALL_LOGIN_URL, { waitUntil: "domcontentloaded" });
   await dismissConsent(page);
-  const emailField = await waitForFirstVisible(page, SELECTORS.loginEmail, 15_000);
-  const pwField = await waitForFirstVisible(page, SELECTORS.loginPassword, 15_000);
+  const emailField = await waitForFirstVisible(
+    page,
+    ["#identifier", "input[name='a00identifier']", "input[type=email]"],
+    15_000,
+  );
+  const pwField = await waitForFirstVisible(
+    page,
+    ["input[name='a00password']", "input[type=password]"],
+    15_000,
+  );
   if (!emailField || !pwField) {
     throw new Error(
-      "Login form not found on " + FAMILYWALL_LOGIN_URL +
-        " — Familywall's layout may have changed.",
+      `Login form not found on ${FAMILYWALL_LOGIN_URL} — Familywall's layout may have changed.`,
     );
   }
   await emailField.fill(email);
   await pwField.fill(password);
-  const submit = await firstVisible(page, SELECTORS.loginSubmit);
-  // The signin form on www.familywall.com uses method="get" but has JS that
-  // intercepts submit; wait for the URL to leave the signin page either way.
+  const submit = await firstVisible(page, [
+    "button[type=submit]",
+    "input[type=submit]",
+    "button:has-text('Anmelden')",
+    "button:has-text('Sign in')",
+  ]);
   await Promise.all([
     page.waitForURL((url) => !url.toString().includes("fw2_signin.php"), {
       timeout: 60_000,
@@ -188,178 +135,244 @@ async function login(page: Page, email: string, password: string) {
   ]);
 }
 
-async function listRecipeUrls(
-  page: Page,
-  limit?: number,
-  debug = false,
-): Promise<string[]> {
-  if (debug) console.log(`[familywall] post-login URL: ${page.url()}`);
-
-  // Try the most likely direct URL first.
+async function gotoRecipeList(page: Page, debug: boolean) {
+  await page.goto(FAMILYWALL_RECIPES_URL, { waitUntil: "domcontentloaded" });
+  // The list is loaded synchronously; wait for the container to exist.
   await page
-    .goto(FAMILYWALL_RECIPES_URL, { waitUntil: "domcontentloaded" })
-    .catch((e) => {
-      if (debug) console.log(`[familywall] direct nav failed: ${e}`);
-    });
-
-  // If that redirected us off the recipes section (e.g. straight to the
-  // home page because we're not actually on the recipes route), look for a
-  // recipes-nav element and click it.
-  if (!page.url().includes("recipe") && !page.url().includes("rezept")) {
-    if (debug) {
-      console.log(
-        `[familywall] direct URL didn't land on recipes (now at ${page.url()}), looking for nav link`,
-      );
-    }
-    const nav = await firstVisible(page, SELECTORS.recipesNav);
-    if (nav) {
-      if (debug) console.log("[familywall] clicking recipes nav");
-      await nav.click().catch(() => {});
-    } else if (debug) {
-      console.log("[familywall] no recipes-nav link visible");
-    }
-  }
+    .waitForSelector(".mp-recipe-list .mp-recipe", { timeout: 20_000 })
+    .catch(() => {});
   await page.waitForLoadState("networkidle").catch(() => {});
-  if (debug) console.log(`[familywall] recipes index URL: ${page.url()}`);
-
   if (debug) {
-    // Dump a structural fingerprint of the current page so we can refine
-    // selectors without a second round-trip.
-    const fingerprint = await page.evaluate(() => {
-      const counts: Record<string, number> = {};
-      for (const sel of [
-        "a[href*='fw2_recipe.php']",
-        "a[href*='recipe']",
-        "a[href*='rezept']",
-        "[data-testid]",
-        "main a",
-        "article",
-        "[class*='recipe' i]",
-        "[class*='card' i]",
-      ]) {
-        counts[sel] = document.querySelectorAll(sel).length;
-      }
-      const sampleAnchors = Array.from(document.querySelectorAll("a[href]"))
-        .slice(0, 20)
-        .map((a) => (a as HTMLAnchorElement).href);
-      const dataTestIds = Array.from(
-        new Set(
-          Array.from(document.querySelectorAll("[data-testid]"))
-            .map((n) => n.getAttribute("data-testid"))
-            .filter(Boolean) as string[],
-        ),
-      ).slice(0, 30);
-      return {
-        title: document.title,
-        bodyClass: document.body?.className ?? "",
-        counts,
-        sampleAnchors,
-        dataTestIds,
-      };
-    });
-    console.log(
-      "[familywall] page fingerprint:",
-      JSON.stringify(fingerprint, null, 2),
-    );
+    const stats = await page.evaluate(() => ({
+      url: location.href,
+      recipeCount: document.querySelectorAll(".mp-recipe").length,
+      hasDetailPane: !!document.getElementById("recipeDetail"),
+    }));
+    console.log("[familywall] recipe list:", JSON.stringify(stats));
   }
-
-  // Familywall paginates recipes; we keep scrolling until the count stops
-  // growing or we hit the limit.
-  const seen = new Set<string>();
-  let stable = 0;
-  while (stable < 3) {
-    const links = await page
-      .locator(SELECTORS.recipeCard.join(", "))
-      .evaluateAll((nodes) =>
-        nodes.map((n) => (n as HTMLAnchorElement).href).filter(Boolean),
-      );
-    const before = seen.size;
-    for (const href of links) seen.add(href);
-    if (limit && seen.size >= limit) break;
-    if (seen.size === before) {
-      stable += 1;
-    } else {
-      stable = 0;
-    }
-    // Scroll to load more.
-    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
-    await delay(POLITE_DELAY_MS);
-  }
-  return Array.from(seen).slice(0, limit);
 }
 
-async function scrapeRecipe(
+/**
+ * Extracts the recipe currently rendered in `#recipeDetail` into a raw
+ * payload. Returns null if the detail pane is empty or has no title.
+ *
+ * Runs entirely inside the page context — all parsing happens in
+ * `page.evaluate` so we don't pay round-trip costs per field.
+ */
+async function extractCurrentDetail(
   page: Page,
-  url: string,
-  pageTimeoutMs: number,
 ): Promise<FamilywallRawRecipe | null> {
-  try {
-    await page.goto(url, { timeout: pageTimeoutMs, waitUntil: "domcontentloaded" });
-  } catch {
-    return null;
-  }
+  return page.evaluate(() => {
+    const detail = document.getElementById("recipeDetail");
+    if (!detail) return null;
 
-  const titleLoc = await firstExisting(page, SELECTORS.recipeTitle);
-  const title = ((await titleLoc?.textContent()) ?? "").trim();
-  if (!title) return null;
+    const titleEl = detail.querySelector(
+      ".h1.line, flexauto.h1, .h1",
+    ) as HTMLElement | null;
+    const title = titleEl ? titleEl.innerText.replace(/\s+/g, " ").trim() : "";
+    if (!title) return null;
 
-  const descLoc = await firstExisting(page, SELECTORS.recipeDescription);
-  const description = (await descLoc?.textContent())?.trim() || null;
+    const imgEl = detail.querySelector(
+      ".mp-recipe-header-imgcontainer img",
+    ) as HTMLImageElement | null;
+    const imageUrl = imgEl?.src || null;
 
-  const servingsLoc = await firstExisting(page, SELECTORS.recipeServings);
-  const servingsText = (await servingsLoc?.textContent()) ?? "";
-  const servings = (() => {
-    const m = /(\d+)/.exec(servingsText);
-    return m ? parseInt(m[1], 10) : null;
-  })();
-
-  const ingredients = await page
-    .locator(SELECTORS.recipeIngredients.join(", "))
-    .evaluateAll((nodes) =>
-      nodes
-        .map((n) => (n.textContent ?? "").replace(/\s+/g, " ").trim())
-        .filter((s) => s.length > 0),
-    );
-
-  const instructions = await page
-    .locator(SELECTORS.recipeInstructions.join(", "))
-    .evaluateAll((nodes) =>
-      nodes
-        .map((n) => (n.textContent ?? "").replace(/\s+/g, " ").trim())
-        .filter((s) => s.length > 0),
-    );
-
-  const imageLoc = await firstExisting(page, SELECTORS.recipeImage);
-  const imageUrl = (await imageLoc?.getAttribute("src")) ?? null;
-
-  const sourceLoc = await firstExisting(page, SELECTORS.recipeSourceLink);
-  let sourceUrl = (await sourceLoc?.getAttribute("href")) ?? null;
-  // Defensive: never store a Familywall URL as "source" — that's a hard
-  // product rule. Only links pointing outside the Familywall domain qualify.
-  if (sourceUrl) {
-    try {
-      const u = new URL(sourceUrl, FAMILYWALL_BASE);
-      if (u.host.endsWith("familywall.com")) {
-        sourceUrl = null;
-      } else {
-        sourceUrl = u.toString();
+    function parseMins(t: string): number | null {
+      const trimmed = t.replace(/\s+/g, " ").trim();
+      if (!trimmed) return null;
+      const hMatch = /(\d+)\s*h/i.exec(trimmed);
+      const mMatch = /(\d+)\s*(?:mins?|min\.?|Min(?:uten)?)/i.exec(trimmed);
+      const h = hMatch ? parseInt(hMatch[1], 10) : 0;
+      const m = mMatch ? parseInt(mMatch[1], 10) : 0;
+      if (h === 0 && m === 0) {
+        const justNum = /^(\d+)$/.exec(trimmed);
+        return justNum ? parseInt(justNum[1], 10) : null;
       }
-    } catch {
-      sourceUrl = null;
+      return h * 60 + m;
+    }
+
+    let prepTimeMin: number | null = null;
+    let cookTimeMin: number | null = null;
+    let servings: number | null = null;
+    let sourceUrl: string | null = null;
+
+    const PREP_LABELS = new Set([
+      "Zubereitungszeit",
+      "Vorbereitungszeit",
+      "Prep time",
+      "Preparation time",
+    ]);
+    const COOK_LABELS = new Set(["Kochzeit", "Cook time", "Cooking time"]);
+    const SERVING_LABELS = new Set([
+      "Portionen",
+      "Servings",
+      "Portions",
+      "Personen",
+    ]);
+    const SOURCE_LABELS = new Set([
+      "Ansehen auf",
+      "View on",
+      "Source",
+      "Quelle",
+    ]);
+
+    const timesTable = detail.querySelector(".mp-recipe-times");
+    if (timesTable) {
+      for (const row of Array.from(timesTable.querySelectorAll("tr"))) {
+        const cells = Array.from(row.querySelectorAll("td"));
+        const labelCell = cells.find((c) =>
+          c.classList.contains("recipe-field-name"),
+        );
+        if (!labelCell) continue;
+        const valueCell = labelCell.nextElementSibling as HTMLElement | null;
+        if (!valueCell) continue;
+        const label = (labelCell as HTMLElement).innerText
+          .replace(/\s+/g, " ")
+          .trim();
+        const valueText = valueCell.innerText.replace(/\s+/g, " ").trim();
+        if (PREP_LABELS.has(label)) {
+          prepTimeMin = parseMins(valueText);
+        } else if (COOK_LABELS.has(label)) {
+          cookTimeMin = parseMins(valueText);
+        } else if (SERVING_LABELS.has(label)) {
+          const n = /(\d+)/.exec(valueText);
+          servings = n ? parseInt(n[1], 10) : null;
+        } else if (SOURCE_LABELS.has(label)) {
+          const link = valueCell.querySelector("a") as HTMLAnchorElement | null;
+          if (link?.href) sourceUrl = link.href;
+        }
+      }
+    }
+
+    /**
+     * Each section ("Beschreibung", "Zutaten", "Anweisungen") is a
+     * <p>-headed child of a border-pane container. Returns the content
+     * children minus the heading and any "add" buttons.
+     */
+    function sectionContent(headingTexts: string[]): Element[] {
+      for (const ht of headingTexts) {
+        const heading = Array.from(detail!.querySelectorAll("p")).find(
+          (p) => p.textContent?.replace(/\s+/g, " ").trim() === ht,
+        );
+        if (!heading) continue;
+        const container = heading.parentElement;
+        if (!container) continue;
+        return Array.from(container.children).filter(
+          (c) =>
+            c !== heading &&
+            !c.classList.contains("rb-button") &&
+            !c.classList.contains("mp-button-like"),
+        );
+      }
+      return [];
+    }
+
+    const descParts = sectionContent(["Beschreibung", "Description"])
+      .map((el) => (el as HTMLElement).innerText.replace(/\s+/g, " ").trim())
+      .filter(Boolean);
+    const description = descParts.length ? descParts.join("\n\n") : null;
+
+    function listItemsFrom(els: Element[]): string[] {
+      const out: string[] = [];
+      for (const el of els) {
+        if (el.tagName === "UL" || el.tagName === "OL") {
+          for (const li of Array.from(el.querySelectorAll("li"))) {
+            const t = (li as HTMLElement).innerText
+              .replace(/\s+/g, " ")
+              .trim();
+            if (t) out.push(t);
+          }
+        } else {
+          // Some recipes free-text the section. Split by newlines so we
+          // don't lose multi-line content.
+          const raw = (el as HTMLElement).innerText;
+          for (const line of raw.split(/\r?\n/)) {
+            const t = line.replace(/\s+/g, " ").trim();
+            if (t) out.push(t);
+          }
+        }
+      }
+      return out;
+    }
+
+    const ingredients = listItemsFrom(
+      sectionContent(["Zutaten", "Ingredients"]),
+    );
+    const instructions = listItemsFrom(
+      sectionContent(["Anweisungen", "Zubereitung", "Instructions", "Steps"]),
+    );
+
+    return {
+      title,
+      description,
+      servings,
+      prepTimeMin,
+      cookTimeMin,
+      ingredients,
+      instructions,
+      imageUrl,
+      sourceUrl,
+    };
+  });
+}
+
+/**
+ * Walks every recipe in the user's recipebox. Sequential by design: each
+ * iteration clicks one `.mp-recipe` row, waits for `#recipeDetail` to
+ * re-render, then extracts the detail.
+ */
+async function* iterRecipes(
+  page: Page,
+  limit: number | undefined,
+  pageTimeoutMs: number,
+  debug: boolean,
+): AsyncGenerator<FamilywallRawRecipe | null> {
+  const cards = page.locator(".mp-recipe-list .mp-recipe");
+  const count = await cards.count();
+  const n = limit ? Math.min(limit, count) : count;
+  if (debug) {
+    console.log(`[familywall] iterating ${n} of ${count} recipes`);
+  }
+  for (let i = 0; i < n; i++) {
+    const card = cards.nth(i);
+    try {
+      await card.scrollIntoViewIfNeeded({ timeout: pageTimeoutMs });
+      const titleBefore = await page
+        .evaluate(() => {
+          const t = document
+            .getElementById("recipeDetail")
+            ?.querySelector(".h1.line, .h1");
+          return t ? (t as HTMLElement).innerText.trim() : "";
+        })
+        .catch(() => "");
+      await card.click({ timeout: pageTimeoutMs });
+      // Wait for the URL to switch to this recipe AND the title in the
+      // detail pane to change from the previous one. Recipes with the same
+      // title are rare; if they happen we just wait the budget out.
+      await page
+        .waitForFunction(
+          (prev) => {
+            const u = location.search;
+            if (!u.includes("id=recipe")) return false;
+            const t = document
+              .getElementById("recipeDetail")
+              ?.querySelector(".h1.line, .h1");
+            const cur = t ? (t as HTMLElement).innerText.trim() : "";
+            return cur.length > 0 && cur !== prev;
+          },
+          titleBefore,
+          { timeout: pageTimeoutMs },
+        )
+        .catch(() => {});
+      // Give the image + content a moment to settle.
+      await delay(POLITE_DELAY_MS);
+      const raw = await extractCurrentDetail(page);
+      yield raw;
+    } catch (e) {
+      if (debug) console.log(`[familywall] recipe #${i} failed: ${e}`);
+      yield null;
     }
   }
-
-  return {
-    title,
-    description,
-    servings,
-    prepTimeMin: null,
-    cookTimeMin: null,
-    ingredients,
-    instructions,
-    imageUrl,
-    sourceUrl,
-  };
 }
 
 /**
@@ -389,6 +402,7 @@ export async function withFamilywallCrawler(
   onProgress?: (info: { total: number; current: number }) => void,
 ): Promise<{ total: number }> {
   const pageTimeoutMs = options.pageTimeoutMs ?? 30_000;
+  const debug = options.debug === true;
   const browser: Browser = await chromium.launch({
     headless: options.headed !== true,
   });
@@ -399,17 +413,24 @@ export async function withFamilywallCrawler(
     });
     const page = await ctx.newPage();
     await login(page, options.email, options.password);
-    const urls = await listRecipeUrls(page, options.limit, options.debug);
+    await gotoRecipeList(page, debug);
+
+    const total = await page.locator(".mp-recipe-list .mp-recipe").count();
+    const cap = options.limit ? Math.min(options.limit, total) : total;
     let current = 0;
-    for (const url of urls) {
+    for await (const recipe of iterRecipes(
+      page,
+      options.limit,
+      pageTimeoutMs,
+      debug,
+    )) {
       current += 1;
-      const recipe = await scrapeRecipe(page, url, pageTimeoutMs);
-      onProgress?.({ total: urls.length, current });
+      onProgress?.({ total: cap, current });
       if (!recipe) continue;
       await sink(recipe, { ctx });
       await delay(POLITE_DELAY_MS);
     }
-    return { total: urls.length };
+    return { total: cap };
   } finally {
     await browser.close();
   }
