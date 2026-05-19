@@ -1,3 +1,5 @@
+import Link from "next/link";
+import { ChevronRight } from "lucide-react";
 import { AppShell } from "@/components/layout/app-shell";
 
 export const dynamic = "force-dynamic";
@@ -17,7 +19,7 @@ const PLACEHOLDERS = [
       "Reihenfolge der Kategorien pro Supermarkt – kommt in Epic 6.",
   },
   {
-    title: "Zutaten / Produkte / Einheiten / Kategorien",
+    title: "Produkte / Einheiten / Kategorien",
     description:
       "Verwaltung, Aliase, Zusammenführen – kommt in Epic 7.",
   },
@@ -43,6 +45,23 @@ export default async function EinstellungenPage() {
       </div>
       <div className="mt-8 grid gap-6">
         <StandarddatenCard initial={counts} />
+        <Link
+          href="/einstellungen/zutaten"
+          className="block rounded-[var(--radius)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+        >
+          <Card className="transition-colors hover:bg-[var(--color-muted)]">
+            <CardHeader className="flex flex-row items-start justify-between gap-3">
+              <div>
+                <CardTitle>Zutaten – Diät-Klassifikation</CardTitle>
+                <CardDescription>
+                  Markiere Zutaten als vegan / vegetarisch / tierisch. Rezepte
+                  erben daraus eine abgeleitete Diät-Angabe.
+                </CardDescription>
+              </div>
+              <ChevronRight className="mt-1 size-5 shrink-0 text-[var(--color-muted-fg)]" />
+            </CardHeader>
+          </Card>
+        </Link>
         <div className="grid gap-4 sm:grid-cols-2">
           {PLACEHOLDERS.map((p) => (
             <Card key={p.title} className="opacity-70">

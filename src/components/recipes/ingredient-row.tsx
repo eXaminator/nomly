@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { AlertTriangle, Sparkles, Trash2 } from "lucide-react";
+import { AlertTriangle, Parentheses, Sparkles, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -84,7 +84,12 @@ export function IngredientRow({ value, onChange, onRemove }: Props) {
   }
 
   return (
-    <div className="grid grid-cols-[5rem_8rem_1fr_auto] gap-2 md:grid-cols-[5rem_8rem_1fr_1fr_auto]">
+    <div
+      className={cn(
+        "grid grid-cols-[5rem_8rem_1fr_auto_auto] gap-2 md:grid-cols-[5rem_8rem_1fr_1fr_auto_auto]",
+        value.isOptional && "opacity-65",
+      )}
+    >
       <Input
         inputMode="decimal"
         placeholder="Menge"
@@ -142,11 +147,30 @@ export function IngredientRow({ value, onChange, onRemove }: Props) {
         className="col-span-3 md:col-span-1"
       />
       <Button
+        variant={value.isOptional ? "secondary" : "ghost"}
+        size="icon"
+        onClick={() => onChange({ ...value, isOptional: !value.isOptional })}
+        aria-pressed={value.isOptional}
+        aria-label={
+          value.isOptional
+            ? "Optional-Markierung entfernen"
+            : "Als optional markieren"
+        }
+        title={
+          value.isOptional
+            ? "Optional – wird im Rezept gedimmt angezeigt und beim Einkaufslisten-Aufbau übersprungen."
+            : "Als optional markieren"
+        }
+        className="col-start-4 md:col-start-5"
+      >
+        <Parentheses className="size-4" />
+      </Button>
+      <Button
         variant="ghost"
         size="icon"
         onClick={onRemove}
         aria-label="Zutat entfernen"
-        className="col-start-4 md:col-start-5"
+        className="col-start-5 md:col-start-6"
       >
         <Trash2 className="size-4" />
       </Button>

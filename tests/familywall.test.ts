@@ -63,6 +63,7 @@ describe("transformFamilywallRecipe", () => {
       quantity: 500,
       unitId: 1, // g
       notes: null,
+      isOptional: false,
     });
   });
 

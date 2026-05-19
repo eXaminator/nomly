@@ -3,7 +3,7 @@ import { asc } from "drizzle-orm";
 import { AppShell } from "@/components/layout/app-shell";
 import { RecipeForm } from "@/components/recipes/recipe-form";
 import { getRecipe } from "@/lib/recipes/service";
-import type { DraftRecipe } from "@/components/recipes/types";
+import { quantityToInputString, type DraftRecipe } from "@/components/recipes/types";
 import { db } from "@/db";
 import { tag } from "@/db/schema";
 
@@ -50,9 +50,10 @@ export default async function EditRecipePage({
           i.ingredientName.toLowerCase()
             ? null
             : i.canonicalIngredientName,
-        quantity: i.quantity === null ? "" : String(i.quantity),
+        quantity: quantityToInputString(i.quantity),
         unit: i.unitId !== null && i.unitName ? { id: i.unitId, name: i.unitName } : null,
         notes: i.notes ?? "",
+        isOptional: i.isOptional,
       })),
     })),
   };

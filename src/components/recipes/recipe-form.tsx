@@ -39,6 +39,7 @@ function ingredientToPayload(ing: DraftIngredient) {
     quantity: toNumberOrNull(ing.quantity),
     unitId: ing.unit?.id ?? null,
     notes: ing.notes.trim() || null,
+    isOptional: ing.isOptional,
   };
 }
 

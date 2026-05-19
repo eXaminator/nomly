@@ -34,6 +34,9 @@ export type DraftIngredient = {
   quantity: string;
   unit: ComboboxItem | null;
   notes: string;
+  /** When true, the row renders dimmed/italic in the read view and is skipped
+   *  by the shopping-list builder. Edited via a per-row toggle. */
+  isOptional: boolean;
   importAnnotation?: ImportAnnotation;
 };
 
@@ -56,6 +59,23 @@ export type DraftRecipe = {
   sections: DraftSection[];
 };
 
+/**
+ * Format a stored numeric quantity for the German-language quantity input.
+ * Outputs "1,5" (not "1.5") so the user sees the same convention they typed.
+ * Returns "" for null. Preserves precision (no rounding) — round-trip:
+ * input.toString() ↔ display.
+ */
+export function quantityToInputString(q: number | null): string {
+  if (q === null) return "";
+  // Intl.NumberFormat with a high digit cap keeps full precision while
+  // emitting the German decimal comma. useGrouping=false to suppress
+  // thousands separators (a 1234 g ingredient should show "1234", not "1.234").
+  return new Intl.NumberFormat("de-DE", {
+    maximumFractionDigits: 20,
+    useGrouping: false,
+  }).format(q);
+}
+
 export function emptyIngredient(): DraftIngredient {
   return {
     uid: crypto.randomUUID(),
@@ -64,6 +84,7 @@ export function emptyIngredient(): DraftIngredient {
     quantity: "",
     unit: null,
     notes: "",
+    isOptional: false,
   };
 }
 
@@ -108,6 +129,7 @@ export function emptyRecipe(): DraftRecipe {
             quantity: "",
             unit: null,
             notes: "",
+            isOptional: false,
           },
         ],
       },

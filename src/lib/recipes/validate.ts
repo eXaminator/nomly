@@ -5,6 +5,7 @@ const ingredientSchema = z.object({
   quantity: z.number().nullable(),
   unitId: z.number().int().positive().nullable(),
   notes: z.string().nullable(),
+  isOptional: z.boolean().default(false),
 });
 
 const sectionSchema = z.object({

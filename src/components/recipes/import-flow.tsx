@@ -13,10 +13,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RecipeForm } from "./recipe-form";
-import type {
-  DraftIngredient,
-  DraftRecipe,
-  ImportAnnotation,
+import {
+  quantityToInputString,
+  type DraftIngredient,
+  type DraftRecipe,
+  type ImportAnnotation,
 } from "./types";
 
 type ImportedRecipeResponse = {
@@ -77,6 +78,7 @@ function importedToDraft(
                 quantity: "",
                 unit: null,
                 notes: "",
+                isOptional: false,
               },
             ]
           : s.ingredients.map<DraftIngredient>((i) => {
@@ -94,9 +96,10 @@ function importedToDraft(
                 uid: crypto.randomUUID(),
                 name: i.name,
                 canonicalName: i.canonicalIngredientName,
-                quantity: i.quantity === null ? "" : String(i.quantity),
+                quantity: quantityToInputString(i.quantity),
                 unit: i.unit ? { id: i.unit.id, name: i.unit.name } : null,
                 notes: i.notes ?? "",
+                isOptional: false,
                 importAnnotation: annotation,
               };
             }),

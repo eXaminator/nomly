@@ -6,6 +6,7 @@ export type RecipeIngredientInput = {
   quantity: number | null;
   unitId: number | null;
   notes: string | null;
+  isOptional: boolean;
 };
 
 export type RecipeSectionInput = {
@@ -35,6 +36,9 @@ export type RecipeListItem = {
   prepTimeMin: number | null;
   cookTimeMin: number | null;
   tags: string[];
+  /** Derived from non-optional ingredients' dietary_class. `null` = unknown. */
+  isVegan: boolean | null;
+  isVegetarian: boolean | null;
 };
 
 export type RecipeIngredientView = {
@@ -50,6 +54,7 @@ export type RecipeIngredientView = {
   unitId: number | null;
   unitName: string | null;
   notes: string | null;
+  isOptional: boolean;
   sortOrder: number;
 };
 
@@ -72,6 +77,9 @@ export type RecipeView = {
   cookTimeMin: number | null;
   tags: string[];
   sections: RecipeSectionView[];
+  /** Derived from non-optional ingredients' dietary_class. `null` = unknown. */
+  isVegan: boolean | null;
+  isVegetarian: boolean | null;
   createdAt: number;
   updatedAt: number;
 };

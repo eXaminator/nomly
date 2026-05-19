@@ -80,6 +80,16 @@ export const ingredient = sqliteTable("ingredient", {
   excludeFromShoppingList: integer("exclude_from_shopping_list", { mode: "boolean" })
     .notNull()
     .default(false),
+  /**
+   * Diet classification used to derive recipe-level vegan/vegetarian flags.
+   * NULL = unknown (user hasn't tagged this ingredient yet) and disqualifies
+   * the recipe from being claimed as vegan or vegetarian. "vegan" implies
+   * "vegetarian"; "meat" covers anything that is neither (fish, gelatin,
+   * meat, etc.).
+   */
+  dietaryClass: text("dietary_class", {
+    enum: ["vegan", "vegetarian", "meat"],
+  }),
   createdAt: integer("created_at").notNull().default(now),
   updatedAt: integer("updated_at").notNull().default(now),
 });
@@ -131,6 +141,12 @@ export const recipeIngredient = sqliteTable(
     quantity: real("quantity"),
     unitId: integer("unit_id").references(() => unit.id, { onDelete: "set null" }),
     notes: text("notes"),
+    /**
+     * When true, this ingredient is "(optional) garnish"-style — the recipe
+     * still works without it. The read view dims optional rows and the
+     * shopping-list builder skips them when seeding from a meal plan.
+     */
+    isOptional: integer("is_optional", { mode: "boolean" }).notNull().default(false),
     sortOrder: integer("sort_order").notNull().default(0),
   },
   (t) => [index("recipe_ingredient_section_idx").on(t.sectionId)],

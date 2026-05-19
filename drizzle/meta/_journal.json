@@ -15,6 +15,20 @@
       "when": 1779100033824,
       "tag": "0001_acoustic_tarantula",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1779223754003,
+      "tag": "0002_huge_stellaris",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1779223953477,
+      "tag": "0003_dark_virginia_dare",
+      "breakpoints": true
     }
   ]
 }

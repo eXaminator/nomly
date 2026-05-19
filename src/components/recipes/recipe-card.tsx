@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Clock, Users } from "lucide-react";
 import type { RecipeListItem } from "@/lib/recipes/types";
 import { cn } from "@/lib/cn";
+import { DietBadge } from "./diet-badge";
 
 type Props = { recipe: RecipeListItem };
 
@@ -35,6 +36,11 @@ export function RecipeCard({ recipe }: Props) {
           </p>
         ) : null}
         <div className="mt-auto flex flex-wrap items-center gap-3 text-xs text-[var(--color-muted-fg)]">
+          <DietBadge
+            isVegan={recipe.isVegan}
+            isVegetarian={recipe.isVegetarian}
+            size="sm"
+          />
           <span className="inline-flex items-center gap-1">
             <Users className="size-3.5" />
             {recipe.servings}
