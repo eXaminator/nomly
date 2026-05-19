@@ -37,6 +37,49 @@ function joinInstructions(steps: string[]): string {
 
 const FAVORITE_TAG = "Familywall-Favorit";
 
+/**
+ * A bare line of all-uppercase text (no digits, no commas) is treated as a
+ * section heading rather than an ingredient — typical pattern in scraped
+ * recipes that split the ingredient list into PASTRY / FILLING / GLAZE.
+ */
+function isSectionHeading(line: string): boolean {
+  const trimmed = line.trim();
+  if (trimmed.length < 2) return false;
+  if (!/\p{L}/u.test(trimmed)) return false;
+  if (/[\d,;()/]/.test(trimmed)) return false;
+  return trimmed === trimmed.toUpperCase();
+}
+
+function toTitleCase(s: string): string {
+  return s.toLowerCase().replace(/\p{L}+/gu, (w) => w[0].toUpperCase() + w.slice(1));
+}
+
+/**
+ * Split raw ingredient lines into one-or-more sections at every all-caps
+ * heading. The heading (title-cased) becomes the section title; lines
+ * between headings are that section's ingredients.
+ */
+function splitIngredientsBySection(
+  lines: string[],
+): Array<{ title: string | null; ingredients: string[] }> {
+  const sections: Array<{ title: string | null; ingredients: string[] }> = [];
+  let cur: { title: string | null; ingredients: string[] } = {
+    title: null,
+    ingredients: [],
+  };
+  for (const line of lines) {
+    if (isSectionHeading(line)) {
+      if (cur.ingredients.length > 0) sections.push(cur);
+      cur = { title: toTitleCase(line.trim()), ingredients: [] };
+    } else {
+      cur.ingredients.push(line);
+    }
+  }
+  if (cur.ingredients.length > 0 || cur.title !== null) sections.push(cur);
+  if (sections.length === 0) sections.push({ title: null, ingredients: [] });
+  return sections;
+}
+
 function dedupeTags(tags: Iterable<string>): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
@@ -57,36 +100,38 @@ export function transformFamilywallRecipe(
   /** Photo path the orchestrator stored before calling us, or null. */
   photoPath: string | null,
 ): RecipeInput {
-  const ingredients = raw.ingredients
-    .map((line) => parseIngredientString(line))
-    .map((parsed) => {
-      const fallbackName = parsed.name.trim();
-      const name =
-        fallbackName.length > 0
-          ? fallbackName
-          : "Unbekannte Zutat";
-      const { resolved, rawUnit } = resolveUnit(
-        lookups.units,
-        parsed.unitName,
-        parsed.quantity,
-      );
-      // Unresolved unit tokens get appended to notes so the user can still
-      // see what Familywall had — same trick the URL importer uses.
-      const noteParts = [
-        parsed.notes,
-        rawUnit && !resolved ? `Einheit: ${rawUnit}` : null,
-      ].filter((p): p is string => typeof p === "string" && p.length > 0);
-      // resolveIngredientName is informational here — `createRecipe` will
-      // do its own case-insensitive resolution when it inserts. We don't
-      // need to pass the resolved id, just the name string.
-      void resolveIngredientName(lookups.ingredients, name);
-      return {
-        ingredientName: name,
-        quantity: parsed.quantity,
-        unitId: resolved ? resolved.id : null,
-        notes: noteParts.length > 0 ? noteParts.join(" – ") : null,
-      };
-    });
+  function parseLine(line: string) {
+    const parsed = parseIngredientString(line);
+    const fallbackName = parsed.name.trim();
+    const name = fallbackName.length > 0 ? fallbackName : "Unbekannte Zutat";
+    const { resolved, rawUnit } = resolveUnit(
+      lookups.units,
+      parsed.unitName,
+      parsed.quantity,
+    );
+    const noteParts = [
+      parsed.notes,
+      rawUnit && !resolved ? `Einheit: ${rawUnit}` : null,
+    ].filter((p): p is string => typeof p === "string" && p.length > 0);
+    // resolveIngredientName is informational here — `createRecipe` does its
+    // own case-insensitive resolution when it inserts.
+    void resolveIngredientName(lookups.ingredients, name);
+    return {
+      ingredientName: name,
+      quantity: parsed.quantity,
+      unitId: resolved ? resolved.id : null,
+      notes: noteParts.length > 0 ? noteParts.join(" – ") : null,
+    };
+  }
+
+  const sectionRaw = splitIngredientsBySection(raw.ingredients);
+  // Instructions describe the whole recipe; Familywall doesn't split them
+  // per-section, so they stay on the first section.
+  const sections = sectionRaw.map((section, idx) => ({
+    title: section.title,
+    instructions: idx === 0 ? joinInstructions(raw.instructions) : "",
+    ingredients: section.ingredients.map(parseLine),
+  }));
 
   return {
     title: raw.title.trim() || "Importiertes Rezept",
@@ -103,12 +148,6 @@ export function transformFamilywallRecipe(
       ...raw.tags,
       ...(raw.isFavorite ? [FAVORITE_TAG] : []),
     ]),
-    sections: [
-      {
-        title: null,
-        instructions: joinInstructions(raw.instructions),
-        ingredients,
-      },
-    ],
+    sections,
   };
 }

@@ -212,6 +212,136 @@ describe("transformFamilywallRecipe", () => {
     expect(ing.ingredientName).toBe("Mehl");
   });
 
+  it("strips pseudo-plural '(n)' from ingredient names", () => {
+    const out = transformFamilywallRecipe(
+      makeRaw({ ingredients: ["6 Tomate(n)"] }),
+      makeLookups(),
+      null,
+    );
+    const ing = out.sections[0].ingredients[0];
+    expect(ing.ingredientName).toBe("Tomate");
+    expect(ing.quantity).toBe(6);
+  });
+
+  it("strips pseudo-plural '/n' from a Familywall unit marker", () => {
+    const lookups = makeLookups();
+    lookups.units.byNameOrAlias.set("dose", { id: 6, name: "Dose" });
+    const out = transformFamilywallRecipe(
+      makeRaw({ ingredients: ["1 Dose/n Kidneybohnen"] }),
+      lookups,
+      null,
+    );
+    const ing = out.sections[0].ingredients[0];
+    expect(ing.quantity).toBe(1);
+    expect(ing.unitId).toBe(6); // Dose
+    expect(ing.ingredientName).toBe("Kidneybohnen");
+  });
+
+  it("captures parenthesised content anywhere as notes", () => {
+    const lookups = makeLookups();
+    lookups.units.byNameOrAlias.set("dose", { id: 6, name: "Dose" });
+    const out = transformFamilywallRecipe(
+      makeRaw({
+        ingredients: ["1 Dose Kidneybohnen (Abtropfgewicht ca. 255 g)"],
+      }),
+      lookups,
+      null,
+    );
+    const ing = out.sections[0].ingredients[0];
+    expect(ing.ingredientName).toBe("Kidneybohnen");
+    expect(ing.notes).toBe("Abtropfgewicht ca. 255 g");
+  });
+
+  it("drops 'of' filler between unit and name", () => {
+    const out = transformFamilywallRecipe(
+      makeRaw({ ingredients: ["100g of caster sugar"] }),
+      makeLookups(),
+      null,
+    );
+    const ing = out.sections[0].ingredients[0];
+    expect(ing.quantity).toBe(100);
+    expect(ing.unitId).toBe(1); // g
+    expect(ing.ingredientName).toBe("caster sugar");
+  });
+
+  it("moves 'oder'-alternatives into notes", () => {
+    const out = transformFamilywallRecipe(
+      makeRaw({ ingredients: ["100g Butter oder Margarine"] }),
+      makeLookups(),
+      null,
+    );
+    const ing = out.sections[0].ingredients[0];
+    expect(ing.ingredientName).toBe("Butter");
+    expect(ing.notes).toBe("oder Margarine");
+  });
+
+  it("moves 'z.B.' examples into notes", () => {
+    const lookups = makeLookups();
+    lookups.units.byNameOrAlias.set("tl", { id: 7, name: "TL" });
+    const out = transformFamilywallRecipe(
+      makeRaw({ ingredients: ["1 TL Salz z.B. Meersalz"] }),
+      lookups,
+      null,
+    );
+    const ing = out.sections[0].ingredients[0];
+    expect(ing.quantity).toBe(1);
+    expect(ing.unitId).toBe(7); // TL
+    expect(ing.ingredientName).toBe("Salz");
+    expect(ing.notes).toBe("z.B. Meersalz");
+  });
+
+  it("recovers a spaced decimal '0, 5'", () => {
+    const out = transformFamilywallRecipe(
+      makeRaw({ ingredients: ["0, 5 g Senf"] }),
+      makeLookups(),
+      null,
+    );
+    const ing = out.sections[0].ingredients[0];
+    expect(ing.quantity).toBe(0.5);
+    expect(ing.unitId).toBe(1); // g
+    expect(ing.ingredientName).toBe("Senf");
+  });
+
+  it("splits ingredients at ALL-CAPS section headings", () => {
+    const out = transformFamilywallRecipe(
+      makeRaw({
+        ingredients: [
+          "PASTRY",
+          "200g Mehl",
+          "100g Butter",
+          "FILLING",
+          "3 Eier",
+        ],
+      }),
+      makeLookups(),
+      null,
+    );
+    expect(out.sections).toHaveLength(2);
+    expect(out.sections[0].title).toBe("Pastry");
+    expect(out.sections[0].ingredients.map((i) => i.ingredientName)).toEqual([
+      "Mehl",
+      "Butter",
+    ]);
+    expect(out.sections[1].title).toBe("Filling");
+    expect(out.sections[1].ingredients.map((i) => i.ingredientName)).toEqual([
+      "Eier",
+    ]);
+    // Instructions stay on the first section
+    expect(out.sections[0].instructions).toBe("1. Anbraten.\n2. Schmoren.");
+    expect(out.sections[1].instructions).toBe("");
+  });
+
+  it("uses first-line heading as the first section's title", () => {
+    const out = transformFamilywallRecipe(
+      makeRaw({ ingredients: ["DOUGH", "200g Mehl"] }),
+      makeLookups(),
+      null,
+    );
+    expect(out.sections).toHaveLength(1);
+    expect(out.sections[0].title).toBe("Dough");
+    expect(out.sections[0].ingredients).toHaveLength(1);
+  });
+
   it("parses '1½tsp' as quantity 1.5 + tsp", () => {
     const lookups = makeLookups();
     lookups.units.byNameOrAlias.set("tsp", { id: 5, name: "TL" });

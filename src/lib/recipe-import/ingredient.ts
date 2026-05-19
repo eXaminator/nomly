@@ -49,8 +49,52 @@ export type ParsedIngredient = {
 };
 
 function normalize(s: string): string {
-  return s.replace(/\s+/g, " ").trim();
+  return (
+    s
+      .replace(/\s+/g, " ")
+      // Spaced decimal commas/dots — Familywall sometimes serves "0, 5" or
+      // "1 . 5". Collapse to "0,5" / "1.5" before tokenising so the numeric
+      // matchers see them as one token.
+      .replace(/(\d)\s+([.,])\s*(\d)/g, "$1$2$3")
+      .replace(/(\d)([.,])\s+(\d)/g, "$1$2$3")
+      // Pseudo-pluralization markers in scraped German recipes:
+      //   "Tomate(n)" → "Tomate", "Zehe(n)" → "Zehe", "Dose/n" → "Dose"
+      // Restrict the inner part to 1-3 letters so we don't strip real
+      // notes ("Erdnussbutter (creamy)") or genuine alternatives
+      // ("Salz/Pfeffer").
+      .replace(/([\p{L}]+)\((\p{L}{1,3})\)/gu, "$1")
+      .replace(/([\p{L}]+)\/\p{L}{1,3}\b/gu, "$1")
+      .trim()
+  );
 }
+
+/**
+ * Words that, when they appear standalone in the name area, mark the
+ * boundary into "notes" — typically a list of alternatives or examples
+ * ("Butter oder Margarine", "Salz z.B. Meersalz"). The matched word
+ * itself is preserved in the notes so a reader still sees the relationship.
+ */
+const NOTE_BOUNDARY_TOKENS = new Set(
+  [
+    "or",
+    "oder",
+    "alternative",
+    "alternativ",
+    "bzw",
+    "bzw.",
+    "z.b.",
+    "z.b",
+    "zb",
+    "ggf",
+    "ggf.",
+  ].map((t) => t.toLowerCase()),
+);
+
+/**
+ * Filler words to drop between a unit and the ingredient name —
+ * "100g of caster sugar" → ignore "of"; same for German "100g von Zucker".
+ */
+const NAME_FILLER_TOKENS = new Set(["of", "von"]);
 
 const NUMERIC_TOKEN_RE = /^[\d./,\-–½¼¾⅓⅔⅛⅜⅝⅞]+$/;
 
@@ -167,11 +211,33 @@ export function parseIngredientString(raw: string): ParsedIngredient {
     }
   }
 
-  // Everything up to the first standalone comma is the name; the rest is notes.
+  // Drop a leading filler word between unit and name ("of", "von").
+  while (tokens.length > 0 && NAME_FILLER_TOKENS.has(tokens[0].toLowerCase())) {
+    tokens.shift();
+  }
+
+  // Split into name vs. notes:
+  // - Tokens inside `(...)` always go to notes (parens themselves are dropped).
+  // - A standalone comma starts notes mode.
+  // - "or", "oder", "alternative", "z.B." in the name area also start notes
+  //   mode — the matched word is preserved in the notes.
   const nameTokens: string[] = [];
   const noteTokens: string[] = [];
   let inNotes = false;
+  let parenDepth = 0;
   for (const t of tokens) {
+    if (t === "(") {
+      parenDepth += 1;
+      continue;
+    }
+    if (t === ")") {
+      parenDepth = Math.max(0, parenDepth - 1);
+      continue;
+    }
+    if (parenDepth > 0) {
+      noteTokens.push(t);
+      continue;
+    }
     if (!inNotes && t === ",") {
       inNotes = true;
       continue;
@@ -180,9 +246,11 @@ export function parseIngredientString(raw: string): ParsedIngredient {
       if (inNotes) noteTokens.push(",");
       continue;
     }
-    if (t === "(" || t === ")") {
-      // Parentheses become part of notes if we're in notes, else dropped.
-      if (inNotes) noteTokens.push(t);
+    if (!inNotes && NOTE_BOUNDARY_TOKENS.has(t.toLowerCase())) {
+      // The boundary word itself joins the notes so a reader sees the
+      // relationship ("Butter oder Margarine" → notes: "oder Margarine").
+      inNotes = true;
+      noteTokens.push(t);
       continue;
     }
     (inNotes ? noteTokens : nameTokens).push(t);

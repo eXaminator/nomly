@@ -96,7 +96,7 @@ export default async function RecipeViewPage({
 
       {descriptionHtml ? (
         <div
-          className="prose prose-sm mt-6 max-w-none text-[var(--color-fg)] dark:prose-invert"
+          className="markdown mt-6 text-[var(--color-fg)]"
           dangerouslySetInnerHTML={{ __html: descriptionHtml }}
         />
       ) : null}
@@ -144,7 +144,7 @@ export default async function RecipeViewPage({
                 ) : null}
                 {html ? (
                   <div
-                    className="prose prose-sm mt-2 max-w-none text-[var(--color-fg)] dark:prose-invert"
+                    className="markdown mt-2 text-[var(--color-fg)]"
                     dangerouslySetInnerHTML={{ __html: html }}
                   />
                 ) : (

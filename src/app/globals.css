@@ -63,3 +63,84 @@
     }
   }
 }
+
+/* Lightweight prose styling for renderMarkdown output. We don't pull in
+   @tailwindcss/typography for two reasons: it's a heavy plugin and we only
+   need a handful of elements rendered well (recipe description + section
+   instructions). Scoped to `.markdown` so other places (forms, navigation)
+   keep their explicit styles. */
+.markdown {
+  line-height: 1.6;
+}
+.markdown > * + * {
+  margin-top: 0.75rem;
+}
+.markdown p {
+  margin: 0;
+}
+.markdown strong {
+  font-weight: 600;
+}
+.markdown em {
+  font-style: italic;
+}
+.markdown a {
+  color: var(--color-accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.markdown a:hover {
+  color: var(--color-fg);
+}
+.markdown ol,
+.markdown ul {
+  margin: 0;
+  padding-left: 1.5rem;
+}
+.markdown ol {
+  list-style: decimal;
+}
+.markdown ul {
+  list-style: disc;
+}
+.markdown li + li {
+  margin-top: 0.25rem;
+}
+.markdown li > p:first-child {
+  display: inline;
+}
+.markdown h1,
+.markdown h2,
+.markdown h3 {
+  font-weight: 600;
+  line-height: 1.25;
+  margin-top: 1rem;
+}
+.markdown h1 {
+  font-size: 1.5rem;
+}
+.markdown h2 {
+  font-size: 1.25rem;
+}
+.markdown h3 {
+  font-size: 1.05rem;
+}
+.markdown code {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  background: var(--color-muted);
+  padding: 0.1em 0.35em;
+  border-radius: 0.3em;
+}
+.markdown pre {
+  font-family: var(--font-mono);
+  background: var(--color-muted);
+  padding: 0.75rem 1rem;
+  border-radius: var(--radius);
+  overflow-x: auto;
+}
+.markdown blockquote {
+  border-left: 3px solid var(--color-border);
+  padding-left: 1rem;
+  color: var(--color-muted-fg);
+}

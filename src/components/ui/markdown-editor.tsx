@@ -396,7 +396,7 @@ export function MarkdownEditor({
       ) : (
         <div
           className={cn(
-            "prose prose-sm max-w-none px-3 py-2 text-[var(--color-fg)] dark:prose-invert",
+            "markdown px-3 py-2 text-[var(--color-fg)]",
             !previewHtml && "italic text-[var(--color-muted-fg)]",
           )}
           style={{ minHeight }}
