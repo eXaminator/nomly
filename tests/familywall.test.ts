@@ -252,6 +252,35 @@ describe("transformFamilywallRecipe", () => {
     expect(ing.notes).toBe("Abtropfgewicht ca. 255 g");
   });
 
+  it("strips existing step numbering before re-numbering", () => {
+    const out = transformFamilywallRecipe(
+      makeRaw({
+        instructions: [
+          "1. Heat the oil.",
+          "2) Add onions.",
+          "Step 3: Stir well.",
+          "Schritt 4. Servieren.",
+        ],
+      }),
+      makeLookups(),
+      null,
+    );
+    expect(out.sections[0].instructions).toBe(
+      "1. Heat the oil.\n2. Add onions.\n3. Stir well.\n4. Servieren.",
+    );
+  });
+
+  it("doesn't strip content that just happens to start with a digit", () => {
+    const out = transformFamilywallRecipe(
+      makeRaw({ instructions: ["1.5 cups of broth, simmer 10 minutes."] }),
+      makeLookups(),
+      null,
+    );
+    expect(out.sections[0].instructions).toBe(
+      "1. 1.5 cups of broth, simmer 10 minutes.",
+    );
+  });
+
   it("recognises 'Dose' after a size modifier 'kl.'", () => {
     const lookups = makeLookups();
     lookups.units.byNameOrAlias.set("dose", { id: 6, name: "Dose" });

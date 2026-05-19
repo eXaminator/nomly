@@ -22,6 +22,19 @@ import type { RecipeInput } from "../recipes/types.ts";
 import type { FamilywallRawRecipe } from "./types.ts";
 
 /**
+ * Strip any existing leading step-number marker from a single step, so we
+ * don't double-number ("1. Heat oil" + our "1. " prefix → "1. 1. Heat oil").
+ * Recognises:
+ *   "1." / "1)" / "1:" — bare numeric marker
+ *   "Step 1." / "Schritt 1:" — labelled marker
+ * The marker must be followed by whitespace, which keeps real content like
+ * "1.5 cups" / "1 minute later" from being eaten.
+ */
+function stripStepNumber(s: string): string {
+  return s.replace(/^\s*(?:step\s+|schritt\s+)?\d+\s*[.):\]]+\s+/i, "");
+}
+
+/**
  * Render the step list as a markdown ordered list. Always uses `1.`, `2.`,
  * … even when there's a single step — that way the rendered recipe shows
  * the same structure regardless of how many steps Familywall had, and the
@@ -30,6 +43,7 @@ import type { FamilywallRawRecipe } from "./types.ts";
 function joinInstructions(steps: string[]): string {
   const cleaned = steps
     .map((s) => s.replace(/\s+/g, " ").trim())
+    .map(stripStepNumber)
     .filter((s) => s.length > 0);
   if (cleaned.length === 0) return "";
   return cleaned.map((s, i) => `${i + 1}. ${s}`).join("\n");
