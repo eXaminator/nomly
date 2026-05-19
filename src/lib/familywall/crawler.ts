@@ -393,8 +393,41 @@ async function extractCurrentDetail(
  * iteration clicks one `.mp-recipe` row, waits for `#recipeDetail` to
  * re-render, then extracts the detail.
  */
+/**
+ * Best-effort recovery: if the page is no longer on the recipe list
+ * (session timed out, accidental navigation, …) bring it back. Returns
+ * true if we end up on a working recipebox page.
+ */
+async function ensureOnRecipeList(
+  page: Page,
+  options: CrawlOptions,
+  debug: boolean,
+): Promise<boolean> {
+  let url = "";
+  try {
+    url = page.url();
+  } catch {
+    // Detached page — let goto re-create it.
+  }
+  if (url.includes("recipebox.php") && !url.includes("noautologin")) {
+    return true;
+  }
+  if (debug) console.log(`[familywall] recovering session (at ${url})`);
+  try {
+    if (url.includes("noautologin") || url.includes("fw2_signin")) {
+      await login(page, options.email, options.password);
+    }
+    await gotoRecipeList(page, debug);
+    return true;
+  } catch (e) {
+    if (debug) console.log(`[familywall] recovery failed: ${e}`);
+    return false;
+  }
+}
+
 async function* iterRecipes(
   page: Page,
+  options: CrawlOptions,
   limit: number | undefined,
   pageTimeoutMs: number,
   debug: boolean,
@@ -420,6 +453,19 @@ async function* iterRecipes(
   for (let i = 0; i < n; i++) {
     const recipeId = recipeIds[i];
     try {
+      // If we drifted off the recipe list (session timed out, unexpected
+      // redirect), recover before trying to click the next card. Doing
+      // this at the top of each iteration means a single bad recipe
+      // doesn't take down the rest of the run.
+      const currentUrl = page.url();
+      if (!currentUrl.includes("recipebox.php") || currentUrl.includes("noautologin")) {
+        const ok = await ensureOnRecipeList(page, options, debug);
+        if (!ok) {
+          yield null;
+          continue;
+        }
+      }
+
       const titleBefore = await page
         .evaluate(() => {
           const t = document
@@ -447,6 +493,9 @@ async function* iterRecipes(
         if (debug) {
           console.log(`[familywall] recipe #${i} (${recipeId}) card missing`);
         }
+        // Card missing usually means the page drifted — try to recover so
+        // the next iteration has a chance.
+        await ensureOnRecipeList(page, options, debug);
         yield null;
         continue;
       }
@@ -475,6 +524,9 @@ async function* iterRecipes(
       if (debug) {
         console.log(`[familywall] recipe #${i} (${recipeId}) failed: ${e}`);
       }
+      // Most likely a navigation-destroyed-execution-context error. Try
+      // to recover so the rest of the queue can still run.
+      await ensureOnRecipeList(page, options, debug).catch(() => {});
       yield null;
     }
   }
@@ -540,6 +592,7 @@ export async function withFamilywallCrawler(
     let current = 0;
     for await (const recipe of iterRecipes(
       page,
+      options,
       options.limit,
       pageTimeoutMs,
       debug,
