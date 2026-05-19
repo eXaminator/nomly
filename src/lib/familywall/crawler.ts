@@ -127,12 +127,28 @@ async function login(page: Page, email: string, password: string) {
     "button:has-text('Anmelden')",
     "button:has-text('Sign in')",
   ]);
-  await Promise.all([
-    page.waitForURL((url) => !url.toString().includes("fw2_signin.php"), {
-      timeout: 60_000,
-    }),
-    submit ? submit.click() : pwField.press("Enter"),
-  ]);
+  // Fire the submit then poll the URL ourselves — `page.waitForURL` waits
+  // for the `load` event by default and Familywall's redirect chain
+  // (signin → home → …) doesn't always settle cleanly within the budget.
+  // Polling is cheap and dodges the "load never fired" timeout.
+  if (submit) {
+    await submit.click().catch(() => {});
+  } else {
+    await pwField.press("Enter").catch(() => {});
+  }
+  const deadline = Date.now() + 60_000;
+  while (Date.now() < deadline) {
+    const url = page.url();
+    if (!url.includes("fw2_signin.php") && !url.includes("about:blank")) {
+      break;
+    }
+    await delay(300);
+  }
+  if (page.url().includes("fw2_signin.php")) {
+    throw new Error(
+      "Login did not redirect off /fw2_signin.php — check credentials or a CAPTCHA may have appeared (try --headed).",
+    );
+  }
 }
 
 async function gotoRecipeList(page: Page, debug: boolean) {
