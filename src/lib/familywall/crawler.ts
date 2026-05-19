@@ -143,19 +143,22 @@ async function gotoRecipeList(page: Page, debug: boolean) {
   await page.waitForLoadState("networkidle").catch(() => {});
 
   // The recipe list lives inside a vertically-scrolling `<div class="main
-  // flexcol">` panel and progressively renders more rows as you scroll
-  // toward the bottom. Without this nudge a handful of recipes at the very
-  // end of the alphabet were missed. Scroll repeatedly until the visible
-  // count is stable across two consecutive checks.
+  // flexcol">` panel that progressively renders more rows. Scroll until
+  // the visible count is stable across three consecutive checks with a
+  // generous beat — Familywall has been observed to need >1 s to render
+  // late additions in headless mode.
   let stable = 0;
   let previous = -1;
-  while (stable < 2) {
+  let iterations = 0;
+  while (stable < 3 && iterations < 40) {
+    iterations += 1;
     const count = await page.locator(".mp-recipe-list .mp-recipe").count();
     if (count === previous) {
       stable += 1;
     } else {
       stable = 0;
       previous = count;
+      if (debug) console.log(`[familywall] scroll: visible=${count}`);
     }
     await page
       .evaluate(() => {
@@ -165,7 +168,7 @@ async function gotoRecipeList(page: Page, debug: boolean) {
         if (scrollEl) scrollEl.scrollTop = scrollEl.scrollHeight;
       })
       .catch(() => {});
-    await delay(POLITE_DELAY_MS);
+    await delay(1000);
   }
 
   // Scroll back to top so the first .mp-recipe is in view and the first
@@ -479,6 +482,15 @@ export async function withFamilywallCrawler(
     const ctx = await browser.newContext({
       locale: "de-DE",
       viewport: { width: 1280, height: 900 },
+      // Familywall serves a slightly smaller recipe list to HeadlessChrome —
+      // we were missing ~2 recipes at the end of the alphabet. Spoof a real
+      // Chrome user-agent and hide the webdriver flag.
+      userAgent:
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    });
+    await ctx.addInitScript(() => {
+      // navigator.webdriver = true is the most common headless tell.
+      Object.defineProperty(navigator, "webdriver", { get: () => false });
     });
     const page = await ctx.newPage();
     await login(page, options.email, options.password);
