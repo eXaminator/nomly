@@ -252,6 +252,17 @@ describe("transformFamilywallRecipe", () => {
     expect(ing.notes).toBe("Abtropfgewicht ca. 255 g");
   });
 
+  it("strips unbalanced trailing parens defensively", () => {
+    const out = transformFamilywallRecipe(
+      makeRaw({ ingredients: ["3 Tomate, gewürfelt)"] }),
+      makeLookups(),
+      null,
+    );
+    const ing = out.sections[0].ingredients[0];
+    expect(ing.notes).toBe("gewürfelt");
+    expect(ing.ingredientName).toBe("Tomate");
+  });
+
   it("drops 'of' filler between unit and name", () => {
     const out = transformFamilywallRecipe(
       makeRaw({ ingredients: ["100g of caster sugar"] }),

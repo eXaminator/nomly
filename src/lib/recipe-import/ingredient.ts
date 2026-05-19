@@ -256,8 +256,17 @@ export function parseIngredientString(raw: string): ParsedIngredient {
     (inNotes ? noteTokens : nameTokens).push(t);
   }
 
-  const name = nameTokens.join(" ").trim();
-  const notes = noteTokens.join(" ").replace(/\s+/g, " ").trim() || null;
+  const name = nameTokens.join(" ").replace(/[()]/g, "").replace(/\s+/g, " ").trim();
+  // Defensive: even though the loop above drops `(` / `)` tokens entirely,
+  // strip any that slipped through (e.g. unbalanced parens from messy input)
+  // and tidy resulting double-spaces / trailing punctuation.
+  const notes =
+    noteTokens
+      .join(" ")
+      .replace(/[()]/g, "")
+      .replace(/\s+/g, " ")
+      .replace(/^[\s,;]+|[\s,;]+$/g, "")
+      .trim() || null;
 
   return { quantity, unitName, name, notes };
 }
