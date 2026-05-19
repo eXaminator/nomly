@@ -137,11 +137,48 @@ async function login(page: Page, email: string, password: string) {
 
 async function gotoRecipeList(page: Page, debug: boolean) {
   await page.goto(FAMILYWALL_RECIPES_URL, { waitUntil: "domcontentloaded" });
-  // The list is loaded synchronously; wait for the container to exist.
   await page
     .waitForSelector(".mp-recipe-list .mp-recipe", { timeout: 20_000 })
     .catch(() => {});
   await page.waitForLoadState("networkidle").catch(() => {});
+
+  // The recipe list lives inside a vertically-scrolling `<div class="main
+  // flexcol">` panel and progressively renders more rows as you scroll
+  // toward the bottom. Without this nudge a handful of recipes at the very
+  // end of the alphabet were missed. Scroll repeatedly until the visible
+  // count is stable across two consecutive checks.
+  let stable = 0;
+  let previous = -1;
+  while (stable < 2) {
+    const count = await page.locator(".mp-recipe-list .mp-recipe").count();
+    if (count === previous) {
+      stable += 1;
+    } else {
+      stable = 0;
+      previous = count;
+    }
+    await page
+      .evaluate(() => {
+        const scrollEl =
+          (document.querySelector(".main.flexcol") as HTMLElement | null) ??
+          document.scrollingElement;
+        if (scrollEl) scrollEl.scrollTop = scrollEl.scrollHeight;
+      })
+      .catch(() => {});
+    await delay(POLITE_DELAY_MS);
+  }
+
+  // Scroll back to top so the first .mp-recipe is in view and the first
+  // click in iterRecipes lands on the right card.
+  await page
+    .evaluate(() => {
+      const scrollEl =
+        (document.querySelector(".main.flexcol") as HTMLElement | null) ??
+        document.scrollingElement;
+      if (scrollEl) scrollEl.scrollTop = 0;
+    })
+    .catch(() => {});
+
   if (debug) {
     const stats = await page.evaluate(() => ({
       url: location.href,
