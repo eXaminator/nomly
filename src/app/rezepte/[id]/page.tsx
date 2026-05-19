@@ -101,61 +101,63 @@ export default async function RecipeViewPage({
         />
       ) : null}
 
-      <div className="mt-8 grid gap-8 lg:grid-cols-[20rem_1fr]">
-        <aside className="space-y-6">
-          {recipe.sections.map((section) => (
-            <div key={section.id}>
+      <div className="mt-8 space-y-12">
+        {recipe.sections.map((section) => {
+          const html = renderMarkdown(section.instructions);
+          const ingredientList = (
+            <ul className="space-y-1 text-sm text-[var(--color-fg)]">
+              {section.ingredients.map((ing) => (
+                <li key={ing.id} className="flex gap-2">
+                  <span className="min-w-12 font-mono text-[var(--color-muted-fg)]">
+                    {formatQuantity(ing.quantity)} {ing.unitName ?? ""}
+                  </span>
+                  <span className="flex-1">
+                    <IngredientLine
+                      displayName={ing.ingredientName}
+                      canonicalName={ing.canonicalIngredientName}
+                    />
+                    {ing.notes ? (
+                      <span className="text-[var(--color-muted-fg)]"> – {ing.notes}</span>
+                    ) : null}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          );
+          // Empty-state for instructions only makes sense for a single-section
+          // recipe — multi-section imports keep all steps on section[0], so
+          // showing "no instructions" under every other section is noise.
+          const showEmptyInstructions =
+            !html && recipe.sections.length === 1;
+          return (
+            <section key={section.id}>
               {section.title ? (
-                <h3 className="text-sm font-semibold uppercase tracking-wider text-[var(--color-muted-fg)]">
+                <h2 className="mb-4 text-xl font-semibold tracking-tight text-[var(--color-fg)]">
                   {section.title}
-                </h3>
+                </h2>
               ) : null}
-              <ul className="mt-2 space-y-1 text-sm text-[var(--color-fg)]">
-                {section.ingredients.map((ing) => (
-                  <li key={ing.id} className="flex gap-2">
-                    <span className="min-w-12 font-mono text-[var(--color-muted-fg)]">
-                      {formatQuantity(ing.quantity)} {ing.unitName ?? ""}
-                    </span>
-                    <span className="flex-1">
-                      <IngredientLine
-                        displayName={ing.ingredientName}
-                        canonicalName={ing.canonicalIngredientName}
+              {html || showEmptyInstructions ? (
+                <div className="grid gap-8 lg:grid-cols-[20rem_1fr]">
+                  <aside>{ingredientList}</aside>
+                  <article>
+                    {html ? (
+                      <div
+                        className="markdown text-[var(--color-fg)]"
+                        dangerouslySetInnerHTML={{ __html: html }}
                       />
-                      {ing.notes ? (
-                        <span className="text-[var(--color-muted-fg)]"> – {ing.notes}</span>
-                      ) : null}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ))}
-        </aside>
-
-        <article className="space-y-8">
-          {recipe.sections.map((section) => {
-            const html = renderMarkdown(section.instructions);
-            return (
-              <section key={section.id}>
-                {section.title ? (
-                  <h2 className="text-xl font-semibold tracking-tight text-[var(--color-fg)]">
-                    {section.title}
-                  </h2>
-                ) : null}
-                {html ? (
-                  <div
-                    className="markdown mt-2 text-[var(--color-fg)]"
-                    dangerouslySetInnerHTML={{ __html: html }}
-                  />
-                ) : (
-                  <p className="mt-2 text-sm text-[var(--color-muted-fg)]">
-                    Keine Anleitung erfasst.
-                  </p>
-                )}
-              </section>
-            );
-          })}
-        </article>
+                    ) : (
+                      <p className="text-sm text-[var(--color-muted-fg)]">
+                        Keine Anleitung erfasst.
+                      </p>
+                    )}
+                  </article>
+                </div>
+              ) : (
+                <div className="lg:max-w-[20rem]">{ingredientList}</div>
+              )}
+            </section>
+          );
+        })}
       </div>
     </AppShell>
   );
