@@ -52,6 +52,7 @@ function buildPayload(draft: DraftRecipe) {
     cookTimeMin: toNumberOrNull(draft.cookTimeMin),
     sourceUrl: draft.sourceUrl.trim() || null,
     photoPath: draft.photoPath,
+    photoUrl: draft.photoUrl.trim() || null,
     tags: draft.tags,
     sections: draft.sections.map((s) => ({
       title: s.title.trim() || null,
@@ -232,8 +233,10 @@ export function RecipeForm({ initial, recipeId, tagSuggestions }: Props) {
             <Label>Foto</Label>
             <div className="mt-1.5">
               <PhotoUpload
-                value={draft.photoPath}
-                onChange={(photoPath) => setDraft({ ...draft, photoPath })}
+                photoPath={draft.photoPath}
+                onPhotoPathChange={(photoPath) => setDraft({ ...draft, photoPath })}
+                photoUrl={draft.photoUrl}
+                onPhotoUrlChange={(photoUrl) => setDraft({ ...draft, photoUrl })}
               />
             </div>
           </div>

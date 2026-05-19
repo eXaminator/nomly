@@ -63,6 +63,7 @@ function importedToDraft(
       imported.cookTimeMin === null ? "" : String(imported.cookTimeMin),
     sourceUrl: imported.sourceUrl,
     photoPath: imported.photoPath,
+    photoUrl: "",
     tags: imported.tags,
     sections: imported.sections.map((s) => ({
       uid: crypto.randomUUID(),

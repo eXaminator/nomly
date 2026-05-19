@@ -22,9 +22,22 @@ export type RecipeInput = {
   prepTimeMin: number | null;
   cookTimeMin: number | null;
   sourceUrl: string | null;
+  /** Path produced by /api/v1/photos (e.g. "photos/<uuid>.webp"). */
   photoPath: string | null;
   tags: string[];
   sections: RecipeSectionInput[];
+};
+
+/**
+ * Wrapper around RecipeInput that allows the API to resolve a freeform
+ * image URL into a photoPath before persisting. The route fetches the URL
+ * via the standard photo pipeline (download → re-encode as webp), then hands
+ * a normal RecipeInput off to the service layer.
+ */
+export type RecipeApiInput = RecipeInput & {
+  /** Image URL the server should download on save. When set, it overrides
+   *  `photoPath` after the download succeeds. */
+  photoUrl?: string | null;
 };
 
 export type RecipeListItem = {

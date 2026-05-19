@@ -5,6 +5,10 @@ import {
   updateRecipe,
 } from "@/lib/recipes/service";
 import { recipeInputSchema } from "@/lib/recipes/validate";
+import {
+  PhotoUrlError,
+  resolvePhotoFromInput,
+} from "@/lib/recipes/photo-from-url";
 
 function parseId(raw: string): number | null {
   const n = Number(raw);
@@ -38,8 +42,17 @@ export async function PATCH(
       { status: 400 },
     );
   }
+  let resolved;
   try {
-    updateRecipe(id, parsed.data);
+    resolved = await resolvePhotoFromInput(parsed.data);
+  } catch (e) {
+    if (e instanceof PhotoUrlError) {
+      return NextResponse.json({ error: e.message }, { status: 422 });
+    }
+    throw e;
+  }
+  try {
+    updateRecipe(id, resolved);
   } catch (e) {
     return NextResponse.json(
       { error: e instanceof Error ? e.message : "update failed" },

@@ -22,6 +22,8 @@ export const recipeInputSchema = z.object({
   cookTimeMin: z.number().int().nonnegative().nullable(),
   sourceUrl: z.string().nullable(),
   photoPath: z.string().nullable(),
+  /** Optional alternative to photoPath — server downloads and replaces. */
+  photoUrl: z.string().nullable().optional(),
   tags: z.array(z.string()),
   sections: z.array(sectionSchema).min(1, "Mindestens einen Abschnitt anlegen"),
 });

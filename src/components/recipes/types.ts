@@ -55,6 +55,9 @@ export type DraftRecipe = {
   cookTimeMin: string;
   sourceUrl: string;
   photoPath: string | null;
+  /** Image URL the server should download on save. When non-empty it takes
+   *  precedence over photoPath. */
+  photoUrl: string;
   tags: string[];
   sections: DraftSection[];
 };
@@ -115,6 +118,7 @@ export function emptyRecipe(): DraftRecipe {
     cookTimeMin: "",
     sourceUrl: "",
     photoPath: null,
+    photoUrl: "",
     tags: [],
     sections: [
       {

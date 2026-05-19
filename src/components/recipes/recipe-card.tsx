@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Clock, Users } from "lucide-react";
+import { Clock, Pencil, Users } from "lucide-react";
 import type { RecipeListItem } from "@/lib/recipes/types";
 import { cn } from "@/lib/cn";
 import { DietBadge } from "./diet-badge";
@@ -8,17 +8,27 @@ type Props = { recipe: RecipeListItem };
 
 export function RecipeCard({ recipe }: Props) {
   return (
-    <Link
-      href={`/rezepte/${recipe.id}`}
-      className="group flex flex-col overflow-hidden rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-card)] transition-colors hover:border-[var(--color-accent)]"
-    >
-      <div className="aspect-video w-full bg-[var(--color-muted)]">
+    <div className="group relative flex h-full flex-col overflow-hidden rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-card)] transition-colors hover:border-[var(--color-accent)]">
+      <Link
+        href={`/rezepte/${recipe.id}/bearbeiten`}
+        onClick={(e) => e.stopPropagation()}
+        aria-label={`„${recipe.title}" bearbeiten`}
+        title="Direkt bearbeiten"
+        className="absolute right-2 top-2 z-10 inline-flex size-8 items-center justify-center rounded-full border border-[var(--color-border)] bg-[var(--color-card)]/85 text-[var(--color-fg)] opacity-0 backdrop-blur-sm transition-opacity hover:bg-[var(--color-card)] focus-visible:opacity-100 group-hover:opacity-100"
+      >
+        <Pencil className="size-4" />
+      </Link>
+      <Link
+        href={`/rezepte/${recipe.id}`}
+        className="flex h-full flex-col"
+      >
+      <div className="aspect-video w-full shrink-0 overflow-hidden bg-[var(--color-muted)]">
         {recipe.photoPath ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
             src={`/api/v1/${recipe.photoPath}`}
             alt={recipe.title}
-            className="h-full w-full object-cover transition-transform group-hover:scale-[1.02]"
+            className="block h-full w-full object-cover transition-transform group-hover:scale-[1.02]"
           />
         ) : (
           <div className="flex h-full items-center justify-center text-[var(--color-muted-fg)]">
@@ -72,6 +82,7 @@ export function RecipeCard({ recipe }: Props) {
           </div>
         ) : null}
       </div>
-    </Link>
+      </Link>
+    </div>
   );
 }

@@ -301,7 +301,16 @@ export function getRecipe(id: number): RecipeView | null {
   };
 }
 
-export function listRecipes(query?: string): RecipeListItem[] {
+export type ListRecipesOptions = {
+  query?: string;
+  /** Recipe must carry every tag in this list. */
+  mustTags?: string[];
+  /** Recipe must carry none of the tags in this list. */
+  notTags?: string[];
+};
+
+export function listRecipes(opts: ListRecipesOptions = {}): RecipeListItem[] {
+  const { query, mustTags = [], notTags = [] } = opts;
   const trimmed = query?.trim() ?? "";
   let rows: Array<typeof recipe.$inferSelect>;
   if (trimmed.length === 0) {
@@ -362,20 +371,36 @@ export function listRecipes(query?: string): RecipeListItem[] {
     tagsByRecipe.set(tr.recipeId, list);
   }
 
-  return rows.map((r) => {
+  // Tag filtering happens in-memory against the already-joined tag map. Tag
+  // names are compared case-insensitively (search hits already are).
+  const mustLower = mustTags.map((t) => t.toLowerCase());
+  const notLower = notTags.map((t) => t.toLowerCase());
+  const passesTagFilter = (recipeTags: string[]): boolean => {
+    if (mustLower.length === 0 && notLower.length === 0) return true;
+    const have = new Set(recipeTags.map((t) => t.toLowerCase()));
+    for (const m of mustLower) if (!have.has(m)) return false;
+    for (const n of notLower) if (have.has(n)) return false;
+    return true;
+  };
+
+  return rows.flatMap((r) => {
+    const recipeTags = (tagsByRecipe.get(r.id) ?? []).sort();
+    if (!passesTagFilter(recipeTags)) return [];
     const diet = dietByRecipe.get(r.id) ?? { isVegan: true, isVegetarian: true };
-    return {
-      id: r.id,
-      title: r.title,
-      description: r.description,
-      photoPath: r.photoPath,
-      servings: r.servings,
-      prepTimeMin: r.prepTimeMin,
-      cookTimeMin: r.cookTimeMin,
-      tags: (tagsByRecipe.get(r.id) ?? []).sort(),
-      isVegan: diet.isVegan,
-      isVegetarian: diet.isVegetarian,
-    };
+    return [
+      {
+        id: r.id,
+        title: r.title,
+        description: r.description,
+        photoPath: r.photoPath,
+        servings: r.servings,
+        prepTimeMin: r.prepTimeMin,
+        cookTimeMin: r.cookTimeMin,
+        tags: recipeTags,
+        isVegan: diet.isVegan,
+        isVegetarian: diet.isVegetarian,
+      },
+    ];
   });
 }
 

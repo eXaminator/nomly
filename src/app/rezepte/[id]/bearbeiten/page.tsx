@@ -35,6 +35,7 @@ export default async function EditRecipePage({
     cookTimeMin: recipe.cookTimeMin === null ? "" : String(recipe.cookTimeMin),
     sourceUrl: recipe.sourceUrl ?? "",
     photoPath: recipe.photoPath,
+    photoUrl: "",
     tags: recipe.tags,
     sections: recipe.sections.map((s) => ({
       uid: crypto.randomUUID(),
