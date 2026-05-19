@@ -63,10 +63,13 @@ function resolveIngredient(tx: Tx, rawName: string): number {
   }
   const lowered = cleaned.toLowerCase();
 
+  // Use `lower_u` (registered in src/db/index.ts) for Unicode-correct
+  // case folding — SQLite's built-in LOWER is ASCII-only and would miss
+  // existing rows like "Äpfel" / "Möhre" / "Soße".
   const canonical = tx
     .select({ id: ingredientTable.id })
     .from(ingredientTable)
-    .where(sql`lower(${ingredientTable.name}) = ${lowered}`)
+    .where(sql`lower_u(${ingredientTable.name}) = ${lowered}`)
     .get();
   if (canonical) return canonical.id;
 
@@ -77,7 +80,7 @@ function resolveIngredient(tx: Tx, rawName: string): number {
       ingredientTable,
       eq(ingredientTable.id, ingredientAliasTable.ingredientId),
     )
-    .where(sql`lower(${ingredientAliasTable.name}) = ${lowered}`)
+    .where(sql`lower_u(${ingredientAliasTable.name}) = ${lowered}`)
     .get();
   if (aliased) return aliased.id;
 

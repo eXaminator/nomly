@@ -68,7 +68,10 @@ function findExistingRecipeId(
     .from(recipe)
     .where(
       and(
-        sql`lower(${recipe.title}) = ${normalizedTitle.toLowerCase()}`,
+        // lower_u (registered in src/db/index.ts) is Unicode-aware — SQLite's
+        // built-in LOWER would skip umlauts and miss recipes like "Apfelkuchen
+        // mit Äpfeln".
+        sql`lower_u(${recipe.title}) = ${normalizedTitle.toLowerCase()}`,
         matchSourceUrl === null
           ? isNull(recipe.sourceUrl)
           : eq(recipe.sourceUrl, matchSourceUrl),
