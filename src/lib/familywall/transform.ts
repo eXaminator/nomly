@@ -114,8 +114,12 @@ export function transformFamilywallRecipe(
   /** Photo path the orchestrator stored before calling us, or null. */
   photoPath: string | null,
 ): RecipeInput {
+  // Derive the parser's known-unit set from the DB. Adding a new alias to
+  // unit_alias is now the single source of truth — no parser-side patch
+  // required.
+  const knownUnitTokens = new Set(lookups.units.byNameOrAlias.keys());
   function parseLine(line: string) {
-    const parsed = parseIngredientString(line);
+    const parsed = parseIngredientString(line, knownUnitTokens);
     const fallbackName = parsed.name.trim();
     const name = fallbackName.length > 0 ? fallbackName : "Unbekannte Zutat";
     const { resolved, rawUnit } = resolveUnit(

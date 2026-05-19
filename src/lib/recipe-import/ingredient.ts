@@ -4,30 +4,11 @@
  * → { quantity: 500, unit: "g", name: "Hackfleisch", notes: "fein gewürfelt" }
  *
  * Designed for German recipe sources (Chefkoch, Lecker, …) but tolerates the
- * common English forms found in JSON-LD too. There is no controlled vocabulary
- * — the unit string is returned verbatim and resolved against `unit.name` /
- * `unit_alias.name` later (the user can fix it before saving anyway).
+ * common English forms found in JSON-LD too. The unit string is returned
+ * verbatim; the caller passes the controlled vocabulary (`knownUnitTokens`)
+ * so adding a new alias to the DB automatically teaches the parser the new
+ * token.
  */
-
-const COMMON_UNIT_TOKENS = new Set(
-  [
-    // metric mass
-    "g", "kg", "mg",
-    // metric volume
-    "ml", "cl", "dl", "l",
-    // imperial / US
-    "oz", "lb", "lbs", "pound", "pounds", "ounce", "ounces",
-    "cup", "cups", "tbsp", "tsp", "teaspoon", "teaspoons",
-    "tablespoon", "tablespoons", "floz",
-    // German cooking
-    "el", "tl", "msp", "prise", "prisen", "bund", "bunde",
-    "stück", "stk", "stk.", "dose", "dosen", "flasche", "flaschen",
-    "becher", "packung", "packungen", "pkg", "päckchen",
-    "scheibe", "scheiben", "zehe", "zehen", "blatt", "blätter",
-    // generic
-    "n.b.", "n.b",
-  ].map((u) => u.toLowerCase()),
-);
 
 const FRACTIONS: Record<string, number> = {
   "½": 0.5,
@@ -220,7 +201,10 @@ function tokenize(input: string): string[] {
   return padded.split(/\s+/).filter((t) => t.length > 0);
 }
 
-export function parseIngredientString(raw: string): ParsedIngredient {
+export function parseIngredientString(
+  raw: string,
+  knownUnitTokens: ReadonlySet<string>,
+): ParsedIngredient {
   const cleaned = normalize(raw);
   if (cleaned.length === 0) {
     return { quantity: null, unitName: null, name: "", notes: null };
@@ -243,13 +227,21 @@ export function parseIngredientString(raw: string): ParsedIngredient {
   }
 
   // Optional unit: only treat the first remaining token as a unit when
-  // it's in the known list (case-insensitive). Otherwise leave it as part
-  // of the name — random adjectives shouldn't get demoted to "unit".
+  // the DB knows it (canonical name or alias, case-insensitive). Otherwise
+  // leave it as part of the name — random adjectives shouldn't get demoted
+  // to "unit". `knownUnitTokens` is built from `unit.name ∪ unit_alias.name`
+  // by the caller (see buildUnitLookup), so adding a new alias to the DB
+  // is enough to teach the parser the new token.
   let unitName: string | null = null;
   if (tokens.length > 0) {
     const candidate = tokens[0];
-    const lower = candidate.toLowerCase().replace(/\.$/, "");
-    if (COMMON_UNIT_TOKENS.has(lower) || COMMON_UNIT_TOKENS.has(`${lower}.`)) {
+    const lower = candidate.toLowerCase();
+    const stripped = lower.replace(/\.$/, "");
+    if (
+      knownUnitTokens.has(lower) ||
+      knownUnitTokens.has(stripped) ||
+      knownUnitTokens.has(`${stripped}.`)
+    ) {
       unitName = candidate.replace(/\.$/, "");
       tokens.shift();
     }

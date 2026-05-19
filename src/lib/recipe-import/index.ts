@@ -293,8 +293,9 @@ export async function importRecipeFromUrl(
   const ingredientStrings = asStringList(recipe.recipeIngredient);
   const unitLookup = buildUnitLookup();
   const ingredientLookup = buildIngredientLookup();
+  const knownUnitTokens = new Set(unitLookup.byNameOrAlias.keys());
   const ingredients: ImportedIngredient[] = ingredientStrings.map((raw) => {
-    const parsed = parseIngredientString(raw);
+    const parsed = parseIngredientString(raw, knownUnitTokens);
     const { resolved, match: unitMatch, rawUnit } = resolveUnit(
       unitLookup,
       parsed.unitName,

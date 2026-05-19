@@ -28,9 +28,26 @@ describe("parseIsoDurationToMinutes", () => {
   });
 });
 
+// Test-side stand-in for the DB-derived unit set. Real callers build this
+// from `buildUnitLookup().byNameOrAlias.keys()`.
+const TEST_UNITS = new Set(
+  [
+    "g", "kg", "mg",
+    "ml", "cl", "dl", "l",
+    "el", "tl",
+    "cup", "cups",
+    "tsp", "teaspoon", "teaspoons",
+    "tbsp", "tablespoon", "tablespoons",
+    "pkg", "pck", "packung", "packungen", "päckchen",
+    "dose", "dosen",
+    "stück", "stk",
+  ].map((u) => u.toLowerCase()),
+);
+const parse = (raw: string) => parseIngredientString(raw, TEST_UNITS);
+
 describe("parseIngredientString", () => {
   it("splits qty + unit + name", () => {
-    expect(parseIngredientString("500 g Hackfleisch")).toEqual({
+    expect(parse("500 g Hackfleisch")).toEqual({
       quantity: 500,
       unitName: "g",
       name: "Hackfleisch",
@@ -38,7 +55,7 @@ describe("parseIngredientString", () => {
     });
   });
   it("separates notes after a comma", () => {
-    expect(parseIngredientString("200 g Speck, gewürfelt")).toEqual({
+    expect(parse("200 g Speck, gewürfelt")).toEqual({
       quantity: 200,
       unitName: "g",
       name: "Speck",
@@ -46,7 +63,7 @@ describe("parseIngredientString", () => {
     });
   });
   it("handles German decimals", () => {
-    expect(parseIngredientString("0,5 l Sahne")).toEqual({
+    expect(parse("0,5 l Sahne")).toEqual({
       quantity: 0.5,
       unitName: "l",
       name: "Sahne",
@@ -54,14 +71,14 @@ describe("parseIngredientString", () => {
     });
   });
   it("handles fractions", () => {
-    const r = parseIngredientString("1 1/2 Tassen Mehl");
+    const r = parse("1 1/2 Tassen Mehl");
     expect(r.quantity).toBeCloseTo(1.5, 2);
     // "Tassen" is not in the known unit list, so it stays in the name.
     expect(r.unitName).toBeNull();
     expect(r.name).toBe("Tassen Mehl");
   });
   it("handles unicode fraction glyphs", () => {
-    expect(parseIngredientString("½ TL Salz")).toEqual({
+    expect(parse("½ TL Salz")).toEqual({
       quantity: 0.5,
       unitName: "TL",
       name: "Salz",
@@ -69,7 +86,7 @@ describe("parseIngredientString", () => {
     });
   });
   it("strips leading 'ca.'", () => {
-    expect(parseIngredientString("ca. 300 ml Brühe")).toEqual({
+    expect(parse("ca. 300 ml Brühe")).toEqual({
       quantity: 300,
       unitName: "ml",
       name: "Brühe",
@@ -77,7 +94,7 @@ describe("parseIngredientString", () => {
     });
   });
   it("averages ranges", () => {
-    expect(parseIngredientString("100-200 g Käse")).toEqual({
+    expect(parse("100-200 g Käse")).toEqual({
       quantity: 150,
       unitName: "g",
       name: "Käse",
@@ -85,19 +102,19 @@ describe("parseIngredientString", () => {
     });
   });
   it("averages a fraction-int range", () => {
-    const r = parseIngredientString("1/2-1 cup peanut butter");
+    const r = parse("1/2-1 cup peanut butter");
     expect(r.quantity).toBeCloseTo(0.75, 3);
     expect(r.unitName).toBe("cup");
     expect(r.name).toBe("peanut butter");
   });
   it("averages an int → mixed-fraction range across token boundaries", () => {
-    const r = parseIngredientString("1- 1 1/2 teaspoons sea salt");
+    const r = parse("1- 1 1/2 teaspoons sea salt");
     expect(r.quantity).toBeCloseTo(1.25, 3);
     expect(r.unitName).toBe("teaspoons");
     expect(r.name).toBe("sea salt");
   });
   it("leaves unitless ingredients alone", () => {
-    expect(parseIngredientString("3 Eier")).toEqual({
+    expect(parse("3 Eier")).toEqual({
       quantity: 3,
       unitName: null,
       name: "Eier",
@@ -105,10 +122,18 @@ describe("parseIngredientString", () => {
     });
   });
   it("returns the original when nothing parses", () => {
-    expect(parseIngredientString("Salz nach Geschmack")).toEqual({
+    expect(parse("Salz nach Geschmack")).toEqual({
       quantity: null,
       unitName: null,
       name: "Salz nach Geschmack",
+      notes: null,
+    });
+  });
+  it("accepts a DB-added alias like 'Pck.' without parser changes", () => {
+    expect(parse("1 Pck. Blätterteig")).toEqual({
+      quantity: 1,
+      unitName: "Pck",
+      name: "Blätterteig",
       notes: null,
     });
   });
