@@ -53,6 +53,17 @@ export type CrawlOptions = {
   pageTimeoutMs?: number;
   /** Emit structural diagnostics. */
   debug?: boolean;
+  /**
+   * When set, restrict the import to a single recipe matched by its
+   * Familywall `data-fw-meta-id` (e.g. "recipe/8084800_2230040", or just
+   * "8084800_2230040" — we prepend "recipe/" if missing).
+   */
+  onlyRecipeId?: string;
+  /**
+   * When set, restrict the import to recipes whose title contains this
+   * substring (case-insensitive). Ignored if `onlyRecipeId` is also set.
+   */
+  onlyTitleSubstring?: string;
 };
 
 export type CrawlSink = (recipe: FamilywallRawRecipe) => Promise<void> | void;
@@ -441,24 +452,67 @@ async function ensureOnRecipeList(
   }
 }
 
+/**
+ * Read all recipe (id, title) pairs from the rendered list, then apply
+ * any --recipe-id / --title filters. Returns the IDs to iterate.
+ */
+async function collectRecipeIds(
+  page: Page,
+  options: CrawlOptions,
+  debug: boolean,
+): Promise<string[]> {
+  const all = await page.evaluate(() =>
+    Array.from(
+      document.querySelectorAll(".mp-recipe-list .mp-recipe[data-fw-meta-id]"),
+    ).map((el) => ({
+      id: el.getAttribute("data-fw-meta-id") ?? "",
+      title:
+        el
+          .querySelector("line")
+          ?.textContent?.replace(/\s+/g, " ")
+          .trim() ?? "",
+    })),
+  );
+  let ids = all.map((r) => r.id).filter((id) => id.length > 0);
+
+  if (options.onlyRecipeId) {
+    const target = options.onlyRecipeId.startsWith("recipe/")
+      ? options.onlyRecipeId
+      : `recipe/${options.onlyRecipeId}`;
+    ids = ids.filter((id) => id === target);
+    if (ids.length === 0) {
+      console.warn(`[familywall] no recipe matched --recipe-id ${target}`);
+    } else if (debug) {
+      console.log(`[familywall] --recipe-id matched: ${target}`);
+    }
+  } else if (options.onlyTitleSubstring) {
+    const needle = options.onlyTitleSubstring.toLowerCase();
+    const matching = new Set(
+      all
+        .filter((r) => r.title.toLowerCase().includes(needle))
+        .map((r) => r.id),
+    );
+    ids = ids.filter((id) => matching.has(id));
+    if (ids.length === 0) {
+      console.warn(
+        `[familywall] no recipe titles contained "${options.onlyTitleSubstring}"`,
+      );
+    } else if (debug) {
+      console.log(`[familywall] --title matched ${ids.length} recipe(s)`);
+    }
+  }
+
+  return ids;
+}
+
 async function* iterRecipes(
   page: Page,
   options: CrawlOptions,
+  recipeIds: string[],
   limit: number | undefined,
   pageTimeoutMs: number,
   debug: boolean,
 ): AsyncGenerator<FamilywallRawRecipe | null> {
-  // Collect every recipe ID up front from the `data-fw-meta-id` attribute
-  // ("recipe/8084800_2230040"). Working from this stable list avoids the
-  // Playwright `locator.nth(i)` + scrollIntoViewIfNeeded path which was
-  // silently dropping the last couple of cards in headless mode.
-  const recipeIds = await page.evaluate(() =>
-    Array.from(
-      document.querySelectorAll(".mp-recipe-list .mp-recipe[data-fw-meta-id]"),
-    )
-      .map((el) => el.getAttribute("data-fw-meta-id"))
-      .filter((id): id is string => typeof id === "string" && id.length > 0),
-  );
   const n = limit ? Math.min(limit, recipeIds.length) : recipeIds.length;
   if (debug) {
     console.log(
@@ -597,18 +651,16 @@ export async function withFamilywallCrawler(
     await login(page, options.email, options.password);
     await gotoRecipeList(page, debug);
 
-    // Count by attribute so the total matches what iterRecipes will walk.
-    const total = await page.evaluate(
-      () =>
-        document.querySelectorAll(
-          ".mp-recipe-list .mp-recipe[data-fw-meta-id]",
-        ).length,
-    );
+    // Resolve the queue once (applies --recipe-id / --title filters) so
+    // the iterator and the progress total agree on what's being walked.
+    const recipeIds = await collectRecipeIds(page, options, debug);
+    const total = recipeIds.length;
     const cap = options.limit ? Math.min(options.limit, total) : total;
     let current = 0;
     for await (const recipe of iterRecipes(
       page,
       options,
+      recipeIds,
       options.limit,
       pageTimeoutMs,
       debug,

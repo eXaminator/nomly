@@ -22,6 +22,12 @@ Required:
 
 Optional:
   --limit <n>          Process at most <n> recipes
+  --recipe-id <id>     Import only one recipe matched by its Familywall
+                       data-fw-meta-id (accepts "recipe/8084800_2230040"
+                       or just "8084800_2230040")
+  --title <substring>  Import only recipes whose title contains this
+                       substring (case-insensitive). Ignored if
+                       --recipe-id is also set.
   --dry-run            Parse + transform, but skip every DB write
   --overwrite          Re-import recipes that already exist (update in place
                        — same dedup key as the skip path: title + source URL)
@@ -47,6 +53,8 @@ async function main() {
         limit: { type: "string" },
         "dry-run": { type: "boolean", default: false },
         overwrite: { type: "boolean", default: false },
+        "recipe-id": { type: "string" },
+        title: { type: "string" },
         headed: { type: "boolean", default: false },
         debug: { type: "boolean", default: false },
         help: { type: "boolean", default: false },
@@ -110,6 +118,8 @@ async function main() {
     debug: parsed.values.debug,
     dryRun: parsed.values["dry-run"],
     overwrite: parsed.values.overwrite,
+    onlyRecipeId: parsed.values["recipe-id"],
+    onlyTitleSubstring: parsed.values.title,
     onRecipe: ({ title, outcome, recipeId, error }) => {
       printed += 1;
       const label = `[${printed}]`;
