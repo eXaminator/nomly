@@ -252,6 +252,24 @@ describe("transformFamilywallRecipe", () => {
     expect(ing.notes).toBe("Abtropfgewicht ca. 255 g");
   });
 
+  it("recognises 'Dose' after a size modifier 'kl.'", () => {
+    const lookups = makeLookups();
+    lookups.units.byNameOrAlias.set("dose", { id: 6, name: "Dose" });
+    const out = transformFamilywallRecipe(
+      makeRaw({
+        ingredients: ["1 kl. Dose Kidneybohnen (Abtropfgewicht ca. 255 g)"],
+      }),
+      lookups,
+      null,
+    );
+    const ing = out.sections[0].ingredients[0];
+    expect(ing.quantity).toBe(1);
+    expect(ing.unitId).toBe(6); // Dose
+    expect(ing.ingredientName).toBe("Kidneybohnen");
+    // Size hint + paren-content both preserved in notes
+    expect(ing.notes).toBe("kl., Abtropfgewicht ca. 255 g");
+  });
+
   it("strips unbalanced trailing parens defensively", () => {
     const out = transformFamilywallRecipe(
       makeRaw({ ingredients: ["3 Tomate, gewürfelt)"] }),

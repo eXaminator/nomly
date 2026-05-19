@@ -96,6 +96,37 @@ const NOTE_BOUNDARY_TOKENS = new Set(
  */
 const NAME_FILLER_TOKENS = new Set(["of", "von"]);
 
+/**
+ * Size modifiers that may sit between the quantity and the unit:
+ * "1 kl. Dose Bohnen", "1 große Tasse Milch". We pull them out so the
+ * unit-recogniser can see the bare unit ("Dose", "Tasse"), and append
+ * the modifier to the notes so the reader keeps the size hint.
+ *
+ * Compared case-insensitively against the token with any trailing
+ * period stripped — so both "kl." and "kl" match.
+ */
+const SIZE_MODIFIER_TOKENS = new Set([
+  "kl",
+  "kleine",
+  "kleiner",
+  "kleines",
+  "klein",
+  "gr",
+  "große",
+  "großer",
+  "großes",
+  "groß",
+  "grosse",
+  "grosser",
+  "grosses",
+  "gross",
+  "mittl",
+  "mittlere",
+  "mittlerer",
+  "mittleres",
+  "mittel",
+]);
+
 const NUMERIC_TOKEN_RE = /^[\d./,\-–½¼¾⅓⅔⅛⅜⅝⅞]+$/;
 
 function parseSingleNumericToken(t: string): number | null {
@@ -198,6 +229,19 @@ export function parseIngredientString(raw: string): ParsedIngredient {
 
   const quantity = consumeQuantity(tokens);
 
+  // Pull off any size modifiers between the quantity and the unit
+  // ("1 kl. Dose Bohnen" → modifier="kl.", unit="Dose"). They go into the
+  // notes so the size hint isn't lost.
+  const sizeModifiers: string[] = [];
+  while (tokens.length > 0) {
+    const lower = tokens[0].toLowerCase().replace(/\.$/, "");
+    if (SIZE_MODIFIER_TOKENS.has(lower)) {
+      sizeModifiers.push(tokens.shift()!);
+    } else {
+      break;
+    }
+  }
+
   // Optional unit: only treat the first remaining token as a unit when
   // it's in the known list (case-insensitive). Otherwise leave it as part
   // of the name — random adjectives shouldn't get demoted to "unit".
@@ -260,13 +304,16 @@ export function parseIngredientString(raw: string): ParsedIngredient {
   // Defensive: even though the loop above drops `(` / `)` tokens entirely,
   // strip any that slipped through (e.g. unbalanced parens from messy input)
   // and tidy resulting double-spaces / trailing punctuation.
-  const notes =
+  const noteBody =
     noteTokens
       .join(" ")
       .replace(/[()]/g, "")
       .replace(/\s+/g, " ")
       .replace(/^[\s,;]+|[\s,;]+$/g, "")
-      .trim() || null;
+      .trim();
+  const sizeNote = sizeModifiers.join(" ").trim();
+  const notes =
+    [sizeNote, noteBody].filter((p) => p.length > 0).join(", ") || null;
 
   return { quantity, unitName, name, notes };
 }
