@@ -35,6 +35,8 @@ export type ImportOptions = {
   onlyRecipeId?: string;
   /** Only import recipes whose title contains this substring (case-insensitive). */
   onlyTitleSubstring?: string;
+  /** Emit per-recipe parsing diagnostics. */
+  debug?: boolean;
   /** Per-line progress hook the CLI uses for live output. */
   onRecipe?: (info: {
     index: number;
@@ -171,11 +173,15 @@ export async function runFamilywallImport(
 
   const queue = resolveQueue(opts);
   const cap = opts.limit ? Math.min(opts.limit, queue.length) : queue.length;
+  if (opts.debug) {
+    console.log(`[familywall] queue: ${queue.length} cached recipes, processing ${cap}`);
+  }
   let index = 0;
 
   for (let i = 0; i < cap; i++) {
     const id = queue[i];
     index += 1;
+    if (opts.debug) console.log(`[familywall] parsing snapshot ${id}`);
     const parsed = parseSnapshot(id);
     if (!parsed) {
       summary.failed += 1;

@@ -24,6 +24,7 @@ Optional:
   --overwrite          Re-import recipes that already exist (update in
                        place — dedup key: title + source URL)
   --yes                Skip the "use existing cache?" prompt
+  --debug              Emit parsing diagnostics for each snapshot
   --help               Print this help
 
 Run \`npm run familywall:download\` first if the cache doesn't exist
@@ -61,6 +62,7 @@ async function main() {
         "dry-run": { type: "boolean", default: false },
         overwrite: { type: "boolean", default: false },
         yes: { type: "boolean", default: false },
+        debug: { type: "boolean", default: false },
         help: { type: "boolean", default: false },
       },
       allowPositionals: false,
@@ -68,10 +70,13 @@ async function main() {
     });
   } catch (e) {
     const code = (e as NodeJS.ErrnoException).code;
-    if (
-      code === "ERR_PARSE_ARGS_UNEXPECTED_POSITIONAL" ||
-      code === "ERR_PARSE_ARGS_UNKNOWN_OPTION"
-    ) {
+    const message = (e as Error).message ?? String(e);
+    if (code === "ERR_PARSE_ARGS_UNKNOWN_OPTION") {
+      console.error(`[familywall] ${message}`);
+      console.error("[familywall] Run with --help for the supported flags.");
+      process.exit(2);
+    }
+    if (code === "ERR_PARSE_ARGS_UNEXPECTED_POSITIONAL") {
       console.error("[familywall] couldn't parse arguments.");
       console.error(
         "[familywall] When using npm, separate the script flags with `--`:",
@@ -125,6 +130,7 @@ async function main() {
     limit,
     dryRun: parsed.values["dry-run"],
     overwrite: parsed.values.overwrite,
+    debug: parsed.values.debug,
     onlyRecipeId: parsed.values["recipe-id"],
     onlyTitleSubstring: parsed.values.title,
     onRecipe: ({ title, outcome, recipeId, error }) => {

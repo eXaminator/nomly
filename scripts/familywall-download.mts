@@ -56,10 +56,13 @@ async function main() {
     });
   } catch (e) {
     const code = (e as NodeJS.ErrnoException).code;
-    if (
-      code === "ERR_PARSE_ARGS_UNEXPECTED_POSITIONAL" ||
-      code === "ERR_PARSE_ARGS_UNKNOWN_OPTION"
-    ) {
+    const message = (e as Error).message ?? String(e);
+    if (code === "ERR_PARSE_ARGS_UNKNOWN_OPTION") {
+      console.error(`[familywall] ${message}`);
+      console.error("[familywall] Run with --help for the supported flags.");
+      process.exit(2);
+    }
+    if (code === "ERR_PARSE_ARGS_UNEXPECTED_POSITIONAL") {
       console.error("[familywall] couldn't parse arguments.");
       console.error(
         "[familywall] When using npm, separate the script flags with `--`:",
