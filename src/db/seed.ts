@@ -97,16 +97,35 @@ const fullWordUnitAliases: Record<string, string> = {
 
 // Top-up units the app expects even if the snapshot lacks them. The current
 // Tandoor snapshot already contains EL/TL/Prise, but this guarantees they
-// exist after any snapshot replacement (§7.1 Epic 1).
+// exist after any snapshot replacement (§7.1 Epic 1). "Packung" is genuinely
+// missing from upstream and shows up often in German recipes ("1 Päckchen
+// Hefe").
 const topUpUnits: Array<{
   name: string;
   dimension: "mass" | "volume" | "count";
   factor: number;
-  basedOn?: { dimension: "mass" | "volume" | "count" };
+  aliases?: string[];
 }> = [
   { name: "EL", dimension: "volume", factor: 14.7867647813 },
   { name: "TL", dimension: "volume", factor: 4.92892159375 },
   { name: "Prise", dimension: "volume", factor: 0.3 },
+  {
+    name: "Packung",
+    dimension: "count",
+    factor: 1,
+    aliases: [
+      "Packungen",
+      "Päckchen",
+      "Pck",
+      "Pck.",
+      "Pkg",
+      "Pkg.",
+      "package",
+      "packages",
+      "packet",
+      "packets",
+    ],
+  },
 ];
 
 function readSeed(file: string): TandoorSeed {
@@ -137,6 +156,10 @@ export function runSeed(): SeedCounts {
     // -- Units --
     const unitIdByKey = new Map<string, number>();
     const unitIdByName = new Map<string, number>();
+    // Track which unit names were already counted in this run, so the
+    // top-up loop below doesn't double-count units that overlap with the
+    // Tandoor snapshot (EL/TL/Prise).
+    const processedThisRun = new Set<string>();
     for (const row of tx.select().from(unit).all()) {
       unitIdByName.set(lower(row.name), row.id);
     }
@@ -151,6 +174,7 @@ export function runSeed(): SeedCounts {
             : 1;
       const existingId = unitIdByName.get(lower(name));
       let id: number;
+      processedThisRun.add(lower(name));
       if (existingId !== undefined) {
         id = existingId;
         counts.units.skipped += 1;
@@ -193,23 +217,39 @@ export function runSeed(): SeedCounts {
 
     // Top-up units the app expects.
     for (const top of topUpUnits) {
-      if (unitIdByName.has(top.name.toLowerCase())) continue;
-      const baseId =
-        top.dimension !== "count"
-          ? (unitIdByName.get(top.dimension === "mass" ? "g" : "ml") ?? null)
-          : null;
-      const inserted = tx
-        .insert(unit)
-        .values({
-          name: top.name,
-          dimension: top.dimension,
-          factor: top.factor,
-          baseUnitId: baseId,
-        })
-        .returning({ id: unit.id })
-        .all();
-      unitIdByName.set(top.name.toLowerCase(), inserted[0].id);
-      counts.units.added += 1;
+      const lowerName = top.name.toLowerCase();
+      let id = unitIdByName.get(lowerName);
+      if (id === undefined) {
+        const baseId =
+          top.dimension !== "count"
+            ? (unitIdByName.get(top.dimension === "mass" ? "g" : "ml") ?? null)
+            : null;
+        const inserted = tx
+          .insert(unit)
+          .values({
+            name: top.name,
+            dimension: top.dimension,
+            factor: top.factor,
+            baseUnitId: baseId,
+          })
+          .returning({ id: unit.id })
+          .all();
+        id = inserted[0].id;
+        unitIdByName.set(lowerName, id);
+        processedThisRun.add(lowerName);
+        counts.units.added += 1;
+      } else if (!processedThisRun.has(lowerName)) {
+        // The unit existed in the DB at the start of the run (a prior seed
+        // added it via this top-up path) and the snapshot loop didn't
+        // count it. Count once so re-runs report a consistent skipped tally.
+        processedThisRun.add(lowerName);
+        counts.units.skipped += 1;
+      }
+      for (const alias of top.aliases ?? []) {
+        addAlias(tx, "unit", id, alias, () => {
+          counts.units.aliasesAdded += 1;
+        });
+      }
     }
 
     // -- Categories --
