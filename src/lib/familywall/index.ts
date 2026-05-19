@@ -1,10 +1,10 @@
 /**
- * Familywall import orchestrator. Wires the Playwright crawler to the
- * recipe service via the pure transform, applies the (title, source_url)
- * dedup, and produces a structured summary.
+ * Familywall import orchestrator — reads cached HTML snapshots
+ * (downloaded earlier by `runFamilywallDownload`), parses each with
+ * jsdom, and ingests into the nomly DB via `createRecipe`/`updateRecipe`.
  *
- * Designed to be called from a CLI entry point (`scripts/import-familywall.
- * mts`); also reusable from tests with a stubbed crawler.
+ * Network-free: the cache must already exist on disk. See
+ * `scripts/familywall-download.mts` for the download step.
  */
 
 import { and, eq, isNull, sql } from "drizzle-orm";
@@ -16,25 +16,25 @@ import {
 } from "../recipe-import/index.ts";
 import { createRecipe, updateRecipe } from "../recipes/service.ts";
 import { savePhotoBuffer } from "../photos.ts";
-import {
-  fetchImageWithContext,
-  withFamilywallCrawler,
-  type CrawlOptions,
-} from "./crawler.ts";
+import { readImageBytes, parseSnapshot } from "./parse-snapshot.ts";
+import { readIndex, listCachedIds } from "./cache.ts";
 import { transformFamilywallRecipe } from "./transform.ts";
 import type {
   FamilywallImportSummary,
   FamilywallRawRecipe,
 } from "./types.ts";
-import type { BrowserContext } from "playwright";
 
-export type RunOptions = CrawlOptions & {
-  /** When true: parse + transform but skip every DB write and photo store. */
+export type ImportOptions = {
+  /** Parse + transform, but skip every DB write and photo store. */
   dryRun?: boolean;
-  /** When true: re-import recipes that already exist in the DB (matched by
-   *  the same title + source_url dedup as the skip path). The existing
-   *  recipe row is updated in place, preserving its ID + relationships. */
+  /** Re-import recipes that already exist (matched on title + source_url). */
   overwrite?: boolean;
+  /** Cap how many cached recipes are ingested. */
+  limit?: number;
+  /** Only import a recipe whose cached id equals this (accepts "recipe/..." or just the suffix). */
+  onlyRecipeId?: string;
+  /** Only import recipes whose title contains this substring (case-insensitive). */
+  onlyTitleSubstring?: string;
   /** Per-line progress hook the CLI uses for live output. */
   onRecipe?: (info: {
     index: number;
@@ -59,18 +59,11 @@ function findExistingRecipeId(
   const normalizedTitle = title.trim();
   if (normalizedTitle.length === 0) return null;
   const matchSourceUrl = sourceUrl?.trim() ?? null;
-  // Two recipes are "the same" iff they share title (case-insensitive)
-  // AND have the same source_url — where same means both null, or both
-  // strings equal. A sourced "Bolognese" and an unsourced "Bolognese" are
-  // distinct recipes.
   const hit = db
     .select({ id: recipe.id })
     .from(recipe)
     .where(
       and(
-        // lower_u (registered in src/db/index.ts) is Unicode-aware — SQLite's
-        // built-in LOWER would skip umlauts and miss recipes like "Apfelkuchen
-        // mit Äpfeln".
         sql`lower_u(${recipe.title}) = ${normalizedTitle.toLowerCase()}`,
         matchSourceUrl === null
           ? isNull(recipe.sourceUrl)
@@ -81,11 +74,17 @@ function findExistingRecipeId(
   return hit?.id ?? null;
 }
 
+function buildLookups() {
+  return {
+    units: buildUnitLookup(),
+    ingredients: buildIngredientLookup(),
+  };
+}
+
 async function ingestOne(
   raw: FamilywallRawRecipe,
-  ctx: BrowserContext,
   lookups: ReturnType<typeof buildLookups>,
-  opts: RunOptions,
+  opts: ImportOptions,
 ): Promise<
   | { outcome: "imported"; id: number }
   | { outcome: "updated"; id: number }
@@ -102,12 +101,11 @@ async function ingestOne(
 
     let photoPath: string | null = null;
     if (raw.imageUrl && !opts.dryRun) {
-      const bytes = await fetchImageWithContext(ctx, raw.imageUrl);
+      const bytes = readImageBytes(raw.imageUrl);
       if (bytes) {
         try {
           photoPath = await savePhotoBuffer(bytes);
         } catch {
-          // Image failed (corrupt, sharp rejected it); proceed without.
           photoPath = null;
         }
       }
@@ -132,15 +130,35 @@ async function ingestOne(
   }
 }
 
-function buildLookups() {
-  return {
-    units: buildUnitLookup(),
-    ingredients: buildIngredientLookup(),
-  };
+/**
+ * Returns the cached recipe IDs that will be processed, after applying
+ * `--recipe-id` / `--title` filters.
+ */
+function resolveQueue(opts: ImportOptions): string[] {
+  const index = readIndex();
+  const ids = index ? index.recipes.map((r) => r.id) : listCachedIds();
+  const titlesById = new Map(
+    (index?.recipes ?? []).map((r) => [r.id, r.title]),
+  );
+
+  if (opts.onlyRecipeId) {
+    const target = opts.onlyRecipeId.startsWith("recipe/")
+      ? opts.onlyRecipeId
+      : `recipe/${opts.onlyRecipeId}`;
+    const hit = ids.find((id) => id === target);
+    return hit ? [hit] : [];
+  }
+  if (opts.onlyTitleSubstring) {
+    const needle = opts.onlyTitleSubstring.toLowerCase();
+    return ids.filter((id) =>
+      (titlesById.get(id) ?? "").toLowerCase().includes(needle),
+    );
+  }
+  return ids;
 }
 
 export async function runFamilywallImport(
-  opts: RunOptions,
+  opts: ImportOptions,
 ): Promise<FamilywallImportSummary> {
   const lookups = buildLookups();
   const summary: FamilywallImportSummary = {
@@ -150,98 +168,67 @@ export async function runFamilywallImport(
     failed: 0,
     details: [],
   };
+
+  const queue = resolveQueue(opts);
+  const cap = opts.limit ? Math.min(opts.limit, queue.length) : queue.length;
   let index = 0;
 
-  await withFamilywallCrawler(
-    opts,
-    async (raw, { ctx }) => {
-      index += 1;
-      const result = await ingestOne(raw, ctx, lookups, opts);
+  for (let i = 0; i < cap; i++) {
+    const id = queue[i];
+    index += 1;
+    const parsed = parseSnapshot(id);
+    if (!parsed) {
+      summary.failed += 1;
+      summary.details.push({
+        title: id,
+        outcome: "failed",
+        error: "snapshot missing or unparsable",
+      });
+      opts.onRecipe?.({
+        index,
+        total: cap,
+        title: id,
+        outcome: "failed",
+        error: "snapshot missing or unparsable",
+      });
+      continue;
+    }
 
-      switch (result.outcome) {
-        case "imported":
-          summary.imported += 1;
-          summary.details.push({
-            title: raw.title,
-            outcome: "imported",
-            recipeId: result.id,
-          });
-          opts.onRecipe?.({
-            index,
-            total: -1,
-            title: raw.title,
-            outcome: "imported",
-            recipeId: result.id,
-          });
-          break;
-        case "updated":
-          summary.updated += 1;
-          summary.details.push({
-            title: raw.title,
-            outcome: "updated",
-            recipeId: result.id,
-          });
-          opts.onRecipe?.({
-            index,
-            total: -1,
-            title: raw.title,
-            outcome: "updated",
-            recipeId: result.id,
-          });
-          break;
-        case "would-import":
-          summary.imported += 1;
-          summary.details.push({ title: raw.title, outcome: "imported" });
-          opts.onRecipe?.({
-            index,
-            total: -1,
-            title: raw.title,
-            outcome: "would-import",
-          });
-          break;
-        case "would-update":
-          summary.updated += 1;
-          summary.details.push({
-            title: raw.title,
-            outcome: "updated",
-            recipeId: result.id,
-          });
-          opts.onRecipe?.({
-            index,
-            total: -1,
-            title: raw.title,
-            outcome: "would-update",
-            recipeId: result.id,
-          });
-          break;
-        case "skipped":
-          summary.skipped += 1;
-          summary.details.push({ title: raw.title, outcome: "skipped" });
-          opts.onRecipe?.({
-            index,
-            total: -1,
-            title: raw.title,
-            outcome: "skipped",
-          });
-          break;
-        case "failed":
-          summary.failed += 1;
-          summary.details.push({
-            title: raw.title,
-            outcome: "failed",
-            error: result.error,
-          });
-          opts.onRecipe?.({
-            index,
-            total: -1,
-            title: raw.title,
-            outcome: "failed",
-            error: result.error,
-          });
-          break;
-      }
-    },
-  );
+    const result = await ingestOne(parsed.raw, lookups, opts);
+    const title = parsed.raw.title;
+    switch (result.outcome) {
+      case "imported":
+        summary.imported += 1;
+        summary.details.push({ title, outcome: "imported", recipeId: result.id });
+        opts.onRecipe?.({ index, total: cap, title, outcome: "imported", recipeId: result.id });
+        break;
+      case "updated":
+        summary.updated += 1;
+        summary.details.push({ title, outcome: "updated", recipeId: result.id });
+        opts.onRecipe?.({ index, total: cap, title, outcome: "updated", recipeId: result.id });
+        break;
+      case "would-import":
+        summary.imported += 1;
+        summary.details.push({ title, outcome: "imported" });
+        opts.onRecipe?.({ index, total: cap, title, outcome: "would-import" });
+        break;
+      case "would-update":
+        summary.updated += 1;
+        summary.details.push({ title, outcome: "updated", recipeId: result.id });
+        opts.onRecipe?.({ index, total: cap, title, outcome: "would-update", recipeId: result.id });
+        break;
+      case "skipped":
+        summary.skipped += 1;
+        summary.details.push({ title, outcome: "skipped" });
+        opts.onRecipe?.({ index, total: cap, title, outcome: "skipped" });
+        break;
+      case "failed":
+        summary.failed += 1;
+        summary.details.push({ title, outcome: "failed", error: result.error });
+        opts.onRecipe?.({ index, total: cap, title, outcome: "failed", error: result.error });
+        break;
+    }
+  }
 
   return summary;
 }

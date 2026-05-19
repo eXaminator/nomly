@@ -1,62 +1,66 @@
 import nextEnv from "@next/env";
 import { parseArgs } from "node:util";
+import { createInterface } from "node:readline/promises";
 
 // Familywall import CLI:
-//   npm run import:familywall -- --email <e> --password <p> [flags]
+//   npm run import:familywall -- [flags]
 //
-// Flags:
-//   --email <e>        Familywall account email (required)
-//   --password <p>     Familywall account password (required)
-//   --limit <n>        Cap recipes processed (handy for first runs)
-//   --dry-run          Crawl + transform but never write to the DB
-//   --headed           Show the Chromium window
-//   --help             Print this help
-//
-// First-time setup: `npx playwright install chromium`.
+// Reads cached snapshots from ./data/familywall-cache/ (written by
+// `npm run familywall:download`) and ingests them into the nomly DB.
+// Never talks to Familywall directly — re-runs over the same cache are
+// free, which lets the parser iterate without re-downloading.
 
-const HELP = `Usage: npm run import:familywall -- --email <e> --password <p> [flags]
-
-Required:
-  --email <e>          Familywall account email
-  --password <p>       Familywall account password
+const HELP = `Usage: npm run import:familywall -- [flags]
 
 Optional:
-  --limit <n>          Process at most <n> recipes
-  --recipe-id <id>     Import only one recipe matched by its Familywall
-                       data-fw-meta-id (accepts "recipe/8084800_2230040"
-                       or just "8084800_2230040")
-  --title <substring>  Import only recipes whose title contains this
-                       substring (case-insensitive). Ignored if
-                       --recipe-id is also set.
+  --limit <n>          Process at most <n> cached recipes
+  --recipe-id <id>     Import only the cached recipe whose
+                       data-fw-meta-id matches (accepts
+                       "recipe/8084800_2230040" or just the suffix)
+  --title <substring>  Import only cached recipes whose title contains
+                       this substring (case-insensitive). Ignored if
+                       --recipe-id is set.
   --dry-run            Parse + transform, but skip every DB write
-  --overwrite          Re-import recipes that already exist (update in place
-                       — same dedup key as the skip path: title + source URL)
-  --headed             Show the browser window (default: headless)
-  --debug              Emit selector diagnostics (URLs, anchor counts, etc.)
+  --overwrite          Re-import recipes that already exist (update in
+                       place — dedup key: title + source URL)
+  --yes                Skip the "use existing cache?" prompt
   --help               Print this help
 
-The CLI writes to the same SQLite DB the running server uses
-(\$DATABASE_URL, defaults to ./data/nomly.db). By default re-runs are
-safe — recipes already imported are skipped. Pass --overwrite to
-update them instead.`;
+Run \`npm run familywall:download\` first if the cache doesn't exist
+(or you want a fresh snapshot). Cache lives under
+./data/familywall-cache/.`;
+
+async function confirm(prompt: string, defaultYes = true): Promise<boolean> {
+  if (!process.stdin.isTTY) return defaultYes;
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  const suffix = defaultYes ? "[Y/n]" : "[y/N]";
+  const answer = (await rl.question(`${prompt} ${suffix} `)).trim().toLowerCase();
+  rl.close();
+  if (answer === "") return defaultYes;
+  return answer === "y" || answer === "yes" || answer === "j" || answer === "ja";
+}
+
+function formatRelative(date: Date): string {
+  const seconds = Math.round((Date.now() - date.getTime()) / 1000);
+  if (seconds < 60) return `${seconds}s ago`;
+  if (seconds < 3600) return `${Math.round(seconds / 60)}m ago`;
+  if (seconds < 86_400) return `${Math.round(seconds / 3600)}h ago`;
+  return `${Math.round(seconds / 86_400)}d ago`;
+}
 
 async function main() {
-  // Load .env / .env.local before anything reads process.env.
   nextEnv.loadEnvConfig(process.cwd(), true);
 
   let parsed;
   try {
     parsed = parseArgs({
       options: {
-        email: { type: "string" },
-        password: { type: "string" },
         limit: { type: "string" },
-        "dry-run": { type: "boolean", default: false },
-        overwrite: { type: "boolean", default: false },
         "recipe-id": { type: "string" },
         title: { type: "string" },
-        headed: { type: "boolean", default: false },
-        debug: { type: "boolean", default: false },
+        "dry-run": { type: "boolean", default: false },
+        overwrite: { type: "boolean", default: false },
+        yes: { type: "boolean", default: false },
         help: { type: "boolean", default: false },
       },
       allowPositionals: false,
@@ -72,12 +76,7 @@ async function main() {
       console.error(
         "[familywall] When using npm, separate the script flags with `--`:",
       );
-      console.error(
-        "  npm run import:familywall -- --email me@example.tld --password '…'",
-      );
-      console.error(
-        "[familywall] Without the `--`, npm consumes the flags before they reach the script.",
-      );
+      console.error("  npm run import:familywall -- --overwrite");
       process.exit(2);
     }
     throw e;
@@ -88,34 +87,42 @@ async function main() {
     process.exit(0);
   }
 
-  const email = parsed.values.email ?? "";
-  const password = parsed.values.password ?? "";
-  if (!email || !password) {
-    console.error("[familywall] missing credentials. Pass --email and --password.");
-    process.exit(2);
-  }
   const limit = parsed.values.limit ? parseInt(parsed.values.limit, 10) : undefined;
   if (parsed.values.limit && (Number.isNaN(limit) || (limit ?? 0) <= 0)) {
     console.error("[familywall] --limit must be a positive integer.");
     process.exit(2);
   }
 
-  // Lazy-import so the heavy modules (Playwright, drizzle, etc.) don't load
-  // when the user just runs `--help`.
-  const { runFamilywallImport } = await import("../src/lib/familywall/index.ts");
+  // Lazy-import the cache helpers so --help doesn't pull in jsdom etc.
+  const { cacheStats } = await import("../src/lib/familywall/cache.ts");
+  const stats = cacheStats();
+  if (!stats.exists || stats.count === 0) {
+    console.error("[familywall] no cached snapshots found at ./data/familywall-cache/.");
+    console.error("[familywall] Run `npm run familywall:download -- --email <e> --password <p>` first.");
+    process.exit(1);
+  }
 
-  console.log(
-    `[familywall] launching browser (${parsed.values.headed ? "headed" : "headless"})`,
-  );
-  console.log(`[familywall] logging in as ${email}`);
+  if (!parsed.values.yes) {
+    const downloaded = stats.downloadedAt
+      ? `downloaded ${formatRelative(stats.downloadedAt)} on ${stats.downloadedAt.toISOString()}`
+      : "no timestamp";
+    const ok = await confirm(
+      `[familywall] Use existing cache (${stats.count} recipes, ${downloaded})?`,
+      true,
+    );
+    if (!ok) {
+      console.error(
+        "[familywall] aborted — run `npm run familywall:download` to refresh the cache, then re-run this command.",
+      );
+      process.exit(1);
+    }
+  }
+
+  const { runFamilywallImport } = await import("../src/lib/familywall/index.ts");
 
   let printed = 0;
   const summary = await runFamilywallImport({
-    email,
-    password,
     limit,
-    headed: parsed.values.headed,
-    debug: parsed.values.debug,
     dryRun: parsed.values["dry-run"],
     overwrite: parsed.values.overwrite,
     onlyRecipeId: parsed.values["recipe-id"],

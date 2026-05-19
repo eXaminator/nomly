@@ -40,27 +40,37 @@ mirror what CI checks.
 
 ## Bulk-import from Familywall
 
-One-shot migration tool for users coming from Familywall. Drives a headless
-Chromium session through the user's account, walks every recipe, and writes
-them into nomly's local DB. Idempotent — re-runs skip recipes already
-present (matched on title + original source URL). No links back to
-Familywall are ever stored.
+Two-step migration tool for users coming from Familywall. **Download** drives
+a headless Chromium session through your account and saves a 1:1 HTML +
+photo snapshot of every recipe under `./data/familywall-cache/`. **Import**
+reads those snapshots (no network) and ingests them into nomly's DB.
+Idempotent on the import side — re-runs skip recipes already present
+(matched on title + original source URL). No links back to Familywall are
+ever stored.
 
 ```bash
 # First-time setup: fetch the Chromium binary Playwright needs.
 npx playwright install chromium
 
-# DATABASE_URL defaults to ./data/nomly.db. Pass --email and --password
-# on every invocation.
-npm run import:familywall -- --email me@example.tld --password '…'
+# Step 1: download snapshots. Wipes the cache and refetches everything.
+npm run familywall:download -- --email me@example.tld --password '…'
+
+# Step 2: import from the cache (asks before reusing an existing snapshot).
+npm run import:familywall
 
 # Useful flags for first runs:
-npm run import:familywall -- --email me@example.tld --password '…' \
-  --headed --limit 1 --dry-run
+npm run familywall:download -- --email me@example.tld --password '…' \
+  --headed --limit 1
+npm run import:familywall -- --limit 1 --dry-run
 ```
 
-Prints one line per recipe (`imported (id 12)` / `skipped` / `failed`) and a
-final summary. Use `--headed` whenever a CAPTCHA or 2FA prompt is expected.
+The download writes each snapshot to `./data/familywall-cache/recipes/<id>/`
+as a standalone `detail.html` + `image.<ext>` + `meta.json` — you can open
+the HTML in any browser to review what was captured. The import prints one
+line per recipe (`imported (id 12)` / `updated` / `skipped` / `failed`) and
+a final summary. Use `--headed` whenever a CAPTCHA or 2FA prompt is
+expected. The import script never talks to Familywall — re-parsing after a
+parser improvement is free.
 
 ## Tech
 

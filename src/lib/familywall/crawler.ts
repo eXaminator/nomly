@@ -1,13 +1,15 @@
 /**
  * Playwright-driven Familywall crawler. Logs in once with the provided
  * credentials, walks every recipe in the user's recipebox by clicking
- * each entry in the master-detail list, and yields one
- * {@link FamilywallRawRecipe} per recipe.
+ * each entry in the master-detail list, and yields a SNAPSHOT for each
+ * (the raw `#recipeDetail` HTML + the recipe image bytes).
  *
- * The yielded objects are raw strings; pure-function normalisation
- * happens in {@link transformFamilywallRecipe}.
+ * The crawler is intentionally dumb about parsing — that happens later,
+ * offline, against the cached snapshots (see parse-snapshot.ts). Keeping
+ * the network step purely about fetching means we can iterate the parser
+ * without re-hitting Familywall.
  *
- * DOM structure (verified 2026-05-18 against www.familywall.com):
+ * DOM structure (verified 2026-05-19 against www.familywall.com):
  *
  * - Login page: https://www.familywall.com/fw2_signin.php
  *   - email input `#identifier` (name="a00identifier")
@@ -20,30 +22,17 @@
  *     elements inside `<flexcol class="mp-recipe-list">`. There are no `<a>`
  *     hrefs; clicking sets the URL to `?id=recipe%2F<id>` and renders the
  *     detail in the right pane (`#recipeDetail`).
- *   - All recipes are loaded into the DOM up front — no pagination/scroll.
+ *   - The list panel lazy-renders rows as `<div class="main flexcol">`
+ *     scrolls. We scroll to the bottom up-front so the locator returns
+ *     every card.
  *
  * - Detail pane (`#recipeDetail`):
  *   - Title: `<flexauto class="h1 line">`
  *   - Image: `.mp-recipe-header-imgcontainer img` (served from api.familywall.com)
- *   - Metadata table: `<table class="mp-recipe-times">` with rows of
- *     `<td class="recipe-field-name">label</td><td>value</td>`. Labels are
- *     localised — German ("Zubereitungszeit", "Kochzeit", "Portionen",
- *     "Ansehen auf") or English. The "Ansehen auf"/"View on" row contains
- *     the original source URL as an `<a href>`.
- *   - Description / Zutaten / Anweisungen sections: each is a
- *     `<flexauto class="border-pane">` (or `<div class="border-pane">`)
- *     containing a `<p>` heading with the section name and one or more
- *     content children (a `<p>` for description, a `<ul>` for ingredients,
- *     a `<p>` or `<ol>` for instructions). Each section also contains a
- *     `<div class="rb-button">` add-button which we filter out.
+ *   - Other content described in extract.ts.
  */
 
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
-import type { FamilywallRawRecipe } from "./types.ts";
-
-const FAMILYWALL_BASE = "https://www.familywall.com";
-const FAMILYWALL_LOGIN_URL = `${FAMILYWALL_BASE}/fw2_signin.php`;
-const FAMILYWALL_RECIPES_URL = `${FAMILYWALL_BASE}/recipebox.php`;
 
 export type CrawlOptions = {
   email: string;
@@ -66,7 +55,9 @@ export type CrawlOptions = {
   onlyTitleSubstring?: string;
 };
 
-export type CrawlSink = (recipe: FamilywallRawRecipe) => Promise<void> | void;
+const FAMILYWALL_BASE = "https://www.familywall.com";
+const FAMILYWALL_LOGIN_URL = `${FAMILYWALL_BASE}/fw2_signin.php`;
+const FAMILYWALL_RECIPES_URL = `${FAMILYWALL_BASE}/recipebox.php`;
 
 const POLITE_DELAY_MS = 500;
 
@@ -138,10 +129,6 @@ async function login(page: Page, email: string, password: string) {
     "button:has-text('Anmelden')",
     "button:has-text('Sign in')",
   ]);
-  // Fire the submit then poll the URL ourselves — `page.waitForURL` waits
-  // for the `load` event by default and Familywall's redirect chain
-  // (signin → home → …) doesn't always settle cleanly within the budget.
-  // Polling is cheap and dodges the "load never fired" timeout.
   if (submit) {
     await submit.click().catch(() => {});
   } else {
@@ -169,11 +156,6 @@ async function gotoRecipeList(page: Page, debug: boolean) {
     .catch(() => {});
   await page.waitForLoadState("networkidle").catch(() => {});
 
-  // The recipe list lives inside a vertically-scrolling `<div class="main
-  // flexcol">` panel that progressively renders more rows. Scroll until
-  // the visible count is stable across three consecutive checks with a
-  // generous beat — Familywall has been observed to need >1 s to render
-  // late additions in headless mode.
   let stable = 0;
   let previous = -1;
   let iterations = 0;
@@ -198,8 +180,6 @@ async function gotoRecipeList(page: Page, debug: boolean) {
     await delay(1000);
   }
 
-  // Scroll back to top so the first .mp-recipe is in view and the first
-  // click in iterRecipes lands on the right card.
   await page
     .evaluate(() => {
       const scrollEl =
@@ -219,212 +199,6 @@ async function gotoRecipeList(page: Page, debug: boolean) {
   }
 }
 
-/**
- * Extracts the recipe currently rendered in `#recipeDetail` into a raw
- * payload. Returns null if the detail pane is empty or has no title.
- *
- * Runs entirely inside the page context — all parsing happens in
- * `page.evaluate` so we don't pay round-trip costs per field.
- */
-async function extractCurrentDetail(
-  page: Page,
-): Promise<FamilywallRawRecipe | null> {
-  return page.evaluate(() => {
-    const detail = document.getElementById("recipeDetail");
-    if (!detail) return null;
-
-    const titleEl = detail.querySelector(
-      ".h1.line, flexauto.h1, .h1",
-    ) as HTMLElement | null;
-    const title = titleEl ? titleEl.innerText.replace(/\s+/g, " ").trim() : "";
-    if (!title) return null;
-
-    const imgEl = detail.querySelector(
-      ".mp-recipe-header-imgcontainer img",
-    ) as HTMLImageElement | null;
-    const imageUrl = imgEl?.src || null;
-
-    // Favorite ("bester Moment") — the heart icon's title swaps between
-    // "Als bester Moment gekennzeichnet" (marked) and "Mir gefällt dieser
-    // Post" (unmarked), so the title text alone tells us the state.
-    let isFavorite = false;
-    for (const icon of Array.from(detail.querySelectorAll("icon"))) {
-      const t = icon.getAttribute("title") || "";
-      if (
-        t === "Als bester Moment gekennzeichnet" ||
-        t === "Marked as best moment"
-      ) {
-        isFavorite = true;
-        break;
-      }
-    }
-
-    // Category chips become tags. Familywall prefixes each with an emoji
-    // (e.g. "🍚 Reis"); strip leading emoji + whitespace so the resulting
-    // tags match plain user-created ones.
-    const tags = Array.from(detail.querySelectorAll(".mp-category"))
-      .map((el) => (el as HTMLElement).innerText.replace(/\s+/g, " ").trim())
-      .map((t) =>
-        t
-          .replace(
-            /^[\p{Extended_Pictographic}‍️\u{1F3FB}-\u{1F3FF}]+\s*/u,
-            "",
-          )
-          .trim(),
-      )
-      .filter((t) => t.length > 0);
-
-    function parseMins(t: string): number | null {
-      const trimmed = t.replace(/\s+/g, " ").trim();
-      if (!trimmed) return null;
-      const hMatch = /(\d+)\s*h/i.exec(trimmed);
-      const mMatch = /(\d+)\s*(?:mins?|min\.?|Min(?:uten)?)/i.exec(trimmed);
-      const h = hMatch ? parseInt(hMatch[1], 10) : 0;
-      const m = mMatch ? parseInt(mMatch[1], 10) : 0;
-      if (h === 0 && m === 0) {
-        const justNum = /^(\d+)$/.exec(trimmed);
-        return justNum ? parseInt(justNum[1], 10) : null;
-      }
-      return h * 60 + m;
-    }
-
-    let prepTimeMin: number | null = null;
-    let cookTimeMin: number | null = null;
-    let servings: number | null = null;
-    let sourceUrl: string | null = null;
-
-    const PREP_LABELS = new Set([
-      "Zubereitungszeit",
-      "Vorbereitungszeit",
-      "Prep time",
-      "Preparation time",
-    ]);
-    const COOK_LABELS = new Set(["Kochzeit", "Cook time", "Cooking time"]);
-    const SERVING_LABELS = new Set([
-      "Portionen",
-      "Servings",
-      "Portions",
-      "Personen",
-    ]);
-    const SOURCE_LABELS = new Set([
-      "Ansehen auf",
-      "View on",
-      "Source",
-      "Quelle",
-    ]);
-
-    const timesTable = detail.querySelector(".mp-recipe-times");
-    if (timesTable) {
-      for (const row of Array.from(timesTable.querySelectorAll("tr"))) {
-        const cells = Array.from(row.querySelectorAll("td"));
-        const labelCell = cells.find((c) =>
-          c.classList.contains("recipe-field-name"),
-        );
-        if (!labelCell) continue;
-        const valueCell = labelCell.nextElementSibling as HTMLElement | null;
-        if (!valueCell) continue;
-        const label = (labelCell as HTMLElement).innerText
-          .replace(/\s+/g, " ")
-          .trim();
-        const valueText = valueCell.innerText.replace(/\s+/g, " ").trim();
-        if (PREP_LABELS.has(label)) {
-          prepTimeMin = parseMins(valueText);
-        } else if (COOK_LABELS.has(label)) {
-          cookTimeMin = parseMins(valueText);
-        } else if (SERVING_LABELS.has(label)) {
-          const n = /(\d+)/.exec(valueText);
-          servings = n ? parseInt(n[1], 10) : null;
-        } else if (SOURCE_LABELS.has(label)) {
-          const link = valueCell.querySelector("a") as HTMLAnchorElement | null;
-          if (link?.href) sourceUrl = link.href;
-        }
-      }
-    }
-
-    /**
-     * Each section ("Beschreibung", "Zutaten", "Anweisungen") is a
-     * <p>-headed child of a border-pane container. Returns the content
-     * children minus the heading and any "add" buttons.
-     */
-    function sectionContent(headingTexts: string[]): Element[] {
-      for (const ht of headingTexts) {
-        const heading = Array.from(detail!.querySelectorAll("p")).find(
-          (p) => p.textContent?.replace(/\s+/g, " ").trim() === ht,
-        );
-        if (!heading) continue;
-        const container = heading.parentElement;
-        if (!container) continue;
-        return Array.from(container.children).filter(
-          (c) =>
-            c !== heading &&
-            !c.classList.contains("rb-button") &&
-            !c.classList.contains("mp-button-like"),
-        );
-      }
-      return [];
-    }
-
-    const descParts = sectionContent(["Beschreibung", "Description"])
-      .map((el) => (el as HTMLElement).innerText.replace(/\s+/g, " ").trim())
-      .filter(Boolean);
-    const description = descParts.length ? descParts.join("\n\n") : null;
-
-    function listItemsFrom(els: Element[]): string[] {
-      const out: string[] = [];
-      for (const el of els) {
-        if (el.tagName === "UL" || el.tagName === "OL") {
-          for (const li of Array.from(el.querySelectorAll("li"))) {
-            const t = (li as HTMLElement).innerText
-              .replace(/\s+/g, " ")
-              .trim();
-            if (t) out.push(t);
-          }
-        } else {
-          // Some recipes free-text the section. Split by newlines so we
-          // don't lose multi-line content.
-          const raw = (el as HTMLElement).innerText;
-          for (const line of raw.split(/\r?\n/)) {
-            const t = line.replace(/\s+/g, " ").trim();
-            if (t) out.push(t);
-          }
-        }
-      }
-      return out;
-    }
-
-    const ingredients = listItemsFrom(
-      sectionContent(["Zutaten", "Ingredients"]),
-    );
-    const instructions = listItemsFrom(
-      sectionContent(["Anweisungen", "Zubereitung", "Instructions", "Steps"]),
-    );
-
-    return {
-      title,
-      description,
-      servings,
-      prepTimeMin,
-      cookTimeMin,
-      ingredients,
-      instructions,
-      imageUrl,
-      sourceUrl,
-      isFavorite,
-      tags,
-    };
-  });
-}
-
-/**
- * Walks every recipe in the user's recipebox. Sequential by design: each
- * iteration clicks one `.mp-recipe` row, waits for `#recipeDetail` to
- * re-render, then extracts the detail.
- */
-/**
- * Best-effort recovery: if the page is no longer on the recipe list
- * (session timed out, accidental navigation, …) bring it back. Returns
- * true if we end up on a working recipebox page.
- */
 async function ensureOnRecipeList(
   page: Page,
   options: CrawlOptions,
@@ -453,14 +227,14 @@ async function ensureOnRecipeList(
 }
 
 /**
- * Read all recipe (id, title) pairs from the rendered list, then apply
- * any --recipe-id / --title filters. Returns the IDs to iterate.
+ * Returns `{ id, title }` for every visible recipe in the list, after
+ * applying any `--recipe-id` / `--title` filters.
  */
-async function collectRecipeIds(
+async function collectRecipes(
   page: Page,
   options: CrawlOptions,
   debug: boolean,
-): Promise<string[]> {
+): Promise<Array<{ id: string; title: string }>> {
   const all = await page.evaluate(() =>
     Array.from(
       document.querySelectorAll(".mp-recipe-list .mp-recipe[data-fw-meta-id]"),
@@ -473,60 +247,124 @@ async function collectRecipeIds(
           .trim() ?? "",
     })),
   );
-  let ids = all.map((r) => r.id).filter((id) => id.length > 0);
+  let result = all.filter((r) => r.id.length > 0);
 
   if (options.onlyRecipeId) {
     const target = options.onlyRecipeId.startsWith("recipe/")
       ? options.onlyRecipeId
       : `recipe/${options.onlyRecipeId}`;
-    ids = ids.filter((id) => id === target);
-    if (ids.length === 0) {
+    result = result.filter((r) => r.id === target);
+    if (result.length === 0) {
       console.warn(`[familywall] no recipe matched --recipe-id ${target}`);
     } else if (debug) {
       console.log(`[familywall] --recipe-id matched: ${target}`);
     }
   } else if (options.onlyTitleSubstring) {
     const needle = options.onlyTitleSubstring.toLowerCase();
-    const matching = new Set(
-      all
-        .filter((r) => r.title.toLowerCase().includes(needle))
-        .map((r) => r.id),
-    );
-    ids = ids.filter((id) => matching.has(id));
-    if (ids.length === 0) {
+    result = result.filter((r) => r.title.toLowerCase().includes(needle));
+    if (result.length === 0) {
       console.warn(
         `[familywall] no recipe titles contained "${options.onlyTitleSubstring}"`,
       );
     } else if (debug) {
-      console.log(`[familywall] --title matched ${ids.length} recipe(s)`);
+      console.log(`[familywall] --title matched ${result.length} recipe(s)`);
     }
   }
 
-  return ids;
+  return result;
 }
 
-async function* iterRecipes(
+export type CapturedSnapshot = {
+  id: string;
+  title: string;
+  /** outerHTML of `#recipeDetail` as a string. */
+  detailHtml: string;
+  imageBytes: Buffer | null;
+  imageExt: string | null;
+};
+
+/**
+ * Captures the raw HTML of `#recipeDetail` plus the recipe image bytes
+ * (fetched via the authenticated browser context). Returns null if the
+ * detail pane is empty or has no title.
+ */
+async function captureDetailSnapshot(
   page: Page,
+  ctx: BrowserContext,
+  id: string,
+): Promise<CapturedSnapshot | null> {
+  const captured = await page.evaluate(() => {
+    const detail = document.getElementById("recipeDetail");
+    if (!detail) return null;
+    const titleEl = detail.querySelector(".h1.line, flexauto.h1, .h1");
+    const title = (titleEl?.textContent ?? "").replace(/\s+/g, " ").trim();
+    if (!title) return null;
+    const imgEl = detail.querySelector(
+      ".mp-recipe-header-imgcontainer img",
+    ) as HTMLImageElement | null;
+    return {
+      title,
+      detailHtml: detail.outerHTML,
+      imageUrl: imgEl?.src || null,
+    };
+  });
+  if (!captured) return null;
+
+  let imageBytes: Buffer | null = null;
+  let imageExt: string | null = null;
+  if (captured.imageUrl) {
+    try {
+      const res = await ctx.request.get(captured.imageUrl);
+      if (res.ok()) {
+        imageBytes = Buffer.from(await res.body());
+        imageExt = pickImageExtension(
+          res.headers()["content-type"] ?? "",
+          captured.imageUrl,
+        );
+      }
+    } catch {
+      // Image failures are non-fatal — the snapshot still saves without it.
+    }
+  }
+
+  return {
+    id,
+    title: captured.title,
+    detailHtml: captured.detailHtml,
+    imageBytes,
+    imageExt,
+  };
+}
+
+function pickImageExtension(contentType: string, url: string): string {
+  const ct = contentType.toLowerCase();
+  if (ct.includes("png")) return "png";
+  if (ct.includes("webp")) return "webp";
+  if (ct.includes("gif")) return "gif";
+  if (ct.includes("svg")) return "svg";
+  if (ct.includes("jpeg") || ct.includes("jpg")) return "jpg";
+  // Fall back to URL extension if the response didn't pin one down.
+  const m = /\.([a-z]{3,4})(?:\?|$)/i.exec(url);
+  return m ? m[1].toLowerCase() : "jpg";
+}
+
+async function* iterSnapshots(
+  page: Page,
+  ctx: BrowserContext,
   options: CrawlOptions,
-  recipeIds: string[],
+  recipes: Array<{ id: string; title: string }>,
   limit: number | undefined,
   pageTimeoutMs: number,
   debug: boolean,
-): AsyncGenerator<FamilywallRawRecipe | null> {
-  const n = limit ? Math.min(limit, recipeIds.length) : recipeIds.length;
+): AsyncGenerator<CapturedSnapshot | null> {
+  const n = limit ? Math.min(limit, recipes.length) : recipes.length;
   if (debug) {
-    console.log(
-      `[familywall] iterating ${n} of ${recipeIds.length} recipe ids`,
-    );
+    console.log(`[familywall] iterating ${n} of ${recipes.length} recipes`);
   }
 
   for (let i = 0; i < n; i++) {
-    const recipeId = recipeIds[i];
+    const recipe = recipes[i];
     try {
-      // If we drifted off the recipe list (session timed out, unexpected
-      // redirect), recover before trying to click the next card. Doing
-      // this at the top of each iteration means a single bad recipe
-      // doesn't take down the rest of the run.
       const currentUrl = page.url();
       if (!currentUrl.includes("recipebox.php") || currentUrl.includes("noautologin")) {
         const ok = await ensureOnRecipeList(page, options, debug);
@@ -541,14 +379,10 @@ async function* iterRecipes(
           const t = document
             .getElementById("recipeDetail")
             ?.querySelector(".h1.line, .h1");
-          return t ? (t as HTMLElement).innerText.trim() : "";
+          return t ? (t.textContent ?? "").trim() : "";
         })
         .catch(() => "");
 
-      // Click the card by attribute selector so we don't rely on indexed
-      // locators that may have shifted. scrollIntoView happens inside the
-      // page context — works for off-screen tail elements that
-      // Playwright's actionability checks sometimes refuse to scroll to.
       const clicked = await page.evaluate((id) => {
         const card = document.querySelector(
           `.mp-recipe-list .mp-recipe[data-fw-meta-id="${id}"]`,
@@ -557,21 +391,17 @@ async function* iterRecipes(
         card.scrollIntoView({ block: "center" });
         card.click();
         return true;
-      }, recipeId);
+      }, recipe.id);
 
       if (!clicked) {
         if (debug) {
-          console.log(`[familywall] recipe #${i} (${recipeId}) card missing`);
+          console.log(`[familywall] #${i} (${recipe.id}) card missing`);
         }
-        // Card missing usually means the page drifted — try to recover so
-        // the next iteration has a chance.
         await ensureOnRecipeList(page, options, debug);
         yield null;
         continue;
       }
 
-      // Wait until the URL reflects this recipe's id AND the detail title
-      // has actually changed (so we don't extract the previous recipe).
       await page
         .waitForFunction(
           ({ id, prev }) => {
@@ -580,54 +410,47 @@ async function* iterRecipes(
             const t = document
               .getElementById("recipeDetail")
               ?.querySelector(".h1.line, .h1");
-            const cur = t ? (t as HTMLElement).innerText.trim() : "";
+            const cur = t ? (t.textContent ?? "").trim() : "";
             return cur.length > 0 && cur !== prev;
           },
-          { id: recipeId, prev: titleBefore },
+          { id: recipe.id, prev: titleBefore },
           { timeout: pageTimeoutMs },
         )
         .catch(() => {});
       await delay(POLITE_DELAY_MS);
-      const raw = await extractCurrentDetail(page);
-      yield raw;
+      const snapshot = await captureDetailSnapshot(page, ctx, recipe.id);
+      yield snapshot;
     } catch (e) {
       if (debug) {
-        console.log(`[familywall] recipe #${i} (${recipeId}) failed: ${e}`);
+        console.log(`[familywall] #${i} (${recipe.id}) failed: ${e}`);
       }
-      // Most likely a navigation-destroyed-execution-context error. Try
-      // to recover so the rest of the queue can still run.
       await ensureOnRecipeList(page, options, debug).catch(() => {});
       yield null;
     }
   }
 }
 
-/**
- * Fetch the bytes of an image using the same authenticated context as the
- * crawl. Returns null on any failure — the orchestrator just stores a
- * null `photoPath` in that case.
- */
-export async function fetchImageWithContext(
-  ctx: BrowserContext,
-  imgUrl: string,
-): Promise<Buffer | null> {
-  try {
-    const res = await ctx.request.get(imgUrl);
-    if (!res.ok()) return null;
-    return Buffer.from(await res.body());
-  } catch {
-    return null;
-  }
-}
+export type CrawlSink = (
+  snapshot: CapturedSnapshot,
+  helpers: { ctx: BrowserContext },
+) => Promise<void> | void;
 
+/**
+ * Drive a Playwright session through Familywall, calling `sink` with each
+ * captured snapshot. The sink is responsible for writing to the cache (or
+ * doing whatever else with the snapshot) — the crawler itself is purely
+ * about fetching. Returns the total number of recipes that were walked
+ * (counting nulls), plus the IDs that were successfully captured (so the
+ * caller can build a cache index).
+ */
 export async function withFamilywallCrawler(
   options: CrawlOptions,
-  sink: (
-    recipe: FamilywallRawRecipe,
-    helpers: { ctx: BrowserContext },
-  ) => Promise<void>,
+  sink: CrawlSink,
   onProgress?: (info: { total: number; current: number }) => void,
-): Promise<{ total: number }> {
+): Promise<{
+  total: number;
+  capturedRecipes: Array<{ id: string; title: string }>;
+}> {
   const pageTimeoutMs = options.pageTimeoutMs ?? 30_000;
   const debug = options.debug === true;
   const browser: Browser = await chromium.launch({
@@ -644,34 +467,33 @@ export async function withFamilywallCrawler(
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
     });
     await ctx.addInitScript(() => {
-      // navigator.webdriver = true is the most common headless tell.
       Object.defineProperty(navigator, "webdriver", { get: () => false });
     });
     const page = await ctx.newPage();
     await login(page, options.email, options.password);
     await gotoRecipeList(page, debug);
 
-    // Resolve the queue once (applies --recipe-id / --title filters) so
-    // the iterator and the progress total agree on what's being walked.
-    const recipeIds = await collectRecipeIds(page, options, debug);
-    const total = recipeIds.length;
-    const cap = options.limit ? Math.min(options.limit, total) : total;
+    const recipes = await collectRecipes(page, options, debug);
+    const cap = options.limit ? Math.min(options.limit, recipes.length) : recipes.length;
+    const capturedRecipes: Array<{ id: string; title: string }> = [];
     let current = 0;
-    for await (const recipe of iterRecipes(
+    for await (const snapshot of iterSnapshots(
       page,
+      ctx,
       options,
-      recipeIds,
+      recipes,
       options.limit,
       pageTimeoutMs,
       debug,
     )) {
       current += 1;
       onProgress?.({ total: cap, current });
-      if (!recipe) continue;
-      await sink(recipe, { ctx });
+      if (!snapshot) continue;
+      await sink(snapshot, { ctx });
+      capturedRecipes.push({ id: snapshot.id, title: snapshot.title });
       await delay(POLITE_DELAY_MS);
     }
-    return { total: cap };
+    return { total: cap, capturedRecipes };
   } finally {
     await browser.close();
   }
