@@ -281,6 +281,23 @@ describe("transformFamilywallRecipe", () => {
     );
   });
 
+  it("parses 'Pck.' as a Packung unit token", () => {
+    const lookups = makeLookups();
+    lookups.units.byNameOrAlias.set("pck", { id: 8, name: "Packung" });
+    const out = transformFamilywallRecipe(
+      makeRaw({
+        ingredients: ["1 Pck. Blätterteig (Blätterteig-Rolle, TK)"],
+      }),
+      lookups,
+      null,
+    );
+    const ing = out.sections[0].ingredients[0];
+    expect(ing.quantity).toBe(1);
+    expect(ing.unitId).toBe(8); // Packung
+    expect(ing.ingredientName).toBe("Blätterteig");
+    expect(ing.notes).toBe("Blätterteig-Rolle , TK");
+  });
+
   it("recognises 'Dose' after a size modifier 'kl.'", () => {
     const lookups = makeLookups();
     lookups.units.byNameOrAlias.set("dose", { id: 6, name: "Dose" });
