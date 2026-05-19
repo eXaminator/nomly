@@ -3,14 +3,14 @@ import { parseArgs } from "node:util";
 import { createInterface } from "node:readline/promises";
 
 // Familywall import CLI:
-//   npm run import:familywall -- [flags]
+//   npm run familywall:import -- [flags]
 //
 // Reads cached snapshots from ./data/familywall-cache/ (written by
 // `npm run familywall:download`) and ingests them into the nomly DB.
 // Never talks to Familywall directly — re-runs over the same cache are
 // free, which lets the parser iterate without re-downloading.
 
-const HELP = `Usage: npm run import:familywall -- [flags]
+const HELP = `Usage: npm run familywall:import -- [flags]
 
 Optional:
   --limit <n>          Process at most <n> cached recipes
@@ -76,7 +76,7 @@ async function main() {
       console.error(
         "[familywall] When using npm, separate the script flags with `--`:",
       );
-      console.error("  npm run import:familywall -- --overwrite");
+      console.error("  npm run familywall:import -- --overwrite");
       process.exit(2);
     }
     throw e;

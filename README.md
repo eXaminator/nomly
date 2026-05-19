@@ -56,12 +56,12 @@ npx playwright install chromium
 npm run familywall:download -- --email me@example.tld --password '…'
 
 # Step 2: import from the cache (asks before reusing an existing snapshot).
-npm run import:familywall
+npm run familywall:import
 
 # Useful flags for first runs:
 npm run familywall:download -- --email me@example.tld --password '…' \
   --headed --limit 1
-npm run import:familywall -- --limit 1 --dry-run
+npm run familywall:import -- --limit 1 --dry-run
 ```
 
 The download writes each snapshot to `./data/familywall-cache/recipes/<id>/`

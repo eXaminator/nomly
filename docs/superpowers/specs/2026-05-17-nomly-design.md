@@ -664,7 +664,7 @@ Each epic is independently mergeable. Order reflects the critical path to a usab
 
 **Epic 11 — Familywall import**
 - Investigation phase produces a short doc on the extraction approach actually used.
-- CLI: `npm run import:familywall -- <input-path>`.
+- CLI: `npm run familywall:download` (writes snapshots to `./data/familywall-cache/`), then `npm run familywall:import` (reads the cache and ingests).
 - Idempotency: dedupe key on `title + source` (or content-hash); re-run inserts only new recipes.
 - Outputs a summary (`N rezepte importiert, M übersprungen`).
 

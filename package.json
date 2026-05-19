@@ -13,7 +13,7 @@
     "seed": "node --experimental-transform-types --disable-warning=ExperimentalWarning scripts/seed.ts",
     "migrate": "node --experimental-transform-types --disable-warning=ExperimentalWarning scripts/migrate.mts",
     "familywall:download": "node --experimental-transform-types --disable-warning=ExperimentalWarning scripts/familywall-download.mts",
-    "import:familywall": "node --experimental-transform-types --disable-warning=ExperimentalWarning scripts/import-familywall.mts",
+    "familywall:import": "node --experimental-transform-types --disable-warning=ExperimentalWarning scripts/familywall-import.mts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",
