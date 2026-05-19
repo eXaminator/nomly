@@ -36,12 +36,13 @@ export type FamilywallRawRecipe = {
 
 export type FamilywallImportSummary = {
   imported: number;
+  updated: number;
   skipped: number;
   failed: number;
   details: Array<{
     title: string;
-    outcome: "imported" | "skipped" | "failed";
-    /** Set on "imported" outcomes. */
+    outcome: "imported" | "updated" | "skipped" | "failed";
+    /** Set on "imported" / "updated" outcomes. */
     recipeId?: number;
     /** Set on "failed" outcomes — short message. */
     error?: string;

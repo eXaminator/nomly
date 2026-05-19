@@ -23,13 +23,16 @@ Required:
 Optional:
   --limit <n>          Process at most <n> recipes
   --dry-run            Parse + transform, but skip every DB write
+  --overwrite          Re-import recipes that already exist (update in place
+                       — same dedup key as the skip path: title + source URL)
   --headed             Show the browser window (default: headless)
   --debug              Emit selector diagnostics (URLs, anchor counts, etc.)
   --help               Print this help
 
 The CLI writes to the same SQLite DB the running server uses
-(\$DATABASE_URL, defaults to ./data/nomly.db). Re-runs are safe — recipes
-already imported (matched by title + original source URL) are skipped.`;
+(\$DATABASE_URL, defaults to ./data/nomly.db). By default re-runs are
+safe — recipes already imported are skipped. Pass --overwrite to
+update them instead.`;
 
 async function main() {
   // Load .env / .env.local before anything reads process.env.
@@ -43,6 +46,7 @@ async function main() {
         password: { type: "string" },
         limit: { type: "string" },
         "dry-run": { type: "boolean", default: false },
+        overwrite: { type: "boolean", default: false },
         headed: { type: "boolean", default: false },
         debug: { type: "boolean", default: false },
         help: { type: "boolean", default: false },
@@ -105,6 +109,7 @@ async function main() {
     headed: parsed.values.headed,
     debug: parsed.values.debug,
     dryRun: parsed.values["dry-run"],
+    overwrite: parsed.values.overwrite,
     onRecipe: ({ title, outcome, recipeId, error }) => {
       printed += 1;
       const label = `[${printed}]`;
@@ -114,8 +119,14 @@ async function main() {
         case "imported":
           suffix = ` → imported${recipeId ? ` (id ${recipeId})` : ""}`;
           break;
+        case "updated":
+          suffix = ` → updated${recipeId ? ` (id ${recipeId})` : ""}`;
+          break;
         case "would-import":
           suffix = " → would import";
+          break;
+        case "would-update":
+          suffix = ` → would update${recipeId ? ` (id ${recipeId})` : ""}`;
           break;
         case "skipped":
           suffix = " → skipped (already imported)";
@@ -130,7 +141,7 @@ async function main() {
 
   console.log("---");
   console.log(
-    `done: ${summary.imported} imported, ${summary.skipped} skipped, ${summary.failed} failed`,
+    `done: ${summary.imported} imported, ${summary.updated} updated, ${summary.skipped} skipped, ${summary.failed} failed`,
   );
   if (parsed.values["dry-run"]) {
     console.log("(dry run — nothing written to the DB)");

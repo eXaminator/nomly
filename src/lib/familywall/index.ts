@@ -14,7 +14,7 @@ import {
   buildIngredientLookup,
   buildUnitLookup,
 } from "../recipe-import/index.ts";
-import { createRecipe } from "../recipes/service.ts";
+import { createRecipe, updateRecipe } from "../recipes/service.ts";
 import { savePhotoBuffer } from "../photos.ts";
 import {
   fetchImageWithContext,
@@ -31,12 +31,22 @@ import type { BrowserContext } from "playwright";
 export type RunOptions = CrawlOptions & {
   /** When true: parse + transform but skip every DB write and photo store. */
   dryRun?: boolean;
+  /** When true: re-import recipes that already exist in the DB (matched by
+   *  the same title + source_url dedup as the skip path). The existing
+   *  recipe row is updated in place, preserving its ID + relationships. */
+  overwrite?: boolean;
   /** Per-line progress hook the CLI uses for live output. */
   onRecipe?: (info: {
     index: number;
     total: number;
     title: string;
-    outcome: "imported" | "skipped" | "failed" | "would-import";
+    outcome:
+      | "imported"
+      | "skipped"
+      | "failed"
+      | "would-import"
+      | "updated"
+      | "would-update";
     recipeId?: number;
     error?: string;
   }) => void;
@@ -75,13 +85,17 @@ async function ingestOne(
   opts: RunOptions,
 ): Promise<
   | { outcome: "imported"; id: number }
+  | { outcome: "updated"; id: number }
   | { outcome: "skipped" }
   | { outcome: "failed"; error: string }
   | { outcome: "would-import" }
+  | { outcome: "would-update"; id: number }
 > {
   try {
     const existing = findExistingRecipeId(raw.title, raw.sourceUrl);
-    if (existing !== null) return { outcome: "skipped" };
+    if (existing !== null && !opts.overwrite) {
+      return { outcome: "skipped" };
+    }
 
     let photoPath: string | null = null;
     if (raw.imageUrl && !opts.dryRun) {
@@ -97,8 +111,14 @@ async function ingestOne(
     }
 
     const payload = transformFamilywallRecipe(raw, lookups, photoPath);
-    if (opts.dryRun) return { outcome: "would-import" };
 
+    if (existing !== null) {
+      if (opts.dryRun) return { outcome: "would-update", id: existing };
+      updateRecipe(existing, payload);
+      return { outcome: "updated", id: existing };
+    }
+
+    if (opts.dryRun) return { outcome: "would-import" };
     const id = createRecipe(payload);
     return { outcome: "imported", id };
   } catch (e) {
@@ -122,6 +142,7 @@ export async function runFamilywallImport(
   const lookups = buildLookups();
   const summary: FamilywallImportSummary = {
     imported: 0,
+    updated: 0,
     skipped: 0,
     failed: 0,
     details: [],
@@ -134,52 +155,87 @@ export async function runFamilywallImport(
       index += 1;
       const result = await ingestOne(raw, ctx, lookups, opts);
 
-      if (result.outcome === "imported") {
-        summary.imported += 1;
-        summary.details.push({
-          title: raw.title,
-          outcome: "imported",
-          recipeId: result.id,
-        });
-        opts.onRecipe?.({
-          index,
-          total: -1, // resolved by the crawler's onProgress separately
-          title: raw.title,
-          outcome: "imported",
-          recipeId: result.id,
-        });
-      } else if (result.outcome === "would-import") {
-        summary.imported += 1;
-        summary.details.push({ title: raw.title, outcome: "imported" });
-        opts.onRecipe?.({
-          index,
-          total: -1,
-          title: raw.title,
-          outcome: "would-import",
-        });
-      } else if (result.outcome === "skipped") {
-        summary.skipped += 1;
-        summary.details.push({ title: raw.title, outcome: "skipped" });
-        opts.onRecipe?.({
-          index,
-          total: -1,
-          title: raw.title,
-          outcome: "skipped",
-        });
-      } else {
-        summary.failed += 1;
-        summary.details.push({
-          title: raw.title,
-          outcome: "failed",
-          error: result.error,
-        });
-        opts.onRecipe?.({
-          index,
-          total: -1,
-          title: raw.title,
-          outcome: "failed",
-          error: result.error,
-        });
+      switch (result.outcome) {
+        case "imported":
+          summary.imported += 1;
+          summary.details.push({
+            title: raw.title,
+            outcome: "imported",
+            recipeId: result.id,
+          });
+          opts.onRecipe?.({
+            index,
+            total: -1,
+            title: raw.title,
+            outcome: "imported",
+            recipeId: result.id,
+          });
+          break;
+        case "updated":
+          summary.updated += 1;
+          summary.details.push({
+            title: raw.title,
+            outcome: "updated",
+            recipeId: result.id,
+          });
+          opts.onRecipe?.({
+            index,
+            total: -1,
+            title: raw.title,
+            outcome: "updated",
+            recipeId: result.id,
+          });
+          break;
+        case "would-import":
+          summary.imported += 1;
+          summary.details.push({ title: raw.title, outcome: "imported" });
+          opts.onRecipe?.({
+            index,
+            total: -1,
+            title: raw.title,
+            outcome: "would-import",
+          });
+          break;
+        case "would-update":
+          summary.updated += 1;
+          summary.details.push({
+            title: raw.title,
+            outcome: "updated",
+            recipeId: result.id,
+          });
+          opts.onRecipe?.({
+            index,
+            total: -1,
+            title: raw.title,
+            outcome: "would-update",
+            recipeId: result.id,
+          });
+          break;
+        case "skipped":
+          summary.skipped += 1;
+          summary.details.push({ title: raw.title, outcome: "skipped" });
+          opts.onRecipe?.({
+            index,
+            total: -1,
+            title: raw.title,
+            outcome: "skipped",
+          });
+          break;
+        case "failed":
+          summary.failed += 1;
+          summary.details.push({
+            title: raw.title,
+            outcome: "failed",
+            error: result.error,
+          });
+          opts.onRecipe?.({
+            index,
+            total: -1,
+            title: raw.title,
+            outcome: "failed",
+            error: result.error,
+          });
+          break;
       }
     },
   );
