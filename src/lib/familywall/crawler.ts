@@ -399,16 +399,27 @@ async function* iterRecipes(
   pageTimeoutMs: number,
   debug: boolean,
 ): AsyncGenerator<FamilywallRawRecipe | null> {
-  const cards = page.locator(".mp-recipe-list .mp-recipe");
-  const count = await cards.count();
-  const n = limit ? Math.min(limit, count) : count;
+  // Collect every recipe ID up front from the `data-fw-meta-id` attribute
+  // ("recipe/8084800_2230040"). Working from this stable list avoids the
+  // Playwright `locator.nth(i)` + scrollIntoViewIfNeeded path which was
+  // silently dropping the last couple of cards in headless mode.
+  const recipeIds = await page.evaluate(() =>
+    Array.from(
+      document.querySelectorAll(".mp-recipe-list .mp-recipe[data-fw-meta-id]"),
+    )
+      .map((el) => el.getAttribute("data-fw-meta-id"))
+      .filter((id): id is string => typeof id === "string" && id.length > 0),
+  );
+  const n = limit ? Math.min(limit, recipeIds.length) : recipeIds.length;
   if (debug) {
-    console.log(`[familywall] iterating ${n} of ${count} recipes`);
+    console.log(
+      `[familywall] iterating ${n} of ${recipeIds.length} recipe ids`,
+    );
   }
+
   for (let i = 0; i < n; i++) {
-    const card = cards.nth(i);
+    const recipeId = recipeIds[i];
     try {
-      await card.scrollIntoViewIfNeeded({ timeout: pageTimeoutMs });
       const titleBefore = await page
         .evaluate(() => {
           const t = document
@@ -417,31 +428,53 @@ async function* iterRecipes(
           return t ? (t as HTMLElement).innerText.trim() : "";
         })
         .catch(() => "");
-      await card.click({ timeout: pageTimeoutMs });
-      // Wait for the URL to switch to this recipe AND the title in the
-      // detail pane to change from the previous one. Recipes with the same
-      // title are rare; if they happen we just wait the budget out.
+
+      // Click the card by attribute selector so we don't rely on indexed
+      // locators that may have shifted. scrollIntoView happens inside the
+      // page context — works for off-screen tail elements that
+      // Playwright's actionability checks sometimes refuse to scroll to.
+      const clicked = await page.evaluate((id) => {
+        const card = document.querySelector(
+          `.mp-recipe-list .mp-recipe[data-fw-meta-id="${id}"]`,
+        ) as HTMLElement | null;
+        if (!card) return false;
+        card.scrollIntoView({ block: "center" });
+        card.click();
+        return true;
+      }, recipeId);
+
+      if (!clicked) {
+        if (debug) {
+          console.log(`[familywall] recipe #${i} (${recipeId}) card missing`);
+        }
+        yield null;
+        continue;
+      }
+
+      // Wait until the URL reflects this recipe's id AND the detail title
+      // has actually changed (so we don't extract the previous recipe).
       await page
         .waitForFunction(
-          (prev) => {
-            const u = location.search;
-            if (!u.includes("id=recipe")) return false;
+          ({ id, prev }) => {
+            const search = decodeURIComponent(location.search);
+            if (!search.includes(`id=${id}`)) return false;
             const t = document
               .getElementById("recipeDetail")
               ?.querySelector(".h1.line, .h1");
             const cur = t ? (t as HTMLElement).innerText.trim() : "";
             return cur.length > 0 && cur !== prev;
           },
-          titleBefore,
+          { id: recipeId, prev: titleBefore },
           { timeout: pageTimeoutMs },
         )
         .catch(() => {});
-      // Give the image + content a moment to settle.
       await delay(POLITE_DELAY_MS);
       const raw = await extractCurrentDetail(page);
       yield raw;
     } catch (e) {
-      if (debug) console.log(`[familywall] recipe #${i} failed: ${e}`);
+      if (debug) {
+        console.log(`[familywall] recipe #${i} (${recipeId}) failed: ${e}`);
+      }
       yield null;
     }
   }
@@ -496,7 +529,13 @@ export async function withFamilywallCrawler(
     await login(page, options.email, options.password);
     await gotoRecipeList(page, debug);
 
-    const total = await page.locator(".mp-recipe-list .mp-recipe").count();
+    // Count by attribute so the total matches what iterRecipes will walk.
+    const total = await page.evaluate(
+      () =>
+        document.querySelectorAll(
+          ".mp-recipe-list .mp-recipe[data-fw-meta-id]",
+        ).length,
+    );
     const cap = options.limit ? Math.min(options.limit, total) : total;
     let current = 0;
     for await (const recipe of iterRecipes(
