@@ -131,14 +131,14 @@ export function ListShell<TItem>({
     }
   }
 
-  function toggleRow(id: number) {
+  const toggleRow = React.useCallback((id: number) => {
     setSelectedIds((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
       return next;
     });
-  }
+  }, []);
 
   const selectedItems = filtered.filter((i) => selectedIds.has(idOf(i)));
 
@@ -148,12 +148,12 @@ export function ListShell<TItem>({
     setDrawerValid(false);
     setDrawerError(null);
   }
-  function openEdit(item: TItem) {
+  const openEdit = React.useCallback((item: TItem) => {
     setDrawer({ mode: "edit", item });
     setDrawerPayload(null);
     setDrawerValid(false);
     setDrawerError(null);
-  }
+  }, []);
   function closeDrawer() {
     setDrawer(null);
     setDrawerPayload(null);
@@ -301,40 +301,15 @@ export function ListShell<TItem>({
                 ))}
               </tr>
             </thead>
-            <tbody className="divide-y divide-[var(--color-border)]">
-              {filtered.map((item) => {
-                const id = idOf(item);
-                const selected = selectedIds.has(id);
-                return (
-                  <tr
-                    key={id}
-                    className={cn(
-                      "hover:bg-[var(--color-muted)] cursor-pointer",
-                      selected && "bg-[color-mix(in_srgb,var(--color-accent),transparent_88%)]",
-                    )}
-                    onClick={(e) => {
-                      // ignore click that originated on the checkbox column
-                      const target = e.target as HTMLElement;
-                      if (target.closest("[data-row-checkbox]")) return;
-                      openEdit(item);
-                    }}
-                  >
-                    <td className="px-3 py-2 w-10" data-row-checkbox>
-                      <Checkbox
-                        checked={selected}
-                        onCheckedChange={() => toggleRow(id)}
-                        aria-label={`${nameOf(item)} auswählen`}
-                      />
-                    </td>
-                    {columns.map((c) => (
-                      <td key={c.key} className={cn("px-3 py-2", c.className)}>
-                        {c.cell(item)}
-                      </td>
-                    ))}
-                  </tr>
-                );
-              })}
-            </tbody>
+            <ListTableBody
+              filtered={filtered}
+              selectedIds={selectedIds}
+              columns={columns}
+              idOf={idOf}
+              nameOf={nameOf}
+              onOpenEdit={openEdit}
+              onToggleRow={toggleRow}
+            />
           </table>
         </div>
       )}
@@ -446,3 +421,67 @@ function pluralFor(kind: EntityKind): string {
       return "supermarkets";
   }
 }
+
+/**
+ * Memoized table body — re-renders only when filtered rows, selection, or
+ * column defs change. Opening/closing the drawer or typing in the form
+ * doesn't invalidate it, so 300+ rows aren't re-walked per keystroke.
+ */
+type ListTableBodyProps<TItem> = {
+  filtered: TItem[];
+  selectedIds: Set<number>;
+  columns: ColumnDef<TItem>[];
+  idOf: (item: TItem) => number;
+  nameOf: (item: TItem) => string;
+  onOpenEdit: (item: TItem) => void;
+  onToggleRow: (id: number) => void;
+};
+
+function ListTableBodyImpl<TItem>({
+  filtered,
+  selectedIds,
+  columns,
+  idOf,
+  nameOf,
+  onOpenEdit,
+  onToggleRow,
+}: ListTableBodyProps<TItem>) {
+  return (
+    <tbody className="divide-y divide-[var(--color-border)]">
+      {filtered.map((item) => {
+        const id = idOf(item);
+        const selected = selectedIds.has(id);
+        return (
+          <tr
+            key={id}
+            className={cn(
+              "hover:bg-[var(--color-muted)] cursor-pointer",
+              selected &&
+                "bg-[color-mix(in_srgb,var(--color-accent),transparent_88%)]",
+            )}
+            onClick={(e) => {
+              const target = e.target as HTMLElement;
+              if (target.closest("[data-row-checkbox]")) return;
+              onOpenEdit(item);
+            }}
+          >
+            <td className="px-3 py-2 w-10" data-row-checkbox>
+              <Checkbox
+                checked={selected}
+                onCheckedChange={() => onToggleRow(id)}
+                aria-label={`${nameOf(item)} auswählen`}
+              />
+            </td>
+            {columns.map((c) => (
+              <td key={c.key} className={cn("px-3 py-2", c.className)}>
+                {c.cell(item)}
+              </td>
+            ))}
+          </tr>
+        );
+      })}
+    </tbody>
+  );
+}
+
+const ListTableBody = React.memo(ListTableBodyImpl) as typeof ListTableBodyImpl;
