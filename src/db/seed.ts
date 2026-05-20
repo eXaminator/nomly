@@ -150,7 +150,13 @@ const topUpUnits: Array<{
     name: "Bund",
     dimension: "count",
     factor: 1,
-    aliases: ["Bunde", "Bündel", "bunch", "bunches"],
+    aliases: ["Bunde", "Bündel", "Bd.", "Bd", "bunch", "bunches"],
+  },
+  {
+    name: "Stück",
+    dimension: "count",
+    factor: 1,
+    aliases: ["Stk", "Stk.", "St.", "x", "piece", "pieces"],
   },
   {
     name: "Handvoll",

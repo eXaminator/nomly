@@ -87,13 +87,15 @@ export function UnitPageClient({
   initialItems: UnitItem[];
 }) {
   const [dimension, setDimension] = React.useState<DimensionFilter>("all");
+  const [unusedOnly, setUnusedOnly] = React.useState(false);
 
   const applyFilters = React.useCallback(
     (item: UnitItem) => {
       if (dimension !== "all" && item.dimension !== dimension) return false;
+      if (unusedOnly && item.recipeRefCount > 0) return false;
       return true;
     },
-    [dimension],
+    [dimension, unusedOnly],
   );
 
   const searchMatches = React.useCallback((item: UnitItem, q: string) => {
@@ -125,6 +127,12 @@ export function UnitPageClient({
         active={dimension === "count"}
         onClick={() => setDimension("count")}
         label="Stück"
+      />
+      <span className="mx-2 h-5 w-px bg-[var(--color-border)]" />
+      <Chip
+        active={unusedOnly}
+        onClick={() => setUnusedOnly((v) => !v)}
+        label="Ungenutzt"
       />
     </>
   );

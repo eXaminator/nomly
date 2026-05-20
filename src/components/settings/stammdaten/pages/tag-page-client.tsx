@@ -23,9 +23,34 @@ const columns: ColumnDef<TagItem>[] = [
 ];
 
 export function TagPageClient({ initialItems }: { initialItems: TagItem[] }) {
+  const [unusedOnly, setUnusedOnly] = React.useState(false);
+
   const searchMatches = React.useCallback(
     (item: TagItem, q: string) => item.name.toLowerCase().includes(q),
     [],
+  );
+
+  const applyFilters = React.useCallback(
+    (item: TagItem) => {
+      if (unusedOnly && item.recipeRefCount > 0) return false;
+      return true;
+    },
+    [unusedOnly],
+  );
+
+  const filterControls = (
+    <button
+      type="button"
+      onClick={() => setUnusedOnly((v) => !v)}
+      className={
+        "rounded-full border px-3 py-1 text-xs transition-colors " +
+        (unusedOnly
+          ? "border-[var(--color-accent)] bg-[var(--color-accent)] text-[var(--color-accent-fg)]"
+          : "border-[var(--color-border)] hover:bg-[var(--color-muted)]")
+      }
+    >
+      Ungenutzt
+    </button>
   );
 
   return (
@@ -36,6 +61,8 @@ export function TagPageClient({ initialItems }: { initialItems: TagItem[] }) {
       idOf={(i) => i.id}
       nameOf={(i) => i.name}
       searchMatches={searchMatches}
+      applyFilters={applyFilters}
+      filterControls={filterControls}
       EditForm={TagForm}
       hardDeleteAllowed={true}
       mergeWarning={

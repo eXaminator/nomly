@@ -53,6 +53,7 @@ const TEST_UNITS = new Set(
     "zoll", "inch", "inches", '"',
     "cm", "zentimeter", "centimeter", "centimeters",
     "zehe", "zehen", "clove", "cloves",
+    "x", "tin", "tins", "bd", "bd.",
   ].map((u) => u.toLowerCase()),
 );
 const parse = (raw: string) => parseIngredientString(raw, TEST_UNITS);
@@ -385,6 +386,83 @@ describe("parseIngredientString — extended cases", () => {
     const r = parse("2 ripe tomatoes");
     expect(r.altWithPrepStripped).toBeNull();
   });
+
+  it("strips soft hyphens from the name", () => {
+    const r = parse("100 g Thy­mi­an");
+    expect(r.name).toBe("Thymian");
+  });
+  it("strips leading bullet emoji '▢'", () => {
+    const r = parse("▢1 teaspoon ground cinnamon");
+    expect(r.quantity).toBe(1);
+    expect(r.unitName).toBe("teaspoon");
+    expect(r.name.toLowerCase()).toContain("cinnamon");
+  });
+  it("treats '~ 2 EL' as quantity 2", () => {
+    const r = parse("~ 2 EL Honig");
+    expect(r.quantity).toBe(2);
+    expect(r.unitName).toBe("EL");
+    expect(r.name).toBe("Honig");
+  });
+  it("'plus 1 teaspoon brown sugar' drops the 'plus'", () => {
+    const r = parse("plus 1 teaspoon brown sugar");
+    expect(r.quantity).toBe(1);
+    expect(r.unitName).toBe("teaspoon");
+    expect(r.name).toBe("brown sugar");
+  });
+  it("'to ½ teaspoon red pepper flakes' drops the 'to'", () => {
+    const r = parse("to ½ teaspoon red pepper flakes");
+    expect(r.quantity).toBe(0.5);
+    expect(r.unitName).toBe("teaspoon");
+    expect(r.name).toBe("red pepper flakes");
+  });
+  it("'bell pepper- thinly sliced' splits the dash into a note", () => {
+    const r = parse("1 bell pepper- thinly sliced");
+    expect(r.quantity).toBe(1);
+    expect(r.name.toLowerCase()).toContain("bell pepper");
+    expect(r.notes?.toLowerCase()).toContain("thinly sliced");
+  });
+  it("'optional' anywhere sets the flag and is stripped", () => {
+    const r = parse("100 g Zucker (optional, fein)");
+    expect(r.isOptional).toBe(true);
+    expect(r.name).toBe("Zucker");
+    expect((r.notes ?? "").toLowerCase()).not.toContain("optional");
+  });
+  it("'n. B.' marker sets optional", () => {
+    const r = parse("Salz n. B.");
+    expect(r.isOptional).toBe(true);
+    expect(r.name).toBe("Salz");
+  });
+  it("range with repeated unit '25 g – 50 g' uses max + note", () => {
+    const r = parse("25 g – 50 g gekühlte Marzipan-Rohmasse");
+    expect(r.quantity).toBe(50);
+    expect(r.unitName).toBe("g");
+    expect(r.notes).toMatch(/25-50/);
+  });
+  it("'1 garlic clove' parses unit from the trailing token", () => {
+    const r = parse("1 garlic clove");
+    expect(r.quantity).toBe(1);
+    expect(r.unitName?.toLowerCase()).toBe("clove");
+    expect(r.name).toBe("garlic");
+  });
+  it("'1x Knoblauchzehe' parses 'x' as Stück alias", () => {
+    const r = parse("1x Knoblauchzehe");
+    expect(r.quantity).toBe(1);
+    expect(r.unitName?.toLowerCase()).toBe("x");
+    expect(r.name).toBe("Knoblauchzehe");
+  });
+  it("'1 tin chopped tomatoes' parses tin as Dose alias", () => {
+    const r = parse("1 tin chopped tomatoes");
+    expect(r.quantity).toBe(1);
+    expect(r.unitName?.toLowerCase()).toBe("tin");
+    expect(r.name.toLowerCase()).toContain("tomatoes");
+  });
+  it("'Stk. Ingwer' falls back to amount 1 with Stk. as unit", () => {
+    const r = parse("Stk. Ingwer");
+    expect(r.quantity).toBe(1);
+    expect(r.unitName?.toLowerCase()).toBe("stk");
+    expect(r.name).toBe("Ingwer");
+  });
+
   it("parser returns empty name for '2 Prise' alone", () => {
     const r = parse("2 Prise");
     expect(r.quantity).toBe(2);
@@ -421,6 +499,12 @@ describe("detectSectionHeader", () => {
   });
   it("ignores single-dash bullet", () => {
     expect(detectSectionHeader("- 100 g Mehl")).toBeNull();
+  });
+  it("'Part 2: Sauce' → 'Sauce'", () => {
+    expect(detectSectionHeader("Part 2: Sauce")).toBe("Sauce");
+  });
+  it("'Teil 1: Teig' → 'Teig'", () => {
+    expect(detectSectionHeader("Teil 1: Teig")).toBe("Teig");
   });
 });
 

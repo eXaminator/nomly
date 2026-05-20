@@ -49,6 +49,8 @@ export function CategoryPageClient({
 }: {
   initialItems: CategoryItem[];
 }) {
+  const [unusedOnly, setUnusedOnly] = React.useState(false);
+
   const searchMatches = React.useCallback((item: CategoryItem, q: string) => {
     if (item.name.toLowerCase().includes(q)) return true;
     for (const a of item.aliases) {
@@ -56,6 +58,29 @@ export function CategoryPageClient({
     }
     return false;
   }, []);
+
+  const applyFilters = React.useCallback(
+    (item: CategoryItem) => {
+      if (unusedOnly && item.usageCount > 0) return false;
+      return true;
+    },
+    [unusedOnly],
+  );
+
+  const filterControls = (
+    <button
+      type="button"
+      onClick={() => setUnusedOnly((v) => !v)}
+      className={
+        "rounded-full border px-3 py-1 text-xs transition-colors " +
+        (unusedOnly
+          ? "border-[var(--color-accent)] bg-[var(--color-accent)] text-[var(--color-accent-fg)]"
+          : "border-[var(--color-border)] hover:bg-[var(--color-muted)]")
+      }
+    >
+      Ungenutzt
+    </button>
+  );
 
   return (
     <ListShell<CategoryItem>
@@ -65,6 +90,8 @@ export function CategoryPageClient({
       idOf={(i) => i.id}
       nameOf={(i) => i.name}
       searchMatches={searchMatches}
+      applyFilters={applyFilters}
+      filterControls={filterControls}
       EditForm={CategoryForm}
       hardDeleteAllowed={true}
     />

@@ -152,6 +152,10 @@ const NAME_FILLER_TOKENS = new Set([
   "der",
   "die",
   "das",
+  // Leading "plus" / "to" from chained ingredient writeups
+  // ("plus 1 tsp brown sugar", "to ½ tsp red pepper flakes").
+  "plus",
+  "to",
 ]);
 
 /**
@@ -227,6 +231,7 @@ const OPTIONAL_MARKER_WORDS = [
   "ggf\\.?",
   "if available",
   "if needed",
+  "n\\.\\s*B\\.?",
 ];
 
 const OPTIONAL_LEADING_RE = new RegExp(
@@ -241,6 +246,14 @@ const OPTIONAL_INLINE_TRAIL_RE = new RegExp(
   `[\\s,–-]+(?:${OPTIONAL_MARKER_WORDS.join("|")})\\s*$`,
   "i",
 );
+/**
+ * The literal word "optional"/"optionally"/"opt." appearing ANYWHERE in the
+ * line — even mid-name — sets the flag and is stripped from the text. The
+ * user's explicit rule: that word should never end up in the ingredient
+ * name or notes.
+ */
+const OPTIONAL_ANYWHERE_RE =
+  /[\s,;()\[\]–-]*\b(?:optional|optionally|opt\.)\b[\s,;()\[\]–-]*/gi;
 
 /**
  * Tokens that, if they appear after a unit token, should still be treated
@@ -377,6 +390,15 @@ export function detectSectionHeader(raw: string): string | null {
   // recipes: "[Sauce]" → "Sauce".
   text = text.replace(/^\[|\]$/g, "").trim();
 
+  // "Part 1: Sauce" / "Teil 2: Beilage" — strip the leading "Part N:" prefix
+  // and use whatever follows the colon as the section title. When nothing
+  // follows, keep the "Part N" label.
+  const partMatch = /^(?:part|teil)\s+\d+\s*[:.]?\s*(.*)$/i.exec(text);
+  if (partMatch) {
+    const rest = partMatch[1].trim();
+    return rest.length > 0 ? rest : text.trim();
+  }
+
   if (/^[-–—]{2,}/.test(text) || /[-–—]{2,}$/.test(text)) {
     return text.replace(/^[-–—\s]+|[-–—\s]+$/g, "").trim() || null;
   }
@@ -423,13 +445,51 @@ function preprocess(raw: string): {
   capturedNotes: string[];
   isOptional: boolean;
 } {
-  let text = raw;
+  // Strip invisible / formatting chars up front: SOFT HYPHEN, ZWSP/ZWNJ/ZWJ,
+  // word joiner, BOM. These appear in copy/pasted ingredient text and silently
+  // break ingredient-name matching ("Thy­mi­an" vs "Thymian").
+  let text = raw
+    .replace(/[­​‌‍⁠﻿]/g, "")
+    // Strip emoji + symbol-like glyphs that recipe sites use as bullets
+    // (▢, ☐, ◯, decorative symbols, recipe-format emojis). The
+    // section-header heuristic catches a LEADING emoji separately; here
+    // we drop any leftover symbols anywhere in the line so they don't
+    // pollute the ingredient name.
+    .replace(
+      /[▀-▟■-◿☀-⛿✀-➿\u{1F300}-\u{1FAFF}\u{1F600}-\u{1F64F}]/gu,
+      "",
+    );
   const capturedNotes: string[] = [];
   let isOptional = false;
 
-  // Detect optional markers — leading "Optional:", "opt. 2 EL", or inline
-  // "Salz (optional)" / "Salz, optional". Strip them and set the flag; the
-  // flag carries the meaning so we don't also push to notes.
+  // "(...optional...)" — the paren contains the marker. Strip the parens
+  // entirely, capture any remaining text from inside as a note, flag
+  // optional. Has to run before the generic "optional anywhere" path so
+  // we don't leave an orphan ")" behind.
+  text = text.replace(
+    /\(([^)]*\b(?:optional|optionally|opt\.)\b[^)]*)\)/gi,
+    (_match, inner: string) => {
+      isOptional = true;
+      const cleaned = inner
+        .replace(/\b(?:optional|optionally|opt\.)\b/gi, "")
+        .replace(/^[\s,;]+|[\s,;]+$/g, "")
+        .replace(/[\s,;]+/g, " ")
+        .trim();
+      if (cleaned.length > 0) capturedNotes.push(cleaned);
+      return " ";
+    },
+  );
+
+  // "optional" / "optionally" / "opt." appearing ANYWHERE flags the row
+  // and is stripped from the text. The user's rule: never let those words
+  // bleed into the name or notes.
+  if (OPTIONAL_ANYWHERE_RE.test(text)) {
+    isOptional = true;
+    text = text.replace(OPTIONAL_ANYWHERE_RE, " ");
+    OPTIONAL_ANYWHERE_RE.lastIndex = 0;
+  }
+  // Other markers (n. B., evtl., nach Belieben, …) — same strip but they
+  // never appear standalone so we still scan all three positions.
   if (OPTIONAL_LEADING_RE.test(text)) {
     isOptional = true;
     text = text.replace(OPTIONAL_LEADING_RE, "");
@@ -466,19 +526,39 @@ function preprocess(raw: string): {
   // sites: "*Hackfleisch", "Salz*").
   text = text.replace(/\*/g, " ");
 
-  // Strip leading/trailing throwaway punctuation: "+", "&", "·", "•", etc.
-  // (Section-header heuristics ran earlier; here we only see ingredients.)
-  text = text.replace(/^[\s+&·•●◦|]+|[\s+&·•|]+$/g, "");
+  // Strip any non-letter / non-digit run from the very start of the line:
+  // bullet glyphs like ▢, "+", "&", "·", "•", "~", "*", whitespace,
+  // emoji that survived the earlier scrub, dotted-list markers, …
+  // Stop as soon as we hit a letter or digit so leading quantities aren't
+  // damaged. Preserve a leading "." or "," when it's followed by a digit —
+  // that's a decimal like ".5 cup" / ",5 l".
+  text = text.replace(/^(?:[^\p{L}\p{N}.,]|[.,](?!\d))+/u, "");
+  // Trailing: keep parens / brackets which the bracketed-note logic
+  // already handled, just drop punctuation/whitespace.
+  text = text.replace(/[\s+&·•|.,;:]+$/u, "");
 
-  // Strip leading filler conjunctions/articles: "und ", "and ", "the ".
+  // Strip leading filler conjunctions/articles: "und ", "and ", "the ", and
+  // chained-recipe leaders like "plus" / "to" / "or" — those are usually
+  // artifacts of how multi-ingredient lines are written.
   text = text.replace(
-    /^(?:und|and|the|der|die|das|of|von|vom|or|oder|sowie|plus)\s+/i,
+    /^(?:und|and|the|der|die|das|of|von|vom|or|oder|sowie|plus|to)\s+/i,
     "",
   );
+
+  // Leading "~" (approximation tilde): drop it.
+  text = text.replace(/^\s*[~∼]\s*/, "");
 
   // " / " and " o. " → " or " — keep both alternatives but route them through
   // the existing NOTE_BOUNDARY logic.
   text = text.replace(/\s+\/\s+/g, " or ").replace(/\s+o\.\s+/gi, " or ");
+
+  // Range with repeated unit: "25 g – 50 g" / "100 ml - 200 ml" → "25-50 g"
+  // (the duplicated unit is redundant; collapsing it lets the existing range
+  // path handle the rest).
+  text = text.replace(
+    /(\d+(?:[.,]\d+)?)\s+(\p{L}+)\s*[-–—]\s*(\d+(?:[.,]\d+)?)\s+\2\b/gu,
+    "$1-$3 $2",
+  );
 
   // "Amount at end" via colon: "Flohsamenschalenpulver: 30 g" → "30 g Flohsamenschalenpulver"
   const colonAmount = /^(.+?):\s*([\d\s./,\-–½¼¾⅓⅔⅛⅜⅝⅞]+(?:\s+\p{L}{1,30})?)\s*$/u.exec(text);
@@ -557,7 +637,20 @@ function tokenize(input: string): string[] {
     .replace(/(\d)"/g, '$1 "')
     .replace(/(\d)([½¼¾⅓⅔⅛⅜⅝⅞])/g, "$1 $2")
     .replace(/(\d)([a-zA-ZäöüÄÖÜß])/g, "$1 $2")
-    .replace(/([½¼¾⅓⅔⅛⅜⅝⅞])([a-zA-ZäöüÄÖÜß])/g, "$1 $2");
+    .replace(/([½¼¾⅓⅔⅛⅜⅝⅞])([a-zA-ZäöüÄÖÜß])/g, "$1 $2")
+    // A dash adjacent to whitespace acts as a note separator
+    // ("bell pepper- thinly sliced" → pad to a standalone "-" token). Don't
+    // touch dashes inside compounds where neither side has whitespace
+    // ("Persian-style", "Weizen-Vollkornmehl"). Also skip dash-compound +
+    // conjunction ("Weizen- oder Dinkelmehl"): when the word AFTER the
+    // whitespace is "oder"/"or"/"und"/"and"/"bzw"/"alternativ", keep the
+    // dash glued to the preceding word so the parser treats the whole
+    // span as one ingredient name.
+    .replace(
+      /([\p{L}\)\]])([-–])(\s+)(?!(?:oder|or|und|and|bzw\.?|alternativ|alternatively)\b)/gu,
+      "$1 $2 $3",
+    )
+    .replace(/(\s)([-–])([\p{L}\(])/gu, "$1$2 $3");
   return padded.split(/\s+/).filter((t) => t.length > 0);
 }
 
@@ -737,6 +830,28 @@ export function parseIngredientString(
     nameTokens.pop();
   }
 
+  // Trailing-unit fallback: when we didn't catch a unit after the quantity
+  // ("1 garlic clove") but the last name token IS a known unit, peel it
+  // off. This handles English-style "qty NAME UNIT" alongside the more
+  // common "qty UNIT NAME" the main loop already covers.
+  if (
+    unitName === null &&
+    nameTokens.length >= 2 &&
+    quantity !== null
+  ) {
+    const lastToken = nameTokens[nameTokens.length - 1];
+    const lower = lastToken.toLowerCase();
+    const stripped = lower.replace(/\.$/, "");
+    if (
+      knownUnitTokens.has(lower) ||
+      knownUnitTokens.has(stripped) ||
+      knownUnitTokens.has(`${stripped}.`)
+    ) {
+      unitName = lastToken.replace(/\.$/, "");
+      nameTokens.pop();
+    }
+  }
+
   const name = nameTokens
     .join(" ")
     .replace(/[()]/g, "")
@@ -837,6 +952,7 @@ export const PREP_LEADING_TOKENS = new Set([
   "seeded",
   "stemmed",
   "trimmed",
+  "crumbled",
   // English adverbs that pair with prep verbs
   "finely",
   "coarsely",

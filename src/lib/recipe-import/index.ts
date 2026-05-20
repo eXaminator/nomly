@@ -317,6 +317,17 @@ export function parseIngredientLines(
       // ingredient). Same for fragments produced by conjunction splitting
       // that turn out to be empty.
       if (parsed.name.trim().length === 0) continue;
+      // A leading "or X" / "oder X" almost always means we just split a
+      // conjunction that connected alternatives. Attach as a note on the
+      // previous row instead of creating a separate ingredient.
+      const leadingOr = /^(?:or|oder)\s+(.+)/i.exec(parsed.name.trim());
+      if (leadingOr && out.length > 0) {
+        const alt = leadingOr[1];
+        const prev = out[out.length - 1];
+        prev.notes = prev.notes ? `${prev.notes}, oder ${alt}` : `oder ${alt}`;
+        if (parsed.isOptional) prev.isOptional = true;
+        continue;
+      }
       const { resolved, match: unitMatch, rawUnit } = resolveUnit(
         lookups.units,
         parsed.unitName,
@@ -383,6 +394,15 @@ export function parseIngredientLinesIntoSections(
     for (const piece of splitConjunctions(raw, splitOpts)) {
       const parsed = parseIngredientString(piece, knownUnitTokens);
       if (parsed.name.trim().length === 0) continue;
+      const currentGroup = groups[groups.length - 1];
+      const leadingOr = /^(?:or|oder)\s+(.+)/i.exec(parsed.name.trim());
+      if (leadingOr && currentGroup.ingredients.length > 0) {
+        const alt = leadingOr[1];
+        const prev = currentGroup.ingredients[currentGroup.ingredients.length - 1];
+        prev.notes = prev.notes ? `${prev.notes}, oder ${alt}` : `oder ${alt}`;
+        if (parsed.isOptional) prev.isOptional = true;
+        continue;
+      }
       const { resolved, match: unitMatch, rawUnit } = resolveUnit(
         lookups.units,
         parsed.unitName,
@@ -398,7 +418,7 @@ export function parseIngredientLinesIntoSections(
         lookups.ingredients,
         name,
       );
-      groups[groups.length - 1].ingredients.push({
+      currentGroup.ingredients.push({
         quantity: parsed.quantity,
         unit: resolved,
         unitMatch,

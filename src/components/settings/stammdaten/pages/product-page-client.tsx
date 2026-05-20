@@ -59,6 +59,8 @@ export function ProductPageClient({
 }: {
   initialItems: ProductItem[];
 }) {
+  const [unusedOnly, setUnusedOnly] = React.useState(false);
+
   const searchMatches = React.useCallback((item: ProductItem, q: string) => {
     if (item.name.toLowerCase().includes(q)) return true;
     for (const a of item.aliases) {
@@ -66,6 +68,29 @@ export function ProductPageClient({
     }
     return false;
   }, []);
+
+  const applyFilters = React.useCallback(
+    (item: ProductItem) => {
+      if (unusedOnly && item.shoppingItemRefCount > 0) return false;
+      return true;
+    },
+    [unusedOnly],
+  );
+
+  const filterControls = (
+    <button
+      type="button"
+      onClick={() => setUnusedOnly((v) => !v)}
+      className={
+        "rounded-full border px-3 py-1 text-xs transition-colors " +
+        (unusedOnly
+          ? "border-[var(--color-accent)] bg-[var(--color-accent)] text-[var(--color-accent-fg)]"
+          : "border-[var(--color-border)] hover:bg-[var(--color-muted)]")
+      }
+    >
+      Ungenutzt
+    </button>
+  );
 
   return (
     <ListShell<ProductItem>
@@ -75,6 +100,8 @@ export function ProductPageClient({
       idOf={(i) => i.id}
       nameOf={(i) => i.name}
       searchMatches={searchMatches}
+      applyFilters={applyFilters}
+      filterControls={filterControls}
       EditForm={ProductForm}
       hardDeleteAllowed={false}
       hardDeleteDisabledReason="Dieses Produkt steht noch auf einer Einkaufsliste — ein Ersatz-Produkt ist erforderlich."

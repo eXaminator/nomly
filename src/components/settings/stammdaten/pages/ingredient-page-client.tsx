@@ -102,6 +102,7 @@ export function IngredientPageClient({
 }) {
   const [diet, setDiet] = React.useState<DietFilter>("all");
   const [excludedOnly, setExcludedOnly] = React.useState(false);
+  const [unusedOnly, setUnusedOnly] = React.useState(false);
 
   const applyFilters = React.useCallback(
     (item: IngredientItem) => {
@@ -110,9 +111,10 @@ export function IngredientPageClient({
         if (diet !== "unknown" && item.dietaryClass !== diet) return false;
       }
       if (excludedOnly && !item.excludeFromShoppingList) return false;
+      if (unusedOnly && item.recipeRefCount > 0) return false;
       return true;
     },
-    [diet, excludedOnly],
+    [diet, excludedOnly, unusedOnly],
   );
 
   const searchMatches = React.useCallback(
@@ -158,6 +160,11 @@ export function IngredientPageClient({
         active={excludedOnly}
         onClick={() => setExcludedOnly((v) => !v)}
         label="Ausgeschlossen"
+      />
+      <Chip
+        active={unusedOnly}
+        onClick={() => setUnusedOnly((v) => !v)}
+        label="Ungenutzt"
       />
     </>
   );
