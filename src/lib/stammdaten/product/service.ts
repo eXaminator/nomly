@@ -8,6 +8,10 @@ import {
   shoppingItem,
 } from "../../../db/schema.ts";
 import { getImpact } from "../shared/impact.ts";
+import {
+  findMergeClusters,
+  type ProposalCluster,
+} from "../shared/merge-proposals.ts";
 import { runMerge, MergeError, type MergeResult } from "../shared/merge.ts";
 import type { ImpactRow } from "../shared/types.ts";
 import {
@@ -329,6 +333,18 @@ export function mergeProducts(
 
 export function getImpactForProducts(ids: number[]): ImpactRow[] {
   return getImpact(ids, productAdapter);
+}
+
+export function getMergeProposalsForProducts(): ProposalCluster[] {
+  const list = listProducts();
+  return findMergeClusters(
+    list.map((item) => ({
+      id: item.id,
+      name: item.name,
+      aliases: item.aliases,
+      refCount: item.shoppingItemRefCount,
+    })),
+  );
 }
 
 function unreachable(): never {

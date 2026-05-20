@@ -175,6 +175,7 @@ export function IngredientPageClient({
       EditForm={IngredientForm}
       hardDeleteAllowed={false}
       hardDeleteDisabledReason="Diese Zutat wird in Rezepten oder Einkaufslisten verwendet — eine Ersatz-Zutat ist erforderlich."
+      enableMergeProposals
     />
   );
 }

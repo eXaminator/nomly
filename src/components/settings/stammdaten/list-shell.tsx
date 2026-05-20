@@ -12,6 +12,7 @@ import { cn } from "@/lib/cn";
 import { DeleteDialog } from "./delete-dialog";
 import { DrawerShell } from "./drawer-shell";
 import { MergeDialog } from "./merge-dialog";
+import { MergeProposalsDialog } from "./merge-proposals-dialog";
 import {
   ENTITY_LABELS,
   type EntityKind,
@@ -48,6 +49,9 @@ export type ListShellProps<TItem> = {
   mergeWarning?: React.ReactNode;
   /** Custom in-memory filter for the freetext search (defaults to canonical name). */
   searchMatches?: (item: TItem, query: string) => boolean;
+  /** When true, an "Ähnliche zusammenführen" button opens the merge-proposals
+   *  dialog. Server side needs a `/api/v1/<entity>/merge-proposals` endpoint. */
+  enableMergeProposals?: boolean;
 };
 
 export function ListShell<TItem>({
@@ -63,6 +67,7 @@ export function ListShell<TItem>({
   hardDeleteDisabledReason,
   mergeWarning,
   searchMatches,
+  enableMergeProposals,
 }: ListShellProps<TItem>) {
   const router = useRouter();
   const labels = ENTITY_LABELS[entityKind];
@@ -83,6 +88,7 @@ export function ListShell<TItem>({
 
   const [mergeOpen, setMergeOpen] = React.useState(false);
   const [deleteOpen, setDeleteOpen] = React.useState<TItem[] | null>(null);
+  const [proposalsOpen, setProposalsOpen] = React.useState(false);
 
   // Memoize so each form's onPayloadChange-deps don't churn every parent
   // render — otherwise the form's "publish payload" effect re-fires in a
@@ -251,10 +257,25 @@ export function ListShell<TItem>({
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between gap-3">
-        <h1 className="text-2xl font-semibold tracking-tight">{labels.plural}</h1>
-        <Button onClick={openCreate}>
-          <Plus className="size-4" /> Neu
-        </Button>
+        <h1 className="text-2xl font-semibold tracking-tight">
+          {labels.plural}
+          <span className="ml-2 text-base font-normal text-[var(--color-muted-fg)]">
+            ({items.length})
+          </span>
+        </h1>
+        <div className="flex items-center gap-2">
+          {enableMergeProposals && (
+            <Button
+              variant="outline"
+              onClick={() => setProposalsOpen(true)}
+            >
+              Ähnliche zusammenführen
+            </Button>
+          )}
+          <Button onClick={openCreate}>
+            <Plus className="size-4" /> Neu
+          </Button>
+        </div>
       </div>
 
       <div className="flex flex-col gap-3">
@@ -399,6 +420,20 @@ export function ListShell<TItem>({
           hardDeleteAllowed={hardDeleteAllowed}
           hardDeleteDisabledReason={hardDeleteDisabledReason}
           onSubmit={handleDelete}
+        />
+      )}
+
+      {enableMergeProposals && proposalsOpen && (
+        <MergeProposalsDialog
+          open={proposalsOpen}
+          onClose={() => setProposalsOpen(false)}
+          entityKind={entityKind}
+          onMerged={() => {
+            // Trigger a full refresh — the proposals dialog may have merged
+            // many rows at once, and re-fetching is simpler than patching
+            // them out one by one.
+            router.refresh();
+          }}
         />
       )}
     </div>

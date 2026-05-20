@@ -9,6 +9,10 @@ import {
 } from "../../../db/schema.ts";
 import { getImpact } from "../shared/impact.ts";
 import { linkedRecipesForIngredients } from "../shared/linked-recipes.ts";
+import {
+  findMergeClusters,
+  type ProposalCluster,
+} from "../shared/merge-proposals.ts";
 import { runMerge, MergeError, type MergeResult } from "../shared/merge.ts";
 import type { ImpactRow, Tx } from "../shared/types.ts";
 import {
@@ -366,6 +370,18 @@ export function getImpactForIngredients(ids: number[]): ImpactRow[] {
     ...row,
     linkedRecipes: linkedByOwner.get(row.id) ?? [],
   }));
+}
+
+export function getMergeProposalsForIngredients(): ProposalCluster[] {
+  const list = listIngredients();
+  return findMergeClusters(
+    list.map((item) => ({
+      id: item.id,
+      name: item.name,
+      aliases: item.aliases,
+      refCount: item.recipeRefCount,
+    })),
+  );
 }
 
 function unreachable(): never {

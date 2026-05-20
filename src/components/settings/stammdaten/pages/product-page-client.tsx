@@ -78,6 +78,7 @@ export function ProductPageClient({
       EditForm={ProductForm}
       hardDeleteAllowed={false}
       hardDeleteDisabledReason="Dieses Produkt steht noch auf einer Einkaufsliste — ein Ersatz-Produkt ist erforderlich."
+      enableMergeProposals
     />
   );
 }
