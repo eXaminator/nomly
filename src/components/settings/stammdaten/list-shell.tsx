@@ -84,6 +84,17 @@ export function ListShell<TItem>({
   const [mergeOpen, setMergeOpen] = React.useState(false);
   const [deleteOpen, setDeleteOpen] = React.useState<TItem[] | null>(null);
 
+  // Memoize so each form's onPayloadChange-deps don't churn every parent
+  // render — otherwise the form's "publish payload" effect re-fires in a
+  // loop because the callback reference changes on every render.
+  const handlePayloadChange = React.useCallback(
+    (payload: unknown, valid: boolean) => {
+      setDrawerPayload(payload);
+      setDrawerValid(valid);
+    },
+    [],
+  );
+
   const filtered = React.useMemo(() => {
     const q = query.trim().toLowerCase();
     return items.filter((item) => {
@@ -383,10 +394,7 @@ export function ListShell<TItem>({
         >
           <EditForm
             item={drawer.mode === "edit" ? drawer.item : null}
-            onPayloadChange={(payload, valid) => {
-              setDrawerPayload(payload);
-              setDrawerValid(valid);
-            }}
+            onPayloadChange={handlePayloadChange}
           />
         </DrawerShell>
       )}
