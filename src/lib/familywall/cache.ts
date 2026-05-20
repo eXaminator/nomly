@@ -162,8 +162,8 @@ function wrapDetailForViewing(bodyHtml: string, title: string): string {
   /* Hide interactive action controls — the snapshot is read-only — but
      keep tag chips (.mp-category) and the favorite indicator (the
      mpunstar icon — its title encodes the state). Note: the action name
-     is `mpunstar` when the recipe IS favorited (clicking would un-star)
-     and `mpstar` when it isn't (clicking would star). The title string is
+     is "mpunstar" when the recipe IS favorited (clicking would un-star)
+     and "mpstar" when it isn't (clicking would star). The title string is
      the source of truth, the action name is the inverse. */
   .rb-button,
   .mp-button-like:not(.mp-category),
