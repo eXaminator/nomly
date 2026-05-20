@@ -153,8 +153,20 @@ function wrapDetailForViewing(bodyHtml: string, title: string): string {
   .mp-recipe-header-imgcontainer img { max-width: 100%; height: auto; border-radius: 8px; }
   .border-pane { margin: 0.6rem 0; }
   .mp-category { display: inline-block; background: #f1ebe0; padding: 0.1rem 0.6rem; border-radius: 999px; font-size: 0.9rem; margin: 0.1rem 0.3rem 0.1rem 0; }
-  /* Hide every interactive control — the snapshot is read-only. */
-  .rb-button, .mp-button-like, icon { display: none; }
+  /* Hide interactive action controls — the snapshot is read-only — but
+     keep the tag chips (.mp-category, which also carry .mp-button-like)
+     and the favorite marker (an <icon> whose title encodes the state). */
+  .rb-button,
+  .mp-button-like:not(.mp-category),
+  icon[data-fw-onclick]:not([title*="bester Moment"]):not([title*="best moment"]) {
+    display: none;
+  }
+  icon[data-fw-onclick="mpstar"][title*="bester Moment"]::before,
+  icon[data-fw-onclick="mpstar"][title*="best moment"]::before {
+    content: "⭐";
+    display: inline-block;
+    margin-right: 0.3rem;
+  }
 </style>
 </head>
 <body>
