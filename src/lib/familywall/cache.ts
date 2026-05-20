@@ -154,29 +154,30 @@ function wrapDetailForViewing(bodyHtml: string, title: string): string {
   .border-pane { margin: 0.6rem 0; }
   .mp-category { display: inline-block; background: #f1ebe0; padding: 0.1rem 0.6rem; border-radius: 999px; font-size: 0.9rem; margin: 0.1rem 0.3rem 0.1rem 0; vertical-align: middle; }
   .mp-category emoji { font-size: inherit; line-height: 1; vertical-align: middle; }
+  /* The captured fragment uses custom <icon> elements with inline SVGs that
+     carry no width/height — without Familywall's CSS the browser would size
+     them at the SVG default (≈ 300×150 px). Pin them to text-line size. */
+  icon { display: inline-block; vertical-align: middle; line-height: 1; }
+  icon svg { width: 1rem; height: 1rem; display: inline-block; vertical-align: middle; }
   /* Hide interactive action controls — the snapshot is read-only — but
-     keep the tag chips (.mp-category, which also carry .mp-button-like)
-     and the favorite marker (an <icon> whose title encodes the state). */
+     keep tag chips (.mp-category) and the favorite indicator (the
+     mpunstar icon — its title encodes the state). Note: the action name
+     is `mpunstar` when the recipe IS favorited (clicking would un-star)
+     and `mpstar` when it isn't (clicking would star). The title string is
+     the source of truth, the action name is the inverse. */
   .rb-button,
   .mp-button-like:not(.mp-category),
+  icon[data-widget],
   icon[data-fw-onclick]:not([title*="bester Moment"]):not([title*="best moment"]) {
     display: none;
   }
-  icon[data-fw-onclick="mpstar"][title*="bester Moment"],
-  icon[data-fw-onclick="mpstar"][title*="best moment"] {
-    display: inline-block;
-    font-size: 1rem;
-    line-height: 1;
-    vertical-align: middle;
-  }
-  icon[data-fw-onclick="mpstar"][title*="bester Moment"]::before,
-  icon[data-fw-onclick="mpstar"][title*="best moment"]::before {
-    content: "⭐ Familywall-Favorit";
-    background: #fff7d6;
-    border: 1px solid #f5d97a;
-    border-radius: 999px;
-    padding: 0.1rem 0.6rem;
+  icon[data-fw-onclick="mpunstar"][title*="bester Moment"]::after,
+  icon[data-fw-onclick="mpunstar"][title*="best moment"]::after {
+    content: " Favorit";
     font-size: 0.85rem;
+    color: #FF6C87;
+    margin-left: 0.2rem;
+    vertical-align: middle;
   }
 </style>
 </head>
