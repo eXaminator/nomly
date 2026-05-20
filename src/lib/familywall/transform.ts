@@ -12,7 +12,9 @@
  */
 
 import {
+  mergeIngredientAndInstructionSections,
   parseIngredientLinesIntoSections,
+  parseInstructionsIntoSections,
   type IngredientLookup,
   type UnitLookup,
 } from "../recipe-import/index.ts";
@@ -90,14 +92,25 @@ export function transformFamilywallRecipe(
   // parseIngredientString with all its noise-stripping + amount-parsing
   // heuristics. Familywall imports get the same treatment as any other
   // source.
-  const groups = parseIngredientLinesIntoSections(raw.ingredients, lookups);
+  const ingredientGroups = parseIngredientLinesIntoSections(
+    raw.ingredients,
+    lookups,
+  );
+  // Instructions can carry their own section headers ("Für den Teig:" then
+  // the steps for the dough). Parse them with the same header detector so
+  // matching titles end up in the same merged section.
+  const instructionGroups = parseInstructionsIntoSections(raw.instructions);
 
-  const sections = groups.map((group, idx) => ({
-    title: group.title ? prettifySectionTitle(group.title) : null,
-    // Instructions describe the whole recipe; Familywall doesn't split them
-    // per-section, so they stay on the first section.
-    instructions: idx === 0 ? joinInstructions(raw.instructions) : "",
-    ingredients: group.ingredients.map((p) => {
+  const merged = mergeIngredientAndInstructionSections(
+    ingredientGroups,
+    instructionGroups,
+    joinInstructions,
+  );
+
+  const sections = merged.map((m) => ({
+    title: m.title ? prettifySectionTitle(m.title) : null,
+    instructions: m.instructions,
+    ingredients: m.ingredients.map((p) => {
       const name = p.name.trim().length > 0 ? p.name.trim() : "Unbekannte Zutat";
       const noteParts = [
         p.notes,

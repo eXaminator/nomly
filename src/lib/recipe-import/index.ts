@@ -441,6 +441,119 @@ export function parseIngredientLinesIntoSections(
   return groups;
 }
 
+export type ParsedInstructionGroup = {
+  title: string | null;
+  lines: string[];
+};
+
+/**
+ * Split a list of instruction steps into groups by section header
+ * ("Für den Teig:", "FÜR DIE FÜLLUNG", "Part 1: Sauce"). Mirrors the
+ * ingredient-side splitter so titles match by string identity and the
+ * caller can pair them up section-by-section.
+ */
+export function parseInstructionsIntoSections(
+  lines: readonly string[],
+): ParsedInstructionGroup[] {
+  const groups: ParsedInstructionGroup[] = [{ title: null, lines: [] }];
+  for (const raw of lines) {
+    if (typeof raw !== "string") continue;
+    const trimmed = raw.trim();
+    if (trimmed.length === 0) continue;
+    const header = detectSectionHeader(trimmed);
+    if (header) {
+      groups.push({ title: header, lines: [] });
+      continue;
+    }
+    groups[groups.length - 1].lines.push(trimmed);
+  }
+  if (groups.length > 1 && groups[0].title === null && groups[0].lines.length === 0) {
+    groups.shift();
+  }
+  return groups;
+}
+
+/**
+ * Match instruction groups to ingredient groups by title (case- and
+ * diacritic-insensitive) and emit per-section instructions. Instruction
+ * groups without a matching ingredient title become their own
+ * ingredient-less section. Leading unnamed instructions get attached to
+ * the first ingredient section so a recipe that starts with a prep step
+ * and then has "Für den Teig:" still gets all instructions in the right
+ * order.
+ *
+ * `joinFn` controls how step lines are rendered into the section's
+ * instructions string (each importer can format differently — Familywall
+ * uses numbered ordered-list markdown, URL imports keep the source's
+ * structure).
+ */
+export function mergeIngredientAndInstructionSections(
+  ingredientGroups: readonly ParsedSectionGroup[],
+  instructionGroups: readonly ParsedInstructionGroup[],
+  joinFn: (lines: string[]) => string,
+): Array<{
+  title: string | null;
+  ingredients: ImportedIngredient[];
+  instructions: string;
+}> {
+  function keyOf(t: string | null): string | null {
+    return t == null ? null : normalizeForMatch(t);
+  }
+
+  const remaining = new Map<string | null, string[]>();
+  // When multiple instruction groups share a normalized title (rare), the
+  // first wins; the rest accumulate into the same key so nothing is lost.
+  for (const g of instructionGroups) {
+    const k = keyOf(g.title);
+    const existing = remaining.get(k);
+    if (existing) existing.push(...g.lines);
+    else remaining.set(k, [...g.lines]);
+  }
+
+  const merged: Array<{
+    title: string | null;
+    ingredients: ImportedIngredient[];
+    instructions: string;
+  }> = [];
+  for (const ig of ingredientGroups) {
+    const k = keyOf(ig.title);
+    const lines = remaining.get(k);
+    if (lines) remaining.delete(k);
+    merged.push({
+      title: ig.title,
+      ingredients: ig.ingredients,
+      instructions: joinFn(lines ?? []),
+    });
+  }
+
+  // Instructions whose title didn't match any ingredient section.
+  // Attach unnamed leftovers to the first section's instructions
+  // (prepend) so they read in document order. Named leftovers become
+  // their own sections with empty ingredients.
+  for (const [k, lines] of remaining) {
+    if (lines.length === 0) continue;
+    if (k === null) {
+      if (merged.length === 0) {
+        merged.push({ title: null, ingredients: [], instructions: joinFn(lines) });
+      } else {
+        const head = merged[0];
+        head.instructions = [joinFn(lines), head.instructions]
+          .filter((s) => s.length > 0)
+          .join("\n");
+      }
+      continue;
+    }
+    const originalTitle =
+      instructionGroups.find((g) => keyOf(g.title) === k)?.title ?? null;
+    merged.push({
+      title: originalTitle,
+      ingredients: [],
+      instructions: joinFn(lines),
+    });
+  }
+  return merged;
+}
+
 function instructionsToMarkdown(steps: string[]): string {
   if (steps.length === 0) return "";
   if (steps.length === 1) return steps[0];
@@ -534,13 +647,23 @@ export async function importRecipeFromUrl(
   const ingredientStrings = asStringList(recipe.recipeIngredient);
   const unitLookup = buildUnitLookup();
   const ingredientLookup = buildIngredientLookup();
-  const ingredients: ImportedIngredient[] = parseIngredientLines(
-    ingredientStrings,
-    { units: unitLookup, ingredients: ingredientLookup },
-  );
 
-  const instructions = instructionsToMarkdown(
+  // Section-aware: ingredients and instructions both get split on shared
+  // section headers ("Für den Teig:", "FÜR DIE FÜLLUNG"). Matching titles
+  // land in the same merged section. Unmatched leftovers either prepend
+  // to the first section (unnamed lead-in) or become their own ingredient-
+  // less sections (named).
+  const ingredientGroups = parseIngredientLinesIntoSections(ingredientStrings, {
+    units: unitLookup,
+    ingredients: ingredientLookup,
+  });
+  const instructionGroups = parseInstructionsIntoSections(
     asStringList(recipe.recipeInstructions),
+  );
+  const merged = mergeIngredientAndInstructionSections(
+    ingredientGroups,
+    instructionGroups,
+    instructionsToMarkdown,
   );
 
   let photoPath: string | null = null;
@@ -558,12 +681,9 @@ export async function importRecipeFromUrl(
     sourceUrl: fetched.url,
     photoPath,
     tags: pickTags(recipe),
-    sections: [
-      {
-        title: null,
-        instructions,
-        ingredients,
-      },
-    ],
+    sections:
+      merged.length > 0
+        ? merged
+        : [{ title: null, instructions: "", ingredients: [] }],
   };
 }

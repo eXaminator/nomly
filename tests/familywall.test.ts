@@ -433,4 +433,71 @@ describe("transformFamilywallRecipe", () => {
     expect(ing.unitId).toBe(5); // TL
     expect(ing.ingredientName).toBe("Salz");
   });
+
+  it("matches instruction sections to ingredient sections by title", () => {
+    const out = transformFamilywallRecipe(
+      makeRaw({
+        ingredients: [
+          "Für den Teig:",
+          "200 g Mehl",
+          "1 EL Zucker",
+          "Für die Füllung:",
+          "100 g Quark",
+        ],
+        instructions: [
+          "Für den Teig:",
+          "Mehl und Zucker mischen.",
+          "Teig kneten.",
+          "Für die Füllung:",
+          "Quark glattrühren.",
+        ],
+      }),
+      makeLookups(),
+      null,
+    );
+    // Two sections, each with its own instructions
+    expect(out.sections).toHaveLength(2);
+    expect(out.sections[0].title).toBe("Für den Teig");
+    expect(out.sections[0].instructions).toMatch(/Mehl und Zucker/);
+    expect(out.sections[0].instructions).toMatch(/Teig kneten/);
+    expect(out.sections[0].instructions).not.toMatch(/Quark/);
+    expect(out.sections[1].title).toBe("Für die Füllung");
+    expect(out.sections[1].instructions).toMatch(/Quark glattrühren/);
+    expect(out.sections[1].instructions).not.toMatch(/Mehl/);
+  });
+
+  it("leading unsectioned instructions attach to the first section", () => {
+    const out = transformFamilywallRecipe(
+      makeRaw({
+        ingredients: ["Für den Teig:", "200 g Mehl"],
+        instructions: ["Ofen vorheizen.", "Für den Teig:", "Mehl mischen."],
+      }),
+      makeLookups(),
+      null,
+    );
+    expect(out.sections).toHaveLength(1);
+    expect(out.sections[0].title).toBe("Für den Teig");
+    expect(out.sections[0].instructions).toMatch(/Ofen vorheizen/);
+    expect(out.sections[0].instructions).toMatch(/Mehl mischen/);
+  });
+
+  it("instructions without matching ingredient section become own section", () => {
+    const out = transformFamilywallRecipe(
+      makeRaw({
+        ingredients: ["200 g Mehl"],
+        instructions: [
+          "Mehl sieben.",
+          "Zum Servieren:",
+          "Mit Puderzucker bestäuben.",
+        ],
+      }),
+      makeLookups(),
+      null,
+    );
+    expect(out.sections).toHaveLength(2);
+    expect(out.sections[0].instructions).toMatch(/Mehl sieben/);
+    expect(out.sections[1].title).toBe("Zum Servieren");
+    expect(out.sections[1].ingredients).toHaveLength(0);
+    expect(out.sections[1].instructions).toMatch(/Puderzucker/);
+  });
 });
