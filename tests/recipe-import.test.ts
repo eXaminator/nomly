@@ -53,7 +53,7 @@ const TEST_UNITS = new Set(
     "zoll", "inch", "inches", '"',
     "cm", "zentimeter", "centimeter", "centimeters",
     "zehe", "zehen", "clove", "cloves",
-    "x", "tin", "tins", "bd", "bd.",
+    "x", "tin", "tins", "bd", "bd.", "stick", "sticks",
   ].map((u) => u.toLowerCase()),
 );
 const parse = (raw: string) => parseIngredientString(raw, TEST_UNITS);
@@ -461,6 +461,44 @@ describe("parseIngredientString — extended cases", () => {
     expect(r.quantity).toBe(1);
     expect(r.unitName?.toLowerCase()).toBe("stk");
     expect(r.name).toBe("Ingwer");
+  });
+
+  it("'4 to 6 cups chicken stock' uses max + range note", () => {
+    const r = parse("4 to 6 cups chicken stock");
+    expect(r.quantity).toBe(6);
+    expect(r.unitName).toBe("cups");
+    expect(r.name).toBe("chicken stock");
+    expect(r.notes).toMatch(/4-6/);
+  });
+  it("'1 bis 2 EL Milch' uses max + range note", () => {
+    const r = parse("1 bis 2 EL Milch");
+    expect(r.quantity).toBe(2);
+    expect(r.unitName).toBe("EL");
+    expect(r.name).toBe("Milch");
+    expect(r.notes).toMatch(/1-2/);
+  });
+  it("'Heaping 1 teaspoon sea salt' peels modifier before quantity", () => {
+    const r = parse("Heaping 1 teaspoon sea salt");
+    expect(r.quantity).toBe(1);
+    expect(r.unitName).toBe("teaspoon");
+    expect(r.name).toBe("sea salt");
+    expect(r.notes?.toLowerCase()).toContain("heaping");
+  });
+  it("'½ cup 1 stick unsalted butter' peels secondary qty+unit to notes", () => {
+    const r = parse("½ cup 1 stick unsalted butter, room temperature");
+    expect(r.quantity).toBe(0.5);
+    expect(r.unitName).toBe("cup");
+    expect(r.name).toBe("unsalted butter");
+    expect(r.notes).toMatch(/1 stick/);
+    expect(r.notes?.toLowerCase()).toContain("room temperature");
+  });
+  it("'1½ tsp. plus ¼ cup cornstarch, divided' moves '¼ cup' to notes", () => {
+    const r = parse("1½ tsp. plus ¼ cup cornstarch, divided");
+    expect(r.quantity).toBeCloseTo(1.5, 3);
+    expect(r.unitName).toBe("tsp");
+    expect(r.name).toBe("cornstarch");
+    expect(r.notes).toMatch(/¼ cup/);
+    expect(r.notes?.toLowerCase()).toContain("divided");
   });
 
   it("parser returns empty name for '2 Prise' alone", () => {

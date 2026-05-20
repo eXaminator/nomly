@@ -156,7 +156,16 @@ const topUpUnits: Array<{
     name: "Stück",
     dimension: "count",
     factor: 1,
-    aliases: ["Stk", "Stk.", "St.", "x", "piece", "pieces"],
+    aliases: [
+      "Stk",
+      "Stk.",
+      "St.",
+      "x",
+      "piece",
+      "pieces",
+      "stick",
+      "sticks",
+    ],
   },
   {
     name: "Handvoll",

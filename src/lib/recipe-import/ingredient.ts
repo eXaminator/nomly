@@ -318,8 +318,10 @@ function consumeQuantity(tokens: string[]): RangeResult | null {
   if (tokens.length === 0) return null;
 
   // Collect numeric tokens, allowing "+" / "&" between them as additive
-  // connectors ("2 + 1/4 cups" / "1 & ½ tsp"). The connectors are dropped;
-  // the existing whitespace-implicit-add path then sums the numbers.
+  // connectors ("2 + 1/4 cups" / "1 & ½ tsp") and "to" / "bis" as range
+  // separators ("4 to 6 cups" / "1 bis 2 EL"). Additive connectors are
+  // dropped; range separators are replaced with a dash so the existing
+  // range-split path handles them.
   const numericRun: string[] = [];
   while (tokens.length > 0) {
     if (NUMERIC_TOKEN_RE.test(tokens[0])) {
@@ -333,6 +335,16 @@ function consumeQuantity(tokens: string[]): RangeResult | null {
       NUMERIC_TOKEN_RE.test(tokens[1])
     ) {
       tokens.shift();
+      continue;
+    }
+    if (
+      /^(?:to|bis)$/i.test(tokens[0]) &&
+      numericRun.length > 0 &&
+      tokens.length > 1 &&
+      NUMERIC_TOKEN_RE.test(tokens[1])
+    ) {
+      tokens.shift();
+      numericRun.push("-");
       continue;
     }
     break;
@@ -691,6 +703,20 @@ export function parseIngredientString(
 
   dropLeadingFiller(tokens);
 
+  // Pre-quantity size modifiers — "Heaping 1 teaspoon", "Scant ½ cup",
+  // "Gehäuft 1 EL". The same modifier can also sit between quantity and
+  // unit ("1 heaping teaspoon"), which the post-quantity loop below
+  // handles. Both paths fill the same `sizeModifiers` array.
+  const sizeModifiers: string[] = [];
+  while (tokens.length > 0) {
+    const lower = tokens[0].toLowerCase().replace(/\.$/, "");
+    if (SIZE_MODIFIER_TOKENS.has(lower)) {
+      sizeModifiers.push(tokens.shift()!);
+    } else {
+      break;
+    }
+  }
+
   // Quantity may be a text amount ("Eine Prise", "a pinch"), a vague amount
   // ("Etwas Salz"), a numeric range, or a single number.
   let quantity: number | null = null;
@@ -717,8 +743,8 @@ export function parseIngredientString(
     }
   }
 
-  // Pull off any size modifiers between the quantity and the unit.
-  const sizeModifiers: string[] = [];
+  // Post-quantity size modifiers ("1 kl. Dose", "2 große Eier") — these
+  // sit between the quantity and the unit. Both paths share `sizeModifiers`.
   while (tokens.length > 0) {
     const lower = tokens[0].toLowerCase().replace(/\.$/, "");
     if (SIZE_MODIFIER_TOKENS.has(lower)) {
@@ -852,6 +878,51 @@ export function parseIngredientString(
     }
   }
 
+  // Secondary "N UNIT" runs inside the name area — these come from
+  // parallel measurement writeups like "½ cup 1 stick unsalted butter"
+  // (where "½ cup" is consumed as the real quantity+unit and "1 stick"
+  // is a parenthetical alternative the user dropped the parens around)
+  // or "1½ tsp. plus ¼ cup cornstarch" (where "plus" is filler-stripped
+  // but the secondary "¼ cup" is left behind). Walk the name tokens and
+  // peel any "number (UNIT)?" run, pushing it to notes verbatim.
+  const secondaryAmounts: string[] = [];
+  {
+    const kept: string[] = [];
+    for (let i = 0; i < nameTokens.length; ) {
+      const t = nameTokens[i];
+      if (NUMERIC_TOKEN_RE.test(t)) {
+        const run = [t];
+        let j = i + 1;
+        // Consume any trailing fraction glyph attached to the run
+        // ("1 ½" tokens) plus an optional unit-like token.
+        if (j < nameTokens.length && NUMERIC_TOKEN_RE.test(nameTokens[j])) {
+          run.push(nameTokens[j]);
+          j += 1;
+        }
+        if (j < nameTokens.length) {
+          const next = nameTokens[j];
+          const lower = next.toLowerCase();
+          const stripped = lower.replace(/\.$/, "");
+          const isUnit =
+            knownUnitTokens.has(lower) ||
+            knownUnitTokens.has(stripped) ||
+            knownUnitTokens.has(`${stripped}.`) ||
+            SIZE_UNIT_TOKENS_RE.test(next);
+          if (isUnit) {
+            run.push(next);
+            j += 1;
+          }
+        }
+        secondaryAmounts.push(run.join(" "));
+        i = j;
+      } else {
+        kept.push(t);
+        i += 1;
+      }
+    }
+    nameTokens.splice(0, nameTokens.length, ...kept);
+  }
+
   const name = nameTokens
     .join(" ")
     .replace(/[()]/g, "")
@@ -866,7 +937,7 @@ export function parseIngredientString(
       .trim();
   const sizeNote = sizeModifiers.join(" ").trim();
   const notes =
-    [sizeNote, ...rangeNotes, noteBody, ...capturedNotes]
+    [sizeNote, ...rangeNotes, ...secondaryAmounts, noteBody, ...capturedNotes]
       .map((p) => p.trim())
       .filter((p) => p.length > 0)
       .join(", ") || null;
@@ -893,7 +964,14 @@ export function parseIngredientString(
       .replace(/\s+/g, " ")
       .trim();
     const altNotes =
-      [sizeNote, ...rangeNotes, stripped.join(" "), noteBody, ...capturedNotes]
+      [
+        sizeNote,
+        ...rangeNotes,
+        ...secondaryAmounts,
+        stripped.join(" "),
+        noteBody,
+        ...capturedNotes,
+      ]
         .map((p) => p.trim())
         .filter((p) => p.length > 0)
         .join(", ") || null;
