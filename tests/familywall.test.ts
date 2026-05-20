@@ -9,18 +9,19 @@ import type { FamilywallRawRecipe } from "@/lib/familywall/types";
 function makeLookups(): { units: UnitLookup; ingredients: IngredientLookup } {
   const units: UnitLookup = {
     byNameOrAlias: new Map([
-      ["g", { id: 1, name: "g" }],
-      ["el", { id: 2, name: "EL" }],
-      ["tablespoon", { id: 2, name: "EL" }],
-      ["stück", { id: 3, name: "Stück" }],
-      ["cup", { id: 4, name: "Cup" }],
+      ["g", { id: 1, name: "g", isContainer: false }],
+      ["el", { id: 2, name: "EL", isContainer: false }],
+      ["tablespoon", { id: 2, name: "EL", isContainer: false }],
+      ["stück", { id: 3, name: "Stück", isContainer: false }],
+      ["cup", { id: 4, name: "Cup", isContainer: false }],
     ]),
     byCanonicalName: new Map([
-      ["g", { id: 1, name: "g" }],
-      ["el", { id: 2, name: "EL" }],
-      ["stück", { id: 3, name: "Stück" }],
-      ["cup", { id: 4, name: "Cup" }],
+      ["g", { id: 1, name: "g", isContainer: false }],
+      ["el", { id: 2, name: "EL", isContainer: false }],
+      ["stück", { id: 3, name: "Stück", isContainer: false }],
+      ["cup", { id: 4, name: "Cup", isContainer: false }],
     ]),
+    containerTokens: new Set(),
   };
   const ingredients: IngredientLookup = new Map([
     ["mehl", { id: 10, canonicalName: "Mehl" }],
@@ -226,7 +227,7 @@ describe("transformFamilywallRecipe", () => {
 
   it("strips pseudo-plural '/n' from a Familywall unit marker", () => {
     const lookups = makeLookups();
-    lookups.units.byNameOrAlias.set("dose", { id: 6, name: "Dose" });
+    lookups.units.byNameOrAlias.set("dose", { id: 6, name: "Dose", isContainer: false });
     const out = transformFamilywallRecipe(
       makeRaw({ ingredients: ["1 Dose/n Kidneybohnen"] }),
       lookups,
@@ -240,7 +241,7 @@ describe("transformFamilywallRecipe", () => {
 
   it("captures parenthesised content anywhere as notes", () => {
     const lookups = makeLookups();
-    lookups.units.byNameOrAlias.set("dose", { id: 6, name: "Dose" });
+    lookups.units.byNameOrAlias.set("dose", { id: 6, name: "Dose", isContainer: false });
     const out = transformFamilywallRecipe(
       makeRaw({
         ingredients: ["1 Dose Kidneybohnen (Abtropfgewicht ca. 255 g)"],
@@ -284,7 +285,7 @@ describe("transformFamilywallRecipe", () => {
 
   it("parses 'Pck.' as a Packung unit token", () => {
     const lookups = makeLookups();
-    lookups.units.byNameOrAlias.set("pck", { id: 8, name: "Packung" });
+    lookups.units.byNameOrAlias.set("pck", { id: 8, name: "Packung", isContainer: false });
     const out = transformFamilywallRecipe(
       makeRaw({
         ingredients: ["1 Pck. Blätterteig (Blätterteig-Rolle, TK)"],
@@ -301,7 +302,7 @@ describe("transformFamilywallRecipe", () => {
 
   it("recognises 'Dose' after a size modifier 'kl.'", () => {
     const lookups = makeLookups();
-    lookups.units.byNameOrAlias.set("dose", { id: 6, name: "Dose" });
+    lookups.units.byNameOrAlias.set("dose", { id: 6, name: "Dose", isContainer: false });
     const out = transformFamilywallRecipe(
       makeRaw({
         ingredients: ["1 kl. Dose Kidneybohnen (Abtropfgewicht ca. 255 g)"],
@@ -353,7 +354,7 @@ describe("transformFamilywallRecipe", () => {
 
   it("moves 'z.B.' examples into notes", () => {
     const lookups = makeLookups();
-    lookups.units.byNameOrAlias.set("tl", { id: 7, name: "TL" });
+    lookups.units.byNameOrAlias.set("tl", { id: 7, name: "TL", isContainer: false });
     const out = transformFamilywallRecipe(
       makeRaw({ ingredients: ["1 TL Salz z.B. Meersalz"] }),
       lookups,
@@ -420,8 +421,8 @@ describe("transformFamilywallRecipe", () => {
 
   it("parses '1½tsp' as quantity 1.5 + tsp", () => {
     const lookups = makeLookups();
-    lookups.units.byNameOrAlias.set("tsp", { id: 5, name: "TL" });
-    lookups.units.byNameOrAlias.set("teaspoon", { id: 5, name: "TL" });
+    lookups.units.byNameOrAlias.set("tsp", { id: 5, name: "TL", isContainer: false });
+    lookups.units.byNameOrAlias.set("teaspoon", { id: 5, name: "TL", isContainer: false });
     const out = transformFamilywallRecipe(
       makeRaw({ ingredients: ["1½tsp Salz"] }),
       lookups,

@@ -48,6 +48,17 @@ export const unit = sqliteTable("unit", {
     onDelete: "set null",
   }),
   factor: real("factor").notNull().default(1),
+  /**
+   * Set on units that describe a physical container (Dose, Glas, Tube,
+   * Packung, Flasche, Karton, Schachtel). The ingredient parser uses this
+   * to suppress conjunction-splitting and prep-word stripping when a
+   * container is present — the trailing adjective is then part of the
+   * product name ("1 Dose chopped tomatoes" rather than "chopped" as a
+   * prep instruction).
+   */
+  isContainer: integer("is_container", { mode: "boolean" })
+    .notNull()
+    .default(false),
 });
 
 export const unitAlias = sqliteTable("unit_alias", {

@@ -32,6 +32,19 @@ export type ParsedIngredient = {
    * "if available", "bei Bedarf", "ggf."). Plumbed through to the recipe
    * draft so the row is saved with isOptional=true. */
   isOptional: boolean;
+  /**
+   * Alternative name + notes where leading cooking-prep adjectives/adverbs
+   * have been peeled off the front of the name and pushed to the notes.
+   * Set when the name area starts with one or more prep tokens. Null when
+   * there's nothing to strip.
+   *
+   * The caller (parseIngredientLines) decides which form to use based on
+   * container context + ingredient-lookup match:
+   *   - container present in the line: use full name (no strip)
+   *   - full name already matches an ingredient/alias: use full name
+   *   - else: use this alternative
+   */
+  altWithPrepStripped: { name: string; notes: string | null } | null;
 };
 
 /**
@@ -572,7 +585,14 @@ export function parseIngredientString(
   if (cleaned.length === 0) {
     const notes =
       capturedNotes.length > 0 ? capturedNotes.join(", ") : null;
-    return { quantity: null, unitName: null, name: "", notes, isOptional };
+    return {
+      quantity: null,
+      unitName: null,
+      name: "",
+      notes,
+      isOptional,
+      altWithPrepStripped: null,
+    };
   }
   const tokens = tokenize(cleaned);
 
@@ -736,7 +756,36 @@ export function parseIngredientString(
       .filter((p) => p.length > 0)
       .join(", ") || null;
 
-  return { quantity, unitName, name, notes, isOptional };
+  // Produce the prep-stripped alternative. Peel leading PREP_LEADING_TOKENS
+  // off the name area; the stripped tokens become extra notes. Only emit
+  // an alternative if we'd actually have a non-empty name left AND we did
+  // strip something — otherwise return null to signal "no choice".
+  const stripped: string[] = [];
+  let firstKept = 0;
+  while (
+    firstKept < nameTokens.length &&
+    PREP_LEADING_TOKENS.has(nameTokens[firstKept].toLowerCase())
+  ) {
+    stripped.push(nameTokens[firstKept]);
+    firstKept += 1;
+  }
+  let altWithPrepStripped: ParsedIngredient["altWithPrepStripped"] = null;
+  if (stripped.length > 0 && firstKept < nameTokens.length) {
+    const altName = nameTokens
+      .slice(firstKept)
+      .join(" ")
+      .replace(/[()]/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+    const altNotes =
+      [sizeNote, ...rangeNotes, stripped.join(" "), noteBody, ...capturedNotes]
+        .map((p) => p.trim())
+        .filter((p) => p.length > 0)
+        .join(", ") || null;
+    altWithPrepStripped = { name: altName, notes: altNotes };
+  }
+
+  return { quantity, unitName, name, notes, isOptional, altWithPrepStripped };
 }
 
 /**
@@ -748,14 +797,19 @@ export function parseIngredientString(
  * so the existing single-output parser is the no-op path.
  */
 /**
- * Cooking prep / preparation words that, when they immediately follow a
- * conjunction, signal a continuation of the previous ingredient's notes
- * ("halved lengthwise and cut into pieces") rather than a second ingredient.
- * Matched case-insensitively against the first word after the conjunction.
+ * Cooking-prep words that, when they appear at the very front of the name
+ * area, can be peeled off into the notes. Used to produce the alternative
+ * parse — the caller picks between the full and stripped forms based on
+ * container presence and existing ingredient matches.
+ *
+ * Matched case-insensitively. Includes past participles (English -ed forms,
+ * German -t / -en forms) plus their typical adverbs. Excludes ambiguous
+ * descriptors like "fresh"/"frisch"/"ripe"/"reif"/"raw" — those can be
+ * either a prep instruction or part of the canonical name, so we leave
+ * them in.
  */
-const PREP_WORDS = new Set([
-  // English participles + adverbs
-  "cut",
+export const PREP_LEADING_TOKENS = new Set([
+  // English past participles
   "chopped",
   "sliced",
   "diced",
@@ -767,8 +821,6 @@ const PREP_WORDS = new Set([
   "rinsed",
   "drained",
   "cooked",
-  "cooled",
-  "dried",
   "baked",
   "mixed",
   "crushed",
@@ -776,16 +828,16 @@ const PREP_WORDS = new Set([
   "softened",
   "whisked",
   "beaten",
-  "deveined",
-  "seeded",
-  "stemmed",
-  "trimmed",
   "shredded",
   "ground",
   "soaked",
   "rolled",
-  "rinsed",
   "patted",
+  "deveined",
+  "seeded",
+  "stemmed",
+  "trimmed",
+  // English adverbs that pair with prep verbs
   "finely",
   "coarsely",
   "thinly",
@@ -793,8 +845,8 @@ const PREP_WORDS = new Set([
   "roughly",
   "lightly",
   "freshly",
-  "very",
-  // German participles + adverbs
+  "well",
+  // German past participles
   "gewürfelt",
   "gehackt",
   "geschnitten",
@@ -806,23 +858,50 @@ const PREP_WORDS = new Set([
   "geknetet",
   "gemischt",
   "geraspelt",
+  // German adverbs
   "fein",
   "grob",
 ]);
 
-export function splitConjunctions(raw: string): string[] {
+export type SplitConjunctionsOptions = {
+  /**
+   * Lowercased tokens of units flagged as containers in the DB (Dose, can,
+   * Glas, jar, Tube, Flasche, Karton, Schachtel, Packung, …). When any of
+   * these appears in the line, splitting is suppressed — the whole line is
+   * one product.
+   */
+  containerTokens?: ReadonlySet<string>;
+  /**
+   * Lowercased known ingredient names + aliases. When any of these appears
+   * as a substring of the line that *spans* a conjunction position,
+   * splitting at that position is suppressed — the user already has a
+   * canonical ingredient that crosses the conjunction.
+   */
+  knownIngredients?: ReadonlySet<string>;
+};
+
+export function splitConjunctions(
+  raw: string,
+  options?: SplitConjunctionsOptions,
+): string[] {
   const trimmed = raw.trim();
   if (trimmed.length === 0) return [];
 
-  // Don't split when the conjunction is part of a dash-compound like
-  // "Weizen- oder Dinkelmehl" (handled by normalize() in the parser too).
-  // Never split when the conjunction is inside parentheses or brackets —
-  // those describe a single ingredient ("medium onion (½ chopped & ½
-  // sliced)"), not a list. And: don't split when the part after the
-  // conjunction starts with a cooking-prep verb ("halved lengthwise and
-  // cut into 1/2-inch pieces" / "Tomaten fein gehackt und püriert"); that's
-  // a continuation of the previous ingredient's prep notes, not a second
-  // ingredient.
+  // Container guard: when the line carries a container unit ("1 can chopped
+  // tomatoes and onions"), the whole line describes one product — never
+  // split.
+  if (options?.containerTokens && options.containerTokens.size > 0) {
+    const tokens = trimmed
+      .toLowerCase()
+      .split(/[^\p{L}\p{N}]+/u)
+      .filter(Boolean);
+    for (const t of tokens) {
+      if (options.containerTokens.has(t)) {
+        return [trimmed];
+      }
+    }
+  }
+
   const SPLIT_RE = /\s+(?:und|and|&)\s+/gi;
   const parts: string[] = [];
   let lastIndex = 0;
@@ -837,20 +916,54 @@ export function splitConjunctions(raw: string): string[] {
     return depth;
   }
 
+  // Comma guard: the first comma at depth 0 marks the start of the prep /
+  // notes section. Conjunctions after it connect prep instructions, not
+  // ingredients ("Persian cucumbers, halved lengthwise and cut into pieces").
+  function commaBefore(idx: number): boolean {
+    let depth = 0;
+    for (let i = 0; i < idx; i++) {
+      const c = trimmed[i];
+      if (c === "(" || c === "[") depth += 1;
+      else if (c === ")" || c === "]") depth = Math.max(0, depth - 1);
+      else if (c === "," && depth === 0) return true;
+    }
+    return false;
+  }
+
+  const lowerLine = trimmed.toLowerCase();
+
   for (const match of trimmed.matchAll(SPLIT_RE)) {
     const idx = match.index ?? 0;
     if (depthAt(idx) > 0) continue;
     const before = trimmed.slice(0, idx);
     const beforeTrimmed = before.replace(/\s+$/, "");
     const lastChar = beforeTrimmed[beforeTrimmed.length - 1];
+    // Dash-compound exception: "Weizen- oder Dinkelmehl".
     if (lastChar === "-" || lastChar === "–") continue;
-
-    // Prep-word check: if the very next word after the conjunction is a
-    // cooking-prep verb / adverb, the conjunction is connecting prep
-    // instructions, not separate ingredients.
-    const after = trimmed.slice(idx + match[0].length);
-    const nextWord = (after.match(/^[\p{L}]+/u)?.[0] ?? "").toLowerCase();
-    if (PREP_WORDS.has(nextWord)) continue;
+    // Comma guard.
+    if (commaBefore(idx)) continue;
+    // Overlap guard: an existing ingredient name spans the conjunction —
+    // user already has it as one row, so don't split.
+    if (options?.knownIngredients && options.knownIngredients.size > 0) {
+      const matchEnd = idx + match[0].length;
+      let overlapped = false;
+      for (const known of options.knownIngredients) {
+        // Cheap skip for very short names — too noisy.
+        if (known.length < 4) continue;
+        // Cheap skip when the conjunction itself isn't inside the candidate.
+        if (!known.includes(" ")) continue;
+        let pos = lowerLine.indexOf(known);
+        while (pos !== -1) {
+          if (pos < idx && pos + known.length > matchEnd) {
+            overlapped = true;
+            break;
+          }
+          pos = lowerLine.indexOf(known, pos + 1);
+        }
+        if (overlapped) break;
+      }
+      if (overlapped) continue;
+    }
 
     parts.push(trimmed.slice(lastIndex, idx).trim());
     lastIndex = idx + match[0].length;

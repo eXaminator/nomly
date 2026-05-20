@@ -49,7 +49,10 @@ const columns: ColumnDef<UnitItem>[] = [
     key: "dimension",
     header: "Dimension",
     cell: (item) => (
-      <Badge variant="outline">{DIMENSION_LABEL[item.dimension]}</Badge>
+      <span className="inline-flex items-center gap-1">
+        <Badge variant="outline">{DIMENSION_LABEL[item.dimension]}</Badge>
+        {item.isContainer && <Badge variant="accent">Behälter</Badge>}
+      </span>
     ),
   },
   {

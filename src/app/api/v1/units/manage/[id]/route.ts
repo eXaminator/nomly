@@ -17,6 +17,7 @@ const updateSchema = z.object({
   dimension: z.enum(["mass", "volume", "count"]),
   baseUnitId: z.number().int().positive().nullable(),
   factor: z.number().positive(),
+  isContainer: z.boolean().default(false),
 });
 
 export async function GET(

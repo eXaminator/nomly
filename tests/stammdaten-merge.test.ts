@@ -62,6 +62,7 @@ describe("unit stammdaten merge", () => {
       dimension: "mass",
       baseUnitId: null,
       factor: 1,
+      isContainer: false,
     });
     const ml = unit.createUnit({
       name: "Milliliter",
@@ -69,6 +70,7 @@ describe("unit stammdaten merge", () => {
       dimension: "volume",
       baseUnitId: null,
       factor: 1,
+      isContainer: false,
     });
     expect(() => unit.mergeUnits(gram.id, [ml.id])).toThrow(/Dimension/);
   });
@@ -81,6 +83,7 @@ describe("unit stammdaten merge", () => {
       dimension: "mass",
       baseUnitId: null,
       factor: 1000,
+      isContainer: false,
     });
     const g = unit.listUnitsManaged().find((u) => u.name === "Gramm")!;
     expect(() => unit.mergeUnits(g.id, [kg.id])).toThrow(/Faktor/);
@@ -94,6 +97,7 @@ describe("unit stammdaten merge", () => {
       dimension: "count",
       baseUnitId: null,
       factor: 1,
+      isContainer: false,
     });
     const piece = unit.createUnit({
       name: "Piece",
@@ -101,6 +105,7 @@ describe("unit stammdaten merge", () => {
       dimension: "count",
       baseUnitId: null,
       factor: 1,
+      isContainer: false,
     });
     const result = unit.mergeUnits(stk.id, [piece.id]);
     expect(result.deletedIds).toEqual([piece.id]);

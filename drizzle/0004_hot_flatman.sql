@@ -1,0 +1,1 @@
+ALTER TABLE `unit` ADD `is_container` integer DEFAULT false NOT NULL;

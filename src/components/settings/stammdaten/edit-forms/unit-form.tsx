@@ -6,6 +6,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { SelectSearch } from "@/components/ui/select-search";
 
+import { Switch } from "@/components/ui/switch";
+
 import { AliasChipEditor } from "../alias-chip-editor";
 import { ImpactSection } from "../impact-section";
 import type { EditFormProps } from "../list-shell";
@@ -20,6 +22,7 @@ export type UnitItem = {
   baseUnitId: number | null;
   baseUnitName: string | null;
   factor: number;
+  isContainer: boolean;
   recipeRefCount: number;
 };
 
@@ -48,6 +51,9 @@ export function UnitForm({ item, onPayloadChange }: EditFormProps<UnitItem>) {
   const [factorText, setFactorText] = React.useState<string>(
     item ? String(item.factor) : "1",
   );
+  const [isContainer, setIsContainer] = React.useState<boolean>(
+    item?.isContainer ?? false,
+  );
 
 
   React.useEffect(() => {
@@ -62,10 +68,11 @@ export function UnitForm({ item, onPayloadChange }: EditFormProps<UnitItem>) {
         dimension,
         baseUnitId: baseUnit?.id ?? null,
         factor: Number.isFinite(factor) ? factor : 0,
+        isContainer,
       },
       valid,
     );
-  }, [name, aliases, dimension, baseUnit, factorText, onPayloadChange]);
+  }, [name, aliases, dimension, baseUnit, factorText, isContainer, onPayloadChange]);
 
   async function searchBaseUnits(q: string) {
     const res = await fetch(
@@ -175,6 +182,22 @@ export function UnitForm({ item, onPayloadChange }: EditFormProps<UnitItem>) {
             {baseUnit?.name ?? "Basis-Einheiten"}.
           </p>
         )}
+      </div>
+
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <Label>Behälter</Label>
+          <p className="text-xs text-[var(--color-muted-fg)]">
+            Aktivieren für Einheiten, die ein physisches Gefäß beschreiben
+            (Dose, Glas, Tube …). Der Parser hält dann nachfolgende
+            Adjektive als Teil des Produktnamens (z.&nbsp;B. „1 Dose chopped
+            tomatoes&rdquo;).
+          </p>
+        </div>
+        <Switch
+          checked={isContainer}
+          onCheckedChange={(v) => setIsContainer(Boolean(v))}
+        />
       </div>
 
       {item && <ImpactSection entityKind="unit" id={item.id} />}

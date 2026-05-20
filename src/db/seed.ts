@@ -127,6 +127,10 @@ const topUpUnits: Array<{
   dimension: "mass" | "volume" | "count";
   factor: number;
   aliases?: string[];
+  /** When true, this unit row is marked as a physical container. The
+   *  ingredient parser uses this flag to keep prep adjectives attached to
+   *  the product name ("1 Dose chopped tomatoes"). */
+  isContainer?: boolean;
 }> = [
   { name: "EL", dimension: "volume", factor: 14.7867647813 },
   { name: "TL", dimension: "volume", factor: 4.92892159375 },
@@ -178,6 +182,7 @@ const topUpUnits: Array<{
     name: "Packung",
     dimension: "count",
     factor: 1,
+    isContainer: true,
     aliases: [
       "Packungen",
       "Päckchen",
@@ -197,7 +202,43 @@ const topUpUnits: Array<{
     name: "Dose",
     dimension: "count",
     factor: 1,
+    isContainer: true,
     aliases: ["Dosen", "can", "cans", "tin", "tins"],
+  },
+  {
+    name: "Glas",
+    dimension: "count",
+    factor: 1,
+    isContainer: true,
+    aliases: ["Gläser", "jar", "jars"],
+  },
+  {
+    name: "Tube",
+    dimension: "count",
+    factor: 1,
+    isContainer: true,
+    aliases: ["Tuben", "tubes"],
+  },
+  {
+    name: "Flasche",
+    dimension: "count",
+    factor: 1,
+    isContainer: true,
+    aliases: ["Flaschen", "bottle", "bottles"],
+  },
+  {
+    name: "Karton",
+    dimension: "count",
+    factor: 1,
+    isContainer: true,
+    aliases: ["Kartons", "carton", "cartons"],
+  },
+  {
+    name: "Schachtel",
+    dimension: "count",
+    factor: 1,
+    isContainer: true,
+    aliases: ["Schachteln", "box", "boxes"],
   },
 ];
 
@@ -304,6 +345,7 @@ export function runSeed(): SeedCounts {
             dimension: top.dimension,
             factor: top.factor,
             baseUnitId: baseId,
+            isContainer: top.isContainer ?? false,
           })
           .returning({ id: unit.id })
           .all();
@@ -317,6 +359,15 @@ export function runSeed(): SeedCounts {
         // count it. Count once so re-runs report a consistent skipped tally.
         processedThisRun.add(lowerName);
         counts.units.skipped += 1;
+      }
+      // Keep the isContainer flag in sync for any unit we top up — even if
+      // the row pre-existed (came from Tandoor or a prior run). This lets us
+      // add containers to the seed without users having to wipe their DB.
+      if (top.isContainer) {
+        tx.update(unit)
+          .set({ isContainer: true })
+          .where(eq(unit.id, id))
+          .run();
       }
       for (const alias of top.aliases ?? []) {
         addAlias(tx, "unit", id, alias, () => {

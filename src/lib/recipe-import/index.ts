@@ -21,6 +21,7 @@ import {
   normalizeForMatch,
   parseIngredientString,
   splitConjunctions,
+  type ParsedIngredient,
 } from "./ingredient.ts";
 import { savePhotoBuffer, type PhotoPath } from "../photos.ts";
 
@@ -85,27 +86,50 @@ export class ImportError extends Error {
   }
 }
 
+export type UnitLookupEntry = {
+  id: number;
+  name: string;
+  isContainer: boolean;
+};
 export type UnitLookup = {
-  byNameOrAlias: Map<string, { id: number; name: string }>;
-  byCanonicalName: Map<string, { id: number; name: string }>;
+  byNameOrAlias: Map<string, UnitLookupEntry>;
+  byCanonicalName: Map<string, UnitLookupEntry>;
+  /**
+   * Lowercased tokens (canonical names + aliases) of units flagged as
+   * containers. The parser uses this set to suppress conjunction-splitting
+   * and prep-word stripping when a container is present.
+   */
+  containerTokens: Set<string>;
 };
 
 export function buildUnitLookup(): UnitLookup {
-  const byNameOrAlias = new Map<string, { id: number; name: string }>();
-  const byCanonicalName = new Map<string, { id: number; name: string }>();
+  const byNameOrAlias = new Map<string, UnitLookupEntry>();
+  const byCanonicalName = new Map<string, UnitLookupEntry>();
+  const containerTokens = new Set<string>();
   const canonical = db
-    .select({ id: unit.id, name: unit.name })
+    .select({
+      id: unit.id,
+      name: unit.name,
+      isContainer: unit.isContainer,
+    })
     .from(unit)
     .all();
   for (const u of canonical) {
     const lower = u.name.toLowerCase();
-    byNameOrAlias.set(lower, { id: u.id, name: u.name });
-    byCanonicalName.set(lower, { id: u.id, name: u.name });
+    const entry: UnitLookupEntry = {
+      id: u.id,
+      name: u.name,
+      isContainer: u.isContainer,
+    };
+    byNameOrAlias.set(lower, entry);
+    byCanonicalName.set(lower, entry);
+    if (u.isContainer) containerTokens.add(lower);
   }
   const aliases = db
     .select({
       id: unit.id,
       canonicalName: unit.name,
+      isContainer: unit.isContainer,
       aliasName: unitAlias.name,
     })
     .from(unitAlias)
@@ -114,10 +138,15 @@ export function buildUnitLookup(): UnitLookup {
   for (const a of aliases) {
     const key = a.aliasName.toLowerCase();
     if (!byNameOrAlias.has(key)) {
-      byNameOrAlias.set(key, { id: a.id, name: a.canonicalName });
+      byNameOrAlias.set(key, {
+        id: a.id,
+        name: a.canonicalName,
+        isContainer: a.isContainer,
+      });
     }
+    if (a.isContainer) containerTokens.add(key);
   }
-  return { byNameOrAlias, byCanonicalName };
+  return { byNameOrAlias, byCanonicalName, containerTokens };
 }
 
 export type ResolveUnitResult = {
@@ -221,11 +250,56 @@ void sql; // kept for future tuning; the import side reads everything via JS.
  * Parse a batch of raw ingredient strings into the same shape `importRecipeFromUrl`
  * returns. Used by both the URL importer and the clipboard-paste endpoint.
  */
+/**
+ * Decide between the full parsed name and the prep-stripped alternative.
+ * Rules:
+ *   - container present in the line ⇒ use full name (no strip). The trailing
+ *     adjective is part of the canned/jarred product name.
+ *   - full name matches an existing ingredient/alias ⇒ use full name.
+ *   - alternative available ⇒ use it (strip leading prep adjectives to notes).
+ *   - otherwise ⇒ use full name unchanged.
+ */
+function pickNameAndNotes(
+  rawLine: string,
+  parsed: ParsedIngredient,
+  ingredientLookup: IngredientLookup,
+  containerTokens: ReadonlySet<string>,
+): { name: string; notes: string | null } {
+  const hasContainer = lineContainsToken(rawLine, containerTokens);
+  if (hasContainer) {
+    return { name: parsed.name, notes: parsed.notes };
+  }
+  const fullMatch = ingredientLookup.has(parsed.name.toLowerCase());
+  if (fullMatch) {
+    return { name: parsed.name, notes: parsed.notes };
+  }
+  if (parsed.altWithPrepStripped) {
+    return parsed.altWithPrepStripped;
+  }
+  return { name: parsed.name, notes: parsed.notes };
+}
+
+function lineContainsToken(
+  line: string,
+  tokens: ReadonlySet<string>,
+): boolean {
+  if (tokens.size === 0) return false;
+  const parts = line.toLowerCase().split(/[^\p{L}\p{N}]+/u);
+  for (const p of parts) {
+    if (tokens.has(p)) return true;
+  }
+  return false;
+}
+
 export function parseIngredientLines(
   lines: readonly string[],
   lookups: { units: UnitLookup; ingredients: IngredientLookup },
 ): ImportedIngredient[] {
   const knownUnitTokens = new Set(lookups.units.byNameOrAlias.keys());
+  const splitOpts = {
+    containerTokens: lookups.units.containerTokens,
+    knownIngredients: new Set(lookups.ingredients.keys()),
+  };
   const out: ImportedIngredient[] = [];
   for (const raw of lines) {
     // Section headers (e.g. "Für den Teig:", "FÜR DIE FÜLLUNG") aren't
@@ -233,7 +307,7 @@ export function parseIngredientLines(
     if (detectSectionHeader(raw)) continue;
     // Skip pure-noise lines (no letters at all, e.g. "—–", "***").
     if (!/\p{L}/u.test(raw)) continue;
-    for (const piece of splitConjunctions(raw)) {
+    for (const piece of splitConjunctions(raw, splitOpts)) {
       const parsed = parseIngredientString(piece, knownUnitTokens);
       // Skip the row when the parser couldn't pull a real ingredient name
       // out of the line. Familywall data legitimately has entries like
@@ -248,7 +322,12 @@ export function parseIngredientLines(
         parsed.unitName,
         parsed.quantity,
       );
-      const name = parsed.name;
+      const { name, notes } = pickNameAndNotes(
+        piece,
+        parsed,
+        lookups.ingredients,
+        lookups.units.containerTokens,
+      );
       const ingredientResolution = resolveIngredientName(
         lookups.ingredients,
         name,
@@ -262,7 +341,7 @@ export function parseIngredientLines(
         ingredientId: ingredientResolution.id,
         ingredientMatch: ingredientResolution.match,
         canonicalIngredientName: ingredientResolution.canonicalName,
-        notes: parsed.notes,
+        notes,
         isOptional: parsed.isOptional,
       });
     }
@@ -288,6 +367,10 @@ export function parseIngredientLinesIntoSections(
   lookups: { units: UnitLookup; ingredients: IngredientLookup },
 ): ParsedSectionGroup[] {
   const knownUnitTokens = new Set(lookups.units.byNameOrAlias.keys());
+  const splitOpts = {
+    containerTokens: lookups.units.containerTokens,
+    knownIngredients: new Set(lookups.ingredients.keys()),
+  };
   const groups: ParsedSectionGroup[] = [{ title: null, ingredients: [] }];
 
   for (const raw of lines) {
@@ -297,7 +380,7 @@ export function parseIngredientLinesIntoSections(
       continue;
     }
     if (!/\p{L}/u.test(raw)) continue;
-    for (const piece of splitConjunctions(raw)) {
+    for (const piece of splitConjunctions(raw, splitOpts)) {
       const parsed = parseIngredientString(piece, knownUnitTokens);
       if (parsed.name.trim().length === 0) continue;
       const { resolved, match: unitMatch, rawUnit } = resolveUnit(
@@ -305,7 +388,12 @@ export function parseIngredientLinesIntoSections(
         parsed.unitName,
         parsed.quantity,
       );
-      const name = parsed.name;
+      const { name, notes } = pickNameAndNotes(
+        piece,
+        parsed,
+        lookups.ingredients,
+        lookups.units.containerTokens,
+      );
       const ingredientResolution = resolveIngredientName(
         lookups.ingredients,
         name,
@@ -319,7 +407,7 @@ export function parseIngredientLinesIntoSections(
         ingredientId: ingredientResolution.id,
         ingredientMatch: ingredientResolution.match,
         canonicalIngredientName: ingredientResolution.canonicalName,
-        notes: parsed.notes,
+        notes,
         isOptional: parsed.isOptional,
       });
     }

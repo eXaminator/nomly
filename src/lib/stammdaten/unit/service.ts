@@ -28,6 +28,7 @@ export type UnitListItem = {
   baseUnitId: number | null;
   baseUnitName: string | null;
   factor: number;
+  isContainer: boolean;
   recipeRefCount: number;
 };
 
@@ -37,6 +38,7 @@ export type UnitUpsertInput = {
   dimension: Dimension;
   baseUnitId: number | null;
   factor: number;
+  isContainer: boolean;
 };
 
 export class UnitStammdatenError extends Error {
@@ -99,6 +101,7 @@ function loadUnitsBase(query?: string) {
         dimension: unit.dimension,
         baseUnitId: unit.baseUnitId,
         factor: unit.factor,
+        isContainer: unit.isContainer,
       })
       .from(unit)
       .orderBy(sql`unaccent(${unit.name})`)
@@ -116,6 +119,7 @@ function loadUnitsBase(query?: string) {
       dimension: unit.dimension,
       baseUnitId: unit.baseUnitId,
       factor: unit.factor,
+      isContainer: unit.isContainer,
     })
     .from(unit)
     .where(
@@ -156,6 +160,7 @@ export function listUnitsManaged(query?: string): UnitListItem[] {
     baseUnitName:
       row.baseUnitId != null ? baseUnitNames.get(row.baseUnitId) ?? null : null,
     factor: row.factor,
+    isContainer: row.isContainer,
     recipeRefCount: recipeCounts.get(row.id) ?? 0,
   }));
 }
@@ -176,6 +181,7 @@ export function getUnitDetail(id: number): UnitListItem | null {
     baseUnitName:
       row.baseUnitId != null ? baseUnitNames.get(row.baseUnitId) ?? null : null,
     factor: row.factor,
+    isContainer: row.isContainer,
     recipeRefCount: recipeCounts.get(row.id) ?? 0,
   };
 }
@@ -272,6 +278,7 @@ export function createUnit(input: UnitUpsertInput): UnitListItem {
         dimension: input.dimension,
         baseUnitId: input.baseUnitId ?? null,
         factor: input.factor,
+        isContainer: input.isContainer,
       })
       .returning({ id: unit.id })
       .all();
@@ -307,6 +314,7 @@ export function updateUnit(id: number, input: UnitUpsertInput): UnitListItem {
         name,
         baseUnitId: input.baseUnitId ?? null,
         factor: input.factor,
+        isContainer: input.isContainer,
       })
       .where(eq(unit.id, id))
       .run();

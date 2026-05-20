@@ -65,6 +65,7 @@ describe("parseIngredientString", () => {
       name: "Hackfleisch",
       notes: null,
       isOptional: false,
+      altWithPrepStripped: null,
     });
   });
   it("separates notes after a comma", () => {
@@ -74,6 +75,7 @@ describe("parseIngredientString", () => {
       name: "Speck",
       notes: "gewürfelt",
       isOptional: false,
+      altWithPrepStripped: null,
     });
   });
   it("handles German decimals", () => {
@@ -83,6 +85,7 @@ describe("parseIngredientString", () => {
       name: "Sahne",
       notes: null,
       isOptional: false,
+      altWithPrepStripped: null,
     });
   });
   it("handles fractions", () => {
@@ -99,6 +102,7 @@ describe("parseIngredientString", () => {
       name: "Salz",
       notes: null,
       isOptional: false,
+      altWithPrepStripped: null,
     });
   });
   it("strips leading 'ca.'", () => {
@@ -108,6 +112,7 @@ describe("parseIngredientString", () => {
       name: "Brühe",
       notes: null,
       isOptional: false,
+      altWithPrepStripped: null,
     });
   });
   it("uses the max of a range and records the range in notes", () => {
@@ -117,6 +122,7 @@ describe("parseIngredientString", () => {
       name: "Käse",
       notes: "100-200",
       isOptional: false,
+      altWithPrepStripped: null,
     });
   });
   it("range with fractions: max + note", () => {
@@ -140,6 +146,7 @@ describe("parseIngredientString", () => {
       name: "Eier",
       notes: null,
       isOptional: false,
+      altWithPrepStripped: null,
     });
   });
   it("treats 'nach Geschmack' as a note", () => {
@@ -149,6 +156,7 @@ describe("parseIngredientString", () => {
       name: "Salz",
       notes: "nach geschmack",
       isOptional: false,
+      altWithPrepStripped: null,
     });
   });
   it("accepts a DB-added alias like 'Pck.' without parser changes", () => {
@@ -158,6 +166,7 @@ describe("parseIngredientString", () => {
       name: "Blätterteig",
       notes: null,
       isOptional: false,
+      altWithPrepStripped: null,
     });
   });
 });
@@ -357,6 +366,24 @@ describe("parseIngredientString — extended cases", () => {
     expect(r.quantity).toBe(2);
     expect(r.unitName?.toLowerCase()).toBe("zehen");
     expect(r.name).toBe("Knoblauch");
+  });
+
+  it("offers prep-stripped alternative for '2 chopped tomatoes'", () => {
+    const r = parse("2 chopped tomatoes");
+    expect(r.quantity).toBe(2);
+    expect(r.name).toBe("chopped tomatoes");
+    expect(r.altWithPrepStripped).not.toBeNull();
+    expect(r.altWithPrepStripped?.name).toBe("tomatoes");
+    expect(r.altWithPrepStripped?.notes?.toLowerCase()).toContain("chopped");
+  });
+  it("offers prep-stripped alt for German 'gehackt' + adverb", () => {
+    const r = parse("200 g fein gehackt Petersilie");
+    expect(r.altWithPrepStripped?.name).toBe("Petersilie");
+    expect(r.altWithPrepStripped?.notes?.toLowerCase()).toContain("fein gehackt");
+  });
+  it("no alt for '2 ripe tomatoes' (ripe is not a prep word)", () => {
+    const r = parse("2 ripe tomatoes");
+    expect(r.altWithPrepStripped).toBeNull();
   });
   it("parser returns empty name for '2 Prise' alone", () => {
     const r = parse("2 Prise");
