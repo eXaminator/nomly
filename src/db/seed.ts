@@ -163,6 +163,18 @@ const topUpUnits: Array<{
     aliases: ["inch", "inches", "-inch", "Inch", '"'],
   },
   {
+    name: "cm",
+    dimension: "count",
+    factor: 1,
+    aliases: ["zentimeter", "Zentimeter", "centimeter", "centimeters", "-cm"],
+  },
+  {
+    name: "Zehe",
+    dimension: "count",
+    factor: 1,
+    aliases: ["Zehen", "clove", "cloves"],
+  },
+  {
     name: "Packung",
     dimension: "count",
     factor: 1,
@@ -173,6 +185,8 @@ const topUpUnits: Array<{
       "Pck.",
       "Pkg",
       "Pkg.",
+      "Pckg",
+      "Pckg.",
       "package",
       "packages",
       "packet",

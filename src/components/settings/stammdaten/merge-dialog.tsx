@@ -27,8 +27,13 @@ export type MergeDialogProps<TItem> = {
   nameOf: (item: TItem) => string;
   /** Optional inline warning banner shown above the radio list. */
   warning?: React.ReactNode;
-  /** Submit handler — receives winner id + loser ids. */
-  onSubmit: (winnerId: number, loserIds: number[]) => Promise<void>;
+  /** Submit handler — receives winner id + loser ids + ids that should be
+   *  REPLACED (FKs rewired but name/aliases NOT absorbed). */
+  onSubmit: (
+    winnerId: number,
+    loserIds: number[],
+    replaceIds: number[],
+  ) => Promise<void>;
 };
 
 export function MergeDialog<TItem>({
@@ -47,6 +52,12 @@ export function MergeDialog<TItem>({
   const [loadingImpact, setLoadingImpact] = React.useState(false);
   const [submitting, setSubmitting] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  // Per-loser mode: "merge" absorbs the loser's name+aliases as new aliases
+  // of the winner; "replace" rewires refs but discards the name. Default
+  // merge for every row; can't be set on the winner.
+  const [modes, setModes] = React.useState<Map<number, "merge" | "replace">>(
+    new Map(),
+  );
 
   React.useEffect(() => {
     if (!open || items.length === 0) return;
@@ -90,13 +101,24 @@ export function MergeDialog<TItem>({
     setSubmitting(true);
     setError(null);
     try {
-      await onSubmit(idOf(winner), losers.map(idOf));
+      const replaceIds = losers
+        .map(idOf)
+        .filter((id) => modes.get(id) === "replace");
+      await onSubmit(idOf(winner), losers.map(idOf), replaceIds);
       onClose();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Merge fehlgeschlagen.");
     } finally {
       setSubmitting(false);
     }
+  }
+
+  function setMode(id: number, mode: "merge" | "replace"): void {
+    setModes((prev) => {
+      const next = new Map(prev);
+      next.set(id, mode);
+      return next;
+    });
   }
 
   return (
@@ -127,15 +149,17 @@ export function MergeDialog<TItem>({
               const id = idOf(item);
               const im = impact.get(id);
               const refSummary = im ? formatRefs(im.refs) : "";
+              const isWinner = winnerId === id;
+              const mode = modes.get(id) ?? "merge";
               return (
-                <label
+                <div
                   key={id}
-                  className="flex items-start gap-3 px-3 py-2 cursor-pointer hover:bg-[var(--color-muted)]"
+                  className="flex items-start gap-3 px-3 py-2 hover:bg-[var(--color-muted)]"
                 >
                   <input
                     type="radio"
                     name="winner"
-                    checked={winnerId === id}
+                    checked={isWinner}
                     onChange={() => setWinnerId(id)}
                     className="mt-1"
                   />
@@ -148,7 +172,20 @@ export function MergeDialog<TItem>({
                         ` · ${im.aliasCount} Aliase`}
                     </div>
                   </div>
-                </label>
+                  {!isWinner && hasAliasTable(entityKind) && (
+                    <select
+                      value={mode}
+                      onChange={(e) =>
+                        setMode(id, e.target.value as "merge" | "replace")
+                      }
+                      className="rounded border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1 text-xs"
+                      aria-label="Modus für diese Zeile"
+                    >
+                      <option value="merge">Zusammenführen</option>
+                      <option value="replace">Ersetzen</option>
+                    </select>
+                  )}
+                </div>
               );
             })}
           </div>

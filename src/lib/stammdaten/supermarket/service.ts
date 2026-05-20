@@ -73,7 +73,7 @@ function loadOrderedCategories(
     .from(supermarketCategory)
     .innerJoin(category, eq(category.id, supermarketCategory.categoryId))
     .where(eq(supermarketCategory.supermarketId, supermarketId))
-    .orderBy(asc(supermarketCategory.sortOrder), asc(category.name))
+    .orderBy(asc(supermarketCategory.sortOrder), sql`unaccent(${category.name})`)
     .all();
 }
 
@@ -83,7 +83,7 @@ export function listSupermarkets(query?: string): SupermarketListItem[] {
       ? db
           .select({ id: supermarket.id, name: supermarket.name })
           .from(supermarket)
-          .orderBy(asc(supermarket.name))
+          .orderBy(sql`unaccent(${supermarket.name})`)
           .all()
       : (() => {
           const pattern = `%${query.trim().toLowerCase().replace(/[%_]/g, "\\$&")}%`;
@@ -91,7 +91,7 @@ export function listSupermarkets(query?: string): SupermarketListItem[] {
             .select({ id: supermarket.id, name: supermarket.name })
             .from(supermarket)
             .where(sql`lower_u(${supermarket.name}) LIKE ${pattern}`)
-            .orderBy(asc(supermarket.name))
+            .orderBy(sql`unaccent(${supermarket.name})`)
             .all();
         })();
   const ids = base.map((r) => r.id);
@@ -283,9 +283,10 @@ export function deleteSupermarket(
 export function mergeSupermarkets(
   winnerId: number,
   loserIds: number[],
+  options?: { replaceIds?: number[] },
 ): MergeResult<SupermarketRow> {
   try {
-    return runMerge(winnerId, loserIds, supermarketAdapter);
+    return runMerge(winnerId, loserIds, supermarketAdapter, options);
   } catch (e) {
     if (e instanceof MergeError)
       throw new SupermarketStammdatenError(e.message, 409);

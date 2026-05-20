@@ -51,6 +51,8 @@ const TEST_UNITS = new Set(
     "prise", "prisen", "pr", "pinch",
     "messerspitze", "msp",
     "zoll", "inch", "inches", '"',
+    "cm", "zentimeter", "centimeter", "centimeters",
+    "zehe", "zehen", "clove", "cloves",
   ].map((u) => u.toLowerCase()),
 );
 const parse = (raw: string) => parseIngredientString(raw, TEST_UNITS);
@@ -220,15 +222,18 @@ describe("parseIngredientString — extended cases", () => {
     expect(r.unitName?.toLowerCase()).toBe("el");
     expect(r.notes).toMatch(/bis 2/);
   });
-  it("' / ' is treated like 'or'", () => {
+  it("' / ' is normalised to 'or' and stays in the name", () => {
     const r = parse("100 g Butter / Margarine");
-    expect(r.name).toBe("Butter");
-    expect(r.notes?.toLowerCase()).toContain("margarine");
+    expect(r.name).toBe("Butter or Margarine");
   });
-  it("' o. ' is treated like 'or'", () => {
+  it("' o. ' is normalised to 'or' and stays in the name", () => {
     const r = parse("1 EL Zucker o. Honig");
-    expect(r.name).toBe("Zucker");
-    expect(r.notes?.toLowerCase()).toContain("honig");
+    expect(r.name).toBe("Zucker or Honig");
+  });
+  it("'or' alternatives stay in the name", () => {
+    const r = parse("6 dried or fresh shiitake mushrooms");
+    expect(r.quantity).toBe(6);
+    expect(r.name).toBe("dried or fresh shiitake mushrooms");
   });
   it("keeps 'Weizen- oder Dinkelmehl' as one ingredient", () => {
     const r = parse("200 g Weizen- oder Dinkelmehl");
@@ -341,6 +346,18 @@ describe("parseIngredientString — extended cases", () => {
   it("non-optional rows have isOptional=false", () => {
     expect(parse("100 g Mehl").isOptional).toBe(false);
   });
+  it("'5 cm piece ginger' parses with cm unit", () => {
+    const r = parse("5 cm piece ginger finely grated");
+    expect(r.quantity).toBe(5);
+    expect(r.unitName?.toLowerCase()).toBe("cm");
+    expect(r.name.toLowerCase()).toContain("ginger");
+  });
+  it("'2 Zehen Knoblauch' parses with Zehen unit", () => {
+    const r = parse("2 Zehen Knoblauch");
+    expect(r.quantity).toBe(2);
+    expect(r.unitName?.toLowerCase()).toBe("zehen");
+    expect(r.name).toBe("Knoblauch");
+  });
   it("parser returns empty name for '2 Prise' alone", () => {
     const r = parse("2 Prise");
     expect(r.quantity).toBe(2);
@@ -406,6 +423,15 @@ describe("splitConjunctions", () => {
   it("does not split inside brackets", () => {
     expect(splitConjunctions("Salz [Meersalz und Steinsalz]")).toEqual([
       "Salz [Meersalz und Steinsalz]",
+    ]);
+  });
+  it("does not split before a cooking-prep verb", () => {
+    expect(
+      splitConjunctions(
+        "1 pound Persian cucumbers, halved lengthwise and cut into 1/2-inch pieces",
+      ),
+    ).toEqual([
+      "1 pound Persian cucumbers, halved lengthwise and cut into 1/2-inch pieces",
     ]);
   });
 });

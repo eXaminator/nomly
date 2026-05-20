@@ -98,7 +98,7 @@ function loadProductsBase(query?: string) {
     .leftJoin(categoryTable, eq(categoryTable.id, product.defaultCategoryId));
 
   if (!query || query.trim().length === 0) {
-    return base.orderBy(asc(product.name)).all();
+    return base.orderBy(sql`unaccent(${product.name})`).all();
   }
   const lowered = query.trim().toLowerCase();
   const pattern = `%${lowered.replace(/[%_]/g, "\\$&")}%`;
@@ -113,7 +113,7 @@ function loadProductsBase(query?: string) {
         inArray(product.id, aliasMatchIds),
       ),
     )
-    .orderBy(asc(product.name))
+    .orderBy(sql`unaccent(${product.name})`)
     .all();
 }
 
@@ -322,9 +322,10 @@ export function deleteProduct(
 export function mergeProducts(
   winnerId: number,
   loserIds: number[],
+  options?: { replaceIds?: number[] },
 ): MergeResult<ProductRow> {
   try {
-    return runMerge(winnerId, loserIds, productAdapter);
+    return runMerge(winnerId, loserIds, productAdapter, options);
   } catch (e) {
     if (e instanceof MergeError) throw new ProductStammdatenError(e.message, 409);
     throw e;

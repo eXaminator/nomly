@@ -203,11 +203,15 @@ export function ListShell<TItem>({
     }
   }
 
-  async function handleMerge(winnerId: number, loserIds: number[]) {
+  async function handleMerge(
+    winnerId: number,
+    loserIds: number[],
+    replaceIds: number[],
+  ) {
     const res = await fetch(`/api/v1/${plural}/merge`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ winnerId, loserIds }),
+      body: JSON.stringify({ winnerId, loserIds, replaceIds }),
     });
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
@@ -485,34 +489,17 @@ function ListTableBodyImpl<TItem>({
     <tbody className="divide-y divide-[var(--color-border)]">
       {filtered.map((item) => {
         const id = idOf(item);
-        const selected = selectedIds.has(id);
         return (
-          <tr
+          <ListTableRow
             key={id}
-            className={cn(
-              "hover:bg-[var(--color-muted)] cursor-pointer",
-              selected &&
-                "bg-[color-mix(in_srgb,var(--color-accent),transparent_88%)]",
-            )}
-            onClick={(e) => {
-              const target = e.target as HTMLElement;
-              if (target.closest("[data-row-checkbox]")) return;
-              onOpenEdit(item);
-            }}
-          >
-            <td className="px-3 py-2 w-10" data-row-checkbox>
-              <Checkbox
-                checked={selected}
-                onCheckedChange={() => onToggleRow(id)}
-                aria-label={`${nameOf(item)} auswählen`}
-              />
-            </td>
-            {columns.map((c) => (
-              <td key={c.key} className={cn("px-3 py-2", c.className)}>
-                {c.cell(item)}
-              </td>
-            ))}
-          </tr>
+            item={item}
+            id={id}
+            selected={selectedIds.has(id)}
+            columns={columns}
+            nameOf={nameOf}
+            onOpenEdit={onOpenEdit}
+            onToggleRow={onToggleRow}
+          />
         );
       })}
     </tbody>
@@ -520,3 +507,59 @@ function ListTableBodyImpl<TItem>({
 }
 
 const ListTableBody = React.memo(ListTableBodyImpl) as typeof ListTableBodyImpl;
+
+/**
+ * Single-row component. Memo'd on its own props so that toggling one
+ * checkbox re-renders just that row and the previously-checked one (their
+ * `selected` flips), not all ~400 ingredient rows. The stable callbacks
+ * from `useCallback` in ListShell make this memoization effective.
+ */
+type ListTableRowProps<TItem> = {
+  item: TItem;
+  id: number;
+  selected: boolean;
+  columns: ColumnDef<TItem>[];
+  nameOf: (item: TItem) => string;
+  onOpenEdit: (item: TItem) => void;
+  onToggleRow: (id: number) => void;
+};
+
+function ListTableRowImpl<TItem>({
+  item,
+  id,
+  selected,
+  columns,
+  nameOf,
+  onOpenEdit,
+  onToggleRow,
+}: ListTableRowProps<TItem>) {
+  return (
+    <tr
+      className={cn(
+        "hover:bg-[var(--color-muted)] cursor-pointer",
+        selected &&
+          "bg-[color-mix(in_srgb,var(--color-accent),transparent_88%)]",
+      )}
+      onClick={(e) => {
+        const target = e.target as HTMLElement;
+        if (target.closest("[data-row-checkbox]")) return;
+        onOpenEdit(item);
+      }}
+    >
+      <td className="px-3 py-2 w-10" data-row-checkbox>
+        <Checkbox
+          checked={selected}
+          onCheckedChange={() => onToggleRow(id)}
+          aria-label={`${nameOf(item)} auswählen`}
+        />
+      </td>
+      {columns.map((c) => (
+        <td key={c.key} className={cn("px-3 py-2", c.className)}>
+          {c.cell(item)}
+        </td>
+      ))}
+    </tr>
+  );
+}
+
+const ListTableRow = React.memo(ListTableRowImpl) as typeof ListTableRowImpl;

@@ -1,4 +1,4 @@
-import { asc, eq, inArray, sql } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 
 import { db } from "../../../db/index.ts";
 import { recipeTag, tag } from "../../../db/schema.ts";
@@ -45,14 +45,14 @@ function loadRecipeRefCounts(ids: number[]): Map<number, number> {
 export function listTags(query?: string): TagListItem[] {
   const base =
     !query || query.trim().length === 0
-      ? db.select({ id: tag.id, name: tag.name }).from(tag).orderBy(asc(tag.name)).all()
+      ? db.select({ id: tag.id, name: tag.name }).from(tag).orderBy(sql`unaccent(${tag.name})`).all()
       : (() => {
           const pattern = `%${query.trim().toLowerCase().replace(/[%_]/g, "\\$&")}%`;
           return db
             .select({ id: tag.id, name: tag.name })
             .from(tag)
             .where(sql`lower_u(${tag.name}) LIKE ${pattern}`)
-            .orderBy(asc(tag.name))
+            .orderBy(sql`unaccent(${tag.name})`)
             .all();
         })();
   const ids = base.map((r) => r.id);
@@ -152,9 +152,10 @@ export function deleteTag(id: number, replaceWith?: number): TagDeleteResult {
 export function mergeTags(
   winnerId: number,
   loserIds: number[],
+  options?: { replaceIds?: number[] },
 ): MergeResult<TagRow> {
   try {
-    return runMerge(winnerId, loserIds, tagAdapter);
+    return runMerge(winnerId, loserIds, tagAdapter, options);
   } catch (e) {
     if (e instanceof MergeError) throw new TagStammdatenError(e.message, 409);
     throw e;

@@ -69,7 +69,11 @@ function selectIngredientWithJoinedData(query?: string) {
     .leftJoin(categoryTable, eq(categoryTable.id, ingredient.defaultCategoryId));
 
   if (!query || query.trim().length === 0) {
-    return base.orderBy(asc(ingredient.name)).all();
+    // Case- and diacritic-insensitive order so "Apfel" / "äpfel" /
+    // "zucchini" / "Zwiebel" sort together by their visible alphabetical
+    // form instead of by binary code point (where all-uppercase letters
+    // would land before all-lowercase ones).
+    return base.orderBy(sql`unaccent(${ingredient.name})`).all();
   }
   const lowered = query.trim().toLowerCase();
   const pattern = `%${lowered.replace(/[%_]/g, "\\$&")}%`;
@@ -85,7 +89,7 @@ function selectIngredientWithJoinedData(query?: string) {
         inArray(ingredient.id, aliasMatchIds),
       ),
     )
-    .orderBy(asc(ingredient.name))
+    .orderBy(sql`unaccent(${ingredient.name})`)
     .all();
 }
 
@@ -354,9 +358,10 @@ export function deleteIngredient(
 export function mergeIngredients(
   winnerId: number,
   loserIds: number[],
+  options?: { replaceIds?: number[] },
 ): MergeResult<IngredientRow> {
   try {
-    return runMerge(winnerId, loserIds, ingredientAdapter);
+    return runMerge(winnerId, loserIds, ingredientAdapter, options);
   } catch (e) {
     if (e instanceof MergeError) throw new StammdatenError(e.message, 409);
     throw e;

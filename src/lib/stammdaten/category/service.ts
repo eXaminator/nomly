@@ -123,7 +123,7 @@ function loadCategoriesBase(query?: string) {
     return db
       .select({ id: category.id, name: category.name })
       .from(category)
-      .orderBy(asc(category.name))
+      .orderBy(sql`unaccent(${category.name})`)
       .all();
   }
   const pattern = `%${query.trim().toLowerCase().replace(/[%_]/g, "\\$&")}%`;
@@ -140,7 +140,7 @@ function loadCategoriesBase(query?: string) {
         inArray(category.id, aliasMatchIds),
       ),
     )
-    .orderBy(asc(category.name))
+    .orderBy(sql`unaccent(${category.name})`)
     .all();
 }
 
@@ -321,9 +321,10 @@ export function deleteCategory(
 export function mergeCategories(
   winnerId: number,
   loserIds: number[],
+  options?: { replaceIds?: number[] },
 ): MergeResult<CategoryRow> {
   try {
-    return runMerge(winnerId, loserIds, categoryAdapter);
+    return runMerge(winnerId, loserIds, categoryAdapter, options);
   } catch (e) {
     if (e instanceof MergeError) throw new CategoryStammdatenError(e.message, 409);
     throw e;

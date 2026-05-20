@@ -101,7 +101,7 @@ function loadUnitsBase(query?: string) {
         factor: unit.factor,
       })
       .from(unit)
-      .orderBy(asc(unit.name))
+      .orderBy(sql`unaccent(${unit.name})`)
       .all();
   }
   const pattern = `%${query.trim().toLowerCase().replace(/[%_]/g, "\\$&")}%`;
@@ -124,7 +124,7 @@ function loadUnitsBase(query?: string) {
         inArray(unit.id, aliasMatchIds),
       ),
     )
-    .orderBy(asc(unit.name))
+    .orderBy(sql`unaccent(${unit.name})`)
     .all();
 }
 
@@ -367,9 +367,10 @@ export function deleteUnit(
 export function mergeUnits(
   winnerId: number,
   loserIds: number[],
+  options?: { replaceIds?: number[] },
 ): MergeResult<UnitRow> {
   try {
-    return runMerge(winnerId, loserIds, unitAdapter);
+    return runMerge(winnerId, loserIds, unitAdapter, options);
   } catch (e) {
     if (e instanceof MergeError) throw new UnitStammdatenError(e.message, 409);
     throw e;

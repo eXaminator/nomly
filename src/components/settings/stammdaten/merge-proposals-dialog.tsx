@@ -39,6 +39,9 @@ type ClusterDecision = {
   winnerId: number;
   /** ids that should participate; subset of cluster.items. */
   participantIds: Set<number>;
+  /** Per-loser mode. Missing key = default "merge". Winner is never in the
+   * map. "replace" rewires FK refs but discards the name (no alias). */
+  modes: Map<number, "merge" | "replace">;
 };
 
 export type MergeProposalsDialogProps = {
@@ -88,6 +91,7 @@ export function MergeProposalsDialog({
             enabled: true,
             winnerId: c.defaultWinnerId,
             participantIds: new Set(c.items.map((i) => i.id)),
+            modes: new Map(),
           });
         }
         setDecisions(init);
@@ -164,6 +168,9 @@ export function MergeProposalsDialog({
         (id) => id !== decision.winnerId,
       );
       if (loserIds.length === 0) continue;
+      const replaceIds = loserIds.filter(
+        (id) => decision.modes.get(id) === "replace",
+      );
       try {
         const res = await fetch(`/api/v1/${plural}/merge`, {
           method: "POST",
@@ -171,6 +178,7 @@ export function MergeProposalsDialog({
           body: JSON.stringify({
             winnerId: decision.winnerId,
             loserIds,
+            replaceIds,
           }),
         });
         if (!res.ok) {
@@ -312,6 +320,28 @@ export function MergeProposalsDialog({
                                 ` · ${item.aliases.slice(0, 3).join(", ")}${item.aliases.length > 3 ? "…" : ""}`}
                             </div>
                           </div>
+                          {!isWinner && (
+                            <select
+                              value={decision.modes.get(item.id) ?? "merge"}
+                              onChange={(e) => {
+                                const mode = e.target.value as
+                                  | "merge"
+                                  | "replace";
+                                const nextModes = new Map(decision.modes);
+                                if (mode === "merge") nextModes.delete(item.id);
+                                else nextModes.set(item.id, mode);
+                                updateDecision(cluster.id, {
+                                  modes: nextModes,
+                                });
+                              }}
+                              disabled={!decision.enabled || !checked}
+                              className="rounded border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1 text-xs"
+                              aria-label="Modus für diese Zeile"
+                            >
+                              <option value="merge">Zusammenführen</option>
+                              <option value="replace">Ersetzen</option>
+                            </select>
+                          )}
                         </div>
                       );
                     })}

@@ -91,8 +91,11 @@ const TEXT_AMOUNT_VAGUE = new Set([
  */
 const NOTE_BOUNDARY_TOKENS = new Set(
   [
-    "or",
-    "oder",
+    // "or"/"oder" intentionally NOT in this list — recipe sources commonly
+    // write "6 dried or fresh shiitake mushrooms" or "Butter oder Margarine"
+    // as ALTERNATIVES for the same ingredient slot, and treating "or" as a
+    // notes boundary truncates the name to the first adjective. Alternatives
+    // stay in the name verbatim.
     "alternative",
     "alternativ",
     "bzw",
@@ -481,7 +484,7 @@ function preprocess(raw: string): {
   //     so the regular parser sees "4 inch stems …" → unit "inch", qty 4.
   const CONTAINER_RE = /(?:package|packages|packet|packets|can|cans|tin|tins|jar|jars|bottle|bottles|tube|tubes|box|boxes|dose|dosen|packung|päckchen|pck|pkg|carton|cartons)/i;
   text = text.replace(
-    /(\d+)[-–](count|ounce|ounces|oz|inch|inches|gram|grams|g|kg|ml|l|lb|pound|pounds)\b(\s*)(\S*)/gi,
+    /(\d+)[-–](count|ounce|ounces|oz|inch|inches|cm|gram|grams|g|kg|ml|l|lb|pound|pounds)\b(\s*)(\S*)/gi,
     (match, num: string, sizeUnit: string, ws: string, next: string) => {
       if (next && CONTAINER_RE.test(next)) {
         capturedNotes.push(`${num} ${sizeUnit}`);
@@ -744,17 +747,82 @@ export function parseIngredientString(
  * Returns the original line as a single-element array when no split applies,
  * so the existing single-output parser is the no-op path.
  */
+/**
+ * Cooking prep / preparation words that, when they immediately follow a
+ * conjunction, signal a continuation of the previous ingredient's notes
+ * ("halved lengthwise and cut into pieces") rather than a second ingredient.
+ * Matched case-insensitively against the first word after the conjunction.
+ */
+const PREP_WORDS = new Set([
+  // English participles + adverbs
+  "cut",
+  "chopped",
+  "sliced",
+  "diced",
+  "grated",
+  "minced",
+  "halved",
+  "quartered",
+  "peeled",
+  "rinsed",
+  "drained",
+  "cooked",
+  "cooled",
+  "dried",
+  "baked",
+  "mixed",
+  "crushed",
+  "melted",
+  "softened",
+  "whisked",
+  "beaten",
+  "deveined",
+  "seeded",
+  "stemmed",
+  "trimmed",
+  "shredded",
+  "ground",
+  "soaked",
+  "rolled",
+  "rinsed",
+  "patted",
+  "finely",
+  "coarsely",
+  "thinly",
+  "thickly",
+  "roughly",
+  "lightly",
+  "freshly",
+  "very",
+  // German participles + adverbs
+  "gewürfelt",
+  "gehackt",
+  "geschnitten",
+  "püriert",
+  "gerieben",
+  "geschält",
+  "gewaschen",
+  "erhitzt",
+  "geknetet",
+  "gemischt",
+  "geraspelt",
+  "fein",
+  "grob",
+]);
+
 export function splitConjunctions(raw: string): string[] {
   const trimmed = raw.trim();
   if (trimmed.length === 0) return [];
 
   // Don't split when the conjunction is part of a dash-compound like
   // "Weizen- oder Dinkelmehl" (handled by normalize() in the parser too).
-  // Also: never split when the conjunction is inside parentheses or
-  // brackets — those describe a single ingredient ("medium onion (½ chopped
-  // & ½ sliced)"), not a list.
-  // Strategy: walk forward, track paren/bracket depth, and split only at
-  // " und " / " and " / " & " encountered at depth 0 and not preceded by "-".
+  // Never split when the conjunction is inside parentheses or brackets —
+  // those describe a single ingredient ("medium onion (½ chopped & ½
+  // sliced)"), not a list. And: don't split when the part after the
+  // conjunction starts with a cooking-prep verb ("halved lengthwise and
+  // cut into 1/2-inch pieces" / "Tomaten fein gehackt und püriert"); that's
+  // a continuation of the previous ingredient's prep notes, not a second
+  // ingredient.
   const SPLIT_RE = /\s+(?:und|and|&)\s+/gi;
   const parts: string[] = [];
   let lastIndex = 0;
@@ -776,6 +844,13 @@ export function splitConjunctions(raw: string): string[] {
     const beforeTrimmed = before.replace(/\s+$/, "");
     const lastChar = beforeTrimmed[beforeTrimmed.length - 1];
     if (lastChar === "-" || lastChar === "–") continue;
+
+    // Prep-word check: if the very next word after the conjunction is a
+    // cooking-prep verb / adverb, the conjunction is connecting prep
+    // instructions, not separate ingredients.
+    const after = trimmed.slice(idx + match[0].length);
+    const nextWord = (after.match(/^[\p{L}]+/u)?.[0] ?? "").toLowerCase();
+    if (PREP_WORDS.has(nextWord)) continue;
 
     parts.push(trimmed.slice(lastIndex, idx).trim());
     lastIndex = idx + match[0].length;

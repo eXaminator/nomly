@@ -340,15 +340,15 @@ describe("transformFamilywallRecipe", () => {
     expect(ing.ingredientName).toBe("caster sugar");
   });
 
-  it("moves 'oder'-alternatives into notes", () => {
+  it("keeps 'oder'-alternatives in the name", () => {
     const out = transformFamilywallRecipe(
       makeRaw({ ingredients: ["100g Butter oder Margarine"] }),
       makeLookups(),
       null,
     );
     const ing = out.sections[0].ingredients[0];
-    expect(ing.ingredientName).toBe("Butter");
-    expect(ing.notes).toBe("oder Margarine");
+    expect(ing.ingredientName).toBe("Butter oder Margarine");
+    expect(ing.notes).toBeNull();
   });
 
   it("moves 'z.B.' examples into notes", () => {

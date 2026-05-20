@@ -7,6 +7,7 @@ import { mergeProducts } from "@/lib/stammdaten/product/service";
 const mergeSchema = z.object({
   winnerId: z.number().int().positive(),
   loserIds: z.array(z.number().int().positive()).min(1),
+  replaceIds: z.array(z.number().int().positive()).optional(),
 });
 
 export async function POST(request: Request) {
@@ -15,7 +16,7 @@ export async function POST(request: Request) {
   if (!parsed.success) return NextResponse.json({ error: "validation" }, { status: 400 });
   try {
     return NextResponse.json(
-      mergeProducts(parsed.data.winnerId, parsed.data.loserIds),
+      mergeProducts(parsed.data.winnerId, parsed.data.loserIds, { replaceIds: parsed.data.replaceIds }),
     );
   } catch (e) {
     return errorToResponse(e);

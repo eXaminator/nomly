@@ -16,6 +16,19 @@ export type MergeResult<Row> = {
   deletedIds: number[];
 };
 
+export type MergeOptions = {
+  /**
+   * Loser ids that should be REPLACED (FK refs rewired to the winner, row
+   * deleted) without absorbing the loser's canonical name / aliases as new
+   * aliases of the winner. Use this when the loser was clearly an erroneous
+   * row and the user doesn't want the name preserved.
+   *
+   * Ids not in this set get the default merge treatment (name + aliases
+   * become aliases of the winner).
+   */
+  replaceIds?: number[];
+};
+
 /**
  * Generic merge transaction. Loads winner + losers, calls adapter validators,
  * absorbs loser names + aliases into the winner's alias table (when one
@@ -30,6 +43,7 @@ export function runMerge<Row extends { id: number; name?: string | null }>(
   winnerId: number,
   loserIds: number[],
   adapter: MergeAdapter<Row>,
+  options?: MergeOptions,
 ): MergeResult<Row> {
   const uniqueLosers = Array.from(new Set(loserIds));
   if (uniqueLosers.includes(winnerId)) {
@@ -37,6 +51,14 @@ export function runMerge<Row extends { id: number; name?: string | null }>(
   }
   if (uniqueLosers.length === 0) {
     throw new MergeError("Mindestens ein Verlierer ist erforderlich.");
+  }
+  const replaceSet = new Set(options?.replaceIds ?? []);
+  for (const id of replaceSet) {
+    if (!uniqueLosers.includes(id)) {
+      throw new MergeError(
+        `Replace-Id ${id} ist nicht in der Verlierer-Liste.`,
+      );
+    }
   }
 
   return db.transaction((tx) => {
@@ -62,7 +84,17 @@ export function runMerge<Row extends { id: number; name?: string | null }>(
       adapter.aliasParentColumn &&
       adapter.aliasNameColumn
     ) {
-      absorbAliases(tx, adapter, winner, losers);
+      // Only losers in "merge" mode contribute their names+aliases. "Replace"
+      // losers get their alias rows dropped but nothing is absorbed into the
+      // winner — their names disappear with them.
+      const mergeLosers = losers.filter((l) => !replaceSet.has(l.id));
+      const replaceLosers = losers.filter((l) => replaceSet.has(l.id));
+      absorbAliases(tx, adapter, winner, mergeLosers);
+      if (replaceLosers.length > 0) {
+        tx.delete(adapter.aliasTable)
+          .where(inArray(adapter.aliasParentColumn, replaceLosers.map((l) => l.id)))
+          .run();
+      }
     }
 
     // Composite-PK dedupe FIRST (so the bulk update afterwards can't run
