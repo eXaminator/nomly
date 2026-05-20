@@ -63,6 +63,48 @@ export type DraftRecipe = {
 };
 
 /**
+ * Wire shape returned by the URL importer and the clipboard parser. Matches
+ * `ImportedIngredient` server-side — kept in lockstep manually so client
+ * code doesn't pull a server-side type. Both endpoints are populated by
+ * `parseIngredientLines` so the conversion below applies uniformly.
+ */
+export type ParsedIngredientResponse = {
+  quantity: number | null;
+  unit: { id: number; name: string } | null;
+  unitMatch: "matched" | "defaulted" | "unresolved" | "empty";
+  rawUnit: string | null;
+  name: string;
+  ingredientId: number | null;
+  ingredientMatch: "existing" | "new";
+  canonicalIngredientName: string | null;
+  notes: string | null;
+};
+
+export function parsedIngredientToDraft(
+  i: ParsedIngredientResponse,
+): DraftIngredient {
+  // "matched" collapses to the "ok" annotation state; the badge reads
+  // `rawUnit` separately when an alias-hit needs surfacing.
+  const unitState: ImportAnnotation["unitState"] =
+    i.unitMatch === "matched" ? "ok" : i.unitMatch;
+  const annotation: ImportAnnotation = {
+    ingredientIsNew: i.ingredientMatch === "new",
+    unitState,
+    rawUnit: i.rawUnit,
+  };
+  return {
+    uid: crypto.randomUUID(),
+    name: i.name,
+    canonicalName: i.canonicalIngredientName,
+    quantity: quantityToInputString(i.quantity),
+    unit: i.unit ? { id: i.unit.id, name: i.unit.name } : null,
+    notes: i.notes ?? "",
+    isOptional: false,
+    importAnnotation: annotation,
+  };
+}
+
+/**
  * Format a stored numeric quantity for the German-language quantity input.
  * Outputs "1,5" (not "1.5") so the user sees the same convention they typed.
  * Returns "" for null. Preserves precision (no rounding) — round-trip:

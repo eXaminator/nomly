@@ -200,6 +200,38 @@ export function resolveIngredientName(
 
 void sql; // kept for future tuning; the import side reads everything via JS.
 
+/**
+ * Parse a batch of raw ingredient strings into the same shape `importRecipeFromUrl`
+ * returns. Used by both the URL importer and the clipboard-paste endpoint.
+ */
+export function parseIngredientLines(
+  lines: readonly string[],
+  lookups: { units: UnitLookup; ingredients: IngredientLookup },
+): ImportedIngredient[] {
+  const knownUnitTokens = new Set(lookups.units.byNameOrAlias.keys());
+  return lines.map((raw) => {
+    const parsed = parseIngredientString(raw, knownUnitTokens);
+    const { resolved, match: unitMatch, rawUnit } = resolveUnit(
+      lookups.units,
+      parsed.unitName,
+      parsed.quantity,
+    );
+    const name = parsed.name || raw.trim();
+    const ingredientResolution = resolveIngredientName(lookups.ingredients, name);
+    return {
+      quantity: parsed.quantity,
+      unit: resolved,
+      unitMatch,
+      rawUnit,
+      name,
+      ingredientId: ingredientResolution.id,
+      ingredientMatch: ingredientResolution.match,
+      canonicalIngredientName: ingredientResolution.canonicalName,
+      notes: parsed.notes,
+    };
+  });
+}
+
 function instructionsToMarkdown(steps: string[]): string {
   if (steps.length === 0) return "";
   if (steps.length === 1) return steps[0];
@@ -293,28 +325,10 @@ export async function importRecipeFromUrl(
   const ingredientStrings = asStringList(recipe.recipeIngredient);
   const unitLookup = buildUnitLookup();
   const ingredientLookup = buildIngredientLookup();
-  const knownUnitTokens = new Set(unitLookup.byNameOrAlias.keys());
-  const ingredients: ImportedIngredient[] = ingredientStrings.map((raw) => {
-    const parsed = parseIngredientString(raw, knownUnitTokens);
-    const { resolved, match: unitMatch, rawUnit } = resolveUnit(
-      unitLookup,
-      parsed.unitName,
-      parsed.quantity,
-    );
-    const name = parsed.name || raw.trim();
-    const ingredientResolution = resolveIngredientName(ingredientLookup, name);
-    return {
-      quantity: parsed.quantity,
-      unit: resolved,
-      unitMatch,
-      rawUnit,
-      name,
-      ingredientId: ingredientResolution.id,
-      ingredientMatch: ingredientResolution.match,
-      canonicalIngredientName: ingredientResolution.canonicalName,
-      notes: parsed.notes,
-    };
-  });
+  const ingredients: ImportedIngredient[] = parseIngredientLines(
+    ingredientStrings,
+    { units: unitLookup, ingredients: ingredientLookup },
+  );
 
   const instructions = instructionsToMarkdown(
     asStringList(recipe.recipeInstructions),

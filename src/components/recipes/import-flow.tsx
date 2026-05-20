@@ -14,10 +14,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RecipeForm } from "./recipe-form";
 import {
-  quantityToInputString,
-  type DraftIngredient,
+  parsedIngredientToDraft,
   type DraftRecipe,
-  type ImportAnnotation,
+  type ParsedIngredientResponse,
 } from "./types";
 
 type ImportedRecipeResponse = {
@@ -32,17 +31,7 @@ type ImportedRecipeResponse = {
   sections: Array<{
     title: string | null;
     instructions: string;
-    ingredients: Array<{
-      quantity: number | null;
-      unit: { id: number; name: string } | null;
-      unitMatch: "matched" | "defaulted" | "unresolved" | "empty";
-      rawUnit: string | null;
-      name: string;
-      ingredientId: number | null;
-      ingredientMatch: "existing" | "new";
-      canonicalIngredientName: string | null;
-      notes: string | null;
-    }>;
+    ingredients: ParsedIngredientResponse[];
   }>;
 };
 
@@ -82,28 +71,7 @@ function importedToDraft(
                 isOptional: false,
               },
             ]
-          : s.ingredients.map<DraftIngredient>((i) => {
-              // "matched" collapses to "ok"; UnitBadge separately shows the
-              // import-time spelling whenever rawUnit is set (alias hits
-              // where the typed token differs from the canonical).
-              const unitState: ImportAnnotation["unitState"] =
-                i.unitMatch === "matched" ? "ok" : i.unitMatch;
-              const annotation: ImportAnnotation = {
-                ingredientIsNew: i.ingredientMatch === "new",
-                unitState,
-                rawUnit: i.rawUnit,
-              };
-              return {
-                uid: crypto.randomUUID(),
-                name: i.name,
-                canonicalName: i.canonicalIngredientName,
-                quantity: quantityToInputString(i.quantity),
-                unit: i.unit ? { id: i.unit.id, name: i.unit.name } : null,
-                notes: i.notes ?? "",
-                isOptional: false,
-                importAnnotation: annotation,
-              };
-            }),
+          : s.ingredients.map(parsedIngredientToDraft),
     })),
   };
 }
