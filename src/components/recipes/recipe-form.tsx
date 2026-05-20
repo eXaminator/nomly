@@ -95,6 +95,13 @@ export function RecipeForm({ initial, recipeId, tagSuggestions }: Props) {
     setDraft({ ...draft, sections: [...draft.sections, emptySection()] });
   }
 
+  function appendSectionsAfter(i: number, extras: DraftSection[]) {
+    if (extras.length === 0) return;
+    const sections = draft.sections.slice();
+    sections.splice(i + 1, 0, ...extras);
+    setDraft({ ...draft, sections });
+  }
+
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
@@ -270,6 +277,7 @@ export function RecipeForm({ initial, recipeId, tagSuggestions }: Props) {
             onChange={(next) => setSection(i, next)}
             onRemove={() => removeSection(i)}
             onMove={(dir) => moveSection(i, dir)}
+            onAppendSections={(extras) => appendSectionsAfter(i, extras)}
           />
         ))}
       </div>

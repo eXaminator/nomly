@@ -4,6 +4,7 @@ import { sql, eq } from "drizzle-orm";
 import { db } from "./index.ts";
 import {
   category,
+  categoryAlias,
   ingredient,
   ingredientAlias,
   supermarket,
@@ -77,8 +78,13 @@ const volumeFactorToMl: Record<string, number> = {
 const fullWordUnitAliases: Record<string, string> = {
   tablespoon: "EL",
   tablespoons: "EL",
+  Esslöffel: "EL",
+  esslöffel: "EL",
+  Eßlöffel: "EL",
   teaspoon: "TL",
   teaspoons: "TL",
+  Teelöffel: "TL",
+  teelöffel: "TL",
   piece: "Stück",
   pieces: "Stück",
   pound: "lb",
@@ -87,12 +93,28 @@ const fullWordUnitAliases: Record<string, string> = {
   ounces: "oz",
   gram: "g",
   grams: "g",
+  Gramm: "g",
+  gramm: "g",
   kilogram: "kg",
   kilograms: "kg",
+  Kilogramm: "kg",
+  kilogramm: "kg",
+  Kilo: "kg",
+  kilo: "kg",
   milliliter: "ml",
   milliliters: "ml",
+  Milliliter: "ml",
   liter: "l",
   liters: "l",
+  Liter: "l",
+  cups: "cup",
+  Tasse: "cup",
+  tassen: "cup",
+  Tassen: "cup",
+  // "c." appears in mixed German/English recipes — most commonly an
+  // abbreviation for "cup". Treat as such.
+  "c.": "cup",
+  c: "cup",
 };
 
 // Top-up units the app expects even if the snapshot lacks them. The current
@@ -108,7 +130,38 @@ const topUpUnits: Array<{
 }> = [
   { name: "EL", dimension: "volume", factor: 14.7867647813 },
   { name: "TL", dimension: "volume", factor: 4.92892159375 },
-  { name: "Prise", dimension: "volume", factor: 0.3 },
+  {
+    name: "Prise",
+    dimension: "volume",
+    factor: 0.3,
+    aliases: ["Prisen", "PR", "pinch", "pinches"],
+  },
+  {
+    name: "Messerspitze",
+    dimension: "volume",
+    factor: 0.5,
+    aliases: ["Messerspitzen", "Msp", "Msp.", "knife tip"],
+  },
+  {
+    name: "Bund",
+    dimension: "count",
+    factor: 1,
+    aliases: ["Bunde", "Bündel", "bunch", "bunches"],
+  },
+  {
+    name: "Handvoll",
+    dimension: "count",
+    factor: 1,
+    aliases: ["Hand voll", "handful", "handfuls"],
+  },
+  {
+    name: "Zoll",
+    dimension: "count",
+    factor: 1,
+    // English `inch` and the symbol `"` (single straight quote). Recipe
+    // sites often write `1" piece ginger`.
+    aliases: ["inch", "inches", "-inch", "Inch", '"'],
+  },
   {
     name: "Packung",
     dimension: "count",
@@ -125,6 +178,12 @@ const topUpUnits: Array<{
       "packet",
       "packets",
     ],
+  },
+  {
+    name: "Dose",
+    dimension: "count",
+    factor: 1,
+    aliases: ["Dosen", "can", "cans", "tin", "tins"],
   },
 ];
 
@@ -399,12 +458,7 @@ function addAlias(
       ? unitAlias
       : kind === "ingredient"
         ? ingredientAlias
-        : null;
-  if (!table) {
-    // Categories don't have an alias table in our schema (yet) — silently
-    // skip rather than fabricate one.
-    return;
-  }
+        : categoryAlias;
   const exists = tx
     .select({ id: table.id })
     .from(table)
@@ -414,9 +468,13 @@ function addAlias(
   try {
     if (kind === "unit") {
       tx.insert(unitAlias).values({ unitId: parentId, name: aliasName }).run();
-    } else {
+    } else if (kind === "ingredient") {
       tx.insert(ingredientAlias)
         .values({ ingredientId: parentId, name: aliasName })
+        .run();
+    } else {
+      tx.insert(categoryAlias)
+        .values({ categoryId: parentId, name: aliasName })
         .run();
     }
     onAdded();

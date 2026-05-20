@@ -16,7 +16,12 @@ import {
   type JsonLdRecipe,
 } from "./json-ld.ts";
 import { parseIsoDurationToMinutes } from "./duration.ts";
-import { parseIngredientString } from "./ingredient.ts";
+import {
+  detectSectionHeader,
+  normalizeForMatch,
+  parseIngredientString,
+  splitConjunctions,
+} from "./ingredient.ts";
 import { savePhotoBuffer, type PhotoPath } from "../photos.ts";
 
 export type IngredientMatch = "existing" | "new";
@@ -158,8 +163,18 @@ export function buildIngredientLookup(): IngredientLookup {
     .select({ id: ingredient.id, name: ingredient.name })
     .from(ingredient)
     .all();
+  // Two keys per row: the lowercase form AND the diacritic-stripped form.
+  // The stripped form lets "Möhre" / "Moehre"-style inputs match the same
+  // row when the user has only typed an ASCII-ish approximation. Lowercase
+  // takes precedence (set first), so we never replace an existing exact
+  // match with a different row's normalized hit.
+  function add(key: string, hit: IngredientLookupHit) {
+    if (!lookup.has(key)) lookup.set(key, hit);
+  }
   for (const i of canonical) {
-    lookup.set(i.name.toLowerCase(), { id: i.id, canonicalName: i.name });
+    const hit = { id: i.id, canonicalName: i.name };
+    add(i.name.toLowerCase(), hit);
+    add(normalizeForMatch(i.name), hit);
   }
   const aliases = db
     .select({
@@ -171,10 +186,9 @@ export function buildIngredientLookup(): IngredientLookup {
     .innerJoin(ingredient, eq(ingredient.id, ingredientAlias.ingredientId))
     .all();
   for (const a of aliases) {
-    const key = a.aliasName.toLowerCase();
-    if (!lookup.has(key)) {
-      lookup.set(key, { id: a.id, canonicalName: a.canonicalName });
-    }
+    const hit = { id: a.id, canonicalName: a.canonicalName };
+    add(a.aliasName.toLowerCase(), hit);
+    add(normalizeForMatch(a.aliasName), hit);
   }
   return lookup;
 }
@@ -189,10 +203,10 @@ export function resolveIngredientName(
 } {
   const trimmed = rawName.trim();
   const key = trimmed.toLowerCase();
-  const hit = lookup.get(key);
+  // Try exact lowercase first, then fall back to the diacritic-stripped
+  // form ("Möhre" → "mohre" → match).
+  const hit = lookup.get(key) ?? lookup.get(normalizeForMatch(trimmed));
   if (hit === undefined) return { id: null, match: "new", canonicalName: null };
-  // Only surface the canonical when it differs from what the user typed —
-  // otherwise the pill would just echo the same word.
   const canonicalName =
     hit.canonicalName.toLowerCase() === key ? null : hit.canonicalName;
   return { id: hit.id, match: "existing", canonicalName };
@@ -209,27 +223,97 @@ export function parseIngredientLines(
   lookups: { units: UnitLookup; ingredients: IngredientLookup },
 ): ImportedIngredient[] {
   const knownUnitTokens = new Set(lookups.units.byNameOrAlias.keys());
-  return lines.map((raw) => {
-    const parsed = parseIngredientString(raw, knownUnitTokens);
-    const { resolved, match: unitMatch, rawUnit } = resolveUnit(
-      lookups.units,
-      parsed.unitName,
-      parsed.quantity,
-    );
-    const name = parsed.name || raw.trim();
-    const ingredientResolution = resolveIngredientName(lookups.ingredients, name);
-    return {
-      quantity: parsed.quantity,
-      unit: resolved,
-      unitMatch,
-      rawUnit,
-      name,
-      ingredientId: ingredientResolution.id,
-      ingredientMatch: ingredientResolution.match,
-      canonicalIngredientName: ingredientResolution.canonicalName,
-      notes: parsed.notes,
-    };
-  });
+  const out: ImportedIngredient[] = [];
+  for (const raw of lines) {
+    // Section headers (e.g. "Für den Teig:", "FÜR DIE FÜLLUNG") aren't
+    // ingredients — section-aware callers use parseIngredientLinesIntoSections.
+    if (detectSectionHeader(raw)) continue;
+    for (const piece of splitConjunctions(raw)) {
+      const parsed = parseIngredientString(piece, knownUnitTokens);
+      const { resolved, match: unitMatch, rawUnit } = resolveUnit(
+        lookups.units,
+        parsed.unitName,
+        parsed.quantity,
+      );
+      const name = parsed.name || piece.trim();
+      const ingredientResolution = resolveIngredientName(
+        lookups.ingredients,
+        name,
+      );
+      out.push({
+        quantity: parsed.quantity,
+        unit: resolved,
+        unitMatch,
+        rawUnit,
+        name,
+        ingredientId: ingredientResolution.id,
+        ingredientMatch: ingredientResolution.match,
+        canonicalIngredientName: ingredientResolution.canonicalName,
+        notes: parsed.notes,
+      });
+    }
+  }
+  return out;
+}
+
+export type ParsedSectionGroup = {
+  /** Section title (null = the first/default unnamed section). */
+  title: string | null;
+  ingredients: ImportedIngredient[];
+};
+
+/**
+ * Section-aware variant for the clipboard-paste flow: scans for section
+ * headers (lines like "Für den Teig:", "FÜR DIE FÜLLUNG", "--- Sauce ---"),
+ * splits ingredients into groups, and applies conjunction splitting inside
+ * each group. The first group has `title: null` and collects any ingredients
+ * that appear before the first header.
+ */
+export function parseIngredientLinesIntoSections(
+  lines: readonly string[],
+  lookups: { units: UnitLookup; ingredients: IngredientLookup },
+): ParsedSectionGroup[] {
+  const knownUnitTokens = new Set(lookups.units.byNameOrAlias.keys());
+  const groups: ParsedSectionGroup[] = [{ title: null, ingredients: [] }];
+
+  for (const raw of lines) {
+    const header = detectSectionHeader(raw);
+    if (header) {
+      groups.push({ title: header, ingredients: [] });
+      continue;
+    }
+    for (const piece of splitConjunctions(raw)) {
+      const parsed = parseIngredientString(piece, knownUnitTokens);
+      const { resolved, match: unitMatch, rawUnit } = resolveUnit(
+        lookups.units,
+        parsed.unitName,
+        parsed.quantity,
+      );
+      const name = parsed.name || piece.trim();
+      const ingredientResolution = resolveIngredientName(
+        lookups.ingredients,
+        name,
+      );
+      groups[groups.length - 1].ingredients.push({
+        quantity: parsed.quantity,
+        unit: resolved,
+        unitMatch,
+        rawUnit,
+        name,
+        ingredientId: ingredientResolution.id,
+        ingredientMatch: ingredientResolution.match,
+        canonicalIngredientName: ingredientResolution.canonicalName,
+        notes: parsed.notes,
+      });
+    }
+  }
+
+  // Drop the leading unnamed section if empty — keeps the response clean
+  // when the paste starts with a section header.
+  if (groups.length > 1 && groups[0].title === null && groups[0].ingredients.length === 0) {
+    groups.shift();
+  }
+  return groups;
 }
 
 function instructionsToMarkdown(steps: string[]): string {

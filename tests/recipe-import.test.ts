@@ -1,6 +1,11 @@
 import { describe, it, expect } from "vitest";
 import { parseIsoDurationToMinutes } from "@/lib/recipe-import/duration";
-import { parseIngredientString } from "@/lib/recipe-import/ingredient";
+import {
+  detectSectionHeader,
+  normalizeForMatch,
+  parseIngredientString,
+  splitConjunctions,
+} from "@/lib/recipe-import/ingredient";
 import {
   asImageUrl,
   asServings,
@@ -32,15 +37,20 @@ describe("parseIsoDurationToMinutes", () => {
 // from `buildUnitLookup().byNameOrAlias.keys()`.
 const TEST_UNITS = new Set(
   [
-    "g", "kg", "mg",
+    "g", "kg", "mg", "gramm",
     "ml", "cl", "dl", "l",
-    "el", "tl",
-    "cup", "cups",
+    "el", "tl", "esslöffel", "teelöffel",
+    "cup", "cups", "tasse", "tassen",
     "tsp", "teaspoon", "teaspoons",
     "tbsp", "tablespoon", "tablespoons",
     "pkg", "pck", "packung", "packungen", "päckchen",
-    "dose", "dosen",
+    "dose", "dosen", "can", "cans", "package", "packages",
     "stück", "stk",
+    "bund", "bündel", "bunch",
+    "handvoll", "handful",
+    "prise", "prisen", "pr", "pinch",
+    "messerspitze", "msp",
+    "zoll", "inch", "inches", '"',
   ].map((u) => u.toLowerCase()),
 );
 const parse = (raw: string) => parseIngredientString(raw, TEST_UNITS);
@@ -73,9 +83,9 @@ describe("parseIngredientString", () => {
   it("handles fractions", () => {
     const r = parse("1 1/2 Tassen Mehl");
     expect(r.quantity).toBeCloseTo(1.5, 2);
-    // "Tassen" is not in the known unit list, so it stays in the name.
-    expect(r.unitName).toBeNull();
-    expect(r.name).toBe("Tassen Mehl");
+    // "Tassen" is now in the seeded unit list (alias of cup).
+    expect(r.unitName?.toLowerCase()).toBe("tassen");
+    expect(r.name).toBe("Mehl");
   });
   it("handles unicode fraction glyphs", () => {
     expect(parse("½ TL Salz")).toEqual({
@@ -93,25 +103,27 @@ describe("parseIngredientString", () => {
       notes: null,
     });
   });
-  it("averages ranges", () => {
+  it("uses the max of a range and records the range in notes", () => {
     expect(parse("100-200 g Käse")).toEqual({
-      quantity: 150,
+      quantity: 200,
       unitName: "g",
       name: "Käse",
-      notes: null,
+      notes: "100-200",
     });
   });
-  it("averages a fraction-int range", () => {
+  it("range with fractions: max + note", () => {
     const r = parse("1/2-1 cup peanut butter");
-    expect(r.quantity).toBeCloseTo(0.75, 3);
+    expect(r.quantity).toBe(1);
     expect(r.unitName).toBe("cup");
     expect(r.name).toBe("peanut butter");
+    expect(r.notes).toMatch(/0,5-1/);
   });
-  it("averages an int → mixed-fraction range across token boundaries", () => {
+  it("range across token boundaries: max + note", () => {
     const r = parse("1- 1 1/2 teaspoons sea salt");
-    expect(r.quantity).toBeCloseTo(1.25, 3);
+    expect(r.quantity).toBe(1.5);
     expect(r.unitName).toBe("teaspoons");
     expect(r.name).toBe("sea salt");
+    expect(r.notes).toMatch(/1-1,5/);
   });
   it("leaves unitless ingredients alone", () => {
     expect(parse("3 Eier")).toEqual({
@@ -121,12 +133,12 @@ describe("parseIngredientString", () => {
       notes: null,
     });
   });
-  it("returns the original when nothing parses", () => {
+  it("treats 'nach Geschmack' as a note", () => {
     expect(parse("Salz nach Geschmack")).toEqual({
       quantity: null,
       unitName: null,
-      name: "Salz nach Geschmack",
-      notes: null,
+      name: "Salz",
+      notes: "nach geschmack",
     });
   });
   it("accepts a DB-added alias like 'Pck.' without parser changes", () => {
@@ -136,6 +148,172 @@ describe("parseIngredientString", () => {
       name: "Blätterteig",
       notes: null,
     });
+  });
+});
+
+describe("parseIngredientString — extended cases", () => {
+  it("strips leading + / & / *", () => {
+    expect(parse("+ 100 ml Sojasoße").name).toBe("Sojasoße");
+    expect(parse("& ½ teaspoon coriander powder").name).toBe("coriander powder");
+    expect(parse("*Pfeffer").name).toBe("Pfeffer");
+  });
+  it("strips stray * anywhere in name", () => {
+    expect(parse("100 g *Mehl*").name).toBe("Mehl");
+  });
+  it("treats [bracketed text] as note", () => {
+    const r = parse("200 g Mehl [Type 405]");
+    expect(r.name).toBe("Mehl");
+    expect(r.notes).toMatch(/Type 405/);
+  });
+  it("text amount 'Eine Prise Salz' → quantity 1 + unit Prise", () => {
+    const r = parse("Eine Prise Salz");
+    expect(r.quantity).toBe(1);
+    expect(r.unitName?.toLowerCase()).toBe("prise");
+    expect(r.name).toBe("Salz");
+  });
+  it("text amount 'a pinch of nutmeg' → quantity 1 + unit pinch", () => {
+    const r = parse("a pinch of nutmeg");
+    expect(r.quantity).toBe(1);
+    expect(r.unitName?.toLowerCase()).toBe("pinch");
+    expect(r.name).toBe("nutmeg");
+  });
+  it("vague 'Etwas Puderzucker' → no amount, note 'Etwas'", () => {
+    const r = parse("Etwas Puderzucker");
+    expect(r.quantity).toBeNull();
+    expect(r.name).toBe("Puderzucker");
+    expect(r.notes?.toLowerCase()).toContain("etwas");
+  });
+  it("usage suffix 'zum Bestreuen' goes to notes", () => {
+    const r = parse("Etwas Puderzucker zum Bestreuen");
+    expect(r.name).toBe("Puderzucker");
+    expect(r.notes?.toLowerCase()).toContain("zum bestreuen");
+  });
+  it("dash-separated note 'Flaked Almond - to taste'", () => {
+    const r = parse("Flaked Almond - to taste");
+    expect(r.name).toBe("Flaked Almond");
+    expect(r.notes?.toLowerCase()).toContain("to taste");
+  });
+  it("amount at the end via colon: 'Flohsamenschalenpulver: 30 g'", () => {
+    const r = parse("Flohsamenschalenpulver: 30 g");
+    expect(r.quantity).toBe(30);
+    expect(r.unitName).toBe("g");
+    expect(r.name).toBe("Flohsamenschalenpulver");
+  });
+  it("unit but no amount falls back to 1", () => {
+    const r = parse("Esslöffel Milch");
+    expect(r.quantity).toBe(1);
+    expect(r.unitName?.toLowerCase()).toBe("esslöffel");
+    expect(r.name).toBe("Milch");
+  });
+  it("'bis 2 EL' → max + note", () => {
+    const r = parse("bis 2 EL Honig");
+    expect(r.quantity).toBe(2);
+    expect(r.unitName?.toLowerCase()).toBe("el");
+    expect(r.notes).toMatch(/bis 2/);
+  });
+  it("' / ' is treated like 'or'", () => {
+    const r = parse("100 g Butter / Margarine");
+    expect(r.name).toBe("Butter");
+    expect(r.notes?.toLowerCase()).toContain("margarine");
+  });
+  it("' o. ' is treated like 'or'", () => {
+    const r = parse("1 EL Zucker o. Honig");
+    expect(r.name).toBe("Zucker");
+    expect(r.notes?.toLowerCase()).toContain("honig");
+  });
+  it("keeps 'Weizen- oder Dinkelmehl' as one ingredient", () => {
+    const r = parse("200 g Weizen- oder Dinkelmehl");
+    expect(r.name).toMatch(/Weizen.*oder.*Dinkelmehl/);
+  });
+  it("inch symbol parses as a unit", () => {
+    const r = parse('1" piece ginger');
+    expect(r.quantity).toBe(1);
+    expect(r.unitName).toBe('"');
+    expect(r.name.toLowerCase()).toContain("ginger");
+  });
+  it("12-count package: compound size in note, package as unit", () => {
+    const r = parse("12-count package pull-apart dinner rolls");
+    expect(r.quantity).toBe(1);
+    expect(r.unitName?.toLowerCase()).toBe("package");
+    expect(r.notes).toMatch(/12 count/i);
+    expect(r.name).toMatch(/pull-apart/i);
+  });
+  it("4-inch stems: compound becomes amount+unit when next word is not a container", () => {
+    const r = parse("4-inch stems of fresh rosemary");
+    expect(r.quantity).toBe(4);
+    expect(r.unitName?.toLowerCase()).toBe("inch");
+    expect(r.name.toLowerCase()).toContain("rosemary");
+  });
+  it("parenthesized size 1 (28 oz.) can crushed tomatoes", () => {
+    const r = parse("1 (28 oz.) can crushed tomatoes");
+    expect(r.quantity).toBe(1);
+    expect(r.unitName?.toLowerCase()).toBe("can");
+    expect(r.notes).toMatch(/28 oz/i);
+    expect(r.name).toMatch(/crushed tomatoes/i);
+  });
+  it("'to taste' anywhere is captured to notes", () => {
+    const r = parse("Black pepper to taste");
+    expect(r.name).toBe("Black pepper");
+    expect(r.notes?.toLowerCase()).toContain("to taste");
+  });
+  it("leading filler 'and Salz' is stripped", () => {
+    const r = parse("and Salz");
+    expect(r.name).toBe("Salz");
+  });
+});
+
+describe("detectSectionHeader", () => {
+  it("returns null for normal ingredient lines", () => {
+    expect(detectSectionHeader("200 g Mehl")).toBeNull();
+    expect(detectSectionHeader("Salz")).toBeNull();
+  });
+  it("detects trailing colon", () => {
+    expect(detectSectionHeader("Für den Teig:")).toBe("Für den Teig");
+  });
+  it("detects all-caps", () => {
+    expect(detectSectionHeader("FÜR DEN GRANATAPFELGUSS")).toBe(
+      "FÜR DEN GRANATAPFELGUSS",
+    );
+  });
+  it("detects leading 2+ dashes", () => {
+    expect(detectSectionHeader("--- For the sauce ---")).toBe("For the sauce");
+    expect(detectSectionHeader("-- Teig")).toBe("Teig");
+  });
+  it("detects leading emoji", () => {
+    expect(detectSectionHeader("🥖 For the bread")).toBe("For the bread");
+  });
+  it("ignores single-dash bullet", () => {
+    expect(detectSectionHeader("- 100 g Mehl")).toBeNull();
+  });
+});
+
+describe("splitConjunctions", () => {
+  it("does nothing for a normal line", () => {
+    expect(splitConjunctions("200 g Mehl")).toEqual(["200 g Mehl"]);
+  });
+  it("splits on ' und '", () => {
+    expect(splitConjunctions("Salz und Pfeffer")).toEqual(["Salz", "Pfeffer"]);
+  });
+  it("splits on ' & '", () => {
+    expect(splitConjunctions("Salz & Pfeffer")).toEqual(["Salz", "Pfeffer"]);
+  });
+  it("splits on ' and '", () => {
+    expect(splitConjunctions("Salt and Pepper")).toEqual(["Salt", "Pepper"]);
+  });
+  it("keeps 'Weizen- oder Dinkelmehl' as one ingredient", () => {
+    expect(splitConjunctions("Weizen- und Dinkelmehl")).toEqual([
+      "Weizen- und Dinkelmehl",
+    ]);
+  });
+});
+
+describe("normalizeForMatch", () => {
+  it("removes diacritics and lowercases", () => {
+    expect(normalizeForMatch("Möhre")).toBe("mohre");
+    expect(normalizeForMatch("möhre")).toBe("mohre");
+    expect(normalizeForMatch("Tomate")).toBe("tomate");
+    expect(normalizeForMatch("Soße")).toBe("sosse");
+    expect(normalizeForMatch("ÄPFEL")).toBe("apfel");
   });
 });
 

@@ -21,5 +21,17 @@ sqlite.function("lower_u", { deterministic: true }, (s: unknown) =>
   typeof s === "string" ? s.toLowerCase() : s,
 );
 
+// Diacritic-insensitive normaliser. Used in autocomplete LIKE patterns so
+// "Mohre" still finds "Möhre" and "Soße" matches "Sosse". NFD-decomposes
+// then strips the combining marks, lowercases, and folds ß→ss.
+sqlite.function("unaccent", { deterministic: true }, (s: unknown) => {
+  if (typeof s !== "string") return s;
+  return s
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/ß/g, "ss")
+    .toLowerCase();
+});
+
 export const db = drizzle(sqlite, { schema });
 export { schema };

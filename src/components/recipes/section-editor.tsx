@@ -53,6 +53,11 @@ async function tryReadClipboard(timeoutMs = 800): Promise<string | null> {
   }
 }
 
+export type ParsedSectionGroupResponse = {
+  title: string | null;
+  ingredients: ParsedIngredientResponse[];
+};
+
 type Props = {
   section: DraftSection;
   index: number;
@@ -60,6 +65,10 @@ type Props = {
   onChange: (next: DraftSection) => void;
   onRemove: () => void;
   onMove: (direction: -1 | 1) => void;
+  /** Called by the paste flow when the pasted text contained section
+   *  headers ("Für den Teig:", "FÜR DIE FÜLLUNG"). Receives one DraftSection
+   *  per additional section to append AFTER this one. */
+  onAppendSections?: (sections: DraftSection[]) => void;
 };
 
 /**
@@ -79,6 +88,7 @@ export function SectionEditor({
   onChange,
   onRemove,
   onMove,
+  onAppendSections,
 }: Props) {
   const [pasteOpen, setPasteOpen] = React.useState(false);
   const [pasteText, setPasteText] = React.useState("");
@@ -141,18 +151,55 @@ export function SectionEditor({
         const err = (await res.json().catch(() => ({}))) as { error?: string };
         throw new Error(err.error ?? `HTTP ${res.status}`);
       }
-      const data = (await res.json()) as { items: ParsedIngredientResponse[] };
+      const data = (await res.json()) as {
+        items: ParsedIngredientResponse[];
+        sections?: ParsedSectionGroupResponse[];
+      };
       if (data.items.length === 0) {
         setPasteError("Konnte keine Zutaten erkennen.");
         return;
       }
-      const drafts = data.items.map(parsedIngredientToDraft);
-      // Replace the initial blank placeholder row(s); otherwise append.
+
+      // Section-aware path: when the paste contained section headers
+      // ("Für den Teig:", "FÜR DIE FÜLLUNG"), the response carries one
+      // ParsedSectionGroup per detected header.
+      const groups = data.sections ?? [
+        { title: null, ingredients: data.items },
+      ];
+
+      const firstGroup = groups[0];
+      const firstDrafts = firstGroup.ingredients.map(parsedIngredientToDraft);
       const keep = section.ingredients.filter((i) => !isBlankDraft(i));
-      onChange({ ...section, ingredients: [...keep, ...drafts] });
+      const updatedFirst: DraftSection = {
+        ...section,
+        // Inherit the first group's title only when the current section has
+        // no title yet — avoids surprising the user by renaming a labelled
+        // section just because they pasted text starting with a header.
+        title:
+          section.title.trim().length === 0 && firstGroup.title
+            ? firstGroup.title
+            : section.title,
+        ingredients: [...keep, ...firstDrafts],
+      };
+      onChange(updatedFirst);
+
+      const extraGroups = groups.slice(1);
+      if (extraGroups.length > 0 && onAppendSections) {
+        const extras: DraftSection[] = extraGroups.map((g) => ({
+          uid: crypto.randomUUID(),
+          title: g.title ?? "",
+          instructions: "",
+          ingredients: g.ingredients.map(parsedIngredientToDraft),
+        }));
+        onAppendSections(extras);
+      }
+
+      const totalDrafts = data.items.length;
       setPasteOpen(false);
       setPasteInfo(
-        `${drafts.length} Zutat${drafts.length === 1 ? "" : "en"} eingefügt.`,
+        extraGroups.length > 0
+          ? `${totalDrafts} Zutaten in ${groups.length} Abschnitte eingefügt.`
+          : `${totalDrafts} Zutat${totalDrafts === 1 ? "" : "en"} eingefügt.`,
       );
       window.setTimeout(() => setPasteInfo(null), 3000);
     } catch (e) {

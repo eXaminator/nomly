@@ -1,4 +1,4 @@
-import { asc, desc, eq, like, sql } from "drizzle-orm";
+import { asc, desc, eq, sql } from "drizzle-orm";
 import { db } from "../db/index.ts";
 import {
   category,
@@ -10,7 +10,23 @@ import {
   unitAlias,
 } from "../db/schema.ts";
 
-const norm = (s: string) => s.trim();
+/**
+ * Trim + canonicalise whitespace and hyphens so visually-identical names
+ * don't end up as separate rows. Recipe imports occasionally bring in NBSPs,
+ * en-dashes (–), em-dashes (—), or zero-width spaces — all of which render
+ * identically to the user but compare as different bytes in the DB. We fold
+ * them to ASCII hyphen / single space so "Hokkaido-Kürbis" inserted twice
+ * from different sources resolves to one row.
+ */
+const norm = (s: string) =>
+  s
+    .replace(
+      /[\u00A0\u1680\u2000-\u200D\u202F\u205F\u3000\uFEFF]/g,
+      " ",
+    )
+    .replace(/[\u2013\u2014]/g, "-")
+    .replace(/\s+/g, " ")
+    .trim();
 const lower = (s: string) => norm(s).toLowerCase();
 
 export type AutocompleteHit = {
@@ -34,6 +50,14 @@ function buildLikePattern(query: string): string {
   return `%${query.replace(/[%_]/g, "\\$&")}%`;
 }
 
+function unaccent(s: string): string {
+  return s
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/ß/g, "ss")
+    .toLowerCase();
+}
+
 /**
  * Returns ingredient-name suggestions where canonical names and aliases are
  * both first-class entries. Picking an alias (e.g. "Tomaten") sets the user's
@@ -43,12 +67,16 @@ function buildLikePattern(query: string): string {
 export function searchIngredients(query: string): IngredientSuggestion[] {
   const q = norm(query);
   if (q.length === 0) return [];
-  const pattern = buildLikePattern(q);
+  // Match diacritic-insensitively: lowercase + strip-accents both sides.
+  // The custom `unaccent` SQL function (registered in src/db/index.ts) does
+  // the same transformation in SQLite so user input like "Mohre" finds
+  // "Möhre", "Soße" finds "Sosse", etc.
+  const pattern = buildLikePattern(unaccent(q));
 
   const canonical = db
     .select({ id: ingredient.id, name: ingredient.name })
     .from(ingredient)
-    .where(like(ingredient.name, pattern))
+    .where(sql`unaccent(${ingredient.name}) LIKE ${pattern}`)
     .orderBy(asc(ingredient.name))
     .limit(LIMIT)
     .all();
@@ -61,7 +89,7 @@ export function searchIngredients(query: string): IngredientSuggestion[] {
     })
     .from(ingredientAlias)
     .innerJoin(ingredient, eq(ingredient.id, ingredientAlias.ingredientId))
-    .where(like(ingredientAlias.name, pattern))
+    .where(sql`unaccent(${ingredientAlias.name}) LIKE ${pattern}`)
     .orderBy(asc(ingredientAlias.name))
     .limit(LIMIT)
     .all();
@@ -99,12 +127,12 @@ function rankSuggestion(s: IngredientSuggestion, query: string): number {
 export function searchUnits(query: string): AutocompleteHit[] {
   const q = norm(query);
   if (q.length === 0) return [];
-  const pattern = buildLikePattern(q);
+  const pattern = buildLikePattern(unaccent(q));
 
   const canonical = db
     .select({ id: unit.id, name: unit.name })
     .from(unit)
-    .where(like(unit.name, pattern))
+    .where(sql`unaccent(${unit.name}) LIKE ${pattern}`)
     .orderBy(asc(unit.name))
     .limit(LIMIT)
     .all();
@@ -117,7 +145,7 @@ export function searchUnits(query: string): AutocompleteHit[] {
     })
     .from(unitAlias)
     .innerJoin(unit, eq(unit.id, unitAlias.unitId))
-    .where(like(unitAlias.name, pattern))
+    .where(sql`unaccent(${unitAlias.name}) LIKE ${pattern}`)
     .orderBy(asc(unitAlias.name))
     .limit(LIMIT)
     .all();
@@ -148,12 +176,12 @@ export function listUnitsByUsage(): Array<AutocompleteHit & { usageCount: number
 export function searchCategories(query: string): AutocompleteHit[] {
   const q = norm(query);
   if (q.length === 0) return [];
-  const pattern = buildLikePattern(q);
+  const pattern = buildLikePattern(unaccent(q));
 
   const canonical = db
     .select({ id: category.id, name: category.name })
     .from(category)
-    .where(like(category.name, pattern))
+    .where(sql`unaccent(${category.name}) LIKE ${pattern}`)
     .orderBy(asc(category.name))
     .limit(LIMIT)
     .all();
@@ -166,7 +194,7 @@ export function searchCategories(query: string): AutocompleteHit[] {
     })
     .from(categoryAlias)
     .innerJoin(category, eq(category.id, categoryAlias.categoryId))
-    .where(like(categoryAlias.name, pattern))
+    .where(sql`unaccent(${categoryAlias.name}) LIKE ${pattern}`)
     .orderBy(asc(categoryAlias.name))
     .limit(LIMIT)
     .all();
@@ -208,12 +236,25 @@ export function createIngredient(name: string): { id: number; name: string } {
   if (cleaned.length === 0) {
     throw new Error("ingredient name is required");
   }
-  const collision = findCanonicalOrAlias(cleaned);
-  if (collision.namespace !== "none") {
-    throw new Error(
-      `name "${cleaned}" is already used as ${collision.namespace}`,
-    );
-  }
+  // Diacritic-insensitive existence check: "Hokkaido-Kürbis" + "Hokkaido‑Kürbis"
+  // (en-dash) + "hokkaido-kuerbis" all resolve to the same key. If one already
+  // exists, return it instead of creating a near-duplicate.
+  const existing = db
+    .select({ id: ingredient.id, name: ingredient.name })
+    .from(ingredient)
+    .where(sql`unaccent(${ingredient.name}) = unaccent(${cleaned})`)
+    .get();
+  if (existing) return existing;
+  const aliasHit = db
+    .select({
+      id: ingredient.id,
+      name: ingredient.name,
+    })
+    .from(ingredientAlias)
+    .innerJoin(ingredient, eq(ingredient.id, ingredientAlias.ingredientId))
+    .where(sql`unaccent(${ingredientAlias.name}) = unaccent(${cleaned})`)
+    .get();
+  if (aliasHit) return aliasHit;
   const inserted = db
     .insert(ingredient)
     .values({ name: cleaned })
@@ -259,20 +300,3 @@ export function createCategory(name: string): { id: number; name: string } {
   return inserted[0];
 }
 
-function findCanonicalOrAlias(
-  name: string,
-): { namespace: "ingredient" | "ingredientAlias" | "none" } {
-  const hit = db
-    .select()
-    .from(ingredient)
-    .where(eq(ingredient.name, name))
-    .get();
-  if (hit) return { namespace: "ingredient" };
-  const aliasHit = db
-    .select()
-    .from(ingredientAlias)
-    .where(eq(ingredientAlias.name, name))
-    .get();
-  if (aliasHit) return { namespace: "ingredientAlias" };
-  return { namespace: "none" };
-}

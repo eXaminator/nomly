@@ -3,8 +3,7 @@ import { z } from "zod";
 import {
   buildIngredientLookup,
   buildUnitLookup,
-  parseIngredientLines,
-  type ImportedIngredient,
+  parseIngredientLinesIntoSections,
 } from "@/lib/recipe-import";
 import {
   pairTableLines,
@@ -22,7 +21,7 @@ export async function POST(request: Request) {
 
   const rawLines = splitClipboardToLines(parsed.data.text);
   if (rawLines.length === 0) {
-    return NextResponse.json({ items: [] as ImportedIngredient[] });
+    return NextResponse.json({ items: [], sections: [] });
   }
 
   const lookups = {
@@ -33,6 +32,12 @@ export async function POST(request: Request) {
     rawLines,
     new Set(lookups.units.byNameOrAlias.keys()),
   );
-  const items = parseIngredientLines(lines, lookups);
-  return NextResponse.json({ items });
+  const sections = parseIngredientLinesIntoSections(lines, lookups);
+
+  // Backwards-compatible flat list under `items`: the section-editor was
+  // wired to expect this shape before section headers existed. The new
+  // `sections` field carries the structured response for clients that want
+  // to honor section headers ("Für den Teig:" → new section in the editor).
+  const items = sections.flatMap((s) => s.ingredients);
+  return NextResponse.json({ items, sections });
 }
