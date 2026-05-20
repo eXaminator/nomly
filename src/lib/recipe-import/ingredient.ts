@@ -224,9 +224,25 @@ function consumeQuantity(tokens: string[]): RangeResult | null {
   if (tokens.length > 0 && APPROX_TOKENS_RE.test(tokens[0])) tokens.shift();
   if (tokens.length === 0) return null;
 
+  // Collect numeric tokens, allowing "+" / "&" between them as additive
+  // connectors ("2 + 1/4 cups" / "1 & ½ tsp"). The connectors are dropped;
+  // the existing whitespace-implicit-add path then sums the numbers.
   const numericRun: string[] = [];
-  while (tokens.length > 0 && NUMERIC_TOKEN_RE.test(tokens[0])) {
-    numericRun.push(tokens.shift()!);
+  while (tokens.length > 0) {
+    if (NUMERIC_TOKEN_RE.test(tokens[0])) {
+      numericRun.push(tokens.shift()!);
+      continue;
+    }
+    if (
+      (tokens[0] === "+" || tokens[0] === "&") &&
+      numericRun.length > 0 &&
+      tokens.length > 1 &&
+      NUMERIC_TOKEN_RE.test(tokens[1])
+    ) {
+      tokens.shift();
+      continue;
+    }
+    break;
   }
   if (numericRun.length === 0) return null;
 
@@ -646,16 +662,29 @@ export function splitConjunctions(raw: string): string[] {
 
   // Don't split when the conjunction is part of a dash-compound like
   // "Weizen- oder Dinkelmehl" (handled by normalize() in the parser too).
-  // The strategy: split on " und ", " and ", " & " — but skip splits where
-  // the preceding character is "-" or "–" (dash-compound).
-  // Regex matches separator with required spaces; we then filter.
+  // Also: never split when the conjunction is inside parentheses or
+  // brackets — those describe a single ingredient ("medium onion (½ chopped
+  // & ½ sliced)"), not a list.
+  // Strategy: walk forward, track paren/bracket depth, and split only at
+  // " und " / " and " / " & " encountered at depth 0 and not preceded by "-".
   const SPLIT_RE = /\s+(?:und|and|&)\s+/gi;
   const parts: string[] = [];
   let lastIndex = 0;
+
+  function depthAt(idx: number): number {
+    let depth = 0;
+    for (let i = 0; i < idx; i++) {
+      const c = trimmed[i];
+      if (c === "(" || c === "[") depth += 1;
+      else if (c === ")" || c === "]") depth = Math.max(0, depth - 1);
+    }
+    return depth;
+  }
+
   for (const match of trimmed.matchAll(SPLIT_RE)) {
     const idx = match.index ?? 0;
+    if (depthAt(idx) > 0) continue;
     const before = trimmed.slice(0, idx);
-    // Dash-compound check: the character just before the leading whitespace.
     const beforeTrimmed = before.replace(/\s+$/, "");
     const lastChar = beforeTrimmed[beforeTrimmed.length - 1];
     if (lastChar === "-" || lastChar === "–") continue;

@@ -260,6 +260,18 @@ describe("parseIngredientString — extended cases", () => {
     const r = parse("and Salz");
     expect(r.name).toBe("Salz");
   });
+  it("'2 + 1/4 cups all-purpose flour' uses + as addition", () => {
+    const r = parse("2 + 1/4 cups all-purpose flour");
+    expect(r.quantity).toBeCloseTo(2.25, 3);
+    expect(r.unitName).toBe("cups");
+    expect(r.name).toContain("flour");
+  });
+  it("'1 & ½ teaspoon coriander powder' uses & as addition", () => {
+    const r = parse("1 & ½ teaspoon coriander powder");
+    expect(r.quantity).toBeCloseTo(1.5, 3);
+    expect(r.unitName).toBe("teaspoon");
+    expect(r.name).toContain("coriander");
+  });
 });
 
 describe("detectSectionHeader", () => {
@@ -303,6 +315,16 @@ describe("splitConjunctions", () => {
   it("keeps 'Weizen- oder Dinkelmehl' as one ingredient", () => {
     expect(splitConjunctions("Weizen- und Dinkelmehl")).toEqual([
       "Weizen- und Dinkelmehl",
+    ]);
+  });
+  it("does not split inside parentheses", () => {
+    expect(
+      splitConjunctions("1 medium onion (½ finely chopped & ½ sliced)"),
+    ).toEqual(["1 medium onion (½ finely chopped & ½ sliced)"]);
+  });
+  it("does not split inside brackets", () => {
+    expect(splitConjunctions("Salz [Meersalz und Steinsalz]")).toEqual([
+      "Salz [Meersalz und Steinsalz]",
     ]);
   });
 });

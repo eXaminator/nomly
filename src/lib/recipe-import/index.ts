@@ -236,6 +236,12 @@ export function parseIngredientLines(
         parsed.quantity,
       );
       const name = parsed.name || piece.trim();
+      // Skip degenerate pieces that parsed to no name AND have no letters
+      // (just a number / connector). Happens when conjunction-splitting
+      // produces a fragment like "1" that should be glued to the next part.
+      if (parsed.name.trim().length === 0 && !/\p{L}/u.test(piece)) {
+        continue;
+      }
       const ingredientResolution = resolveIngredientName(
         lookups.ingredients,
         name,
@@ -290,6 +296,12 @@ export function parseIngredientLinesIntoSections(
         parsed.quantity,
       );
       const name = parsed.name || piece.trim();
+      // Skip degenerate pieces that parsed to no name AND have no letters
+      // (just a number / connector). Happens when conjunction-splitting
+      // produces a fragment like "1" that should be glued to the next part.
+      if (parsed.name.trim().length === 0 && !/\p{L}/u.test(piece)) {
+        continue;
+      }
       const ingredientResolution = resolveIngredientName(
         lookups.ingredients,
         name,
