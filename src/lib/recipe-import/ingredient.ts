@@ -48,8 +48,21 @@ const TEXT_AMOUNT_ONE = new Set([
 /**
  * Approximate-quantity tokens that should be stripped before the numeric
  * matcher runs ("ca. 300 ml", "about 2 cups", "approximately 1 tbsp").
+ * Also covers "je" ("each", "per") and the optional/alternative leaders that
+ * recipe sources sprinkle before the amount ("opt. 2 EL", "optional 1 TL").
  */
-const APPROX_TOKENS_RE = /^(ca\.?|etwa|about|approx\.?|approximately|roughly|ungefähr)$/i;
+const APPROX_TOKENS_RE = /^(ca\.?|etwa|about|approx\.?|approximately|roughly|ungefähr|je|opt\.?|optional|alternativ|alternative)$/i;
+
+/**
+ * Text amounts that mean exactly 1/2. "halber Apfel" → quantity 0.5.
+ */
+const TEXT_AMOUNT_HALF = new Set([
+  "halber",
+  "halbe",
+  "halbes",
+  "halben",
+  "half",
+]);
 
 /**
  * Text amount tokens that mean "a small unspecified quantity". They produce
@@ -149,6 +162,19 @@ const SIZE_MODIFIER_TOKENS = new Set([
   "mittlerer",
   "mittleres",
   "mittel",
+  // "gestrichener TL" / "gehäufter TL" — fill-level modifiers.
+  "gestrichen",
+  "gestrichene",
+  "gestrichener",
+  "gestrichenes",
+  "gehäuft",
+  "gehäufte",
+  "gehäufter",
+  "gehäuftes",
+  "geh",
+  "level",
+  "heaped",
+  "heaping",
 ]);
 
 /**
@@ -160,6 +186,23 @@ const TO_TASTE_PHRASES = [
   "nach geschmack",
   "zum abschmecken",
   "to taste",
+];
+
+/**
+ * Multi-word leading phrases that should be lifted to the notes and stripped
+ * from the front of the line ("Nach Belieben 1 Eigelb" → quantity 1, note
+ * "Nach Belieben"). Recognised case-insensitively, anchored at line start.
+ */
+const LEADING_LIFTED_PHRASES = [
+  "nach belieben",
+  "ggf\\.?",
+  "optional",
+  "opt\\.",
+  "evtl\\.?",
+  "eventuell",
+  "wenn vorhanden",
+  "bei bedarf",
+  "if available",
 ];
 
 /**
@@ -375,6 +418,19 @@ function preprocess(raw: string): { text: string; capturedNotes: string[] } {
     "",
   );
 
+  // Lift multi-word leading phrases like "Nach Belieben" / "Optional:" /
+  // "Wenn vorhanden" into the notes — they describe the line, not the
+  // ingredient. The colon variant ("Optional: 2 EL …") is handled by
+  // accepting an optional ":" + whitespace.
+  for (const phrase of LEADING_LIFTED_PHRASES) {
+    const re = new RegExp(`^\\s*${phrase}\\s*[:,-]?\\s+`, "i");
+    if (re.test(text)) {
+      const match = re.exec(text)!;
+      capturedNotes.push(match[0].replace(/[:,-]\s*$/, "").trim());
+      text = text.replace(re, "");
+    }
+  }
+
   // " / " and " o. " → " or " — keep both alternatives but route them through
   // the existing NOTE_BOUNDARY logic.
   text = text.replace(/\s+\/\s+/g, " or ").replace(/\s+o\.\s+/gi, " or ");
@@ -504,6 +560,9 @@ export function parseIngredientString(
     } else if (TEXT_AMOUNT_ONE.has(firstLower)) {
       tokens.shift();
       quantity = 1;
+    } else if (TEXT_AMOUNT_HALF.has(firstLower)) {
+      tokens.shift();
+      quantity = 0.5;
     } else {
       const range = consumeQuantity(tokens);
       if (range) {

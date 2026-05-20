@@ -272,6 +272,62 @@ describe("parseIngredientString — extended cases", () => {
     expect(r.unitName).toBe("teaspoon");
     expect(r.name).toContain("coriander");
   });
+
+  it("'halber TL Nelkenpulver' → quantity 0.5", () => {
+    const r = parse("halber TL Nelkenpulver");
+    expect(r.quantity).toBe(0.5);
+    expect(r.unitName).toBe("TL");
+    expect(r.name).toBe("Nelkenpulver");
+  });
+  it("'gestrichener TL Zimt' → size modifier 'gestrichen'", () => {
+    const r = parse("gestrichener TL Zimt");
+    expect(r.unitName).toBe("TL");
+    expect(r.name).toBe("Zimt");
+    expect(r.notes?.toLowerCase()).toContain("gestrichen");
+  });
+  it("'geh. TL Salz' → size modifier 'geh.'", () => {
+    const r = parse("geh. TL Salz");
+    expect(r.unitName).toBe("TL");
+    expect(r.name).toBe("Salz");
+    expect(r.notes?.toLowerCase()).toContain("geh");
+  });
+  it("'je ½ TL Zucker' → 'je' stripped, quantity 0.5", () => {
+    const r = parse("je ½ TL Zucker");
+    expect(r.quantity).toBe(0.5);
+    expect(r.unitName).toBe("TL");
+    expect(r.name).toBe("Zucker");
+  });
+  it("'opt. 2 EL Erdnüsse' → 'opt.' stripped, quantity 2", () => {
+    const r = parse("opt. 2 EL Erdnüsse");
+    expect(r.quantity).toBe(2);
+    expect(r.unitName).toBe("EL");
+    expect(r.name).toBe("Erdnüsse");
+  });
+  it("'Optional: 2 EL Sesamsaat' → 'Optional' goes to notes", () => {
+    const r = parse("Optional: 2 EL Sesamsaat");
+    expect(r.quantity).toBe(2);
+    expect(r.unitName).toBe("EL");
+    expect(r.name).toBe("Sesamsaat");
+    expect(r.notes?.toLowerCase()).toContain("optional");
+  });
+  it("'Nach Belieben 1 Eigelb' → multi-word phrase lifted to notes", () => {
+    const r = parse("Nach Belieben 1 Eigelb");
+    expect(r.quantity).toBe(1);
+    expect(r.name).toBe("Eigelb");
+    expect(r.notes?.toLowerCase()).toContain("nach belieben");
+  });
+  it("parser returns empty name for '2 Prise' alone", () => {
+    const r = parse("2 Prise");
+    expect(r.quantity).toBe(2);
+    expect(r.unitName).toBe("Prise");
+    expect(r.name).toBe("");
+  });
+  it("parser returns empty name for '200 g' alone", () => {
+    const r = parse("200 g");
+    expect(r.quantity).toBe(200);
+    expect(r.unitName).toBe("g");
+    expect(r.name).toBe("");
+  });
 });
 
 describe("detectSectionHeader", () => {

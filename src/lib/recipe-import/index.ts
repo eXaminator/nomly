@@ -228,20 +228,24 @@ export function parseIngredientLines(
     // Section headers (e.g. "Für den Teig:", "FÜR DIE FÜLLUNG") aren't
     // ingredients — section-aware callers use parseIngredientLinesIntoSections.
     if (detectSectionHeader(raw)) continue;
+    // Skip pure-noise lines (no letters at all, e.g. "—–", "***").
+    if (!/\p{L}/u.test(raw)) continue;
     for (const piece of splitConjunctions(raw)) {
       const parsed = parseIngredientString(piece, knownUnitTokens);
+      // Skip the row when the parser couldn't pull a real ingredient name
+      // out of the line. Familywall data legitimately has entries like
+      // "2 Prise" / "200 g" / "5-7 EL" with no ingredient — there's nothing
+      // useful to import, and falling back to the raw piece would create
+      // a garbage row in the global ingredient catalog ("2 Prise" as an
+      // ingredient). Same for fragments produced by conjunction splitting
+      // that turn out to be empty.
+      if (parsed.name.trim().length === 0) continue;
       const { resolved, match: unitMatch, rawUnit } = resolveUnit(
         lookups.units,
         parsed.unitName,
         parsed.quantity,
       );
-      const name = parsed.name || piece.trim();
-      // Skip degenerate pieces that parsed to no name AND have no letters
-      // (just a number / connector). Happens when conjunction-splitting
-      // produces a fragment like "1" that should be glued to the next part.
-      if (parsed.name.trim().length === 0 && !/\p{L}/u.test(piece)) {
-        continue;
-      }
+      const name = parsed.name;
       const ingredientResolution = resolveIngredientName(
         lookups.ingredients,
         name,
@@ -288,20 +292,16 @@ export function parseIngredientLinesIntoSections(
       groups.push({ title: header, ingredients: [] });
       continue;
     }
+    if (!/\p{L}/u.test(raw)) continue;
     for (const piece of splitConjunctions(raw)) {
       const parsed = parseIngredientString(piece, knownUnitTokens);
+      if (parsed.name.trim().length === 0) continue;
       const { resolved, match: unitMatch, rawUnit } = resolveUnit(
         lookups.units,
         parsed.unitName,
         parsed.quantity,
       );
-      const name = parsed.name || piece.trim();
-      // Skip degenerate pieces that parsed to no name AND have no letters
-      // (just a number / connector). Happens when conjunction-splitting
-      // produces a fragment like "1" that should be glued to the next part.
-      if (parsed.name.trim().length === 0 && !/\p{L}/u.test(piece)) {
-        continue;
-      }
+      const name = parsed.name;
       const ingredientResolution = resolveIngredientName(
         lookups.ingredients,
         name,
