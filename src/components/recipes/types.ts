@@ -78,6 +78,9 @@ export type ParsedIngredientResponse = {
   ingredientMatch: "existing" | "new";
   canonicalIngredientName: string | null;
   notes: string | null;
+  /** Server marked the row as optional from an "opt." / "Optional:" /
+   *  "evtl." / "(optional)" marker in the source. */
+  isOptional?: boolean;
 };
 
 export function parsedIngredientToDraft(
@@ -99,7 +102,7 @@ export function parsedIngredientToDraft(
     quantity: quantityToInputString(i.quantity),
     unit: i.unit ? { id: i.unit.id, name: i.unit.name } : null,
     notes: i.notes ?? "",
-    isOptional: false,
+    isOptional: i.isOptional ?? false,
     importAnnotation: annotation,
   };
 }

@@ -62,6 +62,7 @@ describe("parseIngredientString", () => {
       unitName: "g",
       name: "Hackfleisch",
       notes: null,
+      isOptional: false,
     });
   });
   it("separates notes after a comma", () => {
@@ -70,6 +71,7 @@ describe("parseIngredientString", () => {
       unitName: "g",
       name: "Speck",
       notes: "gewürfelt",
+      isOptional: false,
     });
   });
   it("handles German decimals", () => {
@@ -78,6 +80,7 @@ describe("parseIngredientString", () => {
       unitName: "l",
       name: "Sahne",
       notes: null,
+      isOptional: false,
     });
   });
   it("handles fractions", () => {
@@ -93,6 +96,7 @@ describe("parseIngredientString", () => {
       unitName: "TL",
       name: "Salz",
       notes: null,
+      isOptional: false,
     });
   });
   it("strips leading 'ca.'", () => {
@@ -101,6 +105,7 @@ describe("parseIngredientString", () => {
       unitName: "ml",
       name: "Brühe",
       notes: null,
+      isOptional: false,
     });
   });
   it("uses the max of a range and records the range in notes", () => {
@@ -109,6 +114,7 @@ describe("parseIngredientString", () => {
       unitName: "g",
       name: "Käse",
       notes: "100-200",
+      isOptional: false,
     });
   });
   it("range with fractions: max + note", () => {
@@ -131,6 +137,7 @@ describe("parseIngredientString", () => {
       unitName: null,
       name: "Eier",
       notes: null,
+      isOptional: false,
     });
   });
   it("treats 'nach Geschmack' as a note", () => {
@@ -139,6 +146,7 @@ describe("parseIngredientString", () => {
       unitName: null,
       name: "Salz",
       notes: "nach geschmack",
+      isOptional: false,
     });
   });
   it("accepts a DB-added alias like 'Pck.' without parser changes", () => {
@@ -147,6 +155,7 @@ describe("parseIngredientString", () => {
       unitName: "Pck",
       name: "Blätterteig",
       notes: null,
+      isOptional: false,
     });
   });
 });
@@ -297,24 +306,40 @@ describe("parseIngredientString — extended cases", () => {
     expect(r.unitName).toBe("TL");
     expect(r.name).toBe("Zucker");
   });
-  it("'opt. 2 EL Erdnüsse' → 'opt.' stripped, quantity 2", () => {
+  it("'opt. 2 EL Erdnüsse' → marked optional, 'opt.' stripped", () => {
     const r = parse("opt. 2 EL Erdnüsse");
     expect(r.quantity).toBe(2);
     expect(r.unitName).toBe("EL");
     expect(r.name).toBe("Erdnüsse");
+    expect(r.isOptional).toBe(true);
   });
-  it("'Optional: 2 EL Sesamsaat' → 'Optional' goes to notes", () => {
+  it("'Optional: 2 EL Sesamsaat' → marked optional, name parsed", () => {
     const r = parse("Optional: 2 EL Sesamsaat");
     expect(r.quantity).toBe(2);
     expect(r.unitName).toBe("EL");
     expect(r.name).toBe("Sesamsaat");
-    expect(r.notes?.toLowerCase()).toContain("optional");
+    expect(r.isOptional).toBe(true);
   });
-  it("'Nach Belieben 1 Eigelb' → multi-word phrase lifted to notes", () => {
+  it("'Nach Belieben 1 Eigelb' → marked optional, name parsed", () => {
     const r = parse("Nach Belieben 1 Eigelb");
     expect(r.quantity).toBe(1);
     expect(r.name).toBe("Eigelb");
-    expect(r.notes?.toLowerCase()).toContain("nach belieben");
+    expect(r.isOptional).toBe(true);
+  });
+  it("inline '(optional)' marker → optional flag set", () => {
+    const r = parse("1 EL Honig (optional)");
+    expect(r.quantity).toBe(1);
+    expect(r.name).toBe("Honig");
+    expect(r.isOptional).toBe(true);
+  });
+  it("trailing ', optional' marker → optional flag set", () => {
+    const r = parse("1 EL Honig, optional");
+    expect(r.quantity).toBe(1);
+    expect(r.name).toBe("Honig");
+    expect(r.isOptional).toBe(true);
+  });
+  it("non-optional rows have isOptional=false", () => {
+    expect(parse("100 g Mehl").isOptional).toBe(false);
   });
   it("parser returns empty name for '2 Prise' alone", () => {
     const r = parse("2 Prise");

@@ -27,6 +27,11 @@ export type ParsedIngredient = {
   unitName: string | null;
   name: string;
   notes: string | null;
+  /** True when the source marked the ingredient as optional ("opt. 2 EL …",
+   * "Optional: …", "evtl.", "(optional)", "nach Belieben", "wenn vorhanden",
+   * "if available", "bei Bedarf", "ggf."). Plumbed through to the recipe
+   * draft so the row is saved with isOptional=true. */
+  isOptional: boolean;
 };
 
 /**
@@ -51,7 +56,7 @@ const TEXT_AMOUNT_ONE = new Set([
  * Also covers "je" ("each", "per") and the optional/alternative leaders that
  * recipe sources sprinkle before the amount ("opt. 2 EL", "optional 1 TL").
  */
-const APPROX_TOKENS_RE = /^(ca\.?|etwa|about|approx\.?|approximately|roughly|ungefähr|je|opt\.?|optional|alternativ|alternative)$/i;
+const APPROX_TOKENS_RE = /^(ca\.?|etwa|about|approx\.?|approximately|roughly|ungefähr|je|alternativ|alternative)$/i;
 
 /**
  * Text amounts that mean exactly 1/2. "halber Apfel" → quantity 0.5.
@@ -189,21 +194,37 @@ const TO_TASTE_PHRASES = [
 ];
 
 /**
- * Multi-word leading phrases that should be lifted to the notes and stripped
- * from the front of the line ("Nach Belieben 1 Eigelb" → quantity 1, note
- * "Nach Belieben"). Recognised case-insensitively, anchored at line start.
+ * Markers that flag the ingredient as optional. Match anchored at line start
+ * (with an optional trailing colon / comma / dash) OR inline as a parenthesised
+ * / comma-separated note. Stripping these doesn't add anything to the notes —
+ * the isOptional flag on the parsed result carries the meaning.
  */
-const LEADING_LIFTED_PHRASES = [
-  "nach belieben",
-  "ggf\\.?",
+const OPTIONAL_MARKER_WORDS = [
   "optional",
+  "optionally",
   "opt\\.",
   "evtl\\.?",
   "eventuell",
   "wenn vorhanden",
   "bei bedarf",
+  "nach belieben",
+  "ggf\\.?",
   "if available",
+  "if needed",
 ];
+
+const OPTIONAL_LEADING_RE = new RegExp(
+  `^\\s*(?:${OPTIONAL_MARKER_WORDS.join("|")})\\s*[:,-]?\\s+`,
+  "i",
+);
+const OPTIONAL_INLINE_PAREN_RE = new RegExp(
+  `\\(\\s*(?:${OPTIONAL_MARKER_WORDS.join("|")})\\s*\\)`,
+  "i",
+);
+const OPTIONAL_INLINE_TRAIL_RE = new RegExp(
+  `[\\s,–-]+(?:${OPTIONAL_MARKER_WORDS.join("|")})\\s*$`,
+  "i",
+);
 
 /**
  * Tokens that, if they appear after a unit token, should still be treated
@@ -381,9 +402,30 @@ export function normalizeForMatch(s: string): string {
  *
  * Returns the cleaned text plus any notes captured from the pre-processing.
  */
-function preprocess(raw: string): { text: string; capturedNotes: string[] } {
+function preprocess(raw: string): {
+  text: string;
+  capturedNotes: string[];
+  isOptional: boolean;
+} {
   let text = raw;
   const capturedNotes: string[] = [];
+  let isOptional = false;
+
+  // Detect optional markers — leading "Optional:", "opt. 2 EL", or inline
+  // "Salz (optional)" / "Salz, optional". Strip them and set the flag; the
+  // flag carries the meaning so we don't also push to notes.
+  if (OPTIONAL_LEADING_RE.test(text)) {
+    isOptional = true;
+    text = text.replace(OPTIONAL_LEADING_RE, "");
+  }
+  if (OPTIONAL_INLINE_PAREN_RE.test(text)) {
+    isOptional = true;
+    text = text.replace(OPTIONAL_INLINE_PAREN_RE, " ");
+  }
+  if (OPTIONAL_INLINE_TRAIL_RE.test(text)) {
+    isOptional = true;
+    text = text.replace(OPTIONAL_INLINE_TRAIL_RE, "");
+  }
 
   // Capture and strip [bracketed text] → notes.
   text = text.replace(/\[([^\]]+)\]/g, (_, inner: string) => {
@@ -417,19 +459,6 @@ function preprocess(raw: string): { text: string; capturedNotes: string[] } {
     /^(?:und|and|the|der|die|das|of|von|vom|or|oder|sowie|plus)\s+/i,
     "",
   );
-
-  // Lift multi-word leading phrases like "Nach Belieben" / "Optional:" /
-  // "Wenn vorhanden" into the notes — they describe the line, not the
-  // ingredient. The colon variant ("Optional: 2 EL …") is handled by
-  // accepting an optional ":" + whitespace.
-  for (const phrase of LEADING_LIFTED_PHRASES) {
-    const re = new RegExp(`^\\s*${phrase}\\s*[:,-]?\\s+`, "i");
-    if (re.test(text)) {
-      const match = re.exec(text)!;
-      capturedNotes.push(match[0].replace(/[:,-]\s*$/, "").trim());
-      text = text.replace(re, "");
-    }
-  }
 
   // " / " and " o. " → " or " — keep both alternatives but route them through
   // the existing NOTE_BOUNDARY logic.
@@ -473,7 +502,7 @@ function preprocess(raw: string): { text: string; capturedNotes: string[] } {
 
   // Collapse whitespace.
   text = text.replace(/\s+/g, " ").trim();
-  return { text, capturedNotes };
+  return { text, capturedNotes, isOptional };
 }
 
 function escapeRegExp(s: string): string {
@@ -535,12 +564,12 @@ export function parseIngredientString(
   raw: string,
   knownUnitTokens: ReadonlySet<string>,
 ): ParsedIngredient {
-  const { text: preprocessed, capturedNotes } = preprocess(raw);
+  const { text: preprocessed, capturedNotes, isOptional } = preprocess(raw);
   const cleaned = normalize(preprocessed);
   if (cleaned.length === 0) {
     const notes =
       capturedNotes.length > 0 ? capturedNotes.join(", ") : null;
-    return { quantity: null, unitName: null, name: "", notes };
+    return { quantity: null, unitName: null, name: "", notes, isOptional };
   }
   const tokens = tokenize(cleaned);
 
@@ -704,7 +733,7 @@ export function parseIngredientString(
       .filter((p) => p.length > 0)
       .join(", ") || null;
 
-  return { quantity, unitName, name, notes };
+  return { quantity, unitName, name, notes, isOptional };
 }
 
 /**

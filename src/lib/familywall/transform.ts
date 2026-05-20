@@ -108,7 +108,7 @@ export function transformFamilywallRecipe(
         quantity: p.quantity,
         unitId: p.unit ? p.unit.id : null,
         notes: noteParts.length > 0 ? noteParts.join(" – ") : null,
-        isOptional: false,
+        isOptional: p.isOptional,
       };
     }),
   }));

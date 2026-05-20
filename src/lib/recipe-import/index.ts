@@ -52,6 +52,9 @@ export type ImportedIngredient = {
    *  name differs from the canonical (i.e. we matched via an alias). */
   canonicalIngredientName: string | null;
   notes: string | null;
+  /** True when the source line carried an "optional" marker ("opt.",
+   *  "Optional:", "evtl.", "nach Belieben", "(optional)" inline, …). */
+  isOptional: boolean;
 };
 
 export type ImportedSection = {
@@ -260,6 +263,7 @@ export function parseIngredientLines(
         ingredientMatch: ingredientResolution.match,
         canonicalIngredientName: ingredientResolution.canonicalName,
         notes: parsed.notes,
+        isOptional: parsed.isOptional,
       });
     }
   }
@@ -316,6 +320,7 @@ export function parseIngredientLinesIntoSections(
         ingredientMatch: ingredientResolution.match,
         canonicalIngredientName: ingredientResolution.canonicalName,
         notes: parsed.notes,
+        isOptional: parsed.isOptional,
       });
     }
   }
