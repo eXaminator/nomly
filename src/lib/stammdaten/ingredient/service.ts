@@ -8,6 +8,7 @@ import {
   recipeIngredient,
 } from "../../../db/schema.ts";
 import { getImpact } from "../shared/impact.ts";
+import { linkedRecipesForIngredients } from "../shared/linked-recipes.ts";
 import { runMerge, MergeError, type MergeResult } from "../shared/merge.ts";
 import type { ImpactRow, Tx } from "../shared/types.ts";
 import {
@@ -359,7 +360,12 @@ export function mergeIngredients(
 }
 
 export function getImpactForIngredients(ids: number[]): ImpactRow[] {
-  return getImpact(ids, ingredientAdapter);
+  const base = getImpact(ids, ingredientAdapter);
+  const linkedByOwner = linkedRecipesForIngredients(ids);
+  return base.map((row) => ({
+    ...row,
+    linkedRecipes: linkedByOwner.get(row.id) ?? [],
+  }));
 }
 
 function unreachable(): never {

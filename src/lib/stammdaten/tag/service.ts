@@ -3,6 +3,7 @@ import { asc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "../../../db/index.ts";
 import { recipeTag, tag } from "../../../db/schema.ts";
 import { getImpact } from "../shared/impact.ts";
+import { linkedRecipesForTags } from "../shared/linked-recipes.ts";
 import { runMerge, MergeError, type MergeResult } from "../shared/merge.ts";
 import type { ImpactRow } from "../shared/types.ts";
 import { normalizeName, validateName } from "../shared/validation.ts";
@@ -161,7 +162,12 @@ export function mergeTags(
 }
 
 export function getImpactForTags(ids: number[]): ImpactRow[] {
-  return getImpact(ids, tagAdapter);
+  const base = getImpact(ids, tagAdapter);
+  const linkedByOwner = linkedRecipesForTags(ids);
+  return base.map((row) => ({
+    ...row,
+    linkedRecipes: linkedByOwner.get(row.id) ?? [],
+  }));
 }
 
 function unreachable(): never {

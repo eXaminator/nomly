@@ -1,7 +1,8 @@
 "use client";
 
 import * as React from "react";
-import { ChevronDown, Loader2 } from "lucide-react";
+import Link from "next/link";
+import { ChevronDown, ExternalLink, Loader2 } from "lucide-react";
 import { cn } from "@/lib/cn";
 
 import {
@@ -83,31 +84,60 @@ export function ImpactSection({ entityKind, id, initial }: ImpactSectionProps) {
             <p className="text-[var(--color-danger)]">{error}</p>
           )}
           {data && !loading && !error && (
-            <ul className="flex flex-col gap-1">
-              {Object.entries(data.refs).filter(([, n]) => n > 0).length ===
-              0 ? (
-                <li className="text-[var(--color-muted-fg)]">
-                  Diese Zeile wird nirgendwo verwendet.
-                </li>
-              ) : (
-                Object.entries(data.refs)
-                  .filter(([, n]) => n > 0)
-                  .map(([key, count]) => (
-                    <li key={key} className="flex justify-between gap-2">
-                      <span className="text-[var(--color-muted-fg)]">
-                        {REF_LABELS[key] ?? key}
-                      </span>
-                      <span className="font-medium">{count}</span>
-                    </li>
-                  ))
+            <div className="flex flex-col gap-3">
+              <ul className="flex flex-col gap-1">
+                {Object.entries(data.refs).filter(([, n]) => n > 0).length ===
+                0 ? (
+                  <li className="text-[var(--color-muted-fg)]">
+                    Diese Zeile wird nirgendwo verwendet.
+                  </li>
+                ) : (
+                  Object.entries(data.refs)
+                    .filter(([, n]) => n > 0)
+                    .map(([key, count]) => (
+                      <li key={key} className="flex justify-between gap-2">
+                        <span className="text-[var(--color-muted-fg)]">
+                          {REF_LABELS[key] ?? key}
+                        </span>
+                        <span className="font-medium">{count}</span>
+                      </li>
+                    ))
+                )}
+                {data.aliasCount > 0 && (
+                  <li className="flex justify-between gap-2">
+                    <span className="text-[var(--color-muted-fg)]">Aliase</span>
+                    <span className="font-medium">{data.aliasCount}</span>
+                  </li>
+                )}
+              </ul>
+
+              {data.linkedRecipes && data.linkedRecipes.length > 0 && (
+                <div className="border-t border-[var(--color-border)] pt-3">
+                  <p className="mb-2 text-xs font-medium uppercase tracking-wider text-[var(--color-muted-fg)]">
+                    Rezepte
+                  </p>
+                  <ul className="flex flex-col gap-1">
+                    {data.linkedRecipes.map((r) => (
+                      <li key={r.id}>
+                        <Link
+                          href={`/rezepte/${r.id}`}
+                          className="inline-flex items-center gap-1 text-[var(--color-accent)] hover:underline"
+                        >
+                          {r.title}
+                          <ExternalLink className="size-3" />
+                        </Link>
+                      </li>
+                    ))}
+                  </ul>
+                  {(data.refs.recipes ?? 0) > data.linkedRecipes.length && (
+                    <p className="mt-1 text-xs text-[var(--color-muted-fg)]">
+                      … und {(data.refs.recipes ?? 0) - data.linkedRecipes.length}{" "}
+                      weitere.
+                    </p>
+                  )}
+                </div>
               )}
-              {data.aliasCount > 0 && (
-                <li className="flex justify-between gap-2">
-                  <span className="text-[var(--color-muted-fg)]">Aliase</span>
-                  <span className="font-medium">{data.aliasCount}</span>
-                </li>
-              )}
-            </ul>
+            </div>
           )}
         </div>
       )}

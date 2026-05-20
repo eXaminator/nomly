@@ -22,10 +22,16 @@ export const ENTITY_LABELS: Record<
   },
 };
 
+export type RecipeLink = {
+  id: number;
+  title: string;
+};
+
 export type ImpactRow = {
   id: number;
   refs: Record<string, number>;
   aliasCount: number;
+  linkedRecipes?: RecipeLink[];
 };
 
 export const REF_LABELS: Record<string, string> = {

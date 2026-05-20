@@ -7,6 +7,7 @@ import {
   unitAlias,
 } from "../../../db/schema.ts";
 import { getImpact } from "../shared/impact.ts";
+import { linkedRecipesForUnits } from "../shared/linked-recipes.ts";
 import { runMerge, MergeError, type MergeResult } from "../shared/merge.ts";
 import type { ImpactRow } from "../shared/types.ts";
 import {
@@ -376,7 +377,12 @@ export function mergeUnits(
 }
 
 export function getImpactForUnits(ids: number[]): ImpactRow[] {
-  return getImpact(ids, unitAdapter);
+  const base = getImpact(ids, unitAdapter);
+  const linkedByOwner = linkedRecipesForUnits(ids);
+  return base.map((row) => ({
+    ...row,
+    linkedRecipes: linkedByOwner.get(row.id) ?? [],
+  }));
 }
 
 function unreachable(): never {

@@ -14,10 +14,19 @@ export type EntityKind =
 
 export type RefBreakdown = Record<string, number>;
 
+export type RecipeLink = {
+  id: number;
+  title: string;
+};
+
 export type ImpactRow = {
   id: number;
   refs: RefBreakdown;
   aliasCount: number;
+  /** Concrete recipe references, when applicable (ingredient / tag / unit).
+   * Empty for entities where there's no clean recipe link. Capped at the
+   * service's per-entity limit. */
+  linkedRecipes?: RecipeLink[];
 };
 
 /**
