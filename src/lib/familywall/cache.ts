@@ -152,7 +152,8 @@ function wrapDetailForViewing(bodyHtml: string, title: string): string {
   .recipe-field-name { font-weight: 600; color: #555; }
   .mp-recipe-header-imgcontainer img { max-width: 100%; height: auto; border-radius: 8px; }
   .border-pane { margin: 0.6rem 0; }
-  .mp-category { display: inline-block; background: #f1ebe0; padding: 0.1rem 0.6rem; border-radius: 999px; font-size: 0.9rem; margin: 0.1rem 0.3rem 0.1rem 0; }
+  .mp-category { display: inline-block; background: #f1ebe0; padding: 0.1rem 0.6rem; border-radius: 999px; font-size: 0.9rem; margin: 0.1rem 0.3rem 0.1rem 0; vertical-align: middle; }
+  .mp-category emoji { font-size: inherit; line-height: 1; vertical-align: middle; }
   /* Hide interactive action controls — the snapshot is read-only — but
      keep the tag chips (.mp-category, which also carry .mp-button-like)
      and the favorite marker (an <icon> whose title encodes the state). */
@@ -161,11 +162,21 @@ function wrapDetailForViewing(bodyHtml: string, title: string): string {
   icon[data-fw-onclick]:not([title*="bester Moment"]):not([title*="best moment"]) {
     display: none;
   }
+  icon[data-fw-onclick="mpstar"][title*="bester Moment"],
+  icon[data-fw-onclick="mpstar"][title*="best moment"] {
+    display: inline-block;
+    font-size: 1rem;
+    line-height: 1;
+    vertical-align: middle;
+  }
   icon[data-fw-onclick="mpstar"][title*="bester Moment"]::before,
   icon[data-fw-onclick="mpstar"][title*="best moment"]::before {
-    content: "⭐";
-    display: inline-block;
-    margin-right: 0.3rem;
+    content: "⭐ Familywall-Favorit";
+    background: #fff7d6;
+    border: 1px solid #f5d97a;
+    border-radius: 999px;
+    padding: 0.1rem 0.6rem;
+    font-size: 0.85rem;
   }
 </style>
 </head>
