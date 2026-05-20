@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, like, or, sql } from "drizzle-orm";
+import { asc, eq, inArray, or, sql } from "drizzle-orm";
 
 import { db } from "../../../db/index.ts";
 import {
@@ -6,7 +6,6 @@ import {
   ingredient,
   ingredientAlias,
   recipeIngredient,
-  shoppingItem,
 } from "../../../db/schema.ts";
 import { getImpact } from "../shared/impact.ts";
 import { runMerge, MergeError, type MergeResult } from "../shared/merge.ts";
