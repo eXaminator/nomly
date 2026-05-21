@@ -264,7 +264,9 @@ export function ListShell<TItem>({
         <h1 className="text-2xl font-semibold tracking-tight">
           {labels.plural}
           <span className="ml-2 text-base font-normal text-[var(--color-muted-fg)]">
-            ({items.length})
+            {filtered.length === items.length
+              ? `(${items.length})`
+              : `(${filtered.length} / ${items.length})`}
           </span>
         </h1>
         <div className="flex items-center gap-2">
