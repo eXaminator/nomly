@@ -174,6 +174,12 @@ const topUpUnits: Array<{
     aliases: ["Hand voll", "handful", "handfuls"],
   },
   {
+    name: "Zweig",
+    dimension: "count",
+    factor: 1,
+    aliases: ["Zweige", "twig", "twigs", "sprig", "sprigs"],
+  },
+  {
     name: "Zoll",
     dimension: "count",
     factor: 1,
