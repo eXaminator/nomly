@@ -74,7 +74,16 @@ export function ListShell<TItem>({
   const plural = pluralFor(entityKind);
 
   const [items, setItems] = React.useState<TItem[]>(initialItems);
+  // `inputValue` reflects the input field; `query` is the debounced value
+  // actually used for filtering. Typing on a 400-row list is noticeably
+  // smoother when the filter run waits for the user to pause briefly.
+  const [inputValue, setInputValue] = React.useState("");
   const [query, setQuery] = React.useState("");
+  React.useEffect(() => {
+    if (inputValue === query) return;
+    const handle = window.setTimeout(() => setQuery(inputValue), 180);
+    return () => window.clearTimeout(handle);
+  }, [inputValue, query]);
   const [selectedIds, setSelectedIds] = React.useState<Set<number>>(new Set());
 
   // Drawer state
@@ -288,8 +297,8 @@ export function ListShell<TItem>({
         <div className="relative">
           <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-[var(--color-muted-fg)]" />
           <Input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            value={inputValue}
+            onChange={(e) => setInputValue(e.target.value)}
             placeholder={`Suchen…`}
             className="pl-9"
           />
