@@ -8,8 +8,6 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { StandarddatenCard } from "@/components/settings/standarddaten-card";
-import { readStandarddatenCounts } from "@/lib/seed-counts";
 
 export const dynamic = "force-dynamic";
 
@@ -67,7 +65,6 @@ const PLACEHOLDERS = [
 ];
 
 export default async function EinstellungenPage() {
-  const counts = readStandarddatenCounts();
   return (
     <AppShell>
       <div className="flex flex-col gap-2">
@@ -77,7 +74,6 @@ export default async function EinstellungenPage() {
         </p>
       </div>
       <div className="mt-8 grid gap-6">
-        <StandarddatenCard initial={counts} />
         <div>
           <h2 className="mb-3 text-sm font-medium uppercase tracking-wider text-[var(--color-muted-fg)]">
             Stammdaten
