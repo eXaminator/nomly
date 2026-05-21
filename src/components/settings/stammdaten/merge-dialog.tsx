@@ -172,7 +172,7 @@ export function MergeDialog<TItem>({
                         ` · ${im.aliasCount} Aliase`}
                     </div>
                   </div>
-                  {!isWinner && hasAliasTable(entityKind) && (
+                  {!isWinner && (
                     <select
                       value={mode}
                       onChange={(e) =>
@@ -180,6 +180,11 @@ export function MergeDialog<TItem>({
                       }
                       className="rounded border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1 text-xs"
                       aria-label="Modus für diese Zeile"
+                      title={
+                        hasAliasTable(entityKind)
+                          ? "Zusammenführen: Name + Aliase werden zu Aliasen des Gewinners. Ersetzen: Referenzen umhängen, Name verwerfen."
+                          : "Referenzen werden umgehängt; der Name geht in beiden Modi verloren."
+                      }
                     >
                       <option value="merge">Zusammenführen</option>
                       <option value="replace">Ersetzen</option>
