@@ -77,4 +77,14 @@ describe("findMergeClusters", () => {
     expect(findMergeClusters([])).toEqual([]);
     expect(findMergeClusters([mk(1, "Salz")])).toEqual([]);
   });
+
+  it("'-innen' (5-char) suffix is detected past the length-gap fast-reject", () => {
+    const clusters = findMergeClusters([
+      mk(1, "Lehrer"),
+      mk(2, "Lehrerinnen"),
+      mk(3, "Apfel"),
+    ]);
+    expect(clusters).toHaveLength(1);
+    expect(clusters[0].items.map((i) => i.id).sort()).toEqual([1, 2]);
+  });
 });

@@ -41,6 +41,16 @@ const PLURAL_SUFFIXES = [
   "e",
 ];
 
+/**
+ * Length-gap fast-reject for the pairwise loop. Has to be at least as long
+ * as the longest plural suffix, otherwise pairs like "Lehrer" vs
+ * "Lehrerinnen" (Δ=5) would never even reach the plural-suffix check.
+ */
+const LENGTH_GAP_MAX = Math.max(
+  4,
+  ...PLURAL_SUFFIXES.map((s) => s.length),
+);
+
 function normalize(s: string): string {
   return s
     .normalize("NFD")
@@ -86,7 +96,7 @@ function editDistance(a: string, b: string): number {
  */
 function similarity(a: string, b: string): number {
   if (a === b) return 1;
-  if (Math.abs(a.length - b.length) > 4) return 0;
+  if (Math.abs(a.length - b.length) > LENGTH_GAP_MAX) return 0;
 
   const shorter = a.length <= b.length ? a : b;
   const longer = a.length > b.length ? a : b;
@@ -132,7 +142,7 @@ export function findMergeClusters(
     for (let j = i + 1; j < items.length; j++) {
       const nj = normalized[j];
       if (nj.length === 0) continue;
-      if (Math.abs(ni.length - nj.length) > 4) continue;
+      if (Math.abs(ni.length - nj.length) > LENGTH_GAP_MAX) continue;
       if (similarity(ni, nj) >= SIMILARITY_THRESHOLD) {
         union(i, j);
       }
