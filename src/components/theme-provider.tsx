@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import Script from "next/script";
 
 export type Theme = "light" | "dark" | "system";
 export type ResolvedTheme = "light" | "dark";
@@ -24,9 +25,26 @@ const Ctx = React.createContext<ThemeCtx | null>(null);
  */
 export const THEME_INIT_SCRIPT = `(function(){try{var s=document.documentElement;var t=localStorage.getItem('${STORAGE_KEY}')||'${DEFAULT_THEME}';var r=t==='system'?(window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'):t;s.classList.remove('light','dark');s.classList.add(r);}catch(e){}})();`;
 
+/**
+ * Goes through next/script so React 19's "scripts inside React components"
+ * warning doesn't fire — `next/script` wraps the tag in its own runtime
+ * which doesn't trip the same heuristic. `beforeInteractive` runs the
+ * snippet before hydration so the theme class is on `<html>` before the
+ * first paint.
+ */
+// `beforeInteractive` ensures the snippet runs before hydration so the
+// theme class is on `<html>` before the first paint. The lint rule predates
+// the App Router and still references `pages/_document.js`; in
+// app/layout.tsx this strategy is officially supported.
+/* eslint-disable @next/next/no-before-interactive-script-outside-document */
 export function ThemeInitScript() {
-  return <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />;
+  return (
+    <Script id="nomly-theme-init" strategy="beforeInteractive">
+      {THEME_INIT_SCRIPT}
+    </Script>
+  );
 }
+/* eslint-enable @next/next/no-before-interactive-script-outside-document */
 
 function resolveTheme(theme: Theme): ResolvedTheme {
   if (theme !== "system") return theme;
