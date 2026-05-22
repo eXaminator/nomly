@@ -34,8 +34,11 @@ export function DialogContent({
     <DialogPortal>
       <DialogOverlay />
       <DialogPrimitive.Content
+        // Fullscreen on small screens, centered card from sm and up. Callers
+        // can override the desktop size by passing `sm:max-w-...`.
         className={cn(
-          "fixed left-1/2 top-1/2 z-50 grid w-full max-w-lg -translate-x-1/2 -translate-y-1/2 gap-4 border border-[var(--color-border)] bg-[var(--color-card)] p-6 shadow-lg duration-200 rounded-[var(--radius)] data-[state=open]:animate-in data-[state=closed]:animate-out",
+          "fixed inset-0 z-50 grid h-screen w-screen max-w-none gap-4 overflow-y-auto rounded-none border-0 bg-[var(--color-card)] p-6 shadow-lg duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out",
+          "sm:inset-auto sm:left-1/2 sm:top-1/2 sm:h-auto sm:w-full sm:max-w-lg sm:max-h-[85vh] sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-[var(--radius)] sm:border sm:border-[var(--color-border)]",
           className,
         )}
         {...props}

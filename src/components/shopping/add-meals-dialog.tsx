@@ -164,7 +164,7 @@ export function AddMealsDialog({
 
   return (
     <Dialog open={open} onOpenChange={(v) => (!v && !submitting ? onClose() : undefined)}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>Mahlzeiten hinzufügen</DialogTitle>
           <DialogDescription>

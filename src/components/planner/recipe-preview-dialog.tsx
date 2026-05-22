@@ -30,12 +30,7 @@ export function RecipePreviewDialog({ recipeId, onClose }: Props) {
   const open = recipeId != null;
   return (
     <Dialog open={open} onOpenChange={(v) => (!v ? onClose() : undefined)}>
-      <DialogContent
-        // Fullscreen on small screens (the dialog is otherwise unreadably
-        // cramped when the recipe is more than a few lines). Centered card
-        // shape returns at sm and up.
-        className="inset-0 left-0 top-0 h-screen w-screen max-h-none max-w-none translate-x-0 translate-y-0 overflow-y-auto rounded-none p-0 sm:inset-auto sm:left-1/2 sm:top-1/2 sm:h-auto sm:max-h-[85vh] sm:w-full sm:max-w-3xl sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-[var(--radius)]"
-      >
+      <DialogContent className="p-0 sm:max-w-3xl">
         {/* Remount on every new recipeId so the inner body re-fetches with
             a fresh loading state — avoids setState-in-effect resets. */}
         {recipeId != null ? <RecipeBody key={recipeId} recipeId={recipeId} /> : null}
