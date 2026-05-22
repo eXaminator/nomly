@@ -756,6 +756,16 @@ export function deleteItem(id: number): void {
   if (res.changes === 0) throw new ShoppingApiError("item not found", 404);
 }
 
+/**
+ * Drop every item from the running list. Cascades to `shopping_item_source`,
+ * so contributing meals become eligible to reappear in the "Mahlzeiten
+ * hinzufügen" preview without the "Bereits auf der Liste" badge.
+ */
+export function clearAllItems(): { deletedCount: number } {
+  const result = db.delete(shoppingItem).run();
+  return { deletedCount: result.changes };
+}
+
 export function getItemView(id: number): ShoppingItemView | null {
   const items = listShoppingItems();
   return items.find((i) => i.id === id) ?? null;

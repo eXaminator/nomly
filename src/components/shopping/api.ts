@@ -24,6 +24,11 @@ export async function fetchItems(): Promise<{ items: ShoppingItemView[] }> {
   return (await jsonOrThrow(res)) as { items: ShoppingItemView[] };
 }
 
+export async function clearAll(): Promise<{ deletedCount: number }> {
+  const res = await fetch("/api/v1/shopping", { method: "DELETE" });
+  return (await jsonOrThrow(res)) as { deletedCount: number };
+}
+
 export async function patchItem(
   id: number,
   patch: { checked?: boolean; quantity?: number | null; unitId?: number | null; note?: string | null },

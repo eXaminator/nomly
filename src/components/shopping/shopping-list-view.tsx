@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
-import { CalendarPlus, Plus } from "lucide-react";
+import { CalendarPlus, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { RecipePreviewDialog } from "@/components/planner/recipe-preview-dialog";
 import { cn } from "@/lib/cn";
@@ -12,6 +12,7 @@ import { AddItemDialog } from "./add-item-dialog";
 import { AddMealsDialog } from "./add-meals-dialog";
 import { SupermarketFilter } from "./supermarket-filter";
 import {
+  clearAll as apiClearAll,
   deleteItem as apiDelete,
   patchItem as apiPatch,
   setUnavailable as apiSetUnavailable,
@@ -46,6 +47,7 @@ export function ShoppingListView({
   const [addItemOpen, setAddItemOpen] = React.useState(false);
   const [addMealsOpen, setAddMealsOpen] = React.useState(false);
   const [previewRecipeId, setPreviewRecipeId] = React.useState<number | null>(null);
+  const [confirmingClear, setConfirmingClear] = React.useState(false);
 
   React.useEffect(() => {
     const stored = window.localStorage.getItem(STORAGE_KEY);
@@ -108,6 +110,19 @@ export function ShoppingListView({
     }
   }
 
+  async function onClearAll() {
+    setConfirmingClear(false);
+    const prev = items;
+    setItems([]);
+    try {
+      await apiClearAll();
+      router.refresh();
+    } catch {
+      setItems(prev);
+      router.refresh();
+    }
+  }
+
   async function onToggleUnavailable(item: ShoppingItemView, supermarketId: number) {
     const isUnavailable = item.unavailableSupermarketIds.includes(supermarketId);
     const next = !isUnavailable;
@@ -155,6 +170,32 @@ export function ShoppingListView({
               <Plus className="size-4" />
               Artikel hinzufügen
             </Button>
+            {items.length > 0 ? (
+              confirmingClear ? (
+                <div className="flex items-center gap-2 rounded-[var(--radius)] border border-[var(--color-danger)] px-3 py-1 text-sm">
+                  <span className="text-[var(--color-fg)]">Liste leeren?</span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setConfirmingClear(false)}
+                  >
+                    Abbrechen
+                  </Button>
+                  <Button variant="danger" size="sm" onClick={onClearAll}>
+                    Leeren
+                  </Button>
+                </div>
+              ) : (
+                <Button
+                  variant="ghost"
+                  className="text-[var(--color-danger)]"
+                  onClick={() => setConfirmingClear(true)}
+                >
+                  <Trash2 className="size-4" />
+                  Liste leeren
+                </Button>
+              )
+            ) : null}
           </div>
           <SupermarketFilter
             value={supermarketId}
@@ -294,7 +335,11 @@ function groupByCategory(
     );
   }
 
+  // Uncategorized always sinks to the bottom of the open section, regardless
+  // of whether a supermarket filter is active.
   const ordered = Array.from(buckets.values()).sort((a, b) => {
+    if (a.categoryId == null && b.categoryId != null) return 1;
+    if (a.categoryId != null && b.categoryId == null) return -1;
     if (orderByCategory) {
       const ao = a.categoryId != null ? orderByCategory.get(a.categoryId) : undefined;
       const bo = b.categoryId != null ? orderByCategory.get(b.categoryId) : undefined;
