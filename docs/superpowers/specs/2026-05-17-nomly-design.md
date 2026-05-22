@@ -514,6 +514,11 @@ OIDC via `openid-client` (Node-side discovery + token exchange) + `iron-session`
 - **Delete + concurrent edit conflict.** Default rule: delete wins. Refine in Epic 9 if a real conflict pattern emerges.
 - **WS auth.** `/ws` follows the same gate as `/api/v1/*`: session cookie (web UI) or bearer token (machine clients). Connections without either are rejected at upgrade.
 - **Per-supermarket category overrides.** Currently a product/ingredient has a single `default_category_id` and the supermarket's ordering of categories does the rest. If real shopping experience shows that the same product genuinely belongs to different aisles in different stores, add a `product_supermarket_category` (and `ingredient_supermarket_category`) override table. Deferred unless needed.
+- **Per-supermarket "not carried" flag.** When real shopping shows that a store doesn't carry a specific ingredient/product (e.g. some discounters don't stock specialty items even though they have the broader category), capture that as a simple n:m link rather than an override of the category. Schema additions: `ingredient_supermarket_unavailable(ingredient_id, supermarket_id)` and `product_supermarket_unavailable(product_id, supermarket_id)` — composite PKs, no extra columns. UI surfaces:
+  - **Shopping list (Epic 6 supermarket filter):** when a store is selected, each row gets a context-menu action "Nicht in diesem Supermarkt verfügbar" (toggle). Unavailable rows render muted / struck-through and sink to a "Hier nicht verfügbar" group at the bottom so they don't get lost on the floor walk.
+  - **Stammdaten (Epic 7):** the ingredient/product edit drawer shows a "Nicht erhältlich bei" multi-select over `supermarket`; the supermarket edit drawer shows a read-only counter + drill-down to the affected ingredients/products. Both screens write through the same n:m table.
+  - **API:** mutations under `/api/v1/ingredients/{id}/unavailable-at/{supermarketId}` (DELETE/PUT) plus symmetric product variants, broadcast on the `stammdaten` WS topic so other devices in the store see the toggle live.
+- This stays orthogonal to category overrides: an item is "in aisle X" OR "not carried at all" — never both. Deferred until Epic 5/6 are real and the user has felt the friction at least once in a store.
 - **Promote product → ingredient.** If a manually-added product turns out to be used in recipes, manual re-entry as an ingredient is the v1 path. A "promote" action can be added later.
 - **iCal refresh policy.** v1 fetches on planner load with a 5-minute in-memory cache and a manual refresh button. A background refresh job (e.g. every 15 minutes) is a future enhancement.
 - **DnD on mobile.** Drag-and-drop is desktop-only. Epic 4 mobile uses explicit buttons everywhere (add via "Mahlzeit hinzufügen", move via bottom-sheet "Verschieben" with a date picker, reorder within a day via up/down buttons).
@@ -629,6 +634,7 @@ Each epic is independently mergeable. Order reflects the critical path to a usab
 - `/einstellungen/supermaerkte`: list + add/edit/delete.
 - Per-supermarket category order: drag-and-drop list on desktop; up/down buttons on mobile (no DnD).
 - Shopping list UI: supermarket select; when set, items group by `category` and sort by that supermarket's `sort_order`. When unset, items sort by ingredient name.
+- **TODO (when this epic starts):** add per-item "Nicht in diesem Supermarkt verfügbar" context-menu action + the matching n:m editor in Stammdaten — see the "Per-supermarket 'not carried' flag" entry in §6 for the schema/UI spec.
 
 **Epic 7 — Ingredient / product / unit / category management**
 - `/einstellungen/zutaten`: paginated/searchable list with columns name, aliases (chip list), default category, exclude flag.
