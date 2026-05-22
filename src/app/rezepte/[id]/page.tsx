@@ -31,6 +31,7 @@ export default async function RecipeViewPage({
 
   return (
     <AppShell>
+      <div className="mx-auto max-w-4xl">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex-1">
           <h1 className="text-3xl font-semibold tracking-tight">{recipe.title}</h1>
@@ -90,11 +91,14 @@ export default async function RecipeViewPage({
 
       {recipe.photoPath ? (
         <div className="mt-6 overflow-hidden rounded-[var(--radius)] border border-[var(--color-border)]">
+          {/* Capped at ~18rem so the title + ingredients stay visible above
+              the fold on a typical laptop viewport. `object-cover` crops to
+              the cap; the image always fills the width. */}
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={`/api/v1/${recipe.photoPath}`}
             alt={recipe.title}
-            className="aspect-[16/9] w-full object-cover"
+            className="h-72 w-full object-cover"
           />
         </div>
       ) : null}
@@ -171,6 +175,7 @@ export default async function RecipeViewPage({
             </section>
           );
         })}
+      </div>
       </div>
     </AppShell>
   );
