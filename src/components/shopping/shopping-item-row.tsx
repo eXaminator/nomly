@@ -1,13 +1,16 @@
 "use client";
 
 import * as React from "react";
-import { Ban, Check, MoreVertical, Pencil, RotateCcw, Trash2 } from "lucide-react";
+import { Ban, BookOpen, Check, MoreVertical, Pencil, RotateCcw, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
@@ -23,7 +26,7 @@ type Props = {
   item: ShoppingItemView;
   /** When set, "Hier nicht verfügbar" toggles for this supermarket. */
   activeSupermarketId: number | null;
-  /** Cmd/Ctrl + click on a source chip opens the recipe in a new tab. */
+  /** Opens the recipe preview dialog. Triggered from the context menu only. */
   onPreviewRecipe: (recipeId: number) => void;
   onToggle: (item: ShoppingItemView) => void;
   onPatch: (
@@ -171,11 +174,7 @@ export function ShoppingItemRow({
             {item.sources.length > 0 ? (
               <ul className="flex flex-col gap-0.5 text-xs text-[var(--color-muted-fg)]">
                 {item.sources.map((s) => (
-                  <SourceLine
-                    key={s.sourceId}
-                    source={s}
-                    onPreview={(id) => onPreviewRecipe(id)}
-                  />
+                  <SourceLine key={s.sourceId} source={s} />
                 ))}
               </ul>
             ) : null}
@@ -222,6 +221,10 @@ export function ShoppingItemRow({
                 <Pencil className="mr-2 size-4" />
                 Bearbeiten
               </DropdownMenuItem>
+              <RecipeMenuEntry
+                sources={item.sources}
+                onPreview={onPreviewRecipe}
+              />
               <DropdownMenuItem
                 onClick={() =>
                   activeSupermarketId != null
@@ -272,39 +275,65 @@ function AmountList({ amounts }: { amounts: ShoppingItemAmount[] }) {
   );
 }
 
-function SourceLine({
-  source,
+function SourceLine({ source }: { source: ShoppingItemSourceView }) {
+  return (
+    <li className="inline-flex flex-wrap items-baseline gap-x-1.5 px-1">
+      <span className="font-medium text-[var(--color-fg)]/80">{source.recipeTitle}</span>
+      <span>({formatDate(source.mealDate)})</span>
+      {source.contributedQuantity != null || source.contributedUnit ? (
+        <span>
+          {source.contributedQuantity != null
+            ? formatQty(source.contributedQuantity)
+            : ""}
+          {source.contributedUnit ? ` ${source.contributedUnit}` : ""}
+        </span>
+      ) : null}
+      {source.recipeNotes ? <span>· {source.recipeNotes}</span> : null}
+    </li>
+  );
+}
+
+function RecipeMenuEntry({
+  sources,
   onPreview,
 }: {
-  source: ShoppingItemSourceView;
+  sources: ShoppingItemSourceView[];
   onPreview: (recipeId: number) => void;
 }) {
+  if (sources.length === 0) return null;
+  // De-dup by recipe id so the same recipe contributing twice (e.g. two
+  // meals of the same dish) doesn't double up in the submenu.
+  const uniqueByRecipe = new Map<number, ShoppingItemSourceView>();
+  for (const s of sources) {
+    if (!uniqueByRecipe.has(s.recipeId)) uniqueByRecipe.set(s.recipeId, s);
+  }
+  const unique = Array.from(uniqueByRecipe.values());
+  if (unique.length === 1) {
+    const only = unique[0];
+    return (
+      <DropdownMenuItem onClick={() => onPreview(only.recipeId)}>
+        <BookOpen className="mr-2 size-4" />
+        Rezept öffnen
+      </DropdownMenuItem>
+    );
+  }
   return (
-    <li>
-      <a
-        href={`/rezepte/${source.recipeId}`}
-        onClick={(e) => {
-          // Cmd/Ctrl/middle-click → let the browser handle (new tab).
-          // Plain click → open the preview dialog instead.
-          if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
-          e.preventDefault();
-          onPreview(source.recipeId);
-        }}
-        className="inline-flex flex-wrap items-baseline gap-x-1.5 rounded px-1 py-0.5 hover:bg-[var(--color-muted)] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
-      >
-        <span className="font-medium text-[var(--color-fg)]/80">{source.recipeTitle}</span>
-        <span>({formatDate(source.mealDate)})</span>
-        {source.contributedQuantity != null || source.contributedUnit ? (
-          <span>
-            {source.contributedQuantity != null
-              ? formatQty(source.contributedQuantity)
-              : ""}
-            {source.contributedUnit ? ` ${source.contributedUnit}` : ""}
-          </span>
-        ) : null}
-        {source.recipeNotes ? <span>· {source.recipeNotes}</span> : null}
-      </a>
-    </li>
+    <DropdownMenuSub>
+      <DropdownMenuSubTrigger>
+        <BookOpen className="mr-2 size-4" />
+        Rezept öffnen
+      </DropdownMenuSubTrigger>
+      <DropdownMenuSubContent>
+        {unique.map((s) => (
+          <DropdownMenuItem
+            key={s.recipeId}
+            onClick={() => onPreview(s.recipeId)}
+          >
+            {s.recipeTitle}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuSubContent>
+    </DropdownMenuSub>
   );
 }
 
