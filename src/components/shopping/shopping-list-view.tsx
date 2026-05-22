@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
-import { CalendarPlus, EyeOff, Plus, Trash2, Undo2 } from "lucide-react";
+import { CalendarPlus, EyeOff, Plus, RotateCcw, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { RecipePreviewDialog } from "@/components/planner/recipe-preview-dialog";
 import { cn } from "@/lib/cn";
@@ -201,22 +201,22 @@ export function ShoppingListView({
     <div className="flex flex-col gap-4">
       <h1 className="text-2xl font-semibold tracking-tight">Einkaufsliste</h1>
 
-      {/* Sticky shelf: undo + counter + supermarket select stay visible
-          while the user scrolls through a long list. Sits below the
-          AppShell topbar (h-16) at z-20 so it doesn't outrank it. */}
+      {/* Sticky shelf: undo on the left; counter + supermarket select on the
+          right. Sits below the AppShell topbar (h-16) at z-20 so it doesn't
+          outrank it. */}
       <div className="sticky top-16 z-20 -mx-4 flex flex-wrap items-center justify-between gap-3 border-b border-[var(--color-border)] bg-[var(--color-bg)]/95 px-4 py-2 backdrop-blur supports-[backdrop-filter]:bg-[var(--color-bg)]/80 md:-mx-6 md:px-6">
-        <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={onUndoLastCheck}
-            disabled={!undoAvailable}
-            aria-label="Letzten Haken zurücknehmen"
-            title="Letzten Haken zurücknehmen"
-          >
-            <Undo2 className="size-4" />
-            <span className="hidden sm:inline">Rückgängig</span>
-          </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={onUndoLastCheck}
+          disabled={!undoAvailable}
+          aria-label="Letzten Haken zurücknehmen"
+          title="Letzten Haken zurücknehmen"
+        >
+          <RotateCcw className="size-4" />
+          <span className="hidden sm:inline">Rückgängig</span>
+        </Button>
+        <div className="flex flex-wrap items-center gap-3">
           <span className="text-sm text-[var(--color-muted-fg)]">
             {filterActive ? (
               <>
@@ -238,12 +238,12 @@ export function ShoppingListView({
             {" · "}
             {checkedTotal} erledigt
           </span>
+          <SupermarketFilter
+            value={supermarketId}
+            supermarkets={supermarkets}
+            onChange={persistSupermarket}
+          />
         </div>
-        <SupermarketFilter
-          value={supermarketId}
-          supermarkets={supermarkets}
-          onChange={persistSupermarket}
-        />
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
