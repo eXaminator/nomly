@@ -51,6 +51,12 @@ const STAMMDATEN_LINKS: Array<{
     description:
       "Supermärkte und die Reihenfolge der Kategorien für die Einkaufsliste.",
   },
+  {
+    href: "/einstellungen/planer",
+    title: "Planer",
+    description:
+      "Sichtbare Tage und Beginn der Woche für den Mahlzeitenplaner.",
+  },
 ];
 
 const PLACEHOLDERS = [

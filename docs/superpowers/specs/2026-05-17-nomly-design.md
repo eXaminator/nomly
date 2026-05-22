@@ -141,7 +141,7 @@ shopping_item_source
   -- have multiple rows here. Manually-added items have none.
   -- contributed_quantity / contributed_unit_id store the scaled
   -- contribution at add-time so meal removal can subtract precisely
-  -- (§4.2.1). A meal_plan is "currently on the list" iff at least one
+  -- (§4.3.3). A meal_plan is "currently on the list" iff at least one
   -- row references it.
 
 ical_feed
@@ -192,34 +192,28 @@ app_setting
 
 **Desktop layout (≥ md breakpoint):**
 - Two columns. Left = calendar showing `days_visible` consecutive days starting from the current range origin. Right = recipe list (search by title/tag + filter chips).
-- Each day-cell stacks: planned meals first (movable), then iCal events (read-only, rendered with the source feed's color) — see §4.5.
-- Drag-and-drop:
-  - From recipe-list card → drop on day-cell → creates a `meal_plan` row with `servings_override = recipe.servings` and `sort_order = max + 1`.
-  - From day-cell meal card → drop on another day-cell → moves the meal (updates `date`, recomputes `sort_order`).
-  - Within a day-cell → reorders via `sort_order`.
+- Each day-cell splits into two sub-columns: a narrower **events** column on the left and a wider **meals** column on the right (≈ 1:2). Events render in a muted secondary style (smaller type, low-contrast surface, feed-color left bar) so meals stay the primary signal — see §4.5.
+- Drag-and-drop applies to meals only (events are read-only):
+  - From recipe-list card → drop on a day's meals column → creates a `meal_plan` row with `servings_override = recipe.servings` and `sort_order = max + 1`.
+  - From day-cell meal card → drop on another day's meals column → moves the meal (updates `date`, recomputes `sort_order`).
+  - Within a day's meals column → reorders via `sort_order`.
 - Range nav: `←` / `→` buttons advance by `days_visible`; "Heute"-Button jumps back to today and resets the origin to the configured `start_weekday`.
-- Click a meal card → side panel for editing portions and note; delete from there.
 
 **Mobile layout (< md breakpoint):**
 - Single column: calendar only, no recipe list panel.
-- Drag-and-drop is disabled. Adding a meal: tap a day → "Mahlzeit hinzufügen" → recipe-search modal → portions + note → save.
-- Reorder within a day: long-press handle (lightweight DnD inside one cell is acceptable, cross-day moves use a "Verschieben" action with a date picker).
+- Within a day-cell, planned meals stack first; iCal events render below them in the same muted secondary style. Same column, no DnD anywhere on mobile.
+- Adding a meal: tap a day → "Mahlzeit hinzufügen" → recipe-search modal → portions + note → save.
+
+**Meal card (both layouts):**
+- The card body is a link to the recipe detail page — tapping/clicking anywhere on the card **that is not a button** navigates to `/rezepte/[id]`.
+- Three explicit buttons sit on every card (touch-sized per §5.7, always visible — no hover-only affordances):
+  - **↑ / ↓ reorder buttons.** Within a day they swap `sort_order` with the adjacent meal. At a day boundary they cross: pressing ↑ on the topmost meal of a day moves it to the **bottom of the previous day** (decrements `date`, takes `sort_order = max + 1` there); pressing ↓ on the bottommost meal moves it to the **top of the next day** (increments `date`, renumbers within that day). The crossing behavior is **not bounded by the visible page** — a meal at the first slot of the first visible day still moves into the previous (off-page) day; the user can page back to find it. All reorder writes are one transaction so the move is atomic.
+  - **Bearbeiten** (pencil icon) — opens the meal editor (desktop: side panel; mobile: bottom sheet) with portions override, note, and a "Löschen" action.
 
 **Both layouts:**
 - Multiple meals per day stack in `sort_order`.
-- iCal events appear inline with meals but are visually distinct (left-color-bar from feed color, read-only).
-
-#### 4.2.1 Deleting a meal that has hit the shopping list
-
-If a meal is deleted from the plan after its ingredients have already been added to the shopping list, the user is asked what to do with those ingredients. The server checks `shopping_item_source` for rows pointing at the meal's `meal_plan_id`; if any exist, the delete confirmation shows three options:
-
-- **"Nur Mahlzeit löschen"** — deletes the `meal_plan` row only. The `shopping_item_source` rows go with it via `ON DELETE CASCADE`, but the underlying `shopping_item` rows keep their current quantity. The items effectively become "manual" (no remaining source); they stay on the list until checked or manually deleted.
-- **"Mahlzeit und Zutaten entfernen"** — for each `shopping_item` referenced by this meal: recompute the quantity from the remaining `shopping_item_source` rows (sum `contributed_quantity` converted to a common unit per `(ingredient, dimension)` bucket). If the recomputed quantity is `0` (no other sources), delete the item. Otherwise update `quantity` and bump `version`. Then delete the `meal_plan` row. The whole flow is one transaction; affected item changes broadcast on the `shopping` WS topic.
-- **"Abbrechen"** — no changes.
-
-If no `shopping_item_source` rows reference the meal, the delete confirmation is the regular one-button "Mahlzeit löschen?" prompt with no shopping-list mention.
-
-Note: manual quantity edits the user made after the meal was added are not tracked separately, so the "Zutaten entfernen" path may lose them. Flagged in open questions.
+- iCal events are visually distinct (left color-bar from feed color, muted background, smaller text, read-only) and never participate in DnD or reorder.
+- Deleting a meal from the editor shows a plain "Mahlzeit löschen?" confirm. **Shopping-list contributions are outside the scope of this epic** — when Epic 5 ships, that confirm grows the additional "Mahlzeit und Zutaten entfernen" path described in §4.3.3.
 
 ### 4.3 Adding meals to the shopping list
 
@@ -281,10 +275,22 @@ For the user's checked selection:
    - **Found and unchecked:** add the new amount onto the existing item's quantity. Bump `version` and `updated_at`.
    - **Found and checked (within the 24 h grace window):** uncheck it (`checked = false`, clear `checked_at`), set quantity to the new amount, bump `version` / `updated_at`. Rationale: the user has decided they need this item again — re-add ⇒ reactivate.
    - **Not found:** create a new `shopping_item` with `category_id` snapshotted from `ingredient.default_category_id`.
-5. For every affected item, insert one `shopping_item_source` row per contributing `(meal_plan, recipe_ingredient)`, recording the scaled `contributed_quantity` and `contributed_unit_id` from that line. The dialog uses these rows to flag the meal as `alreadyOnList`; the meal-delete flow uses them to compute precise subtractions (§4.2.1).
+5. For every affected item, insert one `shopping_item_source` row per contributing `(meal_plan, recipe_ingredient)`, recording the scaled `contributed_quantity` and `contributed_unit_id` from that line. The dialog uses these rows to flag the meal as `alreadyOnList`; the meal-removal flow uses them to compute precise subtractions (§4.3.3).
 6. Cross-dimension lines for the same ingredient remain separate but render under one ingredient header in the UI (no special DB representation — just a UI grouping by `ingredient_id` on render).
 
 **Products** are not touched by this flow — they are appended manually via §4.4.
+
+#### 4.3.3 Removing a meal that has hit the shopping list
+
+Owned by Epic 5 (not Epic 4): the planner's plain "Mahlzeit löschen?" confirm is replaced — only when this epic is live — by a shopping-aware variant whenever the meal still has rows in `shopping_item_source`. The server checks for rows pointing at the meal's `meal_plan_id`; if any exist, the confirm shows three options:
+
+- **"Nur Mahlzeit löschen"** — deletes the `meal_plan` row only. The `shopping_item_source` rows go with it via `ON DELETE CASCADE`, but the underlying `shopping_item` rows keep their current quantity. The items effectively become "manual" (no remaining source); they stay on the list until checked or manually deleted.
+- **"Mahlzeit und Zutaten entfernen"** — for each `shopping_item` referenced by this meal: recompute the quantity from the remaining `shopping_item_source` rows (sum `contributed_quantity` converted to a common unit per `(ingredient, dimension)` bucket). If the recomputed quantity is `0` (no other sources), delete the item. Otherwise update `quantity` and bump `version`. Then delete the `meal_plan` row. The whole flow is one transaction; affected item changes broadcast on the `shopping` WS topic.
+- **"Abbrechen"** — no changes.
+
+If no `shopping_item_source` rows reference the meal, the planner's regular one-button "Mahlzeit löschen?" confirm from §4.2 is used as-is.
+
+Note: manual quantity edits the user made after the meal was added are not tracked separately, so the "Zutaten entfernen" path may lose them. Flagged in open questions.
 
 ### 4.4 Shopping in a store (offline + sync)
 
@@ -522,8 +528,8 @@ OIDC via `openid-client` (Node-side discovery + token exchange) + `iron-session`
 - **Promote product → ingredient.** If a manually-added product turns out to be used in recipes, manual re-entry as an ingredient is the v1 path. A "promote" action can be added later.
 - **iCal refresh policy.** v1 fetches on planner load with a 5-minute in-memory cache and a manual refresh button. A background refresh job (e.g. every 15 minutes) is a future enhancement.
 - **DnD on mobile.** Drag-and-drop is desktop-only. Epic 4 mobile uses explicit buttons everywhere (add via "Mahlzeit hinzufügen", move via bottom-sheet "Verschieben" with a date picker, reorder within a day via up/down buttons).
-- **Edited meal plan after add.** If a user edits a `meal_plan` (changes recipe, portions, etc.) AFTER its ingredients have been folded into the list, the items do NOT update. The meal carries an `alreadyOnList` badge in the dialog until the contributions are gone. Workaround: use the planner's "Mahlzeit löschen → Mahlzeit und Zutaten entfernen" flow (§4.2.1) to roll back, then re-add the meal fresh.
-- **Manual quantity edits lost on meal removal.** The "Mahlzeit und Zutaten entfernen" flow (§4.2.1) recomputes each affected item's quantity from remaining `shopping_item_source.contributed_quantity` rows. If the user had manually adjusted an item's quantity in the meantime, that delta is lost. v1 ships without separate adjustment tracking; revisit if it becomes a real problem.
+- **Edited meal plan after add.** If a user edits a `meal_plan` (changes recipe, portions, etc.) AFTER its ingredients have been folded into the list, the items do NOT update. The meal carries an `alreadyOnList` badge in the dialog until the contributions are gone. Workaround: use the planner's "Mahlzeit löschen → Mahlzeit und Zutaten entfernen" flow (§4.3.3) to roll back, then re-add the meal fresh.
+- **Manual quantity edits lost on meal removal.** The "Mahlzeit und Zutaten entfernen" flow (§4.3.3) recomputes each affected item's quantity from remaining `shopping_item_source.contributed_quantity` rows. If the user had manually adjusted an item's quantity in the meantime, that delta is lost. v1 ships without separate adjustment tracking; revisit if it becomes a real problem.
 - **Per-food unit conversions.** The Tandoor seed bundle includes 163 conversions like "1 cup potato = 4.92 oz" that bridge mass and volume (and other dimensions) per ingredient. Our v1 schema has only generic per-dimension unit conversions, so we can't use them yet. An obvious follow-up is an `ingredient_unit_conversion(ingredient_id, from_unit_id, from_amount, to_unit_id, to_amount)` table that the smart-merge consults when summing same-ingredient cross-dimension contributions. Deferred — the data is already vendored in `data/seed/tandoor-de.json` so a future epic can light it up without re-fetching.
 - **HA push notifications.** v1 is pull-only — HA polls REST endpoints and reacts on its own schedule. A future enhancement could expose webhooks (e.g. "fire on item-checked") so HA can react instantly without polling. Deferred.
 - **Per-user data.** v1 has no user table; everyone authenticated sees the same data. If a future use case ("private notes per user", "favorites") emerges, a `user` table keyed by OIDC `sub` plus per-feature ownership columns would be the natural addition. Deferred.
@@ -539,8 +545,8 @@ Each epic is independently mergeable. Order reflects the critical path to a usab
 | 1 | **Foundation + Auth** | — | Custom server, full schema, Einstellungen page with opt-in "Standarddaten laden" (Tandoor seed), layout/nav shell, **OIDC middleware gating every page and API call from day 1**, `/api/health`, UI tooling baseline (§5.7). |
 | 2 | **Deployment & CI** | 1 | Multi-stage Dockerfile, `docker-compose.example.yml` (with Authentik wiring hints), GitHub Actions workflow that builds + pushes `linux/amd64` images to `ghcr.io/examinator/nomly` on push to `main` and on tags, migrations-on-start, healthcheck. |
 | 3 | **Recipes** | 1 | Recipe CRUD with multi-section model, inline ingredient/unit/category create, tags, photo upload, list/grid + detail, search. |
-| 4 | **Meal planner (UI)** | 3 | Two-column desktop with DnD (recipe list ↔ calendar, calendar ↔ calendar), configurable `days_visible` + `start_weekday`, mobile uses buttons (no DnD). Meal-delete prompt offers to also remove shopping-list contributions per §4.2.1. |
-| 5 | **Shopping list (online)** | 4 | Single running list, "Mahlzeiten hinzufügen" dialog with already-on-list badge, merge-on-add with `contributed_quantity` tracking and 24 h-grace reactivation, per-item meal-source chips, visible check / edit / delete buttons on every row, supermarket UI filter, inline product create, 60-minute sweeper. |
+| 4 | **Meal planner (UI)** | 3 | Two-column desktop with DnD (recipe list ↔ calendar, calendar ↔ calendar) plus per-meal ↑/↓ reorder buttons that cross day and page boundaries. Each day-cell splits events (narrow, muted, left) and meals (wide, right). Card body links to the recipe; explicit edit button opens the editor. Configurable `days_visible` + `start_weekday`. Mobile uses buttons only (no DnD); events stack under meals. Plain "Mahlzeit löschen?" confirm — shopping-list interactions are out of scope. |
+| 5 | **Shopping list (online)** | 4 | Single running list, "Mahlzeiten hinzufügen" dialog with already-on-list badge, merge-on-add with `contributed_quantity` tracking and 24 h-grace reactivation, per-item meal-source chips, visible check / edit / delete buttons on every row, supermarket UI filter, inline product create, 60-minute sweeper. Owns the shopping-aware meal-removal confirm (§4.3.3) that supersedes the planner's plain delete when items still source from a meal. |
 | 6 | **Supermarkets** | 5 | Supermarket CRUD, per-supermarket category ordering, filter-and-sort on shopping list. |
 | 7 | **Ingredient / product / unit / category management** | 3, 5 | Settings sub-pages: CRUD, alias management, multi-select merge, delete-with-replacement, `exclude_from_shopping_list` toggle (ingredients only). |
 | 8 | **Offline shopping list (PWA)** | 5 | Manifest, service worker, IndexedDB-backed state, optimistic mutations, FIFO offline queue, offline indicator. |
@@ -606,22 +612,27 @@ Each epic is independently mergeable. Order reflects the critical path to a usab
 **Epic 4 — Meal planner (UI)**
 - Settings page entries for `planner.days_visible` (default 7) and `planner.start_weekday` (ISO 1–7, default 1=Mon).
 - Desktop (≥ md):
-  - Two-column layout. Left = calendar of `days_visible` days. Right = recipe list with text search + tag filter chips.
-  - DnD library: `@dnd-kit/core` (lightweight, keyboard-accessible).
-  - DnD operations: recipe-card → day-cell (create), meal-card → day-cell (move), meal-card within cell (reorder).
-  - Click meal-card → side-panel editor (portions override, note, delete).
+  - Two-column page layout. Left = calendar of `days_visible` days. Right = recipe list with text search + tag filter chips.
+  - Each day-cell splits into a narrower, muted **events** sub-column on the left and a wider **meals** sub-column on the right (≈ 1:2).
+  - DnD library: `@dnd-kit/core` (lightweight, keyboard-accessible). DnD applies to meals only — events are read-only.
+  - DnD operations: recipe-card → day's meals column (create), meal-card → another day's meals column (move), meal-card within a day (reorder).
   - Range nav: `←` / `→` step by `days_visible`; "Heute" resets to the configured origin.
 - Mobile (< md):
-  - Single-column calendar. **No DnD anywhere on mobile.** Tap day-cell → "Mahlzeit hinzufügen" → recipe-search modal → portions + note. Add via explicit button.
-  - Edit a meal: tap meal-card → bottom-sheet editor with explicit "Verschieben" (date picker), "Bearbeiten", "Löschen" buttons. Move to other day uses the date picker — no drag.
+  - Single-column calendar. **No DnD anywhere on mobile.** Within a day, planned meals stack first, then iCal events render below them in the same muted secondary style.
+  - Add a meal: tap day-cell → "Mahlzeit hinzufügen" → recipe-search modal → portions + note.
+- Meal card (both layouts):
+  - Click/tap the card surface (outside any button) → navigates to the recipe detail page.
+  - Explicit **Bearbeiten** button (pencil) opens the meal editor — desktop side panel, mobile bottom sheet — with portions override, note, and a "Löschen" action.
+  - Explicit **↑ / ↓** reorder buttons. Within a day they swap `sort_order`. At day boundaries they cross to the previous/next day (move to bottom-of-previous or top-of-next, updating `date`). The crossing behavior is **not bounded by the visible page** — a meal at the first slot of the first visible day still moves into the previous (off-page) day; users can page back to find it. Each reorder is one transaction.
 - Empty days show a subtle "+" affordance on hover/tap.
-- **Meal-delete prompt per §4.2.1.** When deleting a meal that has rows in `shopping_item_source`, the confirmation offers three buttons: "Nur Mahlzeit löschen", "Mahlzeit und Zutaten entfernen", "Abbrechen". The second path recomputes affected `shopping_item` quantities from remaining sources transactionally and broadcasts updates on the `shopping` WS topic.
-- Calendar day-cells host both meals (this epic) and iCal events (Epic 13) — Epic 4 reserves a render slot for events so Epic 13 only needs to add the data source.
+- Meal-delete from the editor uses a plain "Mahlzeit löschen?" confirm. **Shopping-list cleanup is out of scope for this epic** — when Epic 5 ships, that confirm is replaced by the shopping-aware three-button variant in §4.3.3 (only when the meal still has `shopping_item_source` rows).
+- Calendar day-cells host both meals (this epic) and iCal events (Epic 13) — Epic 4 lays out the events sub-column so Epic 13 only needs to supply the data source.
 
 **Epic 5 — Shopping list (online)**
 - Page: `/einkauf` only. No history, no per-list pages.
 - "Mahlzeiten hinzufügen" dialog per §4.3 (a bottom sheet on mobile, modal on desktop) — date + length controls + live-refreshing per-meal/per-ingredient checkbox preview. Already-on-list meals appear with a "Bereits auf der Liste" badge and start unchecked. Backed by `POST /api/v1/shopping/preview-meals` and `POST /api/v1/shopping/add-meals`.
-- Merge-on-add algorithm per §4.3.2, including the "reactivate within 24 h grace" rule. Writes `shopping_item_source` rows with `contributed_quantity` and `contributed_unit_id` so meal-delete cleanup (Epic 4 / §4.2.1) can subtract precisely.
+- Merge-on-add algorithm per §4.3.2, including the "reactivate within 24 h grace" rule. Writes `shopping_item_source` rows with `contributed_quantity` and `contributed_unit_id` so the meal-removal flow (§4.3.3) can subtract precisely.
+- **Shopping-aware meal-removal confirm (§4.3.3).** When the planner triggers a meal delete and the meal still has `shopping_item_source` rows, this epic supersedes the planner's plain confirm with a three-button variant ("Nur Mahlzeit löschen", "Mahlzeit und Zutaten entfernen", "Abbrechen"). The "Zutaten entfernen" path recomputes affected `shopping_item` quantities from remaining sources transactionally and broadcasts updates on the `shopping` WS topic.
 - Item rows: ingredient/product name, qty + unit, note, plus visible **check / edit / delete** buttons on every screen size — no swipe gestures, no hover-only affordances. Buttons sized per §5.7.
 - Each item shows its meal sources beneath the name as chips: `Für: Spaghetti Bolognese (Mo, 19.05.), Lasagne (Mi, 21.05.)`. Tapping a chip routes to the meal in the planner. Manually-added items show no chips.
 - Checked items render struck-through and muted but remain in place; the check button is replaced by a "Rückgängig" button.
