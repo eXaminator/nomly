@@ -204,7 +204,7 @@ export function ShoppingListView({
       {/* Sticky shelf: undo on the left; counter + supermarket select on the
           right. Sits below the AppShell topbar (h-16) at z-20 so it doesn't
           outrank it. */}
-      <div className="sticky top-16 z-20 -mx-4 flex flex-wrap items-center justify-between gap-3 border-b border-[var(--color-border)] bg-[var(--color-bg)]/95 px-4 py-2 backdrop-blur supports-[backdrop-filter]:bg-[var(--color-bg)]/80 md:-mx-6 md:px-6">
+      <div className="sticky top-16 z-20 -mx-4 flex items-center justify-between gap-2 border-b border-[var(--color-border)] bg-[var(--color-bg)]/95 px-4 py-2 backdrop-blur supports-[backdrop-filter]:bg-[var(--color-bg)]/80 md:-mx-6 md:gap-3 md:px-6">
         <Button
           variant="outline"
           size="sm"
@@ -212,12 +212,13 @@ export function ShoppingListView({
           disabled={!undoAvailable}
           aria-label="Letzten Haken zurücknehmen"
           title="Letzten Haken zurücknehmen"
+          className="shrink-0"
         >
           <RotateCcw className="size-4" />
           <span className="hidden sm:inline">Rückgängig</span>
         </Button>
-        <div className="flex flex-wrap items-center gap-3">
-          <span className="text-sm text-[var(--color-muted-fg)]">
+        <div className="flex min-w-0 items-center gap-2 md:gap-3">
+          <span className="whitespace-nowrap text-sm text-[var(--color-muted-fg)]">
             {filterActive ? (
               <>
                 <strong className="font-semibold text-[var(--color-fg)]">
