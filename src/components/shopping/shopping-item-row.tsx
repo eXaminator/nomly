@@ -1,8 +1,9 @@
 "use client";
 
 import * as React from "react";
-import { Ban, BookOpen, Check, MoreVertical, Pencil, RotateCcw, Trash2 } from "lucide-react";
+import { Ban, BookOpen, Check, MoreVertical, Pencil, Plus, RotateCcw, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Combobox, type ComboboxItem } from "@/components/ui/combobox";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -55,6 +56,9 @@ export function ShoppingItemRow({
   );
   const [note, setNote] = React.useState(item.note ?? "");
   const [saving, setSaving] = React.useState(false);
+  const [newAmountQty, setNewAmountQty] = React.useState("");
+  const [newAmountUnit, setNewAmountUnit] = React.useState<ComboboxItem | null>(null);
+  const [addingNew, setAddingNew] = React.useState(false);
 
   React.useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -62,7 +66,38 @@ export function ShoppingItemRow({
       item.amounts.map((a) => (a.quantity != null ? String(a.quantity) : "")),
     );
     setNote(item.note ?? "");
+    setNewAmountQty("");
+    setNewAmountUnit(null);
+    setAddingNew(false);
   }, [item.id, item.amounts, item.note]);
+
+  async function addNewAmount() {
+    const raw = newAmountQty.trim().replace(",", ".");
+    if (raw.length === 0 || !newAmountUnit) return;
+    const n = Number(raw);
+    if (!Number.isFinite(n)) return;
+    setSaving(true);
+    try {
+      await onSetAmount(item.id, { quantity: n, unitId: newAmountUnit.id });
+      // Reset the inline form; the surrounding list will refresh via the
+      // parent's optimistic update.
+      setNewAmountQty("");
+      setNewAmountUnit(null);
+      setAddingNew(false);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function searchUnits(query: string): Promise<ComboboxItem[]> {
+    const res = await fetch(
+      `/api/v1/units?q=${encodeURIComponent(query)}`,
+      { cache: "no-store" },
+    );
+    if (!res.ok) return [];
+    const data = (await res.json()) as { items: Array<{ id: number; name: string }> };
+    return data.items.map((u) => ({ id: u.id, name: u.name }));
+  }
 
   async function commit() {
     setSaving(true);
@@ -175,6 +210,62 @@ export function ShoppingItemRow({
               <p className="text-xs text-[var(--color-muted-fg)]">
                 Keine Mengen erfasst.
               </p>
+            )}
+            {addingNew ? (
+              <div className="flex flex-wrap items-center gap-2">
+                <Input
+                  type="text"
+                  inputMode="decimal"
+                  value={newAmountQty}
+                  onChange={(e) => setNewAmountQty(e.target.value)}
+                  placeholder="Menge"
+                  className="w-24"
+                  autoFocus
+                />
+                <Combobox
+                  value={newAmountUnit}
+                  onChange={setNewAmountUnit}
+                  search={searchUnits}
+                  placeholder="Einheit"
+                  className="min-w-[8rem] flex-1"
+                />
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  aria-label="Hinzufügen"
+                  onClick={addNewAmount}
+                  disabled={
+                    saving ||
+                    newAmountQty.trim().length === 0 ||
+                    newAmountUnit == null
+                  }
+                >
+                  <Check className="size-4" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  aria-label="Abbrechen"
+                  onClick={() => {
+                    setAddingNew(false);
+                    setNewAmountQty("");
+                    setNewAmountUnit(null);
+                  }}
+                  disabled={saving}
+                >
+                  <X className="size-4" />
+                </Button>
+              </div>
+            ) : (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setAddingNew(true)}
+                className="self-start"
+              >
+                <Plus className="size-4" />
+                Weitere Menge
+              </Button>
             )}
             <Input
               type="text"
