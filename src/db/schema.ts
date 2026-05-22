@@ -251,6 +251,40 @@ export const shoppingItem = sqliteTable(
   ],
 );
 
+/**
+ * User-set manual amounts on a shopping item — one per dimension. Replaces
+ * the per-dimension sources-sum at display time so a row editor can write
+ * "I only need 4 instead of 6" without touching the contributing meals.
+ *
+ * Created either by `addManualItem` (manual add via AddItemDialog) or by
+ * the row editor's per-amount edit. When all amount rows for an item are
+ * cleared and no sources remain, the item is eligible for deletion (see
+ * meals.ts cleanup logic — but for now the item just stays empty).
+ */
+export const shoppingItemAmount = sqliteTable(
+  "shopping_item_amount",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    itemId: integer("item_id")
+      .notNull()
+      .references((): AnySQLiteColumn => shoppingItem.id, { onDelete: "cascade" }),
+    unitId: integer("unit_id").references(() => unit.id, { onDelete: "set null" }),
+    quantity: real("quantity"),
+    /**
+     * Persisted (not derived) so the unique constraint can enforce one
+     * override per (item, dimension). Must match `unit.dimension` when
+     * `unit_id` is set, else "none".
+     */
+    dimension: text("dimension", {
+      enum: ["mass", "volume", "count", "none"],
+    }).notNull(),
+  },
+  (t) => [
+    uniqueIndex("shopping_item_amount_dim_unique").on(t.itemId, t.dimension),
+    index("shopping_item_amount_item_idx").on(t.itemId),
+  ],
+);
+
 export const shoppingItemSource = sqliteTable(
   "shopping_item_source",
   {

@@ -5,8 +5,6 @@ import { deleteItem, patchItem, ShoppingApiError } from "@/lib/shopping/items";
 const patchSchema = z
   .object({
     checked: z.boolean().optional(),
-    quantity: z.number().nullable().optional(),
-    unitId: z.number().int().positive().nullable().optional(),
     note: z.string().nullable().optional(),
   })
   .strict();

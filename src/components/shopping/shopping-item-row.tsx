@@ -29,10 +29,12 @@ type Props = {
   /** Opens the recipe preview dialog. Triggered from the context menu only. */
   onPreviewRecipe: (recipeId: number) => void;
   onToggle: (item: ShoppingItemView) => void;
-  onPatch: (
+  /** Sets a manual override quantity for one dimension of the item. */
+  onSetAmount: (
     id: number,
-    patch: { quantity?: number | null; unitId?: number | null; note?: string | null },
+    amount: { quantity: number | null; unitId: number | null },
   ) => Promise<void>;
+  onPatchNote: (id: number, note: string | null) => Promise<void>;
   onDelete: (id: number) => Promise<void>;
   onToggleUnavailable: (item: ShoppingItemView, supermarketId: number) => Promise<void>;
 };
@@ -42,32 +44,52 @@ export function ShoppingItemRow({
   activeSupermarketId,
   onPreviewRecipe,
   onToggle,
-  onPatch,
+  onSetAmount,
+  onPatchNote,
   onDelete,
   onToggleUnavailable,
 }: Props) {
   const [editing, setEditing] = React.useState(false);
-  const [qty, setQty] = React.useState(
-    item.manualQuantity != null ? String(item.manualQuantity) : "",
+  const [amountInputs, setAmountInputs] = React.useState<string[]>(() =>
+    item.amounts.map((a) => (a.quantity != null ? String(a.quantity) : "")),
   );
   const [note, setNote] = React.useState(item.note ?? "");
   const [saving, setSaving] = React.useState(false);
 
   React.useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setQty(item.manualQuantity != null ? String(item.manualQuantity) : "");
+    setAmountInputs(
+      item.amounts.map((a) => (a.quantity != null ? String(a.quantity) : "")),
+    );
     setNote(item.note ?? "");
-  }, [item.id, item.manualQuantity, item.note]);
+  }, [item.id, item.amounts, item.note]);
 
   async function commit() {
     setSaving(true);
     try {
-      const trimmed = qty.trim().replace(",", ".");
-      const parsed = trimmed.length === 0 ? null : Number(trimmed);
-      await onPatch(item.id, {
-        quantity: parsed != null && Number.isFinite(parsed) ? parsed : null,
-        note: note.trim().length > 0 ? note.trim() : null,
-      });
+      // Persist amount edits first — each dimension is independent. Send only
+      // the ones whose input differs from the displayed value.
+      const tasks: Array<Promise<unknown>> = [];
+      for (let i = 0; i < item.amounts.length; i += 1) {
+        const original = item.amounts[i];
+        const raw = (amountInputs[i] ?? "").trim().replace(",", ".");
+        const next = raw.length === 0 ? null : Number(raw);
+        const parsed =
+          next != null && Number.isFinite(next) ? next : null;
+        if (parsed === original.quantity) continue;
+        tasks.push(
+          onSetAmount(item.id, {
+            quantity: parsed,
+            unitId: original.unitId,
+          }),
+        );
+      }
+      const trimmedNote = note.trim();
+      const nextNote = trimmedNote.length > 0 ? trimmedNote : null;
+      if (nextNote !== (item.note ?? null)) {
+        tasks.push(onPatchNote(item.id, nextNote));
+      }
+      await Promise.all(tasks);
       setEditing(false);
     } finally {
       setSaving(false);
@@ -90,8 +112,6 @@ export function ShoppingItemRow({
         onClick={() => onToggle(item)}
         aria-label={item.checked ? "Rückgängig" : "Abhaken"}
         title={item.checked ? "Rückgängig" : "Abhaken"}
-        // The whole row toggles, but a dedicated left target gives both
-        // keyboard users and screen readers a clear control.
         className="flex w-7 shrink-0 items-center justify-center"
       >
         <span
@@ -109,8 +129,6 @@ export function ShoppingItemRow({
       <button
         type="button"
         onClick={(e) => {
-          // Don't fire when the click came from within an input / dropdown
-          // (these stop their own propagation already).
           if (editing) return;
           e.preventDefault();
           onToggle(item);
@@ -118,35 +136,52 @@ export function ShoppingItemRow({
         className="min-w-0 flex-1 text-left"
       >
         {editing ? (
-          <div className="flex flex-col gap-2">
+          <div
+            className="flex flex-col gap-2"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="flex items-baseline gap-2">
               <span className="font-medium">{item.name}</span>
               <span className="text-xs text-[var(--color-muted-fg)]">
                 {item.refType === "product" ? "Produkt" : "Zutat"}
               </span>
             </div>
-            <div
-              className="flex flex-wrap items-center gap-2"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <Input
-                type="text"
-                value={qty}
-                onChange={(e) => setQty(e.target.value)}
-                placeholder="Menge"
-                className="w-24"
-              />
-              <span className="text-sm text-[var(--color-muted-fg)]">
-                {item.manualUnitName || "—"}
-              </span>
-              <Input
-                type="text"
-                value={note}
-                onChange={(e) => setNote(e.target.value)}
-                placeholder="Notiz"
-                className="flex-1 min-w-[8rem]"
-              />
-            </div>
+            {item.amounts.length > 0 ? (
+              <ul className="flex flex-col gap-1.5">
+                {item.amounts.map((a, i) => (
+                  <li
+                    key={`${a.dimension}-${a.unitId ?? "none"}`}
+                    className="flex items-center gap-2"
+                  >
+                    <Input
+                      type="text"
+                      inputMode="decimal"
+                      value={amountInputs[i] ?? ""}
+                      onChange={(e) => {
+                        const next = [...amountInputs];
+                        next[i] = e.target.value;
+                        setAmountInputs(next);
+                      }}
+                      placeholder="Menge"
+                      className="w-24"
+                    />
+                    <span className="text-sm text-[var(--color-muted-fg)]">
+                      {a.unitName ?? "—"}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-xs text-[var(--color-muted-fg)]">
+                Keine Mengen erfasst.
+              </p>
+            )}
+            <Input
+              type="text"
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              placeholder="Notiz"
+            />
           </div>
         ) : (
           <div className="flex flex-col gap-1">
@@ -299,8 +334,6 @@ function RecipeMenuEntry({
   onPreview: (recipeId: number) => void;
 }) {
   if (sources.length === 0) return null;
-  // De-dup by recipe id so the same recipe contributing twice (e.g. two
-  // meals of the same dish) doesn't double up in the submenu.
   const uniqueByRecipe = new Map<number, ShoppingItemSourceView>();
   for (const s of sources) {
     if (!uniqueByRecipe.has(s.recipeId)) uniqueByRecipe.set(s.recipeId, s);

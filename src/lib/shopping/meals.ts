@@ -3,6 +3,7 @@ import { db } from "../../db/index.ts";
 import {
   mealPlan,
   shoppingItem,
+  shoppingItemAmount,
   shoppingItemSource,
 } from "../../db/schema.ts";
 
@@ -89,21 +90,23 @@ function applyDeleteWithIngredients(
       itemsUpdated += 1;
       continue;
     }
-    // No source left. Drop the item iff the user hasn't put a manual
-    // amount or note on it.
+    // No source left. Drop the item iff the user hasn't put any manual
+    // amounts or a note on it (those are the signals that the item still
+    // matters to the user beyond what the meals contributed).
     const item = tx
-      .select({
-        quantity: shoppingItem.quantity,
-        unitId: shoppingItem.unitId,
-        note: shoppingItem.note,
-      })
+      .select({ note: shoppingItem.note })
       .from(shoppingItem)
       .where(eq(shoppingItem.id, itemId))
       .get();
+    const manual = tx
+      .select({ id: shoppingItemAmount.id })
+      .from(shoppingItemAmount)
+      .where(eq(shoppingItemAmount.itemId, itemId))
+      .limit(1)
+      .get();
     if (
       item != null &&
-      item.quantity == null &&
-      item.unitId == null &&
+      manual == null &&
       (item.note == null || item.note === "")
     ) {
       tx.delete(shoppingItem).where(eq(shoppingItem.id, itemId)).run();

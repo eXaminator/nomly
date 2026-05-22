@@ -14,7 +14,6 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { PreviewMeal, PreviewIngredient } from "@/lib/shopping/preview";
-import { formatQty } from "@/lib/shopping/format";
 import { previewMeals as apiPreview, addMealsToList } from "./api";
 
 type Props = {
@@ -26,6 +25,20 @@ type Props = {
 };
 
 type SelectionState = Map<number, Set<number>>;
+// Per-recipe-ingredient quantity input string (raw user input). Keyed by
+// `${mealPlanId}:${recipeIngredientId}` so a recipe appearing twice keeps
+// independent quantities.
+type QuantityState = Map<string, string>;
+
+function qtyKey(mealPlanId: number, recipeIngredientId: number): string {
+  return `${mealPlanId}:${recipeIngredientId}`;
+}
+
+function formatScaledQty(q: number | null): string {
+  if (q == null) return "";
+  const rounded = Math.round(q * 100) / 100;
+  return Number.isInteger(rounded) ? String(rounded) : String(rounded);
+}
 
 export function AddMealsDialog({
   open,
@@ -43,6 +56,7 @@ export function AddMealsDialog({
 
   // selection: per-meal set of recipeIngredientIds that are checked.
   const [selection, setSelection] = React.useState<SelectionState>(new Map());
+  const [quantities, setQuantities] = React.useState<QuantityState>(new Map());
 
   React.useEffect(() => {
     if (!open) {
@@ -73,10 +87,18 @@ export function AddMealsDialog({
         // and ingredients they want on the list, instead of de-selecting
         // a default that may or may not match their intent.
         const sel = new Map<number, Set<number>>();
+        const qs = new Map<string, string>();
         for (const m of rows) {
           sel.set(m.mealPlanId, new Set());
+          for (const i of m.ingredients) {
+            qs.set(
+              qtyKey(m.mealPlanId, i.recipeIngredientId),
+              formatScaledQty(i.qty),
+            );
+          }
         }
         setSelection(sel);
+        setQuantities(qs);
       })
       .catch((e: unknown) => {
         if (cancelled) return;
@@ -133,6 +155,14 @@ export function AddMealsDialog({
     return n;
   }, [selection]);
 
+  function parseQty(raw: string | undefined): number | null {
+    if (raw == null) return null;
+    const trimmed = raw.trim().replace(",", ".");
+    if (trimmed.length === 0) return null;
+    const n = Number(trimmed);
+    return Number.isFinite(n) ? n : null;
+  }
+
   async function onSubmit() {
     if (!meals || totalSelected === 0) return;
     setSubmitting(true);
@@ -142,7 +172,10 @@ export function AddMealsDialog({
         .filter(([, set]) => set.size > 0)
         .map(([mealPlanId, set]) => ({
           mealPlanId,
-          recipeIngredientIds: Array.from(set),
+          ingredients: Array.from(set).map((recipeIngredientId) => ({
+            recipeIngredientId,
+            quantity: parseQty(quantities.get(qtyKey(mealPlanId, recipeIngredientId))),
+          })),
         }));
       await addMealsToList(sel);
       onAdded();
@@ -151,6 +184,14 @@ export function AddMealsDialog({
     } finally {
       setSubmitting(false);
     }
+  }
+
+  function setQty(mealPlanId: number, recipeIngredientId: number, value: string) {
+    setQuantities((prev) => {
+      const next = new Map(prev);
+      next.set(qtyKey(mealPlanId, recipeIngredientId), value);
+      return next;
+    });
   }
 
   return (
@@ -228,8 +269,10 @@ export function AddMealsDialog({
                     key={m.mealPlanId}
                     meal={m}
                     selected={selection.get(m.mealPlanId) ?? new Set()}
+                    quantities={quantities}
                     onToggleMeal={() => toggleMeal(m)}
                     onToggleIngredient={(riId) => toggleIngredient(m.mealPlanId, riId)}
+                    onChangeQuantity={(riId, value) => setQty(m.mealPlanId, riId, value)}
                   />
                 ))}
               </ul>
@@ -259,13 +302,17 @@ export function AddMealsDialog({
 function MealRow({
   meal,
   selected,
+  quantities,
   onToggleMeal,
   onToggleIngredient,
+  onChangeQuantity,
 }: {
   meal: PreviewMeal;
   selected: Set<number>;
+  quantities: QuantityState;
   onToggleMeal: () => void;
   onToggleIngredient: (riId: number) => void;
+  onChangeQuantity: (riId: number, value: string) => void;
 }) {
   const all = meal.ingredients.length;
   const checked = selected.size;
@@ -301,7 +348,11 @@ function MealRow({
             key={ing.recipeIngredientId}
             ing={ing}
             checked={selected.has(ing.recipeIngredientId)}
+            quantityValue={
+              quantities.get(qtyKey(meal.mealPlanId, ing.recipeIngredientId)) ?? ""
+            }
             onToggle={() => onToggleIngredient(ing.recipeIngredientId)}
+            onChangeQuantity={(v) => onChangeQuantity(ing.recipeIngredientId, v)}
           />
         ))}
       </ul>
@@ -312,16 +363,20 @@ function MealRow({
 function IngredientCheckbox({
   ing,
   checked,
+  quantityValue,
   onToggle,
+  onChangeQuantity,
 }: {
   ing: PreviewIngredient;
   checked: boolean;
+  quantityValue: string;
   onToggle: () => void;
+  onChangeQuantity: (value: string) => void;
 }) {
   return (
     <li>
       <label
-        className={`flex cursor-pointer items-baseline gap-2 text-sm ${
+        className={`flex cursor-pointer items-center gap-2 text-sm ${
           ing.isOptional ? "text-[var(--color-muted-fg)] italic" : ""
         }`}
       >
@@ -331,22 +386,33 @@ function IngredientCheckbox({
           onChange={onToggle}
           className="size-3.5"
         />
-        <span>
+        <span className="flex flex-1 flex-wrap items-center gap-2">
           <span>{ing.ingredientName}</span>
-          {ing.qty != null || ing.unitName ? (
-            <span className="ml-2 text-xs text-[var(--color-muted-fg)]">
-              {ing.qty != null ? formatQty(ing.qty) : ""}
-              {ing.unitName ? ` ${ing.unitName}` : ""}
+          {ing.isOptional ? (
+            <span className="rounded-full bg-[var(--color-muted)] px-1.5 py-0.5 text-[10px] font-medium uppercase not-italic tracking-wider text-[var(--color-muted-fg)]">
+              optional
             </span>
           ) : null}
           {ing.notes ? (
-            <span className="ml-2 text-xs text-[var(--color-muted-fg)]">
+            <span className="text-xs text-[var(--color-muted-fg)]">
               · {ing.notes}
             </span>
           ) : null}
-          {ing.isOptional ? (
-            <span className="ml-2 rounded-full bg-[var(--color-muted)] px-1.5 py-0.5 text-[10px] font-medium uppercase not-italic tracking-wider text-[var(--color-muted-fg)]">
-              optional
+        </span>
+        <span
+          className="flex shrink-0 items-center gap-1"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <input
+            type="text"
+            inputMode="decimal"
+            value={quantityValue}
+            onChange={(e) => onChangeQuantity(e.target.value)}
+            className="h-7 w-16 rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-bg)] px-2 text-right text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+          />
+          {ing.unitName ? (
+            <span className="min-w-8 text-xs text-[var(--color-muted-fg)]">
+              {ing.unitName}
             </span>
           ) : null}
         </span>

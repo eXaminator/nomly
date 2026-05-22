@@ -31,13 +31,38 @@ export async function clearAll(): Promise<{ deletedCount: number }> {
 
 export async function patchItem(
   id: number,
-  patch: { checked?: boolean; quantity?: number | null; unitId?: number | null; note?: string | null },
+  patch: { checked?: boolean; note?: string | null },
 ): Promise<ShoppingItemView> {
   const res = await fetch(`/api/v1/shopping/items/${id}`, {
     method: "PATCH",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(patch),
   });
+  const data = (await jsonOrThrow(res)) as { item: ShoppingItemView };
+  return data.item;
+}
+
+export async function setItemAmount(
+  id: number,
+  amount: { quantity: number | null; unitId: number | null },
+): Promise<ShoppingItemView> {
+  const res = await fetch(`/api/v1/shopping/items/${id}/amount`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(amount),
+  });
+  const data = (await jsonOrThrow(res)) as { item: ShoppingItemView };
+  return data.item;
+}
+
+export async function deleteItemAmount(
+  id: number,
+  amountId: number,
+): Promise<ShoppingItemView> {
+  const res = await fetch(
+    `/api/v1/shopping/items/${id}/amount?amountId=${amountId}`,
+    { method: "DELETE" },
+  );
   const data = (await jsonOrThrow(res)) as { item: ShoppingItemView };
   return data.item;
 }
@@ -89,7 +114,10 @@ export async function previewMeals(
 }
 
 export async function addMealsToList(
-  selection: Array<{ mealPlanId: number; recipeIngredientIds: number[] }>,
+  selection: Array<{
+    mealPlanId: number;
+    ingredients: Array<{ recipeIngredientId: number; quantity?: number | null }>;
+  }>,
 ): Promise<{
   itemsCreated: number;
   itemsIncremented: number;

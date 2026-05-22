@@ -15,6 +15,7 @@ import {
   clearAll as apiClearAll,
   deleteItem as apiDelete,
   patchItem as apiPatch,
+  setItemAmount as apiSetAmount,
   setUnavailable as apiSetUnavailable,
 } from "./api";
 
@@ -133,12 +134,21 @@ export function ShoppingListView({
     [recentChecks, items],
   );
 
-  async function onPatch(
+  async function onPatchNote(id: number, note: string | null) {
+    try {
+      const updated = await apiPatch(id, { note });
+      setItems((prev) => prev.map((i) => (i.id === updated.id ? updated : i)));
+    } catch {
+      router.refresh();
+    }
+  }
+
+  async function onSetAmount(
     id: number,
-    patch: { quantity?: number | null; unitId?: number | null; note?: string | null },
+    amount: { quantity: number | null; unitId: number | null },
   ) {
     try {
-      const updated = await apiPatch(id, patch);
+      const updated = await apiSetAmount(id, amount);
       setItems((prev) => prev.map((i) => (i.id === updated.id ? updated : i)));
     } catch {
       router.refresh();
@@ -345,7 +355,8 @@ export function ShoppingListView({
                       activeSupermarketId={supermarketId}
                       onPreviewRecipe={(id) => setPreviewRecipeId(id)}
                       onToggle={onToggleCheck}
-                      onPatch={onPatch}
+                      onSetAmount={onSetAmount}
+                      onPatchNote={onPatchNote}
                       onDelete={onDelete}
                       onToggleUnavailable={onToggleUnavailable}
                     />

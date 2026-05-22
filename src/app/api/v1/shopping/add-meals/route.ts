@@ -7,7 +7,18 @@ const schema = z.object({
     .array(
       z.object({
         mealPlanId: z.number().int().positive(),
-        recipeIngredientIds: z.array(z.number().int().positive()).min(1),
+        ingredients: z
+          .array(
+            z.object({
+              recipeIngredientId: z.number().int().positive(),
+              /**
+               * Optional user-edited contribution in the recipe ingredient's
+               * unit. When omitted, the scaled recipe quantity is used.
+               */
+              quantity: z.number().nullable().optional(),
+            }),
+          )
+          .min(1),
       }),
     )
     .min(1),

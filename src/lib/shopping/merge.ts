@@ -16,7 +16,16 @@ const GRACE_WINDOW_SECONDS = 24 * 60 * 60;
 
 export type AddMealsSelection = {
   mealPlanId: number;
-  recipeIngredientIds: number[];
+  ingredients: Array<{
+    recipeIngredientId: number;
+    /**
+     * Optional user-edited quantity for this contribution, expressed in the
+     * recipe ingredient's unit. When provided, used verbatim (no further
+     * scaling by servings). When undefined, the recipe's quantity × the
+     * meal's serving scale is used as before.
+     */
+    quantity?: number | null;
+  }>;
 };
 
 export type AddMealsResult = {
@@ -83,7 +92,9 @@ function applyAdd(tx: Tx, selection: AddMealsSelection[]): AddMealsResult {
     tx,
     selection.map((s) => s.mealPlanId),
   );
-  const allRecipeIngredientIds = selection.flatMap((s) => s.recipeIngredientIds);
+  const allRecipeIngredientIds = selection.flatMap((s) =>
+    s.ingredients.map((i) => i.recipeIngredientId),
+  );
   const recipeRows = loadRecipeIngredients(tx, allRecipeIngredientIds);
 
   const contributions: ContributionLine[] = [];
@@ -92,10 +103,15 @@ function applyAdd(tx: Tx, selection: AddMealsSelection[]): AddMealsResult {
     if (!meta) continue;
     const scale =
       meta.recipeServings > 0 ? meta.servings / meta.recipeServings : 1;
-    for (const riId of sel.recipeIngredientIds) {
-      const r = recipeRows.get(riId);
+    for (const sli of sel.ingredients) {
+      const r = recipeRows.get(sli.recipeIngredientId);
       if (!r) continue;
-      const qty = r.quantity == null ? null : r.quantity * scale;
+      const qty =
+        sli.quantity !== undefined
+          ? sli.quantity
+          : r.quantity == null
+            ? null
+            : r.quantity * scale;
       contributions.push({
         mealPlanId: sel.mealPlanId,
         recipeIngredientId: r.id,

@@ -1,4 +1,4 @@
-import { asc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "../../db/index.ts";
 import {
   category,
@@ -12,6 +12,7 @@ import {
   recipe,
   recipeIngredient,
   shoppingItem,
+  shoppingItemAmount,
   shoppingItemSource,
   unit,
 } from "../../db/schema.ts";
@@ -31,16 +32,21 @@ export type ShoppingItemSourceView = {
   recipeNotes: string | null;
 };
 
+/** Tag used in shopping_item_amount.dimension when the row carries no unit. */
+type AmountDimension = Dimension | "none";
+
 /**
- * One row in the aggregated-amounts list for an item. Same dimension
- * contributions (e.g. 500 g + 0.5 kg) are summed into a single entry;
- * cross-dimension contributions produce multiple entries.
+ * One row in the aggregated-amounts list for an item. When the user has set
+ * a manual override for this dimension, `manualAmountId` carries that row's
+ * id (so the editor can target it on save); otherwise the entry is derived
+ * from the sources sum and `manualAmountId` is null.
  */
 export type ShoppingItemAmount = {
   quantity: number | null;
   unitId: number | null;
   unitName: string | null;
-  dimension: Dimension | null;
+  dimension: AmountDimension;
+  manualAmountId: number | null;
 };
 
 export type ShoppingItemView = {
@@ -48,12 +54,7 @@ export type ShoppingItemView = {
   refType: "ingredient" | "product";
   refId: number;
   name: string;
-  /** Aggregated amounts derived from sources + manual quantity. */
   amounts: ShoppingItemAmount[];
-  /** User-set manual quantity (preserved separately so the editor can show it). */
-  manualQuantity: number | null;
-  manualUnitId: number | null;
-  manualUnitName: string | null;
   categoryId: number | null;
   categoryName: string | null;
   checked: boolean;
@@ -63,7 +64,6 @@ export type ShoppingItemView = {
   version: number;
   createdAt: number;
   updatedAt: number;
-  /** Supermarket IDs where this ingredient/product is marked unavailable. */
   unavailableSupermarketIds: number[];
   sources: ShoppingItemSourceView[];
 };
@@ -74,9 +74,6 @@ export function listShoppingItems(): ShoppingItemView[] {
       id: shoppingItem.id,
       refId: shoppingItem.ingredientId,
       name: ingredient.name,
-      quantity: shoppingItem.quantity,
-      unitId: shoppingItem.unitId,
-      unitName: unit.name,
       categoryId: shoppingItem.categoryId,
       categoryName: category.name,
       checked: shoppingItem.checked,
@@ -89,7 +86,6 @@ export function listShoppingItems(): ShoppingItemView[] {
     })
     .from(shoppingItem)
     .innerJoin(ingredient, eq(ingredient.id, shoppingItem.ingredientId))
-    .leftJoin(unit, eq(unit.id, shoppingItem.unitId))
     .leftJoin(category, eq(category.id, shoppingItem.categoryId))
     .all();
 
@@ -98,9 +94,6 @@ export function listShoppingItems(): ShoppingItemView[] {
       id: shoppingItem.id,
       refId: shoppingItem.productId,
       name: product.name,
-      quantity: shoppingItem.quantity,
-      unitId: shoppingItem.unitId,
-      unitName: unit.name,
       categoryId: shoppingItem.categoryId,
       categoryName: category.name,
       checked: shoppingItem.checked,
@@ -113,7 +106,6 @@ export function listShoppingItems(): ShoppingItemView[] {
     })
     .from(shoppingItem)
     .innerJoin(product, eq(product.id, shoppingItem.productId))
-    .leftJoin(unit, eq(unit.id, shoppingItem.unitId))
     .leftJoin(category, eq(category.id, shoppingItem.categoryId))
     .all();
 
@@ -169,15 +161,50 @@ export function listShoppingItems(): ShoppingItemView[] {
     }
   }
 
-  // Load unit metadata (factor/dimension) for every unit referenced by an
-  // item's manual quantity or by any source contribution. One round-trip.
-  const allUnitIds = new Set<number>();
-  for (const r of baseRows) if (r.unitId != null) allUnitIds.add(r.unitId);
-  for (const sources of sourcesByItem.values()) {
-    for (const s of sources) {
-      if (s.contributedUnitId != null) allUnitIds.add(s.contributedUnitId);
+  type RawManual = {
+    id: number;
+    itemId: number;
+    quantity: number | null;
+    unitId: number | null;
+    unitName: string | null;
+    dimension: AmountDimension;
+  };
+  const manualsByItem = new Map<number, RawManual[]>();
+  if (itemIds.length > 0) {
+    const rows = db
+      .select({
+        id: shoppingItemAmount.id,
+        itemId: shoppingItemAmount.itemId,
+        quantity: shoppingItemAmount.quantity,
+        unitId: shoppingItemAmount.unitId,
+        unitName: unit.name,
+        dimension: shoppingItemAmount.dimension,
+      })
+      .from(shoppingItemAmount)
+      .leftJoin(unit, eq(unit.id, shoppingItemAmount.unitId))
+      .where(inArray(shoppingItemAmount.itemId, itemIds))
+      .all();
+    for (const r of rows) {
+      const arr = manualsByItem.get(r.itemId) ?? [];
+      arr.push({
+        id: r.id,
+        itemId: r.itemId,
+        quantity: r.quantity,
+        unitId: r.unitId,
+        unitName: r.unitName,
+        dimension: r.dimension as AmountDimension,
+      });
+      manualsByItem.set(r.itemId, arr);
     }
   }
+
+  // Look up unit metadata (factor + dimension) for every unit referenced.
+  const allUnitIds = new Set<number>();
+  for (const sources of sourcesByItem.values())
+    for (const s of sources)
+      if (s.contributedUnitId != null) allUnitIds.add(s.contributedUnitId);
+  for (const manuals of manualsByItem.values())
+    for (const m of manuals) if (m.unitId != null) allUnitIds.add(m.unitId);
   const unitRows = allUnitIds.size === 0
     ? []
     : (db
@@ -193,8 +220,6 @@ export function listShoppingItems(): ShoppingItemView[] {
         .all() as UnitRow[]);
   const unitsById = new Map(unitRows.map((u) => [u.id, u]));
 
-  // Load unavailable markers separately for ingredients and products. Both
-  // tables share the same shape but reference different parents.
   const ingredientIds = baseRows
     .filter((r) => r.refType === "ingredient")
     .map((r) => r.refId as number);
@@ -236,12 +261,14 @@ export function listShoppingItems(): ShoppingItemView[] {
 
   const all: ShoppingItemView[] = baseRows.map((r) => {
     const sources = sourcesByItem.get(r.id) ?? [];
-    const manualUnit = r.unitId != null ? unitsById.get(r.unitId) ?? null : null;
+    const manuals = manualsByItem.get(r.id) ?? [];
     const amounts = buildAggregatedAmounts({
-      manual: {
-        quantity: r.quantity,
-        unit: manualUnit,
-      },
+      manuals: manuals.map((m) => ({
+        id: m.id,
+        quantity: m.quantity,
+        unit: m.unitId != null ? unitsById.get(m.unitId) ?? null : null,
+        dimension: m.dimension,
+      })),
       sources: sources.map((s) => ({
         quantity: s.contributedQuantity,
         unit: s.contributedUnitId != null ? unitsById.get(s.contributedUnitId) ?? null : null,
@@ -257,9 +284,6 @@ export function listShoppingItems(): ShoppingItemView[] {
       refId: r.refId as number,
       name: r.name,
       amounts,
-      manualQuantity: r.quantity,
-      manualUnitId: r.unitId,
-      manualUnitName: r.unitName,
       categoryId: r.categoryId,
       categoryName: r.categoryName,
       checked: !!r.checked,
@@ -293,132 +317,142 @@ export function listShoppingItems(): ShoppingItemView[] {
 }
 
 type AggregateInput = {
-  manual: { quantity: number | null; unit: UnitRow | null };
+  manuals: Array<{
+    id: number;
+    quantity: number | null;
+    unit: UnitRow | null;
+    dimension: AmountDimension;
+  }>;
   sources: Array<{ quantity: number | null; unit: UnitRow | null }>;
 };
 
 /**
- * Group contributions by dimension and sum in base units. A contribution
- * with no unit and no quantity is ignored (nothing to render); with no unit
- * but a quantity, it lands in a `dimension: null` "unitless" bucket. Cross-
- * dimension contributions appear as separate entries (e.g. mass + count).
+ * Per-dimension override: when a manual amount exists for a dimension it
+ * REPLACES the sources sum entirely. Each manual row carries its own id so
+ * the UI editor can target it on save. Source-only dimensions fall through
+ * to the existing sources-sum logic (largest sensible unit, etc.).
  */
 function buildAggregatedAmounts(input: AggregateInput): ShoppingItemAmount[] {
-  type Bucket = {
-    dimension: Dimension | null;
-    contributions: Array<{ quantity: number | null; unit: UnitRow | null }>;
-  };
-  const bucketsByDim = new Map<Dimension | "unitless", Bucket>();
-  const addLine = (line: { quantity: number | null; unit: UnitRow | null }) => {
-    if (line.quantity == null && line.unit == null) return;
-    const key: Dimension | "unitless" = line.unit?.dimension ?? "unitless";
-    const dim = key === "unitless" ? null : key;
-    const b = bucketsByDim.get(key) ?? { dimension: dim, contributions: [] };
-    b.contributions.push(line);
-    bucketsByDim.set(key, b);
-  };
-  addLine(input.manual);
-  for (const s of input.sources) addLine(s);
+  const manualByDim = new Map<AmountDimension, AggregateInput["manuals"][number]>();
+  for (const m of input.manuals) manualByDim.set(m.dimension, m);
+
+  const sourceByDim = new Map<
+    AmountDimension,
+    Array<{ quantity: number | null; unit: UnitRow | null }>
+  >();
+  for (const s of input.sources) {
+    const dim: AmountDimension = s.unit?.dimension ?? "none";
+    const arr = sourceByDim.get(dim) ?? [];
+    arr.push(s);
+    sourceByDim.set(dim, arr);
+  }
+
+  const dimensions = new Set<AmountDimension>([
+    ...manualByDim.keys(),
+    ...sourceByDim.keys(),
+  ]);
 
   const out: ShoppingItemAmount[] = [];
-  for (const b of bucketsByDim.values()) {
-    if (b.dimension == null) {
-      // Unitless: sum the quantities (if any), drop unit. If all are
-      // open-ended, render as one open-ended row.
-      let total = 0;
-      let allOpen = true;
-      for (const c of b.contributions) {
-        if (c.quantity != null) {
-          total += c.quantity;
-          allOpen = false;
-        }
+  for (const dim of dimensions) {
+    const manual = manualByDim.get(dim);
+    if (manual) {
+      out.push({
+        quantity: manual.quantity,
+        unitId: manual.unit?.id ?? null,
+        unitName: manual.unit?.name ?? null,
+        dimension: dim,
+        manualAmountId: manual.id,
+      });
+      continue;
+    }
+    const sources = sourceByDim.get(dim) ?? [];
+    out.push({
+      ...computeSourcesSum(sources, dim),
+      manualAmountId: null,
+    });
+  }
+
+  // Stable order: mass, volume, count, unitless.
+  const order: Record<string, number> = { mass: 0, volume: 1, count: 2, none: 3 };
+  out.sort(
+    (a, b) => (order[a.dimension] ?? 99) - (order[b.dimension] ?? 99),
+  );
+  return out;
+}
+
+function computeSourcesSum(
+  sources: Array<{ quantity: number | null; unit: UnitRow | null }>,
+  dim: AmountDimension,
+): Omit<ShoppingItemAmount, "manualAmountId"> {
+  if (dim === "none") {
+    let total = 0;
+    let allOpen = true;
+    for (const c of sources) {
+      if (c.quantity != null) {
+        total += c.quantity;
+        allOpen = false;
       }
-      out.push({
-        quantity: allOpen ? null : round3(total),
-        unitId: null,
-        unitName: null,
-        dimension: null,
-      });
-      continue;
     }
-    // Mixed-unit dimension: sum in base, format in the largest sensible
-    // unit that appears in the contributions (avoids inventing a "kg"
-    // when only "g" was on the list).
-    const dimUnits = loadDimensionUnits(b.dimension);
-    let baseTotal = 0;
-    let anyKnown = false;
-    const usedUnits: UnitRow[] = [];
-    for (const c of b.contributions) {
-      if (c.unit) usedUnits.push(c.unit);
-      if (c.quantity == null) continue;
-      anyKnown = true;
-      const factor = c.unit?.factor ?? 1;
-      baseTotal += c.quantity * factor;
+    return {
+      quantity: allOpen ? null : round3(total),
+      unitId: null,
+      unitName: null,
+      dimension: "none",
+    };
+  }
+  const usedUnits: UnitRow[] = [];
+  let baseTotal = 0;
+  let anyKnown = false;
+  for (const c of sources) {
+    if (c.unit) usedUnits.push(c.unit);
+    if (c.quantity == null) continue;
+    anyKnown = true;
+    baseTotal += c.quantity * (c.unit?.factor ?? 1);
+  }
+  if (!anyKnown) {
+    const u = usedUnits[0];
+    return {
+      quantity: null,
+      unitId: u?.id ?? null,
+      unitName: u?.name ?? null,
+      dimension: dim,
+    };
+  }
+  const dimUnits = loadDimensionUnits(dim);
+  const contribByFactorAsc = [...usedUnits].sort((a, b) => a.factor - b.factor);
+  const smallest = contribByFactorAsc[0]!;
+  const valueInSmallest = baseTotal / smallest.factor;
+  let chosen = smallest;
+  if (valueInSmallest >= 1000) {
+    const desc = [...contribByFactorAsc].reverse();
+    let promoted: UnitRow | undefined;
+    for (const u of desc) {
+      if (u.factor <= smallest.factor) continue;
+      if (baseTotal / u.factor >= 1) {
+        promoted = u;
+        break;
+      }
     }
-    if (!anyKnown) {
-      // All open-ended within this dimension — pick any encountered unit
-      // for display.
-      const u = usedUnits[0];
-      out.push({
-        quantity: null,
-        unitId: u?.id ?? null,
-        unitName: u?.name ?? null,
-        dimension: b.dimension,
-      });
-      continue;
-    }
-    // Display rule: stay inside the unit(s) the recipe (or user) actually
-    // wrote — never invent a new unit (no surprise "5.291 oz" for what
-    // started life as "150 g"). Promote to a larger unit only when the
-    // smallest contributed unit would render an awkwardly big number
-    // (≥ 1000 of it).
-    const contribByFactorAsc = [...usedUnits].sort((a, b2) => a.factor - b2.factor);
-    const smallest = contribByFactorAsc[0]!;
-    const valueInSmallest = baseTotal / smallest.factor;
-    let chosen = smallest;
-    if (valueInSmallest >= 1000) {
-      // Try larger contributed units first; fall back to other dimension
-      // units only if no contributed unit fits. Pick the largest one whose
-      // value is still ≥ 1.
-      const desc = [...contribByFactorAsc].reverse();
-      let promoted: UnitRow | undefined;
-      for (const u of desc) {
+    if (!promoted) {
+      const otherDesc = [...dimUnits]
+        .filter((u) => !usedUnits.some((c) => c.id === u.id))
+        .sort((a, b2) => b2.factor - a.factor);
+      for (const u of otherDesc) {
         if (u.factor <= smallest.factor) continue;
         if (baseTotal / u.factor >= 1) {
           promoted = u;
           break;
         }
       }
-      if (!promoted) {
-        const otherDesc = [...dimUnits]
-          .filter((u) => !usedUnits.some((c) => c.id === u.id))
-          .sort((a, b2) => b2.factor - a.factor);
-        for (const u of otherDesc) {
-          if (u.factor <= smallest.factor) continue;
-          if (baseTotal / u.factor >= 1) {
-            promoted = u;
-            break;
-          }
-        }
-      }
-      if (promoted) chosen = promoted;
     }
-    out.push({
-      quantity: round3(baseTotal / chosen.factor),
-      unitId: chosen.id,
-      unitName: chosen.name,
-      dimension: b.dimension,
-    });
+    if (promoted) chosen = promoted;
   }
-
-  // Stable order: mass, volume, count, unitless.
-  const order: Record<string, number> = { mass: 0, volume: 1, count: 2, unitless: 3 };
-  out.sort((a, b) => {
-    const ak = a.dimension ?? "unitless";
-    const bk = b.dimension ?? "unitless";
-    return (order[ak] ?? 99) - (order[bk] ?? 99);
-  });
-  return out;
+  return {
+    quantity: round3(baseTotal / chosen.factor),
+    unitId: chosen.id,
+    unitName: chosen.name,
+    dimension: dim,
+  };
 }
 
 const dimUnitsCache = new Map<Dimension, UnitRow[]>();
@@ -469,13 +503,9 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 /**
  * Adds a single manual item to the list. Always at most one shopping_item
- * row per ingredient — a fresh add against an existing item simply bumps
- * the version and (if the new add carries a quantity) replaces the manual
- * quantity. Checked items inside the 24 h grace window get reactivated.
- *
- * Products always create a new row — same-name product duplicates are
- * intentionally allowed since "1× Toilettenpapier" + "1× Toilettenpapier"
- * isn't meaningful to merge.
+ * per ingredient — a fresh add against an existing item replaces the
+ * manual override for the matching dimension. Reactivates a checked item
+ * within the 24h grace window.
  */
 export function addManualItem(input: AddItemInput): {
   item: ShoppingItemView;
@@ -527,6 +557,53 @@ function candidateView(c: NameCandidate): {
   return { kind: c.kind, id: c.id, name: c.name, matchedAlias: c.matchedAlias };
 }
 
+function dimensionForUnitId(tx: Tx, unitId: number | null): AmountDimension {
+  if (unitId == null) return "none";
+  const row = tx
+    .select({ d: unit.dimension })
+    .from(unit)
+    .where(eq(unit.id, unitId))
+    .get();
+  return (row?.d as AmountDimension | undefined) ?? "none";
+}
+
+function upsertAmount(
+  tx: Tx,
+  input: {
+    itemId: number;
+    quantity: number | null;
+    unitId: number | null;
+    note?: string | null;
+  },
+): void {
+  const dim = dimensionForUnitId(tx, input.unitId);
+  const existing = tx
+    .select({ id: shoppingItemAmount.id })
+    .from(shoppingItemAmount)
+    .where(
+      and(
+        eq(shoppingItemAmount.itemId, input.itemId),
+        eq(shoppingItemAmount.dimension, dim),
+      ),
+    )
+    .get();
+  if (existing) {
+    tx.update(shoppingItemAmount)
+      .set({ quantity: input.quantity, unitId: input.unitId })
+      .where(eq(shoppingItemAmount.id, existing.id))
+      .run();
+  } else {
+    tx.insert(shoppingItemAmount)
+      .values({
+        itemId: input.itemId,
+        quantity: input.quantity,
+        unitId: input.unitId,
+        dimension: dim,
+      })
+      .run();
+  }
+}
+
 function addIngredientItem(
   ingredientId: number,
   input: { quantity?: number | null; unitId?: number | null; note?: string | null },
@@ -552,8 +629,8 @@ function addIngredientItem(
         .values({
           ingredientId,
           productId: null,
-          quantity: input.quantity ?? null,
-          unitId: input.unitId ?? null,
+          quantity: null,
+          unitId: null,
           categoryId: ing.defaultCategoryId ?? null,
           note: input.note ?? null,
           sortOrder,
@@ -568,12 +645,15 @@ function addIngredientItem(
       existing.checkedAt != null &&
       Math.floor(Date.now() / 1000) - existing.checkedAt < GRACE_SECONDS
     ) {
+      // Reactivate: drop any prior manual overrides (the previously-checked
+      // amounts are "gone" from the user's perspective) and start over.
+      tx.delete(shoppingItemAmount)
+        .where(eq(shoppingItemAmount.itemId, existing.id))
+        .run();
       tx.update(shoppingItem)
         .set({
           checked: false,
           checkedAt: null,
-          quantity: input.quantity ?? null,
-          unitId: input.unitId ?? null,
           note: input.note ?? existing.note,
           version: sql`${shoppingItem.version} + 1`,
           updatedAt: sql`unixepoch()`,
@@ -583,23 +663,34 @@ function addIngredientItem(
       itemId = existing.id;
       action = "reactivated";
     } else {
-      // Existing unchecked: only replace the manual quantity if the caller
-      // sent one (otherwise just bump version — source-derived amounts
-      // already cover everything else).
-      const patch: Partial<typeof shoppingItem.$inferInsert> = {};
-      if (input.quantity !== undefined) patch.quantity = input.quantity ?? null;
-      if (input.unitId !== undefined) patch.unitId = input.unitId ?? null;
-      if (input.note !== undefined) patch.note = input.note ?? null;
-      tx.update(shoppingItem)
-        .set({
-          ...patch,
-          version: sql`${shoppingItem.version} + 1`,
-          updatedAt: sql`unixepoch()`,
-        })
-        .where(eq(shoppingItem.id, existing.id))
-        .run();
+      if (input.note !== undefined) {
+        tx.update(shoppingItem)
+          .set({
+            note: input.note ?? null,
+            version: sql`${shoppingItem.version} + 1`,
+            updatedAt: sql`unixepoch()`,
+          })
+          .where(eq(shoppingItem.id, existing.id))
+          .run();
+      } else {
+        tx.update(shoppingItem)
+          .set({
+            version: sql`${shoppingItem.version} + 1`,
+            updatedAt: sql`unixepoch()`,
+          })
+          .where(eq(shoppingItem.id, existing.id))
+          .run();
+      }
       itemId = existing.id;
       action = "incremented";
+    }
+
+    if (input.quantity != null || input.unitId != null) {
+      upsertAmount(tx, {
+        itemId,
+        quantity: input.quantity ?? null,
+        unitId: input.unitId ?? null,
+      });
     }
 
     const view = getItemView(itemId);
@@ -632,8 +723,8 @@ function addProductItem(
       .values({
         ingredientId: null,
         productId,
-        quantity: input.quantity ?? null,
-        unitId: input.unitId ?? null,
+        quantity: null,
+        unitId: null,
         categoryId: p.defaultCategoryId ?? null,
         note: input.note ?? null,
         sortOrder,
@@ -641,7 +732,15 @@ function addProductItem(
       })
       .returning({ id: shoppingItem.id })
       .all();
-    const view = getItemView(created[0].id);
+    const itemId = created[0].id;
+    if (input.quantity != null || input.unitId != null) {
+      upsertAmount(tx, {
+        itemId,
+        quantity: input.quantity ?? null,
+        unitId: input.unitId ?? null,
+      });
+    }
+    const view = getItemView(itemId);
     if (!view) throw new ShoppingApiError("item missing after add", 500);
     return {
       item: view,
@@ -667,8 +766,6 @@ function findExistingForIngredient(
   ingredientId: number,
 ): {
   id: number;
-  quantity: number | null;
-  unitId: number | null;
   checked: boolean;
   checkedAt: number | null;
   note: string | null;
@@ -676,8 +773,6 @@ function findExistingForIngredient(
   const row = tx
     .select({
       id: shoppingItem.id,
-      quantity: shoppingItem.quantity,
-      unitId: shoppingItem.unitId,
       checked: shoppingItem.checked,
       checkedAt: shoppingItem.checkedAt,
       note: shoppingItem.note,
@@ -688,8 +783,6 @@ function findExistingForIngredient(
   if (!row) return null;
   return {
     id: row.id,
-    quantity: row.quantity,
-    unitId: row.unitId,
     checked: !!row.checked,
     checkedAt: row.checkedAt,
     note: row.note,
@@ -706,11 +799,14 @@ function nextSortOrder(tx: Tx): number {
 
 export type PatchInput = {
   checked?: boolean;
-  quantity?: number | null;
-  unitId?: number | null;
   note?: string | null;
 };
 
+/**
+ * Updates only the item-level fields (checked / note). Amount edits go
+ * through `setItemAmount` / `deleteItemAmount` so each manual override
+ * targets a specific dimension.
+ */
 export function patchItem(id: number, patch: PatchInput): ShoppingItemView {
   const existing = db
     .select({ id: shoppingItem.id, checked: shoppingItem.checked })
@@ -723,12 +819,6 @@ export function patchItem(id: number, patch: PatchInput): ShoppingItemView {
   if (Object.prototype.hasOwnProperty.call(patch, "checked")) {
     set.checked = patch.checked;
     set.checkedAt = patch.checked ? Math.floor(Date.now() / 1000) : null;
-  }
-  if (Object.prototype.hasOwnProperty.call(patch, "quantity")) {
-    set.quantity = patch.quantity ?? null;
-  }
-  if (Object.prototype.hasOwnProperty.call(patch, "unitId")) {
-    set.unitId = patch.unitId ?? null;
   }
   if (Object.prototype.hasOwnProperty.call(patch, "note")) {
     set.note = patch.note ?? null;
@@ -751,15 +841,83 @@ export function patchItem(id: number, patch: PatchInput): ShoppingItemView {
   return view;
 }
 
+export type SetAmountInput = {
+  quantity: number | null;
+  unitId: number | null;
+};
+
+/**
+ * Upserts a manual override for a specific dimension. The dimension is
+ * derived from `unitId` (unitless when null). Sets the displayed amount
+ * for that dimension regardless of what the meal-source contributions say.
+ */
+export function setItemAmount(
+  itemId: number,
+  input: SetAmountInput,
+): ShoppingItemView {
+  const exists = db
+    .select({ id: shoppingItem.id })
+    .from(shoppingItem)
+    .where(eq(shoppingItem.id, itemId))
+    .get();
+  if (!exists) throw new ShoppingApiError("item not found", 404);
+
+  db.transaction((tx) => {
+    upsertAmount(tx, {
+      itemId,
+      quantity: input.quantity,
+      unitId: input.unitId,
+    });
+    tx.update(shoppingItem)
+      .set({
+        version: sql`${shoppingItem.version} + 1`,
+        updatedAt: sql`unixepoch()`,
+      })
+      .where(eq(shoppingItem.id, itemId))
+      .run();
+  });
+  const view = getItemView(itemId);
+  if (!view) throw new ShoppingApiError("item not found", 404);
+  return view;
+}
+
+export function deleteItemAmount(itemId: number, amountId: number): ShoppingItemView {
+  const row = db
+    .select({ id: shoppingItemAmount.id })
+    .from(shoppingItemAmount)
+    .where(
+      and(
+        eq(shoppingItemAmount.id, amountId),
+        eq(shoppingItemAmount.itemId, itemId),
+      ),
+    )
+    .get();
+  if (!row) throw new ShoppingApiError("amount not found", 404);
+  db.transaction((tx) => {
+    tx.delete(shoppingItemAmount).where(eq(shoppingItemAmount.id, amountId)).run();
+    tx.update(shoppingItem)
+      .set({
+        version: sql`${shoppingItem.version} + 1`,
+        updatedAt: sql`unixepoch()`,
+      })
+      .where(eq(shoppingItem.id, itemId))
+      .run();
+  });
+  const view = getItemView(itemId);
+  if (!view) throw new ShoppingApiError("item not found", 404);
+  return view;
+}
+
 export function deleteItem(id: number): void {
   const res = db.delete(shoppingItem).where(eq(shoppingItem.id, id)).run();
   if (res.changes === 0) throw new ShoppingApiError("item not found", 404);
 }
 
 /**
- * Drop every item from the running list. Cascades to `shopping_item_source`,
- * so contributing meals become eligible to reappear in the "Mahlzeiten
- * hinzufügen" preview without the "Bereits auf der Liste" badge.
+ * Drop every item from the running list. Cascades to `shopping_item_source`
+ * and `shopping_item_amount`, so contributing meals become eligible to
+ * reappear in the "Mahlzeiten hinzufügen" preview without the "Bereits auf
+ * der Liste" badge.
  */
 export function clearAllItems(): { deletedCount: number } {
   const result = db.delete(shoppingItem).run();

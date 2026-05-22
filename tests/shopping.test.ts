@@ -201,7 +201,7 @@ describe("shopping preview", () => {
     addMealsToList([
       {
         mealPlanId: ctx.mealPlanId,
-        recipeIngredientIds: first[0].ingredients.map((i) => i.recipeIngredientId),
+        ingredients: first[0].ingredients.map((i) => ({ recipeIngredientId: i.recipeIngredientId })),
       },
     ]);
     const second = previewMeals("2026-05-23", 1);
@@ -235,7 +235,7 @@ describe("shopping merge-on-add", () => {
     addMealsToList([
       {
         mealPlanId: ctx.mealPlanId,
-        recipeIngredientIds: meals[0].ingredients.map((i) => i.recipeIngredientId),
+        ingredients: meals[0].ingredients.map((i) => ({ recipeIngredientId: i.recipeIngredientId })),
       },
     ]);
 
@@ -268,7 +268,7 @@ describe("shopping merge-on-add", () => {
     addMealsToList([
       {
         mealPlanId: ctx.mealPlanId,
-        recipeIngredientIds: meals[0].ingredients.map((i) => i.recipeIngredientId),
+        ingredients: meals[0].ingredients.map((i) => ({ recipeIngredientId: i.recipeIngredientId })),
       },
     ]);
     const items = listShoppingItems();
@@ -298,7 +298,7 @@ describe("shopping merge-on-add", () => {
     addMealsToList([
       {
         mealPlanId: ctx.mealPlanId,
-        recipeIngredientIds: meals[0].ingredients.map((i) => i.recipeIngredientId),
+        ingredients: meals[0].ingredients.map((i) => ({ recipeIngredientId: i.recipeIngredientId })),
       },
     ]);
     const items = listShoppingItems();
@@ -318,7 +318,7 @@ describe("shopping merge-on-add", () => {
     addMealsToList([
       {
         mealPlanId: ctx.mealPlanId,
-        recipeIngredientIds: meals[0].ingredients.map((i) => i.recipeIngredientId),
+        ingredients: meals[0].ingredients.map((i) => ({ recipeIngredientId: i.recipeIngredientId })),
       },
     ]);
 
@@ -341,9 +341,12 @@ describe("shopping merge-on-add", () => {
     addMealsToList([
       {
         mealPlanId: ctx.mealPlanId,
-        recipeIngredientIds: [
-          meals2[0].ingredients.find((i) => i.ingredientName === "Tomate")!
-            .recipeIngredientId,
+        ingredients: [
+          {
+            recipeIngredientId: meals2[0].ingredients.find(
+              (i) => i.ingredientName === "Tomate",
+            )!.recipeIngredientId,
+          },
         ],
       },
     ]);
@@ -361,13 +364,71 @@ describe("shopping merge-on-add", () => {
     addMealsToList([
       {
         mealPlanId: ctx.mealPlanId,
-        recipeIngredientIds: meals[0].ingredients.map((i) => i.recipeIngredientId),
+        ingredients: meals[0].ingredients.map((i) => ({ recipeIngredientId: i.recipeIngredientId })),
       },
     ]);
     const items = listShoppingItems();
     for (const item of items) {
       expect(item.categoryId).toBe(ctx.categoryId);
     }
+  });
+});
+
+describe("per-dimension manual override", () => {
+  let ctx: Ctx;
+
+  beforeEach(async () => {
+    ctx = await seed();
+  });
+
+  it("setItemAmount replaces the sources sum for that dimension", async () => {
+    const { previewMeals } = await import("@/lib/shopping/preview");
+    const { addMealsToList } = await import("@/lib/shopping/merge");
+    const { listShoppingItems, setItemAmount } = await import("@/lib/shopping/items");
+    const meals = previewMeals("2026-05-23", 1);
+    addMealsToList([
+      {
+        mealPlanId: ctx.mealPlanId,
+        ingredients: meals[0].ingredients.map((i) => ({
+          recipeIngredientId: i.recipeIngredientId,
+        })),
+      },
+    ]);
+    const before = listShoppingItems();
+    const eier = before.find((i) => i.name === "Eier");
+    expect(eier).toBeDefined();
+    // Scaled: recipe says 3 Stk for 2 portions; planned 4 portions → 6 Stk.
+    expect(eier?.amounts[0].quantity).toBe(6);
+
+    // User says "I have 2 at home, only need 4".
+    setItemAmount(eier!.id, { quantity: 4, unitId: ctx.unitIds.stk });
+
+    const after = listShoppingItems();
+    const eierAfter = after.find((i) => i.name === "Eier");
+    expect(eierAfter?.amounts).toHaveLength(1);
+    expect(eierAfter?.amounts[0].quantity).toBe(4);
+    expect(eierAfter?.amounts[0].unitName).toBe("Stk");
+  });
+
+  it("addMealsToList honours a per-ingredient quantity override", async () => {
+    const { previewMeals } = await import("@/lib/shopping/preview");
+    const { addMealsToList } = await import("@/lib/shopping/merge");
+    const { listShoppingItems } = await import("@/lib/shopping/items");
+    const meals = previewMeals("2026-05-23", 1);
+    const tomate = meals[0].ingredients.find((i) => i.ingredientName === "Tomate")!;
+    addMealsToList([
+      {
+        mealPlanId: ctx.mealPlanId,
+        ingredients: [
+          // Recipe says 500 g for 2 portions (planned 4 → scaled 1000 g);
+          // user types 750 instead.
+          { recipeIngredientId: tomate.recipeIngredientId, quantity: 750 },
+        ],
+      },
+    ]);
+    const items = listShoppingItems();
+    const t = items.find((i) => i.name === "Tomate");
+    expect(t?.sources[0].contributedQuantity).toBe(750);
   });
 });
 
@@ -419,7 +480,7 @@ describe("meal-removal subtraction", () => {
     addMealsToList([
       {
         mealPlanId: ctx.mealPlanId,
-        recipeIngredientIds: meals[0].ingredients.map((i) => i.recipeIngredientId),
+        ingredients: meals[0].ingredients.map((i) => ({ recipeIngredientId: i.recipeIngredientId })),
       },
     ]);
     expect(listShoppingItems().length).toBeGreaterThan(0);
@@ -439,7 +500,7 @@ describe("meal-removal subtraction", () => {
     addMealsToList([
       {
         mealPlanId: ctx.mealPlanId,
-        recipeIngredientIds: meals[0].ingredients.map((i) => i.recipeIngredientId),
+        ingredients: meals[0].ingredients.map((i) => ({ recipeIngredientId: i.recipeIngredientId })),
       },
     ]);
     const before = listShoppingItems().length;
@@ -473,7 +534,7 @@ describe("sweeper", () => {
     addMealsToList([
       {
         mealPlanId: ctx.mealPlanId,
-        recipeIngredientIds: meals[0].ingredients.map((i) => i.recipeIngredientId),
+        ingredients: meals[0].ingredients.map((i) => ({ recipeIngredientId: i.recipeIngredientId })),
       },
     ]);
 
@@ -515,7 +576,7 @@ describe("meal-plan view reports shopping impact", () => {
     addMealsToList([
       {
         mealPlanId: ctx.mealPlanId,
-        recipeIngredientIds: meals[0].ingredients.map((i) => i.recipeIngredientId),
+        ingredients: meals[0].ingredients.map((i) => ({ recipeIngredientId: i.recipeIngredientId })),
       },
     ]);
     const after = listByDateRange("2026-05-23", "2026-05-23");
