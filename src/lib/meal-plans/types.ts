@@ -22,14 +22,15 @@ export type MealPlanMoveInput = {
 export type ReorderDirection = "up" | "down";
 
 /**
- * Default `servingsOverride` for a new meal entry. Most imported recipes
- * have `servings = 1` (the schema default — they never bother setting it),
- * which produces meals that feel too small for a household-of-two plan.
- * Treat anything below 2 as "unset" and fall back to 2; otherwise honour
- * the recipe's own value.
+ * Default `servingsOverride` for a new meal entry — just the recipe's own
+ * servings count. Previously this bumped 1-portion recipes to 2 to suit a
+ * household of two, but the silent doubling masked itself in the shopping
+ * list (e.g. "0,33 cups" recipe → "0,67 cups" on the list). Now meals
+ * default to the recipe's own portion count; the user can adjust each meal
+ * explicitly via the editor when they want a different size.
  */
 export function defaultMealPortions(recipeServings: number): number {
-  return recipeServings < 2 ? 2 : recipeServings;
+  return recipeServings;
 }
 
 export type RecipeUsageStats = {
