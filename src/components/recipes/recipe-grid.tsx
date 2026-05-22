@@ -58,7 +58,7 @@ export function RecipeGrid({ recipes, serverQueryActive }: Props) {
             ? `${shown} von ${total} Rezepten.`
             : `${total} Rezept${total === 1 ? "" : "e"}.`}
       </p>
-      <div className="mt-6 grid auto-rows-fr gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+      <div className="mt-6 grid auto-rows-fr gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
         {filtered.map((r) => (
           <RecipeCard key={r.id} recipe={r} />
         ))}

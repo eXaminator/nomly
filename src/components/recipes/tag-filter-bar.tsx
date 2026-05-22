@@ -2,12 +2,24 @@
 
 import * as React from "react";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
-import { Check, Minus, X } from "lucide-react";
+import { Check, ChevronDown, Minus, X } from "lucide-react";
 import { cn } from "@/lib/cn";
 
 type TagState = "off" | "include" | "exclude";
 
-type Props = { allTags: string[] };
+export type TagFilterValue = {
+  must: string[];
+  not: string[];
+};
+
+type Props = {
+  allTags: string[];
+  /** Controlled value. When both `value` and `onChange` are passed, the
+   *  component reads state from this prop and reports changes via the
+   *  callback instead of writing to URL params. */
+  value?: TagFilterValue;
+  onChange?: (next: TagFilterValue) => void;
+};
 
 const NEXT_STATE: Record<TagState, TagState> = {
   off: "include",
@@ -39,19 +51,61 @@ function parseTagList(raw: string | null): Set<string> {
 
 const tagKey = (t: string) => t.toLowerCase();
 
-export function TagFilterBar({ allTags }: Props) {
+export function TagFilterBar({ allTags, value, onChange }: Props) {
+  const isControlled = value != null && onChange != null;
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
+  const [expanded, setExpanded] = React.useState(false);
+  const listId = React.useId();
 
   const mustSet = React.useMemo(
-    () => parseTagList(params.get("must")),
-    [params],
+    () =>
+      isControlled
+        ? new Set(value.must.map(tagKey))
+        : parseTagList(params.get("must")),
+    [isControlled, value, params],
   );
   const notSet = React.useMemo(
-    () => parseTagList(params.get("not")),
-    [params],
+    () =>
+      isControlled
+        ? new Set(value.not.map(tagKey))
+        : parseTagList(params.get("not")),
+    [isControlled, value, params],
   );
+
+  // Translate a key-set back to the display-cased strings — needed when
+  // bubbling controlled changes back to the parent.
+  function toDisplay(keys: Set<string>): string[] {
+    return Array.from(keys).map(
+      (k) => allTags.find((t) => tagKey(t) === k) ?? k,
+    );
+  }
+
+  function commit(nextMust: Set<string>, nextNot: Set<string>) {
+    if (isControlled) {
+      onChange({ must: toDisplay(nextMust), not: toDisplay(nextNot) });
+      return;
+    }
+    const url = new URLSearchParams(params.toString());
+    if (nextMust.size === 0) url.delete("must");
+    else url.set("must", toDisplay(nextMust).join(","));
+    if (nextNot.size === 0) url.delete("not");
+    else url.set("not", toDisplay(nextNot).join(","));
+    const qs = url.toString();
+    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+  }
+
+  // Active chips bubble to the front so users always see what's selected,
+  // even when the list is collapsed.
+  const sortedTags = React.useMemo(() => {
+    return [...allTags].sort((a, b) => {
+      const aActive = mustSet.has(tagKey(a)) || notSet.has(tagKey(a));
+      const bActive = mustSet.has(tagKey(b)) || notSet.has(tagKey(b));
+      if (aActive === bActive) return 0;
+      return aActive ? -1 : 1;
+    });
+  }, [allTags, mustSet, notSet]);
 
   function stateFor(tag: string): TagState {
     const k = tagKey(tag);
@@ -66,58 +120,26 @@ export function TagFilterBar({ allTags }: Props) {
         ? NEXT_STATE[stateFor(tag)]
         : PREV_STATE[stateFor(tag)];
     const k = tagKey(tag);
-
-    // Look up the existing canonical-cased value in the URL (or fall back to
-    // the clicked tag's display casing) so we keep the user's spelling
-    // round-trip stable in the address bar.
-    const url = new URLSearchParams(params.toString());
-    const displayTag = allTags.find((t) => tagKey(t) === k) ?? tag;
-
-    const drop = (key: string, set: Set<string>) => {
-      const remaining = Array.from(set).filter((x) => x !== k);
-      if (remaining.length === 0) {
-        url.delete(key);
-      } else {
-        // Re-derive display values from `allTags` so URL casing stays in
-        // sync with the tag's canonical form.
-        const display = remaining
-          .map((rk) => allTags.find((t) => tagKey(t) === rk) ?? rk)
-          .join(",");
-        url.set(key, display);
-      }
-    };
-    const add = (key: string, set: Set<string>) => {
-      const values = Array.from(new Set([...set, k]));
-      const display = values
-        .map((rk) =>
-          rk === k ? displayTag : (allTags.find((t) => tagKey(t) === rk) ?? rk),
-        )
-        .join(",");
-      url.set(key, display);
-    };
+    const nextMust = new Set(mustSet);
+    const nextNot = new Set(notSet);
 
     if (next === "off") {
-      drop("must", mustSet);
-      drop("not", notSet);
+      nextMust.delete(k);
+      nextNot.delete(k);
     } else if (next === "include") {
-      drop("not", notSet);
-      add("must", mustSet);
+      nextNot.delete(k);
+      nextMust.add(k);
     } else {
       // exclude
-      drop("must", mustSet);
-      add("not", notSet);
+      nextMust.delete(k);
+      nextNot.add(k);
     }
 
-    const qs = url.toString();
-    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+    commit(nextMust, nextNot);
   }
 
   function clearAll() {
-    const url = new URLSearchParams(params.toString());
-    url.delete("must");
-    url.delete("not");
-    const qs = url.toString();
-    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+    commit(new Set(), new Set());
   }
 
   if (allTags.length === 0) return null;
@@ -140,8 +162,17 @@ export function TagFilterBar({ allTags }: Props) {
           </button>
         ) : null}
       </div>
-      <div className="flex flex-wrap gap-1.5">
-        {allTags.map((tag) => {
+      <div
+        id={listId}
+        className={cn(
+          "flex flex-wrap gap-1.5 overflow-hidden transition-[max-height] duration-200 ease-out motion-reduce:transition-none",
+          // Two rows of chips: chip ≈ 26px + gap-1.5 (6px) → 58px ≈ 3.625rem.
+          // Expanded `max-h-[40rem]` is generous enough to never bite for
+          // any realistic tag count (we don't cap upstream).
+          expanded ? "max-h-[40rem]" : "max-h-[3.625rem]",
+        )}
+      >
+        {sortedTags.map((tag) => {
           const state = stateFor(tag);
           return (
             <button
@@ -182,6 +213,31 @@ export function TagFilterBar({ allTags }: Props) {
           );
         })}
       </div>
+      {allTags.length > 6 ? (
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          aria-expanded={expanded}
+          aria-controls={listId}
+          className={cn(
+            "inline-flex items-center justify-center gap-1 self-stretch rounded-md text-xs font-medium",
+            "border border-transparent text-[var(--color-muted-fg)] transition-colors",
+            "hover:border-[var(--color-border)] hover:bg-[var(--color-muted)] hover:text-[var(--color-fg)]",
+            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]",
+            // 44px tap target on touch / mobile, tighter on desktop.
+            "min-h-11 px-3 py-2 md:min-h-8 md:py-1",
+          )}
+        >
+          <span>{expanded ? "Weniger anzeigen" : "Mehr anzeigen"}</span>
+          <ChevronDown
+            className={cn(
+              "size-3.5 transition-transform duration-200 motion-reduce:transition-none",
+              expanded && "rotate-180",
+            )}
+            aria-hidden
+          />
+        </button>
+      ) : null}
     </div>
   );
 }
