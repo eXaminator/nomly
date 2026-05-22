@@ -48,6 +48,14 @@ export type MealPlanView = {
   servingsOverride: number | null;
   note: string | null;
   sortOrder: number;
+  /**
+   * True when at least one `shopping_item_source` row currently references
+   * this meal. Drives the shopping-aware delete confirm in the planner
+   * (Epic 5 §4.3.3). Stays false for meals that have never been added to
+   * the shopping list, or whose contributing items have all been swept or
+   * deleted.
+   */
+  hasShoppingImpact: boolean;
   recipe: {
     id: number;
     title: string;

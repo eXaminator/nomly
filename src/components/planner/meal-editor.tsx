@@ -134,7 +134,7 @@ function MealEditorDialog({ meal, onClose, onSave, onDelete }: Props) {
           </div>
 
           <div className="flex items-center justify-between gap-2 border-t border-[var(--color-border)] px-5 py-3">
-            {confirmingDelete ? (
+            {confirmingDelete && !meal?.hasShoppingImpact ? (
               <div className="flex flex-1 items-center justify-between gap-2">
                 <span className="text-sm text-[var(--color-fg)]">Mahlzeit löschen?</span>
                 <div className="flex gap-2">
@@ -157,7 +157,16 @@ function MealEditorDialog({ meal, onClose, onSave, onDelete }: Props) {
                   size="icon"
                   aria-label="Löschen"
                   className="text-[var(--color-danger)]"
-                  onClick={() => setConfirmingDelete(true)}
+                  onClick={() => {
+                    if (!meal) return;
+                    // Shopping-aware confirm replaces the inline confirm —
+                    // delegate to the planner's modal via onDelete.
+                    if (meal.hasShoppingImpact) {
+                      void handleDelete();
+                    } else {
+                      setConfirmingDelete(true);
+                    }
+                  }}
                   disabled={saving}
                 >
                   <Trash2 />

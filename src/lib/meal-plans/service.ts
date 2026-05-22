@@ -5,6 +5,7 @@ import {
   recipe,
   recipeSection,
   recipeIngredient,
+  shoppingItemSource,
   ingredient as ingredientTable,
 } from "../../db/schema.ts";
 import { deriveDiet, type IngredientDietaryClass, type RecipeDiet } from "../recipes/diet.ts";
@@ -259,6 +260,14 @@ export function listByDateRange(from: string, to: string): MealPlanView[] {
     Array.from(new Set(meals.map((m) => m.recipeId))),
   );
 
+  const shoppingHits = db
+    .select({ mealPlanId: shoppingItemSource.mealPlanId })
+    .from(shoppingItemSource)
+    .where(inArray(shoppingItemSource.mealPlanId, meals.map((m) => m.id)))
+    .groupBy(shoppingItemSource.mealPlanId)
+    .all();
+  const hasShopping = new Set(shoppingHits.map((r) => r.mealPlanId));
+
   return meals.map((m) => {
     const diet = dietByRecipe.get(m.recipeId) ?? { isVegan: null, isVegetarian: null };
     const servings = m.servingsOverride ?? m.recipeServings;
@@ -269,6 +278,7 @@ export function listByDateRange(from: string, to: string): MealPlanView[] {
       servingsOverride: m.servingsOverride,
       note: m.note,
       sortOrder: m.sortOrder,
+      hasShoppingImpact: hasShopping.has(m.id),
       recipe: {
         id: m.recipeId,
         title: m.recipeTitle,

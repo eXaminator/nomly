@@ -42,6 +42,18 @@ export async function apiDeleteMeal(id: number): Promise<void> {
   await jsonOrThrow(res);
 }
 
+export async function apiDeleteMealWithShopping(
+  id: number,
+  mode: "keep" | "subtract",
+): Promise<void> {
+  const res = await fetch(`/api/v1/meal-plans/${id}/with-shopping`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ mode }),
+  });
+  await jsonOrThrow(res);
+}
+
 export async function apiReorderMeal(
   id: number,
   direction: "up" | "down",

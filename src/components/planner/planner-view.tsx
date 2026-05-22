@@ -41,11 +41,13 @@ import { RecipePreviewDialog } from "./recipe-preview-dialog";
 import {
   apiCreateMeal,
   apiDeleteMeal,
+  apiDeleteMealWithShopping,
   apiMoveMeal,
   apiReorderDay,
   apiReorderMeal,
   apiUpdateMeal,
 } from "./api";
+import { ShoppingAwareDeleteDialog } from "./shopping-aware-delete-dialog";
 import type { DragData, DropData } from "./types";
 
 type Props = {
@@ -130,6 +132,7 @@ export function PlannerView({
       servingsOverride: servings,
       note,
       sortOrder: maxSortOrderForDate(date) + 1,
+      hasShoppingImpact: false,
       recipe: {
         id: recipe.id,
         title: recipe.title,
@@ -237,13 +240,36 @@ export function PlannerView({
     });
   }
 
-  async function handleDelete(id: number) {
-    // Remove from local state immediately — feels instant. The server call
-    // and refresh run in the background; if either fails, withBusy() triggers
-    // a refresh that puts the meal back from the canonical SSR snapshot.
+  // When set, the planner shows the shopping-aware 3-button confirm instead
+  // of the meal-card's plain inline confirm. Cleared on cancel/choice.
+  const [pendingShoppingDelete, setPendingShoppingDelete] = React.useState<
+    MealPlanView | null
+  >(null);
+
+  async function performPlainDelete(id: number) {
     setMealPlans((prev) => prev.filter((m) => m.id !== id));
     await withBusy(async () => {
       await apiDeleteMeal(id);
+      router.refresh();
+    });
+  }
+
+  async function handleDelete(id: number) {
+    const meal = mealPlans.find((m) => m.id === id);
+    if (meal?.hasShoppingImpact) {
+      setPendingShoppingDelete(meal);
+      return;
+    }
+    await performPlainDelete(id);
+  }
+
+  async function handleShoppingChoice(choice: "keep" | "subtract") {
+    const meal = pendingShoppingDelete;
+    if (!meal) return;
+    setMealPlans((prev) => prev.filter((m) => m.id !== meal.id));
+    setPendingShoppingDelete(null);
+    await withBusy(async () => {
+      await apiDeleteMealWithShopping(meal.id, choice);
       router.refresh();
     });
   }
@@ -697,6 +723,13 @@ export function PlannerView({
         onClose={() => setEditing(null)}
         onSave={handleSaveEdit}
         onDelete={handleDelete}
+      />
+      <ShoppingAwareDeleteDialog
+        open={pendingShoppingDelete != null}
+        mealTitle={pendingShoppingDelete?.recipe.title ?? ""}
+        itemCount={null}
+        onChoose={handleShoppingChoice}
+        onCancel={() => setPendingShoppingDelete(null)}
       />
       <AddMealModal
         date={addingForDate}
