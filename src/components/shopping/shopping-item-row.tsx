@@ -81,7 +81,7 @@ export function ShoppingItemRow({
   return (
     <div
       className={cn(
-        "group flex items-stretch gap-2 px-2 py-2 sm:px-3 transition-colors",
+        "group flex items-center gap-2 px-2 py-2 sm:px-3 transition-colors",
         item.checked ? "opacity-60" : "hover:bg-[var(--color-muted)]/40",
       )}
     >
@@ -92,9 +92,7 @@ export function ShoppingItemRow({
         title={item.checked ? "Rückgängig" : "Abhaken"}
         // The whole row toggles, but a dedicated left target gives both
         // keyboard users and screen readers a clear control.
-        className={cn(
-          "flex w-7 shrink-0 items-center justify-center self-start py-1",
-        )}
+        className="flex w-7 shrink-0 items-center justify-center"
       >
         <span
           className={cn(
@@ -182,7 +180,7 @@ export function ShoppingItemRow({
         )}
       </button>
 
-      <div className="flex shrink-0 items-start gap-1 self-start" onClick={(e) => e.stopPropagation()}>
+      <div className="flex shrink-0 items-center gap-1" onClick={(e) => e.stopPropagation()}>
         {editing ? (
           <>
             <Button
