@@ -111,14 +111,20 @@ export function ListShell<TItem>({
   );
 
   const filtered = React.useMemo(() => {
-    const q = query.trim().toLowerCase();
+    // Split on "|" so the user can OR-connect multiple terms
+    // ("tomato|onion" → matches either). Empty terms are dropped so
+    // trailing/leading pipes are forgiving.
+    const terms = query
+      .toLowerCase()
+      .split("|")
+      .map((t) => t.trim())
+      .filter((t) => t.length > 0);
     return items.filter((item) => {
-      if (q.length > 0) {
-        if (searchMatches) {
-          if (!searchMatches(item, q)) return false;
-        } else {
-          if (!nameOf(item).toLowerCase().includes(q)) return false;
-        }
+      if (terms.length > 0) {
+        const hit = searchMatches
+          ? terms.some((t) => searchMatches(item, t))
+          : terms.some((t) => nameOf(item).toLowerCase().includes(t));
+        if (!hit) return false;
       }
       if (applyFilters && !applyFilters(item)) return false;
       return true;
@@ -299,7 +305,7 @@ export function ListShell<TItem>({
           <Input
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
-            placeholder={`Suchen…`}
+            placeholder={`Suchen… (mehrere mit „|" trennen)`}
             className="pl-9"
           />
         </div>
