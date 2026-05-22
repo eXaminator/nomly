@@ -13,8 +13,24 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { addDays } from "@/lib/meal-plans/dates";
 import type { PreviewMeal, PreviewIngredient } from "@/lib/shopping/preview";
 import { previewMeals as apiPreview, addMealsToList } from "./api";
+
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * Inclusive day count between two ISO dates. 0/negative-result inputs
+ * collapse to 1 so the form never produces an invalid length.
+ */
+function daysBetween(start: string, end: string): number {
+  if (!ISO_DATE_RE.test(start) || !ISO_DATE_RE.test(end)) return 1;
+  const a = new Date(`${start}T00:00:00Z`).getTime();
+  const b = new Date(`${end}T00:00:00Z`).getTime();
+  const diff = Math.round((b - a) / 86_400_000) + 1;
+  if (!Number.isFinite(diff) || diff < 1) return 1;
+  return diff;
+}
 
 type Props = {
   open: boolean;
@@ -213,6 +229,22 @@ export function AddMealsDialog({
                 type="date"
                 value={start}
                 onChange={(e) => setStart(e.target.value)}
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <Label htmlFor="meals-end">Enddatum</Label>
+              <Input
+                id="meals-end"
+                type="date"
+                min={start}
+                value={addDays(start, Math.max(0, length - 1))}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  if (!ISO_DATE_RE.test(next)) return;
+                  // End-before-start would produce a non-positive length;
+                  // clamp via daysBetween's floor (1).
+                  setLength(Math.min(60, daysBetween(start, next)));
+                }}
               />
             </div>
             <div className="flex flex-col gap-1">
