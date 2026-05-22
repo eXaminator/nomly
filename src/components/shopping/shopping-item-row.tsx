@@ -60,6 +60,35 @@ export function ShoppingItemRow({
   const [newAmountUnit, setNewAmountUnit] = React.useState<ComboboxItem | null>(null);
   const [addingNew, setAddingNew] = React.useState(false);
 
+  // Default the new-amount unit to "Stück" the first time the form opens
+  // for this item — it's the most common ad-hoc unit by a wide margin.
+  // Fetched lazily so we don't pay for it unless the user opens the form.
+  React.useEffect(() => {
+    if (!addingNew || newAmountUnit != null) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch(
+          `/api/v1/units?q=${encodeURIComponent("Stück")}`,
+          { cache: "no-store" },
+        );
+        if (!res.ok) return;
+        const data = (await res.json()) as {
+          items: Array<{ id: number; name: string }>;
+        };
+        const hit = data.items.find((u) => u.name === "Stück") ?? data.items[0];
+        if (!cancelled && hit) {
+          setNewAmountUnit({ id: hit.id, name: hit.name });
+        }
+      } catch {
+        // Best-effort default; leave the picker empty if the lookup fails.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [addingNew, newAmountUnit]);
+
   React.useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setAmountInputs(
