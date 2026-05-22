@@ -24,6 +24,7 @@ type Props = {
 
 export function AddItemDialog({ open, onClose, onAdded }: Props) {
   const [query, setQuery] = React.useState("");
+  const [quantity, setQuantity] = React.useState("1");
   const [hits, setHits] = React.useState<AutocompleteHit[]>([]);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -32,10 +33,18 @@ export function AddItemDialog({ open, onClose, onAdded }: Props) {
     if (!open) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setQuery("");
+      setQuantity("1");
       setHits([]);
       setError(null);
     }
   }, [open]);
+
+  function parsedQuantity(): number | null {
+    const trimmed = quantity.trim().replace(",", ".");
+    if (trimmed.length === 0) return null;
+    const n = Number(trimmed);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  }
 
   React.useEffect(() => {
     if (!open) return;
@@ -61,11 +70,12 @@ export function AddItemDialog({ open, onClose, onAdded }: Props) {
   async function pickExisting(hit: AutocompleteHit) {
     setBusy(true);
     setError(null);
+    const qty = parsedQuantity();
     try {
       await addItem(
         hit.kind === "ingredient"
-          ? { ingredientId: hit.id }
-          : { productId: hit.id },
+          ? { ingredientId: hit.id, quantity: qty }
+          : { productId: hit.id, quantity: qty },
       );
       onAdded();
     } catch (e) {
@@ -81,7 +91,7 @@ export function AddItemDialog({ open, onClose, onAdded }: Props) {
     setBusy(true);
     setError(null);
     try {
-      await addItem({ byName: trimmed });
+      await addItem({ byName: trimmed, quantity: parsedQuantity() });
       onAdded();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Fehler");
@@ -101,25 +111,38 @@ export function AddItemDialog({ open, onClose, onAdded }: Props) {
           </DialogDescription>
         </DialogHeader>
         <DialogBody className="flex flex-col gap-3">
-          <div className="flex flex-col gap-2">
-            <Label htmlFor="add-name">Name</Label>
-            <Input
-              id="add-name"
-              autoFocus
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="z. B. Toilettenpapier"
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  if (hits.length === 0) {
-                    void pickByName();
-                  } else {
-                    void pickExisting(hits[0]);
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+            <div className="flex flex-1 flex-col gap-2">
+              <Label htmlFor="add-name">Name</Label>
+              <Input
+                id="add-name"
+                autoFocus
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="z. B. Toilettenpapier"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    if (hits.length === 0) {
+                      void pickByName();
+                    } else {
+                      void pickExisting(hits[0]);
+                    }
                   }
-                }
-              }}
-            />
+                }}
+              />
+            </div>
+            <div className="flex flex-col gap-2 sm:w-24">
+              <Label htmlFor="add-quantity">Menge</Label>
+              <Input
+                id="add-quantity"
+                type="text"
+                inputMode="decimal"
+                value={quantity}
+                onChange={(e) => setQuantity(e.target.value)}
+                placeholder="1"
+              />
+            </div>
           </div>
           {hits.length > 0 ? (
             <ul className="flex max-h-60 flex-col divide-y divide-[var(--color-border)] overflow-y-auto rounded-[var(--radius)] border border-[var(--color-border)]">
