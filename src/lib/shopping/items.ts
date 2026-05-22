@@ -367,32 +367,41 @@ function buildAggregatedAmounts(input: AggregateInput): ShoppingItemAmount[] {
       });
       continue;
     }
-    // Pick the largest-factor unit that still yields ≥ 1, biased toward
-    // units that actually appear in the contributions.
-    const preferredIds = new Set(usedUnits.map((u) => u.id));
-    const candidates = dimUnits.length > 0 ? dimUnits : usedUnits;
-    const sorted = [...candidates].sort((a, b2) => {
-      if (a.factor !== b2.factor) return b2.factor - a.factor;
-      const ap = preferredIds.has(a.id) ? 0 : 1;
-      const bp = preferredIds.has(b2.id) ? 0 : 1;
-      return ap - bp;
-    });
-    let chosen: UnitRow | undefined;
-    for (const u of sorted) {
-      if (baseTotal / u.factor >= 1) {
-        chosen = u;
-        break;
+    // Display rule: stay inside the unit(s) the recipe (or user) actually
+    // wrote — never invent a new unit (no surprise "5.291 oz" for what
+    // started life as "150 g"). Promote to a larger unit only when the
+    // smallest contributed unit would render an awkwardly big number
+    // (≥ 1000 of it).
+    const contribByFactorAsc = [...usedUnits].sort((a, b2) => a.factor - b2.factor);
+    const smallest = contribByFactorAsc[0]!;
+    const valueInSmallest = baseTotal / smallest.factor;
+    let chosen = smallest;
+    if (valueInSmallest >= 1000) {
+      // Try larger contributed units first; fall back to other dimension
+      // units only if no contributed unit fits. Pick the largest one whose
+      // value is still ≥ 1.
+      const desc = [...contribByFactorAsc].reverse();
+      let promoted: UnitRow | undefined;
+      for (const u of desc) {
+        if (u.factor <= smallest.factor) continue;
+        if (baseTotal / u.factor >= 1) {
+          promoted = u;
+          break;
+        }
       }
-    }
-    if (!chosen) chosen = sorted[sorted.length - 1] ?? usedUnits[0];
-    if (!chosen) {
-      out.push({
-        quantity: round3(baseTotal),
-        unitId: null,
-        unitName: null,
-        dimension: b.dimension,
-      });
-      continue;
+      if (!promoted) {
+        const otherDesc = [...dimUnits]
+          .filter((u) => !usedUnits.some((c) => c.id === u.id))
+          .sort((a, b2) => b2.factor - a.factor);
+        for (const u of otherDesc) {
+          if (u.factor <= smallest.factor) continue;
+          if (baseTotal / u.factor >= 1) {
+            promoted = u;
+            break;
+          }
+        }
+      }
+      if (promoted) chosen = promoted;
     }
     out.push({
       quantity: round3(baseTotal / chosen.factor),
