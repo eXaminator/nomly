@@ -4,6 +4,7 @@ import * as React from "react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
+  DialogBody,
   DialogContent,
   DialogDescription,
   DialogFooter,
@@ -99,7 +100,7 @@ export function AddItemDialog({ open, onClose, onAdded }: Props) {
             Findet sich nichts, legst du einen neuen Artikel an.
           </DialogDescription>
         </DialogHeader>
-        <div className="flex flex-col gap-3">
+        <DialogBody className="flex flex-col gap-3">
           <div className="flex flex-col gap-2">
             <Label htmlFor="add-name">Name</Label>
             <Input
@@ -153,7 +154,7 @@ export function AddItemDialog({ open, onClose, onAdded }: Props) {
           {error ? (
             <p className="text-sm text-[var(--color-danger)]">{error}</p>
           ) : null}
-        </div>
+        </DialogBody>
         <DialogFooter>
           <Button variant="ghost" onClick={onClose} disabled={busy}>
             Abbrechen

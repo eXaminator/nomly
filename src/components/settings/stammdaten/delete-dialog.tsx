@@ -5,6 +5,7 @@ import { Loader2 } from "lucide-react";
 
 import {
   Dialog,
+  DialogBody,
   DialogContent,
   DialogFooter,
   DialogHeader,
@@ -133,6 +134,7 @@ export function DeleteDialog<TItem>({
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
         </DialogHeader>
+        <DialogBody className="flex flex-col gap-4">
 
         <div className="text-sm">
           {loadingImpact ? (
@@ -211,6 +213,7 @@ export function DeleteDialog<TItem>({
         )}
 
         {error && <p className="text-sm text-[var(--color-danger)]">{error}</p>}
+        </DialogBody>
 
         <DialogFooter>
           <Button variant="ghost" onClick={onClose} disabled={submitting}>

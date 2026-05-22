@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
+  DialogBody,
   DialogContent,
   DialogFooter,
   DialogHeader,
@@ -219,6 +220,7 @@ export function MergeProposalsDialog({
             Ähnliche {labels.plural} zusammenführen
           </DialogTitle>
         </DialogHeader>
+        <DialogBody className="flex flex-col gap-4">
 
         <p className="text-sm text-[var(--color-muted-fg)]">
           Vorschläge basieren auf Namensähnlichkeit (Plurale, Schreibvarianten,
@@ -362,6 +364,7 @@ export function MergeProposalsDialog({
             Wird zusammengeführt… ({progress.done} / {progress.total})
           </p>
         )}
+        </DialogBody>
 
         <DialogFooter className="sm:items-center sm:justify-between">
           <span className="text-xs text-[var(--color-muted-fg)] sm:mr-auto">

@@ -4,6 +4,7 @@ import * as React from "react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
+  DialogBody,
   DialogContent,
   DialogDescription,
   DialogFooter,
@@ -162,7 +163,7 @@ export function AddMealsDialog({
             werden.
           </DialogDescription>
         </DialogHeader>
-        <div className="flex flex-col gap-4">
+        <DialogBody className="flex flex-col gap-4">
           <div className="flex flex-wrap items-end gap-3">
             <div className="flex flex-col gap-1">
               <Label htmlFor="meals-start">Startdatum</Label>
@@ -235,7 +236,7 @@ export function AddMealsDialog({
             )}
           </div>
 
-        </div>
+        </DialogBody>
         <DialogFooter className="sm:items-center sm:justify-between">
           <span className="text-sm text-[var(--color-muted-fg)] sm:mr-auto">
             {totalSelected} Zutaten ausgewählt

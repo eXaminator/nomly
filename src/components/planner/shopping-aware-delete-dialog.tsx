@@ -4,6 +4,7 @@ import * as React from "react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
+  DialogBody,
   DialogContent,
   DialogDescription,
   DialogFooter,
@@ -54,18 +55,22 @@ export function ShoppingAwareDeleteDialog({
             . Was soll mit den Einträgen passieren?
           </DialogDescription>
         </DialogHeader>
-        <ul className="space-y-2 text-sm text-[var(--color-muted-fg)]">
-          <li>
-            <strong className="text-[var(--color-fg)]">Nur Mahlzeit löschen</strong>{" "}
-            — Artikel bleiben unverändert auf der Liste.
-          </li>
-          <li>
-            <strong className="text-[var(--color-fg)]">
-              Mahlzeit und Zutaten entfernen
-            </strong>{" "}
-            — Mengen werden neu berechnet, leere Einträge gelöscht.
-          </li>
-        </ul>
+        <DialogBody>
+          <ul className="space-y-2 text-sm text-[var(--color-muted-fg)]">
+            <li>
+              <strong className="text-[var(--color-fg)]">
+                Nur Mahlzeit löschen
+              </strong>{" "}
+              — Artikel bleiben unverändert auf der Liste.
+            </li>
+            <li>
+              <strong className="text-[var(--color-fg)]">
+                Mahlzeit und Zutaten entfernen
+              </strong>{" "}
+              — Mengen werden neu berechnet, leere Einträge gelöscht.
+            </li>
+          </ul>
+        </DialogBody>
         <DialogFooter>
           <Button variant="ghost" disabled={busy} onClick={onCancel}>
             Abbrechen

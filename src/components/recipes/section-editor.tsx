@@ -12,6 +12,7 @@ import {
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
+  DialogBody,
   DialogClose,
   DialogContent,
   DialogDescription,
@@ -307,17 +308,19 @@ export function SectionEditor({
               auf separaten Zeilen werden zusammengefügt.
             </DialogDescription>
           </DialogHeader>
-          <Textarea
-            ref={textareaRef}
-            value={pasteText}
-            onChange={(e) => setPasteText(e.target.value)}
-            rows={10}
-            placeholder={"500 g Mehl\n2 Eier\nSalz"}
-            autoFocus
-          />
-          {pasteError ? (
-            <p className="text-sm text-[var(--color-danger)]">{pasteError}</p>
-          ) : null}
+          <DialogBody className="flex flex-col gap-3">
+            <Textarea
+              ref={textareaRef}
+              value={pasteText}
+              onChange={(e) => setPasteText(e.target.value)}
+              rows={10}
+              placeholder={"500 g Mehl\n2 Eier\nSalz"}
+              autoFocus
+            />
+            {pasteError ? (
+              <p className="text-sm text-[var(--color-danger)]">{pasteError}</p>
+            ) : null}
+          </DialogBody>
           <DialogFooter className="gap-2">
             <DialogClose asChild>
               <Button type="button" variant="outline" disabled={pasting}>

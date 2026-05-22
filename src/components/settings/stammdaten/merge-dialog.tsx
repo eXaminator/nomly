@@ -4,6 +4,7 @@ import * as React from "react";
 import { AlertTriangle, Loader2 } from "lucide-react";
 import {
   Dialog,
+  DialogBody,
   DialogContent,
   DialogFooter,
   DialogHeader,
@@ -130,6 +131,7 @@ export function MergeDialog<TItem>({
             {items.length} {labels.plural} zusammenführen
           </DialogTitle>
         </DialogHeader>
+        <DialogBody className="flex flex-col gap-4">
 
         {warning && (
           <div className="rounded-[var(--radius)] border border-[var(--color-warning)] bg-[color-mix(in_srgb,var(--color-warning),transparent_88%)] px-3 py-2 text-sm">
@@ -224,6 +226,7 @@ export function MergeDialog<TItem>({
         {error && (
           <p className="text-sm text-[var(--color-danger)]">{error}</p>
         )}
+        </DialogBody>
 
         <DialogFooter>
           <Button variant="ghost" onClick={onClose} disabled={submitting}>
