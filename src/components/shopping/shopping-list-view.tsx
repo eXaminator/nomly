@@ -212,7 +212,7 @@ export function ShoppingListView({
         </div>
       ) : (
         <div className="flex flex-col gap-6">
-          {grouped.map((group) => (
+          {grouped.groups.map((group) => (
             <section key={group.key} className="flex flex-col gap-2">
               <h2
                 className={cn(
@@ -246,6 +246,13 @@ export function ShoppingListView({
               </ul>
             </section>
           ))}
+          {grouped.hiddenByStore > 0 ? (
+            <p className="text-xs text-[var(--color-muted-fg)]">
+              {grouped.hiddenByStore}{" "}
+              {grouped.hiddenByStore === 1 ? "Artikel" : "Artikel"} ausgeblendet
+              — nicht in diesem Supermarkt erhältlich oder andere Kategorie.
+            </p>
+          ) : null}
         </div>
       )}
 
@@ -279,44 +286,63 @@ type Group = {
   key: string;
   label: string;
   items: ShoppingItemView[];
-  /** Set on the trailing "Erledigt" or "Hier nicht verfügbar" sink groups. */
+  /** Set on the trailing "Erledigt" sink group so it renders muted. */
   muted?: boolean;
+};
+
+type GroupedItems = {
+  groups: Group[];
+  /** When a supermarket filter is active, items filtered out by the store
+   *  (unavailable here or in a category this store doesn't carry). 0 when
+   *  no filter is active. */
+  hiddenByStore: number;
 };
 
 function groupByCategory(
   items: ShoppingItemView[],
   supermarketId: number | null,
   supermarkets: SupermarketSummary[],
-): Group[] {
+): GroupedItems {
   const sm = supermarketId != null
     ? supermarkets.find((s) => s.id === supermarketId) ?? null
     : null;
   const orderByCategory = sm
     ? new Map(sm.categories.map((c) => [c.categoryId, c.sortOrder]))
     : null;
+  const allowedCategoryIds = sm
+    ? new Set(sm.categories.map((c) => c.categoryId))
+    : null;
 
-  // Split into three buckets: open/available, unavailable-at-active-store
-  // (sinks to bottom), and checked (sinks to bottom).
   const open: ShoppingItemView[] = [];
-  const unavailable: ShoppingItemView[] = [];
   const checked: ShoppingItemView[] = [];
+  let hiddenByStore = 0;
   for (const item of items) {
     if (item.checked) {
       checked.push(item);
       continue;
     }
-    if (
-      supermarketId != null &&
-      item.unavailableSupermarketIds.includes(supermarketId)
-    ) {
-      unavailable.push(item);
-      continue;
+    if (supermarketId != null) {
+      // Marked as not carried here → hide entirely. Applies to uncategorized
+      // items too — the user opted them out explicitly.
+      if (item.unavailableSupermarketIds.includes(supermarketId)) {
+        hiddenByStore += 1;
+        continue;
+      }
+      // Category exists but this supermarket doesn't carry it → hide. Items
+      // without a category always pass through (the user hasn't tagged them
+      // either way; show them so they aren't accidentally forgotten).
+      if (
+        item.categoryId != null &&
+        allowedCategoryIds != null &&
+        !allowedCategoryIds.has(item.categoryId)
+      ) {
+        hiddenByStore += 1;
+        continue;
+      }
     }
     open.push(item);
   }
 
-  // Group open items by category. Categories outside the supermarket's
-  // order (or always, when no supermarket is selected) sort alphabetically.
   type Bucket = { categoryId: number | null; categoryName: string; items: ShoppingItemView[] };
   const buckets = new Map<number | "none", Bucket>();
   for (const item of open) {
@@ -356,18 +382,9 @@ function groupByCategory(
     items: b.items,
   }));
 
-  if (unavailable.length > 0) {
-    unavailable.sort((a, b) => a.name.localeCompare(b.name, "de", { sensitivity: "base" }));
-    groups.push({
-      key: "unavailable",
-      label: "Hier nicht verfügbar",
-      items: unavailable,
-      muted: true,
-    });
-  }
   if (checked.length > 0) {
     groups.push({ key: "checked", label: "Erledigt", items: checked, muted: true });
   }
-  return groups;
+  return { groups, hiddenByStore };
 }
 
