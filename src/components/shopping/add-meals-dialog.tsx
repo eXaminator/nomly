@@ -67,18 +67,23 @@ export function AddMealsDialog({
       .then((rows) => {
         if (cancelled) return;
         setMeals(rows);
-        // Default selection: every new meal's ingredients are checked; meals
-        // already on the list start unchecked.
+        // Default selection: new-meal non-optional ingredients are checked;
+        // optional lines stay unchecked so the user has to opt in. Meals
+        // already on the list start fully unchecked.
         const sel = new Map<number, Set<number>>();
         for (const m of rows) {
-          if (!m.alreadyOnList) {
-            sel.set(
-              m.mealPlanId,
-              new Set(m.ingredients.map((i) => i.recipeIngredientId)),
-            );
-          } else {
+          if (m.alreadyOnList) {
             sel.set(m.mealPlanId, new Set());
+            continue;
           }
+          sel.set(
+            m.mealPlanId,
+            new Set(
+              m.ingredients
+                .filter((i) => !i.isOptional)
+                .map((i) => i.recipeIngredientId),
+            ),
+          );
         }
         setSelection(sel);
       })
@@ -326,7 +331,11 @@ function IngredientCheckbox({
 }) {
   return (
     <li>
-      <label className="flex cursor-pointer items-baseline gap-2 text-sm">
+      <label
+        className={`flex cursor-pointer items-baseline gap-2 text-sm ${
+          ing.isOptional ? "text-[var(--color-muted-fg)] italic" : ""
+        }`}
+      >
         <input
           type="checkbox"
           checked={checked}
@@ -344,6 +353,11 @@ function IngredientCheckbox({
           {ing.notes ? (
             <span className="ml-2 text-xs text-[var(--color-muted-fg)]">
               · {ing.notes}
+            </span>
+          ) : null}
+          {ing.isOptional ? (
+            <span className="ml-2 rounded-full bg-[var(--color-muted)] px-1.5 py-0.5 text-[10px] font-medium uppercase not-italic tracking-wider text-[var(--color-muted-fg)]">
+              optional
             </span>
           ) : null}
         </span>

@@ -177,7 +177,7 @@ describe("shopping preview", () => {
     expect(names).not.toContain("Salz");
   });
 
-  it("drops optional ingredients", async () => {
+  it("keeps optional ingredients but flags them with isOptional", async () => {
     const { db } = await import("@/db");
     const { recipeIngredient } = await import("@/db/schema");
     const { eq } = await import("drizzle-orm");
@@ -187,8 +187,11 @@ describe("shopping preview", () => {
       .run();
     const { previewMeals } = await import("@/lib/shopping/preview");
     const meals = previewMeals("2026-05-23", 1);
-    const names = meals[0].ingredients.map((i) => i.ingredientName);
-    expect(names).not.toContain("Salz");
+    const salz = meals[0].ingredients.find((i) => i.ingredientName === "Salz");
+    expect(salz).toBeDefined();
+    expect(salz?.isOptional).toBe(true);
+    const tomate = meals[0].ingredients.find((i) => i.ingredientName === "Tomate");
+    expect(tomate?.isOptional).toBe(false);
   });
 
   it("flags alreadyOnList when a source row exists", async () => {

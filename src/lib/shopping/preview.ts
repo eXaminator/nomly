@@ -27,6 +27,11 @@ export type PreviewIngredient = {
   unitId: number | null;
   unitName: string | null;
   notes: string | null;
+  /**
+   * The recipe tagged this line as optional. The dialog surfaces it with a
+   * marker and starts it unchecked so the user has to opt in.
+   */
+  isOptional: boolean;
 };
 
 export type PreviewMeal = {
@@ -97,7 +102,10 @@ export function previewMeals(start: string, lengthDays: number): PreviewMeal[] {
 
   const linesByRecipe = new Map<number, typeof lines>();
   for (const l of lines) {
-    if (l.isOptional || l.excludeFromShoppingList) continue;
+    // exclude_from_shopping_list is a stamm-level "never include" flag
+    // (Wasser, Salz set by the user). Optional lines are still rendered —
+    // the dialog flags them and starts them unchecked.
+    if (l.excludeFromShoppingList) continue;
     const arr = linesByRecipe.get(l.recipeId) ?? [];
     arr.push(l);
     linesByRecipe.set(l.recipeId, arr);
@@ -133,6 +141,7 @@ export function previewMeals(start: string, lengthDays: number): PreviewMeal[] {
       unitId: l.unitId,
       unitName: l.unitName,
       notes: l.notes,
+      isOptional: !!l.isOptional,
     }));
     out.push({
       mealPlanId: m.mealPlanId,
