@@ -68,23 +68,12 @@ export function AddMealsDialog({
       .then((rows) => {
         if (cancelled) return;
         setMeals(rows);
-        // Default selection: new-meal non-optional ingredients are checked;
-        // optional lines stay unchecked so the user has to opt in. Meals
-        // already on the list start fully unchecked.
+        // Start fully unchecked — the user opts in to whichever meals
+        // and ingredients they want on the list, instead of de-selecting
+        // a default that may or may not match their intent.
         const sel = new Map<number, Set<number>>();
         for (const m of rows) {
-          if (m.alreadyOnList) {
-            sel.set(m.mealPlanId, new Set());
-            continue;
-          }
-          sel.set(
-            m.mealPlanId,
-            new Set(
-              m.ingredients
-                .filter((i) => !i.isOptional)
-                .map((i) => i.recipeIngredientId),
-            ),
-          );
+          sel.set(m.mealPlanId, new Set());
         }
         setSelection(sel);
       })
