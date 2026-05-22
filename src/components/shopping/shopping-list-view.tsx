@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
-import { CalendarPlus, Plus, Trash2 } from "lucide-react";
+import { CalendarPlus, EyeOff, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { RecipePreviewDialog } from "@/components/planner/recipe-preview-dialog";
 import { cn } from "@/lib/cn";
@@ -237,6 +237,30 @@ export function ShoppingListView({
         </div>
       ) : (
         <div className="flex flex-col gap-6">
+          {grouped.hiddenByStore > 0 && supermarketId != null ? (
+            <div
+              role="status"
+              className="flex flex-wrap items-center justify-between gap-3 rounded-[var(--radius)] border border-[var(--color-accent)]/40 bg-[color-mix(in_srgb,var(--color-accent),transparent_92%)] px-4 py-3 text-sm text-[var(--color-fg)]"
+            >
+              <span className="inline-flex items-center gap-2">
+                <EyeOff className="size-4 text-[var(--color-accent)]" />
+                <span>
+                  <strong className="font-semibold">
+                    {grouped.hiddenByStore}{" "}
+                    {grouped.hiddenByStore === 1 ? "Artikel ist" : "Artikel sind"}
+                  </strong>{" "}
+                  durch den Supermarkt-Filter ausgeblendet.
+                </span>
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => persistSupermarket(null)}
+              >
+                Alle anzeigen
+              </Button>
+            </div>
+          ) : null}
           {grouped.groups.map((group) => (
             <section key={group.key} className="flex flex-col gap-2">
               <h2
@@ -271,13 +295,6 @@ export function ShoppingListView({
               </ul>
             </section>
           ))}
-          {grouped.hiddenByStore > 0 ? (
-            <p className="text-xs text-[var(--color-muted-fg)]">
-              {grouped.hiddenByStore}{" "}
-              {grouped.hiddenByStore === 1 ? "Artikel" : "Artikel"} ausgeblendet
-              — nicht in diesem Supermarkt erhältlich oder andere Kategorie.
-            </p>
-          ) : null}
         </div>
       )}
 
