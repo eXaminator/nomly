@@ -34,10 +34,12 @@ export function DialogContent({
     <DialogPortal>
       <DialogOverlay />
       <DialogPrimitive.Content
-        // Fullscreen on small screens, centered card from sm and up. Callers
-        // can override the desktop size by passing `sm:max-w-...`.
+        // Fullscreen on small screens, centered card from sm and up. Layout
+        // is a vertical flex column so DialogFooter can pin to the bottom
+        // while the body scrolls. Callers override the desktop size with
+        // `sm:max-w-...`.
         className={cn(
-          "fixed inset-0 z-50 grid h-screen w-screen max-w-none gap-4 overflow-y-auto rounded-none border-0 bg-[var(--color-card)] p-6 shadow-lg duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out",
+          "fixed inset-0 z-50 flex h-screen w-screen max-w-none flex-col gap-4 overflow-y-auto rounded-none border-0 bg-[var(--color-card)] p-6 shadow-lg duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out",
           "sm:inset-auto sm:left-1/2 sm:top-1/2 sm:h-auto sm:w-full sm:max-w-lg sm:max-h-[85vh] sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-[var(--radius)] sm:border sm:border-[var(--color-border)]",
           className,
         )}
@@ -58,9 +60,16 @@ export function DialogHeader({ className, ...props }: React.HTMLAttributes<HTMLD
 }
 
 export function DialogFooter({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
+  // Sticks to the bottom edge of the dialog's scroll container — flush
+  // with the viewport bottom on mobile fullscreen, flush with the card's
+  // bottom on desktop. Pulled out by negative margin so the border/bg span
+  // the full dialog width regardless of DialogContent's p-6.
   return (
     <div
-      className={cn("flex flex-col-reverse sm:flex-row sm:justify-end sm:gap-2", className)}
+      className={cn(
+        "sticky bottom-0 z-10 -mx-6 -mb-6 mt-auto flex flex-col-reverse gap-2 border-t border-[var(--color-border)] bg-[var(--color-card)] px-6 py-4 sm:flex-row sm:justify-end",
+        className,
+      )}
       {...props}
     />
   );

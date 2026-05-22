@@ -6,6 +6,7 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -53,33 +54,37 @@ export function ShoppingAwareDeleteDialog({
             . Was soll mit den Einträgen passieren?
           </DialogDescription>
         </DialogHeader>
-        <div className="flex flex-col gap-2">
+        <ul className="space-y-2 text-sm text-[var(--color-muted-fg)]">
+          <li>
+            <strong className="text-[var(--color-fg)]">Nur Mahlzeit löschen</strong>{" "}
+            — Artikel bleiben unverändert auf der Liste.
+          </li>
+          <li>
+            <strong className="text-[var(--color-fg)]">
+              Mahlzeit und Zutaten entfernen
+            </strong>{" "}
+            — Mengen werden neu berechnet, leere Einträge gelöscht.
+          </li>
+        </ul>
+        <DialogFooter>
+          <Button variant="ghost" disabled={busy} onClick={onCancel}>
+            Abbrechen
+          </Button>
           <Button
             variant="outline"
             disabled={busy}
             onClick={() => pick("keep")}
-            className="justify-start"
           >
             Nur Mahlzeit löschen
-            <span className="ml-2 text-xs text-[var(--color-muted-fg)]">
-              Artikel bleiben unverändert auf der Liste.
-            </span>
           </Button>
           <Button
             variant="danger"
             disabled={busy}
             onClick={() => pick("subtract")}
-            className="justify-start"
           >
             Mahlzeit und Zutaten entfernen
-            <span className="ml-2 text-xs text-white/80">
-              Mengen werden neu berechnet, leere Einträge gelöscht.
-            </span>
           </Button>
-          <Button variant="ghost" disabled={busy} onClick={onCancel}>
-            Abbrechen
-          </Button>
-        </div>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

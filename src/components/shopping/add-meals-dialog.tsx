@@ -6,6 +6,7 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -245,23 +246,21 @@ export function AddMealsDialog({
             )}
           </div>
 
-          <div className="flex items-center justify-between gap-2 pt-1">
-            <span className="text-sm text-[var(--color-muted-fg)]">
-              {totalSelected} Zutaten ausgewählt
-            </span>
-            <div className="flex gap-2">
-              <Button variant="ghost" onClick={onClose} disabled={submitting}>
-                Abbrechen
-              </Button>
-              <Button
-                onClick={onSubmit}
-                disabled={submitting || totalSelected === 0}
-              >
-                {submitting ? "Übernimmt…" : "Übernehmen"}
-              </Button>
-            </div>
-          </div>
         </div>
+        <DialogFooter className="sm:items-center sm:justify-between">
+          <span className="text-sm text-[var(--color-muted-fg)] sm:mr-auto">
+            {totalSelected} Zutaten ausgewählt
+          </span>
+          <Button variant="ghost" onClick={onClose} disabled={submitting}>
+            Abbrechen
+          </Button>
+          <Button
+            onClick={onSubmit}
+            disabled={submitting || totalSelected === 0}
+          >
+            {submitting ? "Übernimmt…" : "Übernehmen"}
+          </Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

@@ -6,6 +6,7 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -152,15 +153,15 @@ export function AddItemDialog({ open, onClose, onAdded }: Props) {
           {error ? (
             <p className="text-sm text-[var(--color-danger)]">{error}</p>
           ) : null}
-          <div className="flex justify-end gap-2 pt-2">
-            <Button variant="ghost" onClick={onClose} disabled={busy}>
-              Abbrechen
-            </Button>
-            <Button onClick={pickByName} disabled={busy || query.trim().length === 0}>
-              {busy ? "Speichert…" : "Hinzufügen"}
-            </Button>
-          </div>
         </div>
+        <DialogFooter>
+          <Button variant="ghost" onClick={onClose} disabled={busy}>
+            Abbrechen
+          </Button>
+          <Button onClick={pickByName} disabled={busy || query.trim().length === 0}>
+            {busy ? "Speichert…" : "Hinzufügen"}
+          </Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );
