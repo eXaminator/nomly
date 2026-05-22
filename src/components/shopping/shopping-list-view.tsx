@@ -156,8 +156,33 @@ export function ShoppingListView({
             Einkaufsliste
           </h1>
           <span className="text-sm text-[var(--color-muted-fg)]">
-            {items.length} Einträge ·{" "}
-            {items.filter((i) => i.checked).length} erledigt
+            {(() => {
+              const openTotal = items.filter((i) => !i.checked).length;
+              const checkedTotal = items.filter((i) => i.checked).length;
+              const visibleOpen = openTotal - grouped.hiddenByStore;
+              const filterActive = supermarketId != null && grouped.hiddenByStore > 0;
+              return (
+                <>
+                  {filterActive ? (
+                    <>
+                      <strong className="font-semibold text-[var(--color-fg)]">
+                        {visibleOpen}
+                      </strong>{" "}
+                      von {openTotal} offen
+                    </>
+                  ) : (
+                    <>
+                      <strong className="font-semibold text-[var(--color-fg)]">
+                        {openTotal}
+                      </strong>{" "}
+                      offen
+                    </>
+                  )}
+                  {" · "}
+                  {checkedTotal} erledigt
+                </>
+              );
+            })()}
           </span>
         </div>
         <div className="flex flex-wrap items-center justify-between gap-3">
