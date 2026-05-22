@@ -53,3 +53,5 @@ next-env.d.ts
 !/data/seed/
 .playwright-mcp/
 editor-bottom-border.png
+
+.claude/

@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { Clock, ExternalLink, Pencil, Users } from "lucide-react";
 import { AppShell } from "@/components/layout/app-shell";
 import { Button } from "@/components/ui/button";
+import { DietBadge } from "@/components/recipes/diet-badge";
 import { IngredientLine } from "@/components/recipes/ingredient-line";
 import { getRecipe } from "@/lib/recipes/service";
 import { renderMarkdown } from "@/lib/markdown";
@@ -34,6 +35,10 @@ export default async function RecipeViewPage({
         <div className="flex-1">
           <h1 className="text-3xl font-semibold tracking-tight">{recipe.title}</h1>
           <div className="mt-2 flex flex-wrap items-center gap-4 text-sm text-[var(--color-muted-fg)]">
+            <DietBadge
+              isVegan={recipe.isVegan}
+              isVegetarian={recipe.isVegetarian}
+            />
             <span className="inline-flex items-center gap-1.5">
               <Users className="size-4" />
               {recipe.servings} Portion{recipe.servings === 1 ? "" : "en"}
@@ -107,7 +112,10 @@ export default async function RecipeViewPage({
           const ingredientList = (
             <ul className="space-y-1 text-sm text-[var(--color-fg)]">
               {section.ingredients.map((ing) => (
-                <li key={ing.id} className="flex gap-2">
+                <li
+                  key={ing.id}
+                  className={ing.isOptional ? "flex gap-2 italic opacity-65" : "flex gap-2"}
+                >
                   <span className="min-w-12 font-mono text-[var(--color-muted-fg)]">
                     {formatQuantity(ing.quantity)} {ing.unitName ?? ""}
                   </span>
@@ -118,6 +126,11 @@ export default async function RecipeViewPage({
                     />
                     {ing.notes ? (
                       <span className="text-[var(--color-muted-fg)]"> – {ing.notes}</span>
+                    ) : null}
+                    {ing.isOptional ? (
+                      <span className="ml-1 text-xs text-[var(--color-muted-fg)]">
+                        (optional)
+                      </span>
                     ) : null}
                   </span>
                 </li>

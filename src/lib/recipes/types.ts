@@ -6,6 +6,7 @@ export type RecipeIngredientInput = {
   quantity: number | null;
   unitId: number | null;
   notes: string | null;
+  isOptional: boolean;
 };
 
 export type RecipeSectionInput = {
@@ -21,9 +22,22 @@ export type RecipeInput = {
   prepTimeMin: number | null;
   cookTimeMin: number | null;
   sourceUrl: string | null;
+  /** Path produced by /api/v1/photos (e.g. "photos/<uuid>.webp"). */
   photoPath: string | null;
   tags: string[];
   sections: RecipeSectionInput[];
+};
+
+/**
+ * Wrapper around RecipeInput that allows the API to resolve a freeform
+ * image URL into a photoPath before persisting. The route fetches the URL
+ * via the standard photo pipeline (download → re-encode as webp), then hands
+ * a normal RecipeInput off to the service layer.
+ */
+export type RecipeApiInput = RecipeInput & {
+  /** Image URL the server should download on save. When set, it overrides
+   *  `photoPath` after the download succeeds. */
+  photoUrl?: string | null;
 };
 
 export type RecipeListItem = {
@@ -35,6 +49,9 @@ export type RecipeListItem = {
   prepTimeMin: number | null;
   cookTimeMin: number | null;
   tags: string[];
+  /** Derived from non-optional ingredients' dietary_class. `null` = unknown. */
+  isVegan: boolean | null;
+  isVegetarian: boolean | null;
 };
 
 export type RecipeIngredientView = {
@@ -50,6 +67,7 @@ export type RecipeIngredientView = {
   unitId: number | null;
   unitName: string | null;
   notes: string | null;
+  isOptional: boolean;
   sortOrder: number;
 };
 
@@ -72,6 +90,9 @@ export type RecipeView = {
   cookTimeMin: number | null;
   tags: string[];
   sections: RecipeSectionView[];
+  /** Derived from non-optional ingredients' dietary_class. `null` = unknown. */
+  isVegan: boolean | null;
+  isVegetarian: boolean | null;
   createdAt: number;
   updatedAt: number;
 };

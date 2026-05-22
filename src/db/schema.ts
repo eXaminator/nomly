@@ -48,6 +48,17 @@ export const unit = sqliteTable("unit", {
     onDelete: "set null",
   }),
   factor: real("factor").notNull().default(1),
+  /**
+   * Set on units that describe a physical container (Dose, Glas, Tube,
+   * Packung, Flasche, Karton, Schachtel). The ingredient parser uses this
+   * to suppress conjunction-splitting and prep-word stripping when a
+   * container is present — the trailing adjective is then part of the
+   * product name ("1 Dose chopped tomatoes" rather than "chopped" as a
+   * prep instruction).
+   */
+  isContainer: integer("is_container", { mode: "boolean" })
+    .notNull()
+    .default(false),
 });
 
 export const unitAlias = sqliteTable("unit_alias", {
@@ -80,6 +91,16 @@ export const ingredient = sqliteTable("ingredient", {
   excludeFromShoppingList: integer("exclude_from_shopping_list", { mode: "boolean" })
     .notNull()
     .default(false),
+  /**
+   * Diet classification used to derive recipe-level vegan/vegetarian flags.
+   * NULL = unknown (user hasn't tagged this ingredient yet) and disqualifies
+   * the recipe from being claimed as vegan or vegetarian. "vegan" implies
+   * "vegetarian"; "meat" covers anything that is neither (fish, gelatin,
+   * meat, etc.).
+   */
+  dietaryClass: text("dietary_class", {
+    enum: ["vegan", "vegetarian", "meat"],
+  }),
   createdAt: integer("created_at").notNull().default(now),
   updatedAt: integer("updated_at").notNull().default(now),
 });
@@ -131,6 +152,12 @@ export const recipeIngredient = sqliteTable(
     quantity: real("quantity"),
     unitId: integer("unit_id").references(() => unit.id, { onDelete: "set null" }),
     notes: text("notes"),
+    /**
+     * When true, this ingredient is "(optional) garnish"-style — the recipe
+     * still works without it. The read view dims optional rows and the
+     * shopping-list builder skips them when seeding from a meal plan.
+     */
+    isOptional: integer("is_optional", { mode: "boolean" }).notNull().default(false),
     sortOrder: integer("sort_order").notNull().default(0),
   },
   (t) => [index("recipe_ingredient_section_idx").on(t.sectionId)],

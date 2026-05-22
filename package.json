@@ -12,6 +12,7 @@
     "test": "vitest run",
     "seed": "node --experimental-transform-types --disable-warning=ExperimentalWarning scripts/seed.ts",
     "migrate": "node --experimental-transform-types --disable-warning=ExperimentalWarning scripts/migrate.mts",
+    "dev:reset": "node --experimental-transform-types --disable-warning=ExperimentalWarning scripts/dev-reset.mts",
     "familywall:download": "node --experimental-transform-types --disable-warning=ExperimentalWarning scripts/familywall-download.mts",
     "familywall:import": "node --experimental-transform-types --disable-warning=ExperimentalWarning scripts/familywall-import.mts",
     "db:generate": "drizzle-kit generate",

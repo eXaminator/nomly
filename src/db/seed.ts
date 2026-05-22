@@ -4,6 +4,7 @@ import { sql, eq } from "drizzle-orm";
 import { db } from "./index.ts";
 import {
   category,
+  categoryAlias,
   ingredient,
   ingredientAlias,
   supermarket,
@@ -77,8 +78,13 @@ const volumeFactorToMl: Record<string, number> = {
 const fullWordUnitAliases: Record<string, string> = {
   tablespoon: "EL",
   tablespoons: "EL",
+  Esslöffel: "EL",
+  esslöffel: "EL",
+  Eßlöffel: "EL",
   teaspoon: "TL",
   teaspoons: "TL",
+  Teelöffel: "TL",
+  teelöffel: "TL",
   piece: "Stück",
   pieces: "Stück",
   pound: "lb",
@@ -87,12 +93,33 @@ const fullWordUnitAliases: Record<string, string> = {
   ounces: "oz",
   gram: "g",
   grams: "g",
+  Gramm: "g",
+  gramm: "g",
+  // German shortform abbreviation — common in recipe sites ("150 gr.
+  // Joghurt", "200 gr Mehl"). Parser strips trailing periods before lookup,
+  // so the `"gr."` entry is just belt-and-suspenders.
+  gr: "g",
+  "gr.": "g",
   kilogram: "kg",
   kilograms: "kg",
+  Kilogramm: "kg",
+  kilogramm: "kg",
+  Kilo: "kg",
+  kilo: "kg",
   milliliter: "ml",
   milliliters: "ml",
+  Milliliter: "ml",
   liter: "l",
   liters: "l",
+  Liter: "l",
+  cups: "cup",
+  Tasse: "cup",
+  tassen: "cup",
+  Tassen: "cup",
+  // "c." appears in mixed German/English recipes — most commonly an
+  // abbreviation for "cup". Treat as such.
+  "c.": "cup",
+  c: "cup",
 };
 
 // Top-up units the app expects even if the snapshot lacks them. The current
@@ -105,14 +132,83 @@ const topUpUnits: Array<{
   dimension: "mass" | "volume" | "count";
   factor: number;
   aliases?: string[];
+  /** When true, this unit row is marked as a physical container. The
+   *  ingredient parser uses this flag to keep prep adjectives attached to
+   *  the product name ("1 Dose chopped tomatoes"). */
+  isContainer?: boolean;
 }> = [
   { name: "EL", dimension: "volume", factor: 14.7867647813 },
   { name: "TL", dimension: "volume", factor: 4.92892159375 },
-  { name: "Prise", dimension: "volume", factor: 0.3 },
+  {
+    name: "Prise",
+    dimension: "volume",
+    factor: 0.3,
+    aliases: ["Prisen", "PR", "pinch", "pinches"],
+  },
+  {
+    name: "Messerspitze",
+    dimension: "volume",
+    factor: 0.5,
+    aliases: ["Messerspitzen", "Msp", "Msp.", "knife tip"],
+  },
+  {
+    name: "Bund",
+    dimension: "count",
+    factor: 1,
+    aliases: ["Bunde", "Bündel", "Bd.", "Bd", "bunch", "bunches"],
+  },
+  {
+    name: "Stück",
+    dimension: "count",
+    factor: 1,
+    aliases: [
+      "Stk",
+      "Stk.",
+      "St.",
+      "x",
+      "piece",
+      "pieces",
+      "stick",
+      "sticks",
+    ],
+  },
+  {
+    name: "Handvoll",
+    dimension: "count",
+    factor: 1,
+    aliases: ["Hand voll", "handful", "handfuls"],
+  },
+  {
+    name: "Zweig",
+    dimension: "count",
+    factor: 1,
+    aliases: ["Zweige", "twig", "twigs", "sprig", "sprigs"],
+  },
+  {
+    name: "Zoll",
+    dimension: "count",
+    factor: 1,
+    // English `inch` and the symbol `"` (single straight quote). Recipe
+    // sites often write `1" piece ginger`.
+    aliases: ["inch", "inches", "-inch", "Inch", '"'],
+  },
+  {
+    name: "cm",
+    dimension: "count",
+    factor: 1,
+    aliases: ["zentimeter", "Zentimeter", "centimeter", "centimeters", "-cm"],
+  },
+  {
+    name: "Zehe",
+    dimension: "count",
+    factor: 1,
+    aliases: ["Zehen", "clove", "cloves"],
+  },
   {
     name: "Packung",
     dimension: "count",
     factor: 1,
+    isContainer: true,
     aliases: [
       "Packungen",
       "Päckchen",
@@ -120,11 +216,62 @@ const topUpUnits: Array<{
       "Pck.",
       "Pkg",
       "Pkg.",
+      "Pckg",
+      "Pckg.",
       "package",
       "packages",
       "packet",
       "packets",
     ],
+  },
+  {
+    name: "Dose",
+    dimension: "count",
+    factor: 1,
+    isContainer: true,
+    aliases: ["Dosen", "can", "cans", "tin", "tins"],
+  },
+  {
+    name: "Glas",
+    dimension: "count",
+    factor: 1,
+    isContainer: true,
+    aliases: ["Gläser", "jar", "jars"],
+  },
+  {
+    name: "Tube",
+    dimension: "count",
+    factor: 1,
+    isContainer: true,
+    aliases: ["Tuben", "tubes"],
+  },
+  {
+    name: "Flasche",
+    dimension: "count",
+    factor: 1,
+    isContainer: true,
+    aliases: ["Flaschen", "bottle", "bottles"],
+  },
+  {
+    name: "Karton",
+    dimension: "count",
+    factor: 1,
+    isContainer: true,
+    aliases: ["Kartons", "carton", "cartons"],
+  },
+  {
+    name: "Schachtel",
+    dimension: "count",
+    factor: 1,
+    isContainer: true,
+    aliases: ["Schachteln", "box", "boxes"],
+  },
+  {
+    name: "Beutel",
+    dimension: "count",
+    factor: 1,
+    isContainer: true,
+    aliases: ["Beuteln", "sachet", "sachets", "bag", "bags"],
   },
 ];
 
@@ -231,6 +378,7 @@ export function runSeed(): SeedCounts {
             dimension: top.dimension,
             factor: top.factor,
             baseUnitId: baseId,
+            isContainer: top.isContainer ?? false,
           })
           .returning({ id: unit.id })
           .all();
@@ -244,6 +392,15 @@ export function runSeed(): SeedCounts {
         // count it. Count once so re-runs report a consistent skipped tally.
         processedThisRun.add(lowerName);
         counts.units.skipped += 1;
+      }
+      // Keep the isContainer flag in sync for any unit we top up — even if
+      // the row pre-existed (came from Tandoor or a prior run). This lets us
+      // add containers to the seed without users having to wipe their DB.
+      if (top.isContainer) {
+        tx.update(unit)
+          .set({ isContainer: true })
+          .where(eq(unit.id, id))
+          .run();
       }
       for (const alias of top.aliases ?? []) {
         addAlias(tx, "unit", id, alias, () => {
@@ -399,12 +556,7 @@ function addAlias(
       ? unitAlias
       : kind === "ingredient"
         ? ingredientAlias
-        : null;
-  if (!table) {
-    // Categories don't have an alias table in our schema (yet) — silently
-    // skip rather than fabricate one.
-    return;
-  }
+        : categoryAlias;
   const exists = tx
     .select({ id: table.id })
     .from(table)
@@ -414,9 +566,13 @@ function addAlias(
   try {
     if (kind === "unit") {
       tx.insert(unitAlias).values({ unitId: parentId, name: aliasName }).run();
-    } else {
+    } else if (kind === "ingredient") {
       tx.insert(ingredientAlias)
         .values({ ingredientId: parentId, name: aliasName })
+        .run();
+    } else {
+      tx.insert(categoryAlias)
+        .values({ categoryId: parentId, name: aliasName })
         .run();
     }
     onAdded();

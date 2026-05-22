@@ -1,0 +1,1 @@
+ALTER TABLE `ingredient` ADD `dietary_class` text;

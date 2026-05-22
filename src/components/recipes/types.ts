@@ -34,6 +34,9 @@ export type DraftIngredient = {
   quantity: string;
   unit: ComboboxItem | null;
   notes: string;
+  /** When true, the row renders dimmed/italic in the read view and is skipped
+   *  by the shopping-list builder. Edited via a per-row toggle. */
+  isOptional: boolean;
   importAnnotation?: ImportAnnotation;
 };
 
@@ -52,9 +55,74 @@ export type DraftRecipe = {
   cookTimeMin: string;
   sourceUrl: string;
   photoPath: string | null;
+  /** Image URL the server should download on save. When non-empty it takes
+   *  precedence over photoPath. */
+  photoUrl: string;
   tags: string[];
   sections: DraftSection[];
 };
+
+/**
+ * Wire shape returned by the URL importer and the clipboard parser. Matches
+ * `ImportedIngredient` server-side — kept in lockstep manually so client
+ * code doesn't pull a server-side type. Both endpoints are populated by
+ * `parseIngredientLines` so the conversion below applies uniformly.
+ */
+export type ParsedIngredientResponse = {
+  quantity: number | null;
+  unit: { id: number; name: string } | null;
+  unitMatch: "matched" | "defaulted" | "unresolved" | "empty";
+  rawUnit: string | null;
+  name: string;
+  ingredientId: number | null;
+  ingredientMatch: "existing" | "new";
+  canonicalIngredientName: string | null;
+  notes: string | null;
+  /** Server marked the row as optional from an "opt." / "Optional:" /
+   *  "evtl." / "(optional)" marker in the source. */
+  isOptional?: boolean;
+};
+
+export function parsedIngredientToDraft(
+  i: ParsedIngredientResponse,
+): DraftIngredient {
+  // "matched" collapses to the "ok" annotation state; the badge reads
+  // `rawUnit` separately when an alias-hit needs surfacing.
+  const unitState: ImportAnnotation["unitState"] =
+    i.unitMatch === "matched" ? "ok" : i.unitMatch;
+  const annotation: ImportAnnotation = {
+    ingredientIsNew: i.ingredientMatch === "new",
+    unitState,
+    rawUnit: i.rawUnit,
+  };
+  return {
+    uid: crypto.randomUUID(),
+    name: i.name,
+    canonicalName: i.canonicalIngredientName,
+    quantity: quantityToInputString(i.quantity),
+    unit: i.unit ? { id: i.unit.id, name: i.unit.name } : null,
+    notes: i.notes ?? "",
+    isOptional: i.isOptional ?? false,
+    importAnnotation: annotation,
+  };
+}
+
+/**
+ * Format a stored numeric quantity for the German-language quantity input.
+ * Outputs "1,5" (not "1.5") so the user sees the same convention they typed.
+ * Returns "" for null. Preserves precision (no rounding) — round-trip:
+ * input.toString() ↔ display.
+ */
+export function quantityToInputString(q: number | null): string {
+  if (q === null) return "";
+  // Intl.NumberFormat with a high digit cap keeps full precision while
+  // emitting the German decimal comma. useGrouping=false to suppress
+  // thousands separators (a 1234 g ingredient should show "1234", not "1.234").
+  return new Intl.NumberFormat("de-DE", {
+    maximumFractionDigits: 20,
+    useGrouping: false,
+  }).format(q);
+}
 
 export function emptyIngredient(): DraftIngredient {
   return {
@@ -64,6 +132,7 @@ export function emptyIngredient(): DraftIngredient {
     quantity: "",
     unit: null,
     notes: "",
+    isOptional: false,
   };
 }
 
@@ -94,6 +163,7 @@ export function emptyRecipe(): DraftRecipe {
     cookTimeMin: "",
     sourceUrl: "",
     photoPath: null,
+    photoUrl: "",
     tags: [],
     sections: [
       {
@@ -108,6 +178,7 @@ export function emptyRecipe(): DraftRecipe {
             quantity: "",
             unit: null,
             notes: "",
+            isOptional: false,
           },
         ],
       },

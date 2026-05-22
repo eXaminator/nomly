@@ -39,6 +39,7 @@ function ingredientToPayload(ing: DraftIngredient) {
     quantity: toNumberOrNull(ing.quantity),
     unitId: ing.unit?.id ?? null,
     notes: ing.notes.trim() || null,
+    isOptional: ing.isOptional,
   };
 }
 
@@ -51,6 +52,7 @@ function buildPayload(draft: DraftRecipe) {
     cookTimeMin: toNumberOrNull(draft.cookTimeMin),
     sourceUrl: draft.sourceUrl.trim() || null,
     photoPath: draft.photoPath,
+    photoUrl: draft.photoUrl.trim() || null,
     tags: draft.tags,
     sections: draft.sections.map((s) => ({
       title: s.title.trim() || null,
@@ -91,6 +93,13 @@ export function RecipeForm({ initial, recipeId, tagSuggestions }: Props) {
 
   function addSection() {
     setDraft({ ...draft, sections: [...draft.sections, emptySection()] });
+  }
+
+  function appendSectionsAfter(i: number, extras: DraftSection[]) {
+    if (extras.length === 0) return;
+    const sections = draft.sections.slice();
+    sections.splice(i + 1, 0, ...extras);
+    setDraft({ ...draft, sections });
   }
 
   async function onSubmit(e: React.FormEvent) {
@@ -231,8 +240,10 @@ export function RecipeForm({ initial, recipeId, tagSuggestions }: Props) {
             <Label>Foto</Label>
             <div className="mt-1.5">
               <PhotoUpload
-                value={draft.photoPath}
-                onChange={(photoPath) => setDraft({ ...draft, photoPath })}
+                photoPath={draft.photoPath}
+                onPhotoPathChange={(photoPath) => setDraft({ ...draft, photoPath })}
+                photoUrl={draft.photoUrl}
+                onPhotoUrlChange={(photoUrl) => setDraft({ ...draft, photoUrl })}
               />
             </div>
           </div>
@@ -266,6 +277,7 @@ export function RecipeForm({ initial, recipeId, tagSuggestions }: Props) {
             onChange={(next) => setSection(i, next)}
             onRemove={() => removeSection(i)}
             onMove={(dir) => moveSection(i, dir)}
+            onAppendSections={(extras) => appendSectionsAfter(i, extras)}
           />
         ))}
       </div>

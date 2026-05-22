@@ -9,18 +9,19 @@ import type { FamilywallRawRecipe } from "@/lib/familywall/types";
 function makeLookups(): { units: UnitLookup; ingredients: IngredientLookup } {
   const units: UnitLookup = {
     byNameOrAlias: new Map([
-      ["g", { id: 1, name: "g" }],
-      ["el", { id: 2, name: "EL" }],
-      ["tablespoon", { id: 2, name: "EL" }],
-      ["stück", { id: 3, name: "Stück" }],
-      ["cup", { id: 4, name: "Cup" }],
+      ["g", { id: 1, name: "g", isContainer: false }],
+      ["el", { id: 2, name: "EL", isContainer: false }],
+      ["tablespoon", { id: 2, name: "EL", isContainer: false }],
+      ["stück", { id: 3, name: "Stück", isContainer: false }],
+      ["cup", { id: 4, name: "Cup", isContainer: false }],
     ]),
     byCanonicalName: new Map([
-      ["g", { id: 1, name: "g" }],
-      ["el", { id: 2, name: "EL" }],
-      ["stück", { id: 3, name: "Stück" }],
-      ["cup", { id: 4, name: "Cup" }],
+      ["g", { id: 1, name: "g", isContainer: false }],
+      ["el", { id: 2, name: "EL", isContainer: false }],
+      ["stück", { id: 3, name: "Stück", isContainer: false }],
+      ["cup", { id: 4, name: "Cup", isContainer: false }],
     ]),
+    containerTokens: new Set(),
   };
   const ingredients: IngredientLookup = new Map([
     ["mehl", { id: 10, canonicalName: "Mehl" }],
@@ -63,6 +64,7 @@ describe("transformFamilywallRecipe", () => {
       quantity: 500,
       unitId: 1, // g
       notes: null,
+      isOptional: false,
     });
   });
 
@@ -106,6 +108,18 @@ describe("transformFamilywallRecipe", () => {
     expect(ing.ingredientName).toBe("schmunzel Salz");
     expect(ing.unitId).toBe(3); // Stück fallback
     expect(ing.notes).toBeNull();
+  });
+
+  it("'halbe Bio-Orange' → 0.5 Stück Bio-Orange (Stück default kicks in)", () => {
+    const out = transformFamilywallRecipe(
+      makeRaw({ ingredients: ["halbe Bio-Orange"] }),
+      makeLookups(),
+      null,
+    );
+    const ing = out.sections[0].ingredients[0];
+    expect(ing.quantity).toBe(0.5);
+    expect(ing.unitId).toBe(3); // Stück
+    expect(ing.ingredientName).toBe("Bio-Orange");
   });
 
   it("english unit token resolves via the alias lookup", () => {
@@ -225,7 +239,7 @@ describe("transformFamilywallRecipe", () => {
 
   it("strips pseudo-plural '/n' from a Familywall unit marker", () => {
     const lookups = makeLookups();
-    lookups.units.byNameOrAlias.set("dose", { id: 6, name: "Dose" });
+    lookups.units.byNameOrAlias.set("dose", { id: 6, name: "Dose", isContainer: false });
     const out = transformFamilywallRecipe(
       makeRaw({ ingredients: ["1 Dose/n Kidneybohnen"] }),
       lookups,
@@ -239,7 +253,7 @@ describe("transformFamilywallRecipe", () => {
 
   it("captures parenthesised content anywhere as notes", () => {
     const lookups = makeLookups();
-    lookups.units.byNameOrAlias.set("dose", { id: 6, name: "Dose" });
+    lookups.units.byNameOrAlias.set("dose", { id: 6, name: "Dose", isContainer: false });
     const out = transformFamilywallRecipe(
       makeRaw({
         ingredients: ["1 Dose Kidneybohnen (Abtropfgewicht ca. 255 g)"],
@@ -283,7 +297,7 @@ describe("transformFamilywallRecipe", () => {
 
   it("parses 'Pck.' as a Packung unit token", () => {
     const lookups = makeLookups();
-    lookups.units.byNameOrAlias.set("pck", { id: 8, name: "Packung" });
+    lookups.units.byNameOrAlias.set("pck", { id: 8, name: "Packung", isContainer: false });
     const out = transformFamilywallRecipe(
       makeRaw({
         ingredients: ["1 Pck. Blätterteig (Blätterteig-Rolle, TK)"],
@@ -300,7 +314,7 @@ describe("transformFamilywallRecipe", () => {
 
   it("recognises 'Dose' after a size modifier 'kl.'", () => {
     const lookups = makeLookups();
-    lookups.units.byNameOrAlias.set("dose", { id: 6, name: "Dose" });
+    lookups.units.byNameOrAlias.set("dose", { id: 6, name: "Dose", isContainer: false });
     const out = transformFamilywallRecipe(
       makeRaw({
         ingredients: ["1 kl. Dose Kidneybohnen (Abtropfgewicht ca. 255 g)"],
@@ -339,20 +353,20 @@ describe("transformFamilywallRecipe", () => {
     expect(ing.ingredientName).toBe("caster sugar");
   });
 
-  it("moves 'oder'-alternatives into notes", () => {
+  it("keeps 'oder'-alternatives in the name", () => {
     const out = transformFamilywallRecipe(
       makeRaw({ ingredients: ["100g Butter oder Margarine"] }),
       makeLookups(),
       null,
     );
     const ing = out.sections[0].ingredients[0];
-    expect(ing.ingredientName).toBe("Butter");
-    expect(ing.notes).toBe("oder Margarine");
+    expect(ing.ingredientName).toBe("Butter oder Margarine");
+    expect(ing.notes).toBeNull();
   });
 
   it("moves 'z.B.' examples into notes", () => {
     const lookups = makeLookups();
-    lookups.units.byNameOrAlias.set("tl", { id: 7, name: "TL" });
+    lookups.units.byNameOrAlias.set("tl", { id: 7, name: "TL", isContainer: false });
     const out = transformFamilywallRecipe(
       makeRaw({ ingredients: ["1 TL Salz z.B. Meersalz"] }),
       lookups,
@@ -419,8 +433,8 @@ describe("transformFamilywallRecipe", () => {
 
   it("parses '1½tsp' as quantity 1.5 + tsp", () => {
     const lookups = makeLookups();
-    lookups.units.byNameOrAlias.set("tsp", { id: 5, name: "TL" });
-    lookups.units.byNameOrAlias.set("teaspoon", { id: 5, name: "TL" });
+    lookups.units.byNameOrAlias.set("tsp", { id: 5, name: "TL", isContainer: false });
+    lookups.units.byNameOrAlias.set("teaspoon", { id: 5, name: "TL", isContainer: false });
     const out = transformFamilywallRecipe(
       makeRaw({ ingredients: ["1½tsp Salz"] }),
       lookups,
@@ -430,5 +444,72 @@ describe("transformFamilywallRecipe", () => {
     expect(ing.quantity).toBe(1.5);
     expect(ing.unitId).toBe(5); // TL
     expect(ing.ingredientName).toBe("Salz");
+  });
+
+  it("matches instruction sections to ingredient sections by title", () => {
+    const out = transformFamilywallRecipe(
+      makeRaw({
+        ingredients: [
+          "Für den Teig:",
+          "200 g Mehl",
+          "1 EL Zucker",
+          "Für die Füllung:",
+          "100 g Quark",
+        ],
+        instructions: [
+          "Für den Teig:",
+          "Mehl und Zucker mischen.",
+          "Teig kneten.",
+          "Für die Füllung:",
+          "Quark glattrühren.",
+        ],
+      }),
+      makeLookups(),
+      null,
+    );
+    // Two sections, each with its own instructions
+    expect(out.sections).toHaveLength(2);
+    expect(out.sections[0].title).toBe("Für den Teig");
+    expect(out.sections[0].instructions).toMatch(/Mehl und Zucker/);
+    expect(out.sections[0].instructions).toMatch(/Teig kneten/);
+    expect(out.sections[0].instructions).not.toMatch(/Quark/);
+    expect(out.sections[1].title).toBe("Für die Füllung");
+    expect(out.sections[1].instructions).toMatch(/Quark glattrühren/);
+    expect(out.sections[1].instructions).not.toMatch(/Mehl/);
+  });
+
+  it("leading unsectioned instructions attach to the first section", () => {
+    const out = transformFamilywallRecipe(
+      makeRaw({
+        ingredients: ["Für den Teig:", "200 g Mehl"],
+        instructions: ["Ofen vorheizen.", "Für den Teig:", "Mehl mischen."],
+      }),
+      makeLookups(),
+      null,
+    );
+    expect(out.sections).toHaveLength(1);
+    expect(out.sections[0].title).toBe("Für den Teig");
+    expect(out.sections[0].instructions).toMatch(/Ofen vorheizen/);
+    expect(out.sections[0].instructions).toMatch(/Mehl mischen/);
+  });
+
+  it("instructions without matching ingredient section become own section", () => {
+    const out = transformFamilywallRecipe(
+      makeRaw({
+        ingredients: ["200 g Mehl"],
+        instructions: [
+          "Mehl sieben.",
+          "Zum Servieren:",
+          "Mit Puderzucker bestäuben.",
+        ],
+      }),
+      makeLookups(),
+      null,
+    );
+    expect(out.sections).toHaveLength(2);
+    expect(out.sections[0].instructions).toMatch(/Mehl sieben/);
+    expect(out.sections[1].title).toBe("Zum Servieren");
+    expect(out.sections[1].ingredients).toHaveLength(0);
+    expect(out.sections[1].instructions).toMatch(/Puderzucker/);
   });
 });

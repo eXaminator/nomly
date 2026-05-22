@@ -11,10 +11,10 @@
  * tolerate missing units/notes.
  */
 
-import { parseIngredientString } from "../recipe-import/ingredient.ts";
 import {
-  resolveIngredientName,
-  resolveUnit,
+  mergeIngredientAndInstructionSections,
+  parseIngredientLinesIntoSections,
+  parseInstructionsIntoSections,
   type IngredientLookup,
   type UnitLookup,
 } from "../recipe-import/index.ts";
@@ -51,47 +51,19 @@ function joinInstructions(steps: string[]): string {
 
 const FAVORITE_TAG = "Familywall-Favorit";
 
-/**
- * A bare line of all-uppercase text (no digits, no commas) is treated as a
- * section heading rather than an ingredient — typical pattern in scraped
- * recipes that split the ingredient list into PASTRY / FILLING / GLAZE.
- */
-function isSectionHeading(line: string): boolean {
-  const trimmed = line.trim();
-  if (trimmed.length < 2) return false;
-  if (!/\p{L}/u.test(trimmed)) return false;
-  if (/[\d,;()/]/.test(trimmed)) return false;
-  return trimmed === trimmed.toUpperCase();
-}
-
 function toTitleCase(s: string): string {
   return s.toLowerCase().replace(/\p{L}+/gu, (w) => w[0].toUpperCase() + w.slice(1));
 }
 
 /**
- * Split raw ingredient lines into one-or-more sections at every all-caps
- * heading. The heading (title-cased) becomes the section title; lines
- * between headings are that section's ingredients.
+ * Familywall often emits all-caps section titles ("PASTRY", "FILLING") that
+ * read better as title-case ("Pastry", "Filling"). Mixed-case titles like
+ * "Für den Teig" the user typed themselves are left untouched.
  */
-function splitIngredientsBySection(
-  lines: string[],
-): Array<{ title: string | null; ingredients: string[] }> {
-  const sections: Array<{ title: string | null; ingredients: string[] }> = [];
-  let cur: { title: string | null; ingredients: string[] } = {
-    title: null,
-    ingredients: [],
-  };
-  for (const line of lines) {
-    if (isSectionHeading(line)) {
-      if (cur.ingredients.length > 0) sections.push(cur);
-      cur = { title: toTitleCase(line.trim()), ingredients: [] };
-    } else {
-      cur.ingredients.push(line);
-    }
-  }
-  if (cur.ingredients.length > 0 || cur.title !== null) sections.push(cur);
-  if (sections.length === 0) sections.push({ title: null, ingredients: [] });
-  return sections;
+function prettifySectionTitle(title: string): string {
+  const trimmed = title.trim();
+  if (trimmed.length === 0) return trimmed;
+  return trimmed === trimmed.toLocaleUpperCase("de") ? toTitleCase(trimmed) : trimmed;
 }
 
 function dedupeTags(tags: Iterable<string>): string[] {
@@ -114,42 +86,55 @@ export function transformFamilywallRecipe(
   /** Photo path the orchestrator stored before calling us, or null. */
   photoPath: string | null,
 ): RecipeInput {
-  // Derive the parser's known-unit set from the DB. Adding a new alias to
-  // unit_alias is now the single source of truth — no parser-side patch
-  // required.
-  const knownUnitTokens = new Set(lookups.units.byNameOrAlias.keys());
-  function parseLine(line: string) {
-    const parsed = parseIngredientString(line, knownUnitTokens);
-    const fallbackName = parsed.name.trim();
-    const name = fallbackName.length > 0 ? fallbackName : "Unbekannte Zutat";
-    const { resolved, rawUnit } = resolveUnit(
-      lookups.units,
-      parsed.unitName,
-      parsed.quantity,
-    );
-    const noteParts = [
-      parsed.notes,
-      rawUnit && !resolved ? `Einheit: ${rawUnit}` : null,
-    ].filter((p): p is string => typeof p === "string" && p.length > 0);
-    // resolveIngredientName is informational here — `createRecipe` does its
-    // own case-insensitive resolution when it inserts.
-    void resolveIngredientName(lookups.ingredients, name);
-    return {
-      ingredientName: name,
-      quantity: parsed.quantity,
-      unitId: resolved ? resolved.id : null,
-      notes: noteParts.length > 0 ? noteParts.join(" – ") : null,
-    };
-  }
+  // Same pipeline as the clipboard-paste and URL-import flows: section
+  // header detection (`:`-ending, all-caps, leading dashes/emoji),
+  // conjunction splitting ("Salz und Pfeffer" → 2 rows), and the full
+  // parseIngredientString with all its noise-stripping + amount-parsing
+  // heuristics. Familywall imports get the same treatment as any other
+  // source.
+  const ingredientGroups = parseIngredientLinesIntoSections(
+    raw.ingredients,
+    lookups,
+  );
+  // Instructions can carry their own section headers ("Für den Teig:" then
+  // the steps for the dough). Parse them with the same header detector so
+  // matching titles end up in the same merged section.
+  const instructionGroups = parseInstructionsIntoSections(raw.instructions);
 
-  const sectionRaw = splitIngredientsBySection(raw.ingredients);
-  // Instructions describe the whole recipe; Familywall doesn't split them
-  // per-section, so they stay on the first section.
-  const sections = sectionRaw.map((section, idx) => ({
-    title: section.title,
-    instructions: idx === 0 ? joinInstructions(raw.instructions) : "",
-    ingredients: section.ingredients.map(parseLine),
+  const merged = mergeIngredientAndInstructionSections(
+    ingredientGroups,
+    instructionGroups,
+    joinInstructions,
+  );
+
+  const sections = merged.map((m) => ({
+    title: m.title ? prettifySectionTitle(m.title) : null,
+    instructions: m.instructions,
+    ingredients: m.ingredients.map((p) => {
+      const name = p.name.trim().length > 0 ? p.name.trim() : "Unbekannte Zutat";
+      const noteParts = [
+        p.notes,
+        p.rawUnit && !p.unit ? `Einheit: ${p.rawUnit}` : null,
+      ].filter((s): s is string => typeof s === "string" && s.length > 0);
+      return {
+        ingredientName: name,
+        quantity: p.quantity,
+        unitId: p.unit ? p.unit.id : null,
+        notes: noteParts.length > 0 ? noteParts.join(" – ") : null,
+        isOptional: p.isOptional,
+      };
+    }),
   }));
+
+  // Guarantee at least one section even when the source had zero ingredients —
+  // RecipeInput callers expect `sections[0]` to exist.
+  if (sections.length === 0) {
+    sections.push({
+      title: null,
+      instructions: joinInstructions(raw.instructions),
+      ingredients: [],
+    });
+  }
 
   return {
     title: raw.title.trim() || "Importiertes Rezept",

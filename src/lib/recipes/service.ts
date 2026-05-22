@@ -10,11 +10,13 @@ import {
   ingredientAlias as ingredientAliasTable,
   unit as unitTable,
 } from "../../db/schema.ts";
+import type { RecipeDiet } from "./diet.ts";
 import type {
   RecipeInput,
   RecipeListItem,
   RecipeView,
 } from "./types.ts";
+import { deriveDiet, type IngredientDietaryClass } from "./diet.ts";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -123,6 +125,7 @@ function writeSections(
           quantity: ing.quantity,
           unitId: ing.unitId,
           notes: ing.notes,
+          isOptional: ing.isOptional,
           sortOrder: iIdx,
         })
         .run();
@@ -214,6 +217,8 @@ export function getRecipe(id: number): RecipeView | null {
     unitId: number | null;
     unitName: string | null;
     notes: string | null;
+    isOptional: boolean;
+    dietaryClass: IngredientDietaryClass;
     sortOrder: number;
   };
   const ingredients: IngredientRow[] =
@@ -232,6 +237,8 @@ export function getRecipe(id: number): RecipeView | null {
             unitId: recipeIngredient.unitId,
             unitName: unitTable.name,
             notes: recipeIngredient.notes,
+            isOptional: recipeIngredient.isOptional,
+            dietaryClass: ingredientTable.dietaryClass,
             sortOrder: recipeIngredient.sortOrder,
           })
           .from(recipeIngredient)
@@ -252,6 +259,10 @@ export function getRecipe(id: number): RecipeView | null {
     .map((t) => t.name)
     .sort();
 
+  const diet = deriveDiet(
+    ingredients.filter((i) => !i.isOptional).map((i) => i.dietaryClass),
+  );
+
   return {
     id: head.id,
     title: head.title,
@@ -262,6 +273,8 @@ export function getRecipe(id: number): RecipeView | null {
     prepTimeMin: head.prepTimeMin,
     cookTimeMin: head.cookTimeMin,
     tags,
+    isVegan: diet.isVegan,
+    isVegetarian: diet.isVegetarian,
     sections: sections.map((s) => ({
       id: s.id,
       title: s.title,
@@ -279,6 +292,7 @@ export function getRecipe(id: number): RecipeView | null {
           unitId: i.unitId,
           unitName: i.unitName,
           notes: i.notes,
+          isOptional: i.isOptional,
           sortOrder: i.sortOrder,
         })),
     })),
@@ -287,7 +301,16 @@ export function getRecipe(id: number): RecipeView | null {
   };
 }
 
-export function listRecipes(query?: string): RecipeListItem[] {
+export type ListRecipesOptions = {
+  query?: string;
+  /** Recipe must carry every tag in this list. */
+  mustTags?: string[];
+  /** Recipe must carry none of the tags in this list. */
+  notTags?: string[];
+};
+
+export function listRecipes(opts: ListRecipesOptions = {}): RecipeListItem[] {
+  const { query, mustTags = [], notTags = [] } = opts;
   const trimmed = query?.trim() ?? "";
   let rows: Array<typeof recipe.$inferSelect>;
   if (trimmed.length === 0) {
@@ -334,6 +357,7 @@ export function listRecipes(query?: string): RecipeListItem[] {
   if (rows.length === 0) return [];
 
   const ids = rows.map((r) => r.id);
+  const dietByRecipe = computeDietForRecipes(ids);
   const tagsByRecipe = new Map<number, string[]>();
   const tagRows = db
     .select({ recipeId: recipeTag.recipeId, name: tag.name })
@@ -347,14 +371,75 @@ export function listRecipes(query?: string): RecipeListItem[] {
     tagsByRecipe.set(tr.recipeId, list);
   }
 
-  return rows.map((r) => ({
-    id: r.id,
-    title: r.title,
-    description: r.description,
-    photoPath: r.photoPath,
-    servings: r.servings,
-    prepTimeMin: r.prepTimeMin,
-    cookTimeMin: r.cookTimeMin,
-    tags: (tagsByRecipe.get(r.id) ?? []).sort(),
-  }));
+  // Tag filtering happens in-memory against the already-joined tag map. Tag
+  // names are compared case-insensitively (search hits already are).
+  const mustLower = mustTags.map((t) => t.toLowerCase());
+  const notLower = notTags.map((t) => t.toLowerCase());
+  const passesTagFilter = (recipeTags: string[]): boolean => {
+    if (mustLower.length === 0 && notLower.length === 0) return true;
+    const have = new Set(recipeTags.map((t) => t.toLowerCase()));
+    for (const m of mustLower) if (!have.has(m)) return false;
+    for (const n of notLower) if (have.has(n)) return false;
+    return true;
+  };
+
+  return rows.flatMap((r) => {
+    const recipeTags = (tagsByRecipe.get(r.id) ?? []).sort();
+    if (!passesTagFilter(recipeTags)) return [];
+    const diet = dietByRecipe.get(r.id) ?? { isVegan: true, isVegetarian: true };
+    return [
+      {
+        id: r.id,
+        title: r.title,
+        description: r.description,
+        photoPath: r.photoPath,
+        servings: r.servings,
+        prepTimeMin: r.prepTimeMin,
+        cookTimeMin: r.cookTimeMin,
+        tags: recipeTags,
+        isVegan: diet.isVegan,
+        isVegetarian: diet.isVegetarian,
+      },
+    ];
+  });
+}
+
+/**
+ * Pull every non-optional (recipeId, dietary_class) pair for the given
+ * recipes and derive recipe-level diet flags in JS. One query, no per-recipe
+ * roundtrips. A recipe with no ingredients yields { vegan: true, vegetarian:
+ * true } (vacuous truth) — the caller's default falls back to the same.
+ */
+function computeDietForRecipes(recipeIds: number[]): Map<number, RecipeDiet> {
+  if (recipeIds.length === 0) return new Map();
+  const rows = db
+    .select({
+      recipeId: recipeSection.recipeId,
+      dietaryClass: ingredientTable.dietaryClass,
+    })
+    .from(recipeIngredient)
+    .innerJoin(recipeSection, eq(recipeSection.id, recipeIngredient.sectionId))
+    .innerJoin(
+      ingredientTable,
+      eq(ingredientTable.id, recipeIngredient.ingredientId),
+    )
+    .where(
+      and(
+        inArray(recipeSection.recipeId, recipeIds),
+        eq(recipeIngredient.isOptional, false),
+      ),
+    )
+    .all();
+
+  const byRecipe = new Map<number, ("vegan" | "vegetarian" | "meat" | null)[]>();
+  for (const row of rows) {
+    const list = byRecipe.get(row.recipeId) ?? [];
+    list.push(row.dietaryClass);
+    byRecipe.set(row.recipeId, list);
+  }
+  const out = new Map<number, RecipeDiet>();
+  for (const [recipeId, classes] of byRecipe) {
+    out.set(recipeId, deriveDiet(classes));
+  }
+  return out;
 }
