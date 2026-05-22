@@ -103,3 +103,25 @@ export async function addMealsToList(
     affectedItemIds: number[];
   };
 }
+
+export async function setUnavailable(
+  kind: "ingredient" | "product",
+  id: number,
+  supermarketId: number,
+  unavailable: boolean,
+): Promise<void> {
+  if (unavailable) {
+    const res = await fetch("/api/v1/shopping/unavailable", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ kind, id, supermarketId }),
+    });
+    await jsonOrThrow(res);
+    return;
+  }
+  const res = await fetch(
+    `/api/v1/shopping/unavailable?kind=${kind}&id=${id}&supermarketId=${supermarketId}`,
+    { method: "DELETE" },
+  );
+  await jsonOrThrow(res);
+}

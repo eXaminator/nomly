@@ -4,6 +4,8 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import { CalendarPlus, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { RecipePreviewDialog } from "@/components/planner/recipe-preview-dialog";
+import { cn } from "@/lib/cn";
 import type { ShoppingItemView } from "@/lib/shopping/items";
 import { ShoppingItemRow } from "./shopping-item-row";
 import { AddItemDialog } from "./add-item-dialog";
@@ -12,6 +14,7 @@ import { SupermarketFilter } from "./supermarket-filter";
 import {
   deleteItem as apiDelete,
   patchItem as apiPatch,
+  setUnavailable as apiSetUnavailable,
 } from "./api";
 
 const STORAGE_KEY = "nomly.shopping.supermarketId";
@@ -37,13 +40,13 @@ export function ShoppingListView({
 }: Props) {
   const router = useRouter();
   const [items, setItems] = React.useState(initialItems);
-  React.useEffect(() => setItems(initialItems), [initialItems]); // eslint-disable-line react-hooks/set-state-in-effect
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  React.useEffect(() => setItems(initialItems), [initialItems]);
   const [supermarketId, setSupermarketId] = React.useState<number | null>(null);
   const [addItemOpen, setAddItemOpen] = React.useState(false);
   const [addMealsOpen, setAddMealsOpen] = React.useState(false);
+  const [previewRecipeId, setPreviewRecipeId] = React.useState<number | null>(null);
 
-  // Hydrate supermarket filter from localStorage. Done in an effect so SSR/CSR
-  // markup matches (localStorage isn't available on the server).
   React.useEffect(() => {
     const stored = window.localStorage.getItem(STORAGE_KEY);
     if (stored == null) return;
@@ -105,8 +108,28 @@ export function ShoppingListView({
     }
   }
 
+  async function onToggleUnavailable(item: ShoppingItemView, supermarketId: number) {
+    const isUnavailable = item.unavailableSupermarketIds.includes(supermarketId);
+    const next = !isUnavailable;
+    // Optimistic toggle so the row chip flips immediately.
+    setItems((prev) =>
+      prev.map((i) => {
+        if (i.id !== item.id) return i;
+        const set = new Set(i.unavailableSupermarketIds);
+        if (next) set.add(supermarketId);
+        else set.delete(supermarketId);
+        return { ...i, unavailableSupermarketIds: Array.from(set) };
+      }),
+    );
+    try {
+      await apiSetUnavailable(item.refType, item.refId, supermarketId, next);
+    } catch {
+      router.refresh();
+    }
+  }
+
   const grouped = React.useMemo(
-    () => groupItems(items, supermarketId, supermarkets),
+    () => groupByCategory(items, supermarketId, supermarkets),
     [items, supermarketId, supermarkets],
   );
 
@@ -150,17 +173,32 @@ export function ShoppingListView({
         <div className="flex flex-col gap-6">
           {grouped.map((group) => (
             <section key={group.key} className="flex flex-col gap-2">
-              <h2 className="text-xs font-medium uppercase tracking-wider text-[var(--color-muted-fg)]">
+              <h2
+                className={cn(
+                  "text-xs font-medium uppercase tracking-wider",
+                  group.muted
+                    ? "text-[var(--color-muted-fg)]/60"
+                    : "text-[var(--color-muted-fg)]",
+                )}
+              >
                 {group.label}
               </h2>
-              <ul className="flex flex-col divide-y divide-[var(--color-border)] rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-card)]">
+              <ul
+                className={cn(
+                  "flex flex-col divide-y divide-[var(--color-border)] rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-card)]",
+                  group.muted && "opacity-60",
+                )}
+              >
                 {group.items.map((item) => (
                   <li key={item.id}>
                     <ShoppingItemRow
                       item={item}
+                      activeSupermarketId={supermarketId}
+                      onPreviewRecipe={(id) => setPreviewRecipeId(id)}
                       onToggle={onToggleCheck}
                       onPatch={onPatch}
                       onDelete={onDelete}
+                      onToggleUnavailable={onToggleUnavailable}
                     />
                   </li>
                 ))}
@@ -188,76 +226,103 @@ export function ShoppingListView({
           router.refresh();
         }}
       />
+      <RecipePreviewDialog
+        recipeId={previewRecipeId}
+        onClose={() => setPreviewRecipeId(null)}
+      />
     </div>
   );
 }
 
-type Group = { key: string; label: string; items: ShoppingItemView[] };
+type Group = {
+  key: string;
+  label: string;
+  items: ShoppingItemView[];
+  /** Set on the trailing "Erledigt" or "Hier nicht verfügbar" sink groups. */
+  muted?: boolean;
+};
 
-function groupItems(
+function groupByCategory(
   items: ShoppingItemView[],
   supermarketId: number | null,
   supermarkets: SupermarketSummary[],
 ): Group[] {
-  // Two stacks: open items first (grouped per the active sort), then checked
-  // items as a single bottom group. Within each section the checked items
-  // stay in place (per spec they don't move to the bottom of the list — they
-  // sink to the bottom of *their own group* via the strike-through styling).
-  const open = items.filter((i) => !i.checked);
-  const checked = items.filter((i) => i.checked);
+  const sm = supermarketId != null
+    ? supermarkets.find((s) => s.id === supermarketId) ?? null
+    : null;
+  const orderByCategory = sm
+    ? new Map(sm.categories.map((c) => [c.categoryId, c.sortOrder]))
+    : null;
 
-  if (supermarketId == null) {
-    open.sort((a, b) => a.name.localeCompare(b.name, "de"));
-    const groups: Group[] = [];
-    if (open.length > 0)
-      groups.push({ key: "all-open", label: "Offene Artikel", items: open });
-    if (checked.length > 0)
-      groups.push({ key: "checked", label: "Erledigt", items: checked });
-    return groups;
+  // Split into three buckets: open/available, unavailable-at-active-store
+  // (sinks to bottom), and checked (sinks to bottom).
+  const open: ShoppingItemView[] = [];
+  const unavailable: ShoppingItemView[] = [];
+  const checked: ShoppingItemView[] = [];
+  for (const item of items) {
+    if (item.checked) {
+      checked.push(item);
+      continue;
+    }
+    if (
+      supermarketId != null &&
+      item.unavailableSupermarketIds.includes(supermarketId)
+    ) {
+      unavailable.push(item);
+      continue;
+    }
+    open.push(item);
   }
 
-  const sm = supermarkets.find((s) => s.id === supermarketId);
-  if (!sm) {
-    return groupItems(items, null, supermarkets);
-  }
-  const orderByCategory = new Map(
-    sm.categories.map((c) => [c.categoryId, c.sortOrder]),
-  );
-
-  const byCategory = new Map<number | null, ShoppingItemView[]>();
+  // Group open items by category. Categories outside the supermarket's
+  // order (or always, when no supermarket is selected) sort alphabetically.
+  type Bucket = { categoryId: number | null; categoryName: string; items: ShoppingItemView[] };
+  const buckets = new Map<number | "none", Bucket>();
   for (const item of open) {
-    const key = orderByCategory.has(item.categoryId ?? -1)
-      ? item.categoryId
-      : null;
-    const arr = byCategory.get(key) ?? [];
-    arr.push(item);
-    byCategory.set(key, arr);
+    const key: number | "none" = item.categoryId ?? "none";
+    const b = buckets.get(key) ?? {
+      categoryId: item.categoryId,
+      categoryName: item.categoryName ?? "Ohne Kategorie",
+      items: [],
+    };
+    b.items.push(item);
+    buckets.set(key, b);
   }
-  for (const [, arr] of byCategory) {
-    arr.sort((a, b) => a.name.localeCompare(b.name, "de"));
+  for (const b of buckets.values()) {
+    b.items.sort((a, b2) =>
+      a.name.localeCompare(b2.name, "de", { sensitivity: "base" }),
+    );
   }
 
-  const groups: Group[] = [];
-  const ordered = Array.from(byCategory.entries())
-    .filter(([key]) => key != null)
-    .sort(([a], [b]) => {
-      const ao = orderByCategory.get(a as number) ?? 0;
-      const bo = orderByCategory.get(b as number) ?? 0;
-      return ao - bo;
-    });
-  for (const [, arr] of ordered) {
-    const catName = arr[0].categoryName ?? "Ohne Kategorie";
+  const ordered = Array.from(buckets.values()).sort((a, b) => {
+    if (orderByCategory) {
+      const ao = a.categoryId != null ? orderByCategory.get(a.categoryId) : undefined;
+      const bo = b.categoryId != null ? orderByCategory.get(b.categoryId) : undefined;
+      if (ao != null && bo != null) return ao - bo;
+      if (ao != null) return -1;
+      if (bo != null) return 1;
+    }
+    return a.categoryName.localeCompare(b.categoryName, "de", { sensitivity: "base" });
+  });
+
+  const groups: Group[] = ordered.map((b) => ({
+    key: `cat-${b.categoryId ?? "none"}`,
+    label: b.categoryName,
+    items: b.items,
+  }));
+
+  if (unavailable.length > 0) {
+    unavailable.sort((a, b) => a.name.localeCompare(b.name, "de", { sensitivity: "base" }));
     groups.push({
-      key: `cat-${arr[0].categoryId ?? "none"}`,
-      label: catName,
-      items: arr,
+      key: "unavailable",
+      label: "Hier nicht verfügbar",
+      items: unavailable,
+      muted: true,
     });
   }
-  const uncategorized = byCategory.get(null);
-  if (uncategorized && uncategorized.length > 0) {
-    groups.push({ key: "uncategorized", label: "Sonstiges", items: uncategorized });
+  if (checked.length > 0) {
+    groups.push({ key: "checked", label: "Erledigt", items: checked, muted: true });
   }
-  if (checked.length > 0)
-    groups.push({ key: "checked", label: "Erledigt", items: checked });
   return groups;
 }
+

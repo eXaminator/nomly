@@ -5,7 +5,6 @@ import {
   shoppingItem,
   shoppingItemSource,
 } from "../../db/schema.ts";
-import { loadUnitsById } from "./units-db.ts";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -33,18 +32,16 @@ export function deleteMealOnly(mealPlanId: number): void {
 }
 
 /**
- * "Mahlzeit und Zutaten entfernen". For each `shopping_item` referenced by
- * this meal:
- *   - recompute the quantity from the *remaining* sources (after dropping
- *     this meal's rows) by summing `contributed_quantity` per item in base
- *     units;
- *   - if nothing remains and the item has no unrelated contributions, delete
- *     the item;
- *   - otherwise update `quantity` (keep `unit_id`), bump `version`.
- * Then delete the meal_plan row.
+ * "Mahlzeit und Zutaten entfernen". The shopping-item amounts are derived
+ * from sources at read time, so removing the meal's sources is enough to
+ * update displayed quantities — no recomputation of `shopping_item.quantity`
+ * needed. We do, however, delete items that:
+ *   - have no remaining sources AND
+ *   - have no manual quantity / unit / note (i.e. they only existed because
+ *     of this meal — manual additions on top of the meal-derived item stay).
  *
- * Manual edits the user made after adding the meal are lost — flagged as
- * an open question in the spec (§4.3.3).
+ * Manual edits via the editor (which set quantity/unit/note) are preserved
+ * because we only delete items where those are still null.
  */
 export function deleteMealAndIngredients(mealPlanId: number): {
   itemsDeleted: number;
@@ -64,8 +61,8 @@ function applyDeleteWithIngredients(
     .all();
   const itemIds = Array.from(new Set(affected.map((r) => r.itemId)));
 
-  // Remove this meal's contribution rows first so the remaining-sources
-  // computation only sees survivors.
+  // Drop this meal's contribution rows so the remaining-sources check is
+  // accurate.
   tx.delete(shoppingItemSource)
     .where(eq(shoppingItemSource.mealPlanId, mealPlanId))
     .run();
@@ -75,65 +72,55 @@ function applyDeleteWithIngredients(
 
   for (const itemId of itemIds) {
     const remaining = tx
-      .select({
-        id: shoppingItemSource.id,
-        contributedQuantity: shoppingItemSource.contributedQuantity,
-        contributedUnitId: shoppingItemSource.contributedUnitId,
-      })
+      .select({ id: shoppingItemSource.id })
       .from(shoppingItemSource)
       .where(eq(shoppingItemSource.itemId, itemId))
-      .all();
-
-    if (remaining.length === 0) {
-      // Item still exists but has no remaining source — delete it. (Manual
-      // items had no source rows to begin with, so they aren't even in
-      // `itemIds`.)
-      tx.delete(shoppingItem).where(eq(shoppingItem.id, itemId)).run();
-      itemsDeleted += 1;
+      .get();
+    if (remaining) {
+      // Sources survived → the read-side aggregation reflects the new
+      // total automatically. Just bump version so clients refetch.
+      tx.update(shoppingItem)
+        .set({
+          version: sql`${shoppingItem.version} + 1`,
+          updatedAt: sql`unixepoch()`,
+        })
+        .where(eq(shoppingItem.id, itemId))
+        .run();
+      itemsUpdated += 1;
       continue;
     }
-
+    // No source left. Drop the item iff the user hasn't put a manual
+    // amount or note on it.
     const item = tx
       .select({
-        unitId: shoppingItem.unitId,
         quantity: shoppingItem.quantity,
-        version: shoppingItem.version,
+        unitId: shoppingItem.unitId,
+        note: shoppingItem.note,
       })
       .from(shoppingItem)
       .where(eq(shoppingItem.id, itemId))
       .get();
-    if (!item) continue;
-
-    // Sum surviving contributions in base units, format back in the item's
-    // current unit (so the displayed unit doesn't flip out from under the
-    // user).
-    const unitIds = [item.unitId, ...remaining.map((r) => r.contributedUnitId)]
-      .filter((x): x is number => x != null);
-    const units = loadUnitsById(unitIds);
-    const itemFactor =
-      item.unitId != null ? units.get(item.unitId)?.factor ?? 1 : 1;
-    let allOpenEnded = true;
-    let total = 0;
-    for (const r of remaining) {
-      if (r.contributedQuantity == null) continue;
-      allOpenEnded = false;
-      const f = r.contributedUnitId != null ? units.get(r.contributedUnitId)?.factor ?? 1 : 1;
-      total += r.contributedQuantity * f;
+    if (
+      item != null &&
+      item.quantity == null &&
+      item.unitId == null &&
+      (item.note == null || item.note === "")
+    ) {
+      tx.delete(shoppingItem).where(eq(shoppingItem.id, itemId)).run();
+      itemsDeleted += 1;
+    } else {
+      tx.update(shoppingItem)
+        .set({
+          version: sql`${shoppingItem.version} + 1`,
+          updatedAt: sql`unixepoch()`,
+        })
+        .where(eq(shoppingItem.id, itemId))
+        .run();
+      itemsUpdated += 1;
     }
-
-    const nextQty = allOpenEnded ? null : Math.round((total / itemFactor) * 1000) / 1000;
-
-    tx.update(shoppingItem)
-      .set({
-        quantity: nextQty,
-        version: item.version + 1,
-        updatedAt: sql`unixepoch()`,
-      })
-      .where(eq(shoppingItem.id, itemId))
-      .run();
-    itemsUpdated += 1;
   }
 
   tx.delete(mealPlan).where(eq(mealPlan.id, mealPlanId)).run();
   return { itemsDeleted, itemsUpdated };
 }
+

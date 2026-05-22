@@ -1,43 +1,60 @@
 "use client";
 
 import * as React from "react";
-import Link from "next/link";
-import { Check, Pencil, RotateCcw, Trash2, X } from "lucide-react";
+import { Ban, Check, MoreVertical, Pencil, RotateCcw, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
-import type { ShoppingItemView } from "@/lib/shopping/items";
+import type {
+  ShoppingItemAmount,
+  ShoppingItemSourceView,
+  ShoppingItemView,
+} from "@/lib/shopping/items";
 import { formatQty } from "@/lib/shopping/format";
 import { cn } from "@/lib/cn";
 
 type Props = {
   item: ShoppingItemView;
+  /** When set, "Hier nicht verfügbar" toggles for this supermarket. */
+  activeSupermarketId: number | null;
+  /** Cmd/Ctrl + click on a source chip opens the recipe in a new tab. */
+  onPreviewRecipe: (recipeId: number) => void;
   onToggle: (item: ShoppingItemView) => void;
   onPatch: (
     id: number,
     patch: { quantity?: number | null; unitId?: number | null; note?: string | null },
   ) => Promise<void>;
   onDelete: (id: number) => Promise<void>;
+  onToggleUnavailable: (item: ShoppingItemView, supermarketId: number) => Promise<void>;
 };
 
-export function ShoppingItemRow({ item, onToggle, onPatch, onDelete }: Props) {
+export function ShoppingItemRow({
+  item,
+  activeSupermarketId,
+  onPreviewRecipe,
+  onToggle,
+  onPatch,
+  onDelete,
+  onToggleUnavailable,
+}: Props) {
   const [editing, setEditing] = React.useState(false);
   const [qty, setQty] = React.useState(
-    item.quantity != null ? String(item.quantity) : "",
+    item.manualQuantity != null ? String(item.manualQuantity) : "",
   );
-  const [unitText, setUnitText] = React.useState(item.unitName ?? "");
   const [note, setNote] = React.useState(item.note ?? "");
   const [saving, setSaving] = React.useState(false);
 
-  // External (server-driven) item state changed — pull it back into the
-  // edit form. The rule's "you might not need an effect" guidance is right
-  // in general, but here the server's broadcast is the synchronisation
-  // source, not a derived value.
   React.useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setQty(item.quantity != null ? String(item.quantity) : "");
-    setUnitText(item.unitName ?? "");
+    setQty(item.manualQuantity != null ? String(item.manualQuantity) : "");
     setNote(item.note ?? "");
-  }, [item.id, item.quantity, item.unitName, item.note]);
+  }, [item.id, item.manualQuantity, item.note]);
 
   async function commit() {
     setSaving(true);
@@ -54,14 +71,51 @@ export function ShoppingItemRow({ item, onToggle, onPatch, onDelete }: Props) {
     }
   }
 
+  const isUnavailableHere =
+    activeSupermarketId != null &&
+    item.unavailableSupermarketIds.includes(activeSupermarketId);
+
   return (
     <div
       className={cn(
-        "flex items-center gap-3 px-3 py-2.5 sm:px-4",
-        item.checked && "opacity-60",
+        "group flex items-stretch gap-2 px-2 py-2 sm:px-3 transition-colors",
+        item.checked ? "opacity-60" : "hover:bg-[var(--color-muted)]/40",
       )}
     >
-      <div className="min-w-0 flex-1">
+      <button
+        type="button"
+        onClick={() => onToggle(item)}
+        aria-label={item.checked ? "Rückgängig" : "Abhaken"}
+        title={item.checked ? "Rückgängig" : "Abhaken"}
+        // The whole row toggles, but a dedicated left target gives both
+        // keyboard users and screen readers a clear control.
+        className={cn(
+          "flex w-7 shrink-0 items-center justify-center self-start py-1",
+        )}
+      >
+        <span
+          className={cn(
+            "inline-flex size-5 items-center justify-center rounded-md border-2 transition-colors",
+            item.checked
+              ? "border-[var(--color-accent)] bg-[var(--color-accent)] text-white"
+              : "border-[var(--color-border)] bg-[var(--color-bg)]",
+          )}
+        >
+          {item.checked ? <Check className="size-3.5" strokeWidth={3} /> : null}
+        </span>
+      </button>
+
+      <button
+        type="button"
+        onClick={(e) => {
+          // Don't fire when the click came from within an input / dropdown
+          // (these stop their own propagation already).
+          if (editing) return;
+          e.preventDefault();
+          onToggle(item);
+        }}
+        className="min-w-0 flex-1 text-left"
+      >
         {editing ? (
           <div className="flex flex-col gap-2">
             <div className="flex items-baseline gap-2">
@@ -70,7 +124,10 @@ export function ShoppingItemRow({ item, onToggle, onPatch, onDelete }: Props) {
                 {item.refType === "product" ? "Produkt" : "Zutat"}
               </span>
             </div>
-            <div className="flex flex-wrap items-center gap-2">
+            <div
+              className="flex flex-wrap items-center gap-2"
+              onClick={(e) => e.stopPropagation()}
+            >
               <Input
                 type="text"
                 value={qty}
@@ -79,7 +136,7 @@ export function ShoppingItemRow({ item, onToggle, onPatch, onDelete }: Props) {
                 className="w-24"
               />
               <span className="text-sm text-[var(--color-muted-fg)]">
-                {unitText || "—"}
+                {item.manualUnitName || "—"}
               </span>
               <Input
                 type="text"
@@ -94,44 +151,39 @@ export function ShoppingItemRow({ item, onToggle, onPatch, onDelete }: Props) {
           <div className="flex flex-col gap-1">
             <div
               className={cn(
-                "flex flex-wrap items-baseline gap-2",
+                "flex flex-wrap items-baseline gap-x-2 gap-y-0.5",
                 item.checked && "line-through",
               )}
             >
               <span className="font-medium">{item.name}</span>
-              {item.quantity != null || item.unitName ? (
-                <span className="text-sm text-[var(--color-muted-fg)]">
-                  {item.quantity != null ? formatQty(item.quantity) : ""}
-                  {item.unitName ? ` ${item.unitName}` : ""}
-                </span>
-              ) : null}
+              <AmountList amounts={item.amounts} />
               {item.note ? (
                 <span className="text-xs text-[var(--color-muted-fg)]">
                   · {item.note}
                 </span>
               ) : null}
+              {isUnavailableHere ? (
+                <span className="rounded-full bg-[color-mix(in_srgb,var(--color-danger),transparent_90%)] px-2 py-0.5 text-xs text-[var(--color-danger)]">
+                  Hier nicht verfügbar
+                </span>
+              ) : null}
             </div>
             {item.sources.length > 0 ? (
-              <div className="flex flex-wrap items-center gap-1.5 text-xs text-[var(--color-muted-fg)]">
-                <span>Für:</span>
-                {item.sources.map((s, idx) => (
-                  <React.Fragment key={`${s.mealPlanId}-${s.recipeId}`}>
-                    {idx > 0 ? <span>·</span> : null}
-                    <Link
-                      href={`/plan?from=${s.mealDate}`}
-                      className="rounded-full bg-[var(--color-muted)] px-2 py-0.5 hover:bg-[color-mix(in_srgb,var(--color-accent),transparent_90%)] hover:text-[var(--color-accent)]"
-                    >
-                      {s.recipeTitle} ({formatDate(s.mealDate)})
-                    </Link>
-                  </React.Fragment>
+              <ul className="flex flex-col gap-0.5 text-xs text-[var(--color-muted-fg)]">
+                {item.sources.map((s) => (
+                  <SourceLine
+                    key={s.sourceId}
+                    source={s}
+                    onPreview={(id) => onPreviewRecipe(id)}
+                  />
                 ))}
-              </div>
+              </ul>
             ) : null}
           </div>
         )}
-      </div>
+      </button>
 
-      <div className="flex shrink-0 items-center gap-1">
+      <div className="flex shrink-0 items-start gap-1 self-start" onClick={(e) => e.stopPropagation()}>
         {editing ? (
           <>
             <Button
@@ -150,55 +202,109 @@ export function ShoppingItemRow({ item, onToggle, onPatch, onDelete }: Props) {
               onClick={() => setEditing(false)}
               disabled={saving}
             >
-              <X className="size-4" />
+              <RotateCcw className="size-4" />
             </Button>
           </>
         ) : (
-          <>
-            {item.checked ? (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
               <Button
                 variant="ghost"
                 size="icon"
-                aria-label="Rückgängig"
-                title="Rückgängig"
-                onClick={() => onToggle(item)}
+                aria-label="Aktionen"
+                title="Aktionen"
               >
-                <RotateCcw className="size-4" />
+                <MoreVertical className="size-4" />
               </Button>
-            ) : (
-              <Button
-                variant="ghost"
-                size="icon"
-                aria-label="Abhaken"
-                title="Abhaken"
-                onClick={() => onToggle(item)}
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => setEditing(true)}>
+                <Pencil className="mr-2 size-4" />
+                Bearbeiten
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() =>
+                  activeSupermarketId != null
+                    ? void onToggleUnavailable(item, activeSupermarketId)
+                    : undefined
+                }
+                disabled={activeSupermarketId == null}
+                className="text-[var(--color-fg)]"
               >
-                <Check className="size-4" />
-              </Button>
-            )}
-            <Button
-              variant="ghost"
-              size="icon"
-              aria-label="Bearbeiten"
-              title="Bearbeiten"
-              onClick={() => setEditing(true)}
-            >
-              <Pencil className="size-4" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              aria-label="Löschen"
-              title="Löschen"
-              className="text-[var(--color-danger)]"
-              onClick={() => onDelete(item.id)}
-            >
-              <Trash2 className="size-4" />
-            </Button>
-          </>
+                <Ban className="mr-2 size-4" />
+                {isUnavailableHere
+                  ? "Hier verfügbar markieren"
+                  : "Hier nicht verfügbar"}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                onClick={() => void onDelete(item.id)}
+                className="text-[var(--color-danger)]"
+              >
+                <Trash2 className="mr-2 size-4" />
+                Löschen
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         )}
       </div>
     </div>
+  );
+}
+
+function AmountList({ amounts }: { amounts: ShoppingItemAmount[] }) {
+  const visible = amounts.filter(
+    (a) => a.quantity != null || a.unitName != null,
+  );
+  if (visible.length === 0) return null;
+  return (
+    <span className="text-sm text-[var(--color-muted-fg)]">
+      {visible.map((a, i) => (
+        <React.Fragment key={i}>
+          {i > 0 ? <span className="mx-1">+</span> : null}
+          <span>
+            {a.quantity != null ? formatQty(a.quantity) : ""}
+            {a.unitName ? `${a.quantity != null ? " " : ""}${a.unitName}` : ""}
+          </span>
+        </React.Fragment>
+      ))}
+    </span>
+  );
+}
+
+function SourceLine({
+  source,
+  onPreview,
+}: {
+  source: ShoppingItemSourceView;
+  onPreview: (recipeId: number) => void;
+}) {
+  return (
+    <li>
+      <a
+        href={`/rezepte/${source.recipeId}`}
+        onClick={(e) => {
+          // Cmd/Ctrl/middle-click → let the browser handle (new tab).
+          // Plain click → open the preview dialog instead.
+          if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
+          e.preventDefault();
+          onPreview(source.recipeId);
+        }}
+        className="inline-flex flex-wrap items-baseline gap-x-1.5 rounded px-1 py-0.5 hover:bg-[var(--color-muted)] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+      >
+        <span className="font-medium text-[var(--color-fg)]/80">{source.recipeTitle}</span>
+        <span>({formatDate(source.mealDate)})</span>
+        {source.contributedQuantity != null || source.contributedUnit ? (
+          <span>
+            {source.contributedQuantity != null
+              ? formatQty(source.contributedQuantity)
+              : ""}
+            {source.contributedUnit ? ` ${source.contributedUnit}` : ""}
+          </span>
+        ) : null}
+        {source.recipeNotes ? <span>· {source.recipeNotes}</span> : null}
+      </a>
+    </li>
   );
 }
 

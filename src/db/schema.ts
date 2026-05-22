@@ -276,6 +276,38 @@ export const shoppingItemSource = sqliteTable(
   ],
 );
 
+/**
+ * Marker rows: `(ingredient_id, supermarket_id)` means "this ingredient is
+ * not carried at this supermarket". The shopping list renders matching items
+ * in a muted bottom group when that supermarket is the active filter (spec
+ * §6). Composite primary key — at most one row per pair.
+ */
+export const ingredientSupermarketUnavailable = sqliteTable(
+  "ingredient_supermarket_unavailable",
+  {
+    ingredientId: integer("ingredient_id")
+      .notNull()
+      .references(() => ingredient.id, { onDelete: "cascade" }),
+    supermarketId: integer("supermarket_id")
+      .notNull()
+      .references(() => supermarket.id, { onDelete: "cascade" }),
+  },
+  (t) => [primaryKey({ columns: [t.ingredientId, t.supermarketId] })],
+);
+
+export const productSupermarketUnavailable = sqliteTable(
+  "product_supermarket_unavailable",
+  {
+    productId: integer("product_id")
+      .notNull()
+      .references(() => product.id, { onDelete: "cascade" }),
+    supermarketId: integer("supermarket_id")
+      .notNull()
+      .references(() => supermarket.id, { onDelete: "cascade" }),
+  },
+  (t) => [primaryKey({ columns: [t.productId, t.supermarketId] })],
+);
+
 export const icalFeed = sqliteTable("ical_feed", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   name: text("name").notNull(),

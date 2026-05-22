@@ -240,8 +240,67 @@ describe("shopping merge-on-add", () => {
     const mehl = items.find((i) => i.name === "Mehl");
     expect(mehl).toBeDefined();
     // 200g + 300g = 500g; *2 scaling = 1000g = 1 kg (preferring kg as largest).
-    expect(mehl?.quantity).toBe(1);
-    expect(mehl?.unitName).toBe("kg");
+    expect(mehl?.amounts).toHaveLength(1);
+    expect(mehl?.amounts[0].quantity).toBe(1);
+    expect(mehl?.amounts[0].unitName).toBe("kg");
+  });
+
+  it("merges the same ingredient across incompatible dimensions into one item with two amount entries", async () => {
+    const { db } = await import("@/db");
+    const { recipeIngredient } = await import("@/db/schema");
+    // Tomate appears once as 500 g; add a second line as 2 Stk so the
+    // ingredient now contributes both a mass and a count.
+    db.insert(recipeIngredient)
+      .values({
+        sectionId: ctx.sectionId,
+        ingredientId: ctx.ingredientIds.tomate,
+        quantity: 2,
+        unitId: ctx.unitIds.stk,
+      })
+      .run();
+    const { previewMeals } = await import("@/lib/shopping/preview");
+    const { addMealsToList } = await import("@/lib/shopping/merge");
+    const { listShoppingItems } = await import("@/lib/shopping/items");
+    const meals = previewMeals("2026-05-23", 1);
+    addMealsToList([
+      {
+        mealPlanId: ctx.mealPlanId,
+        recipeIngredientIds: meals[0].ingredients.map((i) => i.recipeIngredientId),
+      },
+    ]);
+    const items = listShoppingItems();
+    const tomatoes = items.filter((i) => i.name === "Tomate");
+    expect(tomatoes).toHaveLength(1);
+    const amounts = tomatoes[0].amounts;
+    // mass first (500 * 2 = 1 kg) then count (2 * 2 = 4 Stk).
+    expect(amounts).toHaveLength(2);
+    expect(amounts[0].unitName).toBe("kg");
+    expect(amounts[0].quantity).toBe(1);
+    expect(amounts[1].unitName).toBe("Stk");
+    expect(amounts[1].quantity).toBe(4);
+  });
+
+  it("exposes per-source recipe notes on each item", async () => {
+    const { db } = await import("@/db");
+    const { recipeIngredient } = await import("@/db/schema");
+    const { eq } = await import("drizzle-orm");
+    db.update(recipeIngredient)
+      .set({ notes: "fein gehackt" })
+      .where(eq(recipeIngredient.ingredientId, ctx.ingredientIds.tomate))
+      .run();
+    const { previewMeals } = await import("@/lib/shopping/preview");
+    const { addMealsToList } = await import("@/lib/shopping/merge");
+    const { listShoppingItems } = await import("@/lib/shopping/items");
+    const meals = previewMeals("2026-05-23", 1);
+    addMealsToList([
+      {
+        mealPlanId: ctx.mealPlanId,
+        recipeIngredientIds: meals[0].ingredients.map((i) => i.recipeIngredientId),
+      },
+    ]);
+    const items = listShoppingItems();
+    const tomate = items.find((i) => i.name === "Tomate");
+    expect(tomate?.sources[0].recipeNotes).toBe("fein gehackt");
   });
 
   it("reactivates a checked item that is still within the 24h grace window", async () => {

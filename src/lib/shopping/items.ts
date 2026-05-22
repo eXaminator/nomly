@@ -4,23 +4,43 @@ import {
   category,
   ingredient,
   ingredientAlias,
+  ingredientSupermarketUnavailable,
   mealPlan,
   product,
   productAlias,
+  productSupermarketUnavailable,
   recipe,
+  recipeIngredient,
   shoppingItem,
   shoppingItemSource,
   unit,
 } from "../../db/schema.ts";
 import { createProductFromName, resolveByName, type NameCandidate } from "./byName.ts";
+import type { Dimension, UnitRow } from "./format.ts";
+import { loadUnitsByDimension } from "./units-db.ts";
 
-export type ShoppingItemSource = {
+export type ShoppingItemSourceView = {
+  sourceId: number;
   mealPlanId: number;
   mealDate: string;
   recipeId: number;
   recipeTitle: string;
+  recipeIngredientId: number;
   contributedQuantity: number | null;
   contributedUnit: string | null;
+  recipeNotes: string | null;
+};
+
+/**
+ * One row in the aggregated-amounts list for an item. Same dimension
+ * contributions (e.g. 500 g + 0.5 kg) are summed into a single entry;
+ * cross-dimension contributions produce multiple entries.
+ */
+export type ShoppingItemAmount = {
+  quantity: number | null;
+  unitId: number | null;
+  unitName: string | null;
+  dimension: Dimension | null;
 };
 
 export type ShoppingItemView = {
@@ -28,9 +48,12 @@ export type ShoppingItemView = {
   refType: "ingredient" | "product";
   refId: number;
   name: string;
-  quantity: number | null;
-  unitId: number | null;
-  unitName: string | null;
+  /** Aggregated amounts derived from sources + manual quantity. */
+  amounts: ShoppingItemAmount[];
+  /** User-set manual quantity (preserved separately so the editor can show it). */
+  manualQuantity: number | null;
+  manualUnitId: number | null;
+  manualUnitName: string | null;
   categoryId: number | null;
   categoryName: string | null;
   checked: boolean;
@@ -40,7 +63,9 @@ export type ShoppingItemView = {
   version: number;
   createdAt: number;
   updatedAt: number;
-  sources: ShoppingItemSource[];
+  /** Supermarket IDs where this ingredient/product is marked unavailable. */
+  unavailableSupermarketIds: number[];
+  sources: ShoppingItemSourceView[];
 };
 
 export function listShoppingItems(): ShoppingItemView[] {
@@ -92,64 +117,36 @@ export function listShoppingItems(): ShoppingItemView[] {
     .leftJoin(category, eq(category.id, shoppingItem.categoryId))
     .all();
 
-  const all: ShoppingItemView[] = [
-    ...ingredientRows.map((r) => ({
-      id: r.id,
-      refType: "ingredient" as const,
-      refId: r.refId as number,
-      name: r.name,
-      quantity: r.quantity,
-      unitId: r.unitId,
-      unitName: r.unitName,
-      categoryId: r.categoryId,
-      categoryName: r.categoryName,
-      checked: !!r.checked,
-      checkedAt: r.checkedAt,
-      note: r.note,
-      sortOrder: r.sortOrder,
-      version: r.version,
-      createdAt: r.createdAt,
-      updatedAt: r.updatedAt,
-      sources: [],
-    })),
-    ...productRows.map((r) => ({
-      id: r.id,
-      refType: "product" as const,
-      refId: r.refId as number,
-      name: r.name,
-      quantity: r.quantity,
-      unitId: r.unitId,
-      unitName: r.unitName,
-      categoryId: r.categoryId,
-      categoryName: r.categoryName,
-      checked: !!r.checked,
-      checkedAt: r.checkedAt,
-      note: r.note,
-      sortOrder: r.sortOrder,
-      version: r.version,
-      createdAt: r.createdAt,
-      updatedAt: r.updatedAt,
-      sources: [],
-    })),
+  const baseRows = [
+    ...ingredientRows.map((r) => ({ ...r, refType: "ingredient" as const })),
+    ...productRows.map((r) => ({ ...r, refType: "product" as const })),
   ];
 
-  // Attach meal-source chips per item.
-  const itemIds = all.map((i) => i.id);
-  const sourcesByItem = new Map<number, ShoppingItemSource[]>();
+  const itemIds = baseRows.map((r) => r.id);
+  type RawSource = ShoppingItemSourceView & { contributedUnitId: number | null };
+  const sourcesByItem = new Map<number, RawSource[]>();
   if (itemIds.length > 0) {
     const sources = db
       .select({
+        sourceId: shoppingItemSource.id,
         itemId: shoppingItemSource.itemId,
         mealPlanId: mealPlan.id,
         mealDate: mealPlan.date,
         recipeId: recipe.id,
         recipeTitle: recipe.title,
+        recipeIngredientId: shoppingItemSource.recipeIngredientId,
         contributedQuantity: shoppingItemSource.contributedQuantity,
         contributedUnit: unit.name,
+        contributedUnitId: shoppingItemSource.contributedUnitId,
+        recipeNotes: recipeIngredient.notes,
       })
       .from(shoppingItemSource)
       .innerJoin(mealPlan, eq(mealPlan.id, shoppingItemSource.mealPlanId))
       .innerJoin(recipe, eq(recipe.id, mealPlan.recipeId))
+      .innerJoin(
+        recipeIngredient,
+        eq(recipeIngredient.id, shoppingItemSource.recipeIngredientId),
+      )
       .leftJoin(unit, eq(unit.id, shoppingItemSource.contributedUnitId))
       .where(inArray(shoppingItemSource.itemId, itemIds))
       .orderBy(asc(mealPlan.date), asc(recipe.title))
@@ -157,19 +154,135 @@ export function listShoppingItems(): ShoppingItemView[] {
     for (const s of sources) {
       const arr = sourcesByItem.get(s.itemId) ?? [];
       arr.push({
+        sourceId: s.sourceId,
         mealPlanId: s.mealPlanId,
         mealDate: s.mealDate,
         recipeId: s.recipeId,
         recipeTitle: s.recipeTitle,
+        recipeIngredientId: s.recipeIngredientId,
         contributedQuantity: s.contributedQuantity,
         contributedUnit: s.contributedUnit,
+        contributedUnitId: s.contributedUnitId,
+        recipeNotes: s.recipeNotes,
       });
       sourcesByItem.set(s.itemId, arr);
     }
   }
-  for (const item of all) {
-    item.sources = sourcesByItem.get(item.id) ?? [];
+
+  // Load unit metadata (factor/dimension) for every unit referenced by an
+  // item's manual quantity or by any source contribution. One round-trip.
+  const allUnitIds = new Set<number>();
+  for (const r of baseRows) if (r.unitId != null) allUnitIds.add(r.unitId);
+  for (const sources of sourcesByItem.values()) {
+    for (const s of sources) {
+      if (s.contributedUnitId != null) allUnitIds.add(s.contributedUnitId);
+    }
   }
+  const unitRows = allUnitIds.size === 0
+    ? []
+    : (db
+        .select({
+          id: unit.id,
+          name: unit.name,
+          dimension: unit.dimension,
+          baseUnitId: unit.baseUnitId,
+          factor: unit.factor,
+        })
+        .from(unit)
+        .where(inArray(unit.id, Array.from(allUnitIds)))
+        .all() as UnitRow[]);
+  const unitsById = new Map(unitRows.map((u) => [u.id, u]));
+
+  // Load unavailable markers separately for ingredients and products. Both
+  // tables share the same shape but reference different parents.
+  const ingredientIds = baseRows
+    .filter((r) => r.refType === "ingredient")
+    .map((r) => r.refId as number);
+  const productIds = baseRows
+    .filter((r) => r.refType === "product")
+    .map((r) => r.refId as number);
+  const ingredientUnavailable = new Map<number, number[]>();
+  const productUnavailable = new Map<number, number[]>();
+  if (ingredientIds.length > 0) {
+    const rows = db
+      .select({
+        ingredientId: ingredientSupermarketUnavailable.ingredientId,
+        supermarketId: ingredientSupermarketUnavailable.supermarketId,
+      })
+      .from(ingredientSupermarketUnavailable)
+      .where(inArray(ingredientSupermarketUnavailable.ingredientId, ingredientIds))
+      .all();
+    for (const r of rows) {
+      const arr = ingredientUnavailable.get(r.ingredientId) ?? [];
+      arr.push(r.supermarketId);
+      ingredientUnavailable.set(r.ingredientId, arr);
+    }
+  }
+  if (productIds.length > 0) {
+    const rows = db
+      .select({
+        productId: productSupermarketUnavailable.productId,
+        supermarketId: productSupermarketUnavailable.supermarketId,
+      })
+      .from(productSupermarketUnavailable)
+      .where(inArray(productSupermarketUnavailable.productId, productIds))
+      .all();
+    for (const r of rows) {
+      const arr = productUnavailable.get(r.productId) ?? [];
+      arr.push(r.supermarketId);
+      productUnavailable.set(r.productId, arr);
+    }
+  }
+
+  const all: ShoppingItemView[] = baseRows.map((r) => {
+    const sources = sourcesByItem.get(r.id) ?? [];
+    const manualUnit = r.unitId != null ? unitsById.get(r.unitId) ?? null : null;
+    const amounts = buildAggregatedAmounts({
+      manual: {
+        quantity: r.quantity,
+        unit: manualUnit,
+      },
+      sources: sources.map((s) => ({
+        quantity: s.contributedQuantity,
+        unit: s.contributedUnitId != null ? unitsById.get(s.contributedUnitId) ?? null : null,
+      })),
+    });
+    const unavailable =
+      r.refType === "ingredient"
+        ? ingredientUnavailable.get(r.refId as number) ?? []
+        : productUnavailable.get(r.refId as number) ?? [];
+    return {
+      id: r.id,
+      refType: r.refType,
+      refId: r.refId as number,
+      name: r.name,
+      amounts,
+      manualQuantity: r.quantity,
+      manualUnitId: r.unitId,
+      manualUnitName: r.unitName,
+      categoryId: r.categoryId,
+      categoryName: r.categoryName,
+      checked: !!r.checked,
+      checkedAt: r.checkedAt,
+      note: r.note,
+      sortOrder: r.sortOrder,
+      version: r.version,
+      createdAt: r.createdAt,
+      updatedAt: r.updatedAt,
+      unavailableSupermarketIds: unavailable,
+      sources: sources.map((s) => ({
+        sourceId: s.sourceId,
+        mealPlanId: s.mealPlanId,
+        mealDate: s.mealDate,
+        recipeId: s.recipeId,
+        recipeTitle: s.recipeTitle,
+        recipeIngredientId: s.recipeIngredientId,
+        contributedQuantity: s.contributedQuantity,
+        contributedUnit: s.contributedUnit,
+        recipeNotes: s.recipeNotes,
+      })),
+    };
+  });
 
   all.sort(
     (a, b) =>
@@ -177,6 +290,139 @@ export function listShoppingItems(): ShoppingItemView[] {
       a.name.localeCompare(b.name, "de", { sensitivity: "base" }),
   );
   return all;
+}
+
+type AggregateInput = {
+  manual: { quantity: number | null; unit: UnitRow | null };
+  sources: Array<{ quantity: number | null; unit: UnitRow | null }>;
+};
+
+/**
+ * Group contributions by dimension and sum in base units. A contribution
+ * with no unit and no quantity is ignored (nothing to render); with no unit
+ * but a quantity, it lands in a `dimension: null` "unitless" bucket. Cross-
+ * dimension contributions appear as separate entries (e.g. mass + count).
+ */
+function buildAggregatedAmounts(input: AggregateInput): ShoppingItemAmount[] {
+  type Bucket = {
+    dimension: Dimension | null;
+    contributions: Array<{ quantity: number | null; unit: UnitRow | null }>;
+  };
+  const bucketsByDim = new Map<Dimension | "unitless", Bucket>();
+  const addLine = (line: { quantity: number | null; unit: UnitRow | null }) => {
+    if (line.quantity == null && line.unit == null) return;
+    const key: Dimension | "unitless" = line.unit?.dimension ?? "unitless";
+    const dim = key === "unitless" ? null : key;
+    const b = bucketsByDim.get(key) ?? { dimension: dim, contributions: [] };
+    b.contributions.push(line);
+    bucketsByDim.set(key, b);
+  };
+  addLine(input.manual);
+  for (const s of input.sources) addLine(s);
+
+  const out: ShoppingItemAmount[] = [];
+  for (const b of bucketsByDim.values()) {
+    if (b.dimension == null) {
+      // Unitless: sum the quantities (if any), drop unit. If all are
+      // open-ended, render as one open-ended row.
+      let total = 0;
+      let allOpen = true;
+      for (const c of b.contributions) {
+        if (c.quantity != null) {
+          total += c.quantity;
+          allOpen = false;
+        }
+      }
+      out.push({
+        quantity: allOpen ? null : round3(total),
+        unitId: null,
+        unitName: null,
+        dimension: null,
+      });
+      continue;
+    }
+    // Mixed-unit dimension: sum in base, format in the largest sensible
+    // unit that appears in the contributions (avoids inventing a "kg"
+    // when only "g" was on the list).
+    const dimUnits = loadDimensionUnits(b.dimension);
+    let baseTotal = 0;
+    let anyKnown = false;
+    const usedUnits: UnitRow[] = [];
+    for (const c of b.contributions) {
+      if (c.unit) usedUnits.push(c.unit);
+      if (c.quantity == null) continue;
+      anyKnown = true;
+      const factor = c.unit?.factor ?? 1;
+      baseTotal += c.quantity * factor;
+    }
+    if (!anyKnown) {
+      // All open-ended within this dimension — pick any encountered unit
+      // for display.
+      const u = usedUnits[0];
+      out.push({
+        quantity: null,
+        unitId: u?.id ?? null,
+        unitName: u?.name ?? null,
+        dimension: b.dimension,
+      });
+      continue;
+    }
+    // Pick the largest-factor unit that still yields ≥ 1, biased toward
+    // units that actually appear in the contributions.
+    const preferredIds = new Set(usedUnits.map((u) => u.id));
+    const candidates = dimUnits.length > 0 ? dimUnits : usedUnits;
+    const sorted = [...candidates].sort((a, b2) => {
+      if (a.factor !== b2.factor) return b2.factor - a.factor;
+      const ap = preferredIds.has(a.id) ? 0 : 1;
+      const bp = preferredIds.has(b2.id) ? 0 : 1;
+      return ap - bp;
+    });
+    let chosen: UnitRow | undefined;
+    for (const u of sorted) {
+      if (baseTotal / u.factor >= 1) {
+        chosen = u;
+        break;
+      }
+    }
+    if (!chosen) chosen = sorted[sorted.length - 1] ?? usedUnits[0];
+    if (!chosen) {
+      out.push({
+        quantity: round3(baseTotal),
+        unitId: null,
+        unitName: null,
+        dimension: b.dimension,
+      });
+      continue;
+    }
+    out.push({
+      quantity: round3(baseTotal / chosen.factor),
+      unitId: chosen.id,
+      unitName: chosen.name,
+      dimension: b.dimension,
+    });
+  }
+
+  // Stable order: mass, volume, count, unitless.
+  const order: Record<string, number> = { mass: 0, volume: 1, count: 2, unitless: 3 };
+  out.sort((a, b) => {
+    const ak = a.dimension ?? "unitless";
+    const bk = b.dimension ?? "unitless";
+    return (order[ak] ?? 99) - (order[bk] ?? 99);
+  });
+  return out;
+}
+
+const dimUnitsCache = new Map<Dimension, UnitRow[]>();
+function loadDimensionUnits(d: Dimension): UnitRow[] {
+  const cached = dimUnitsCache.get(d);
+  if (cached) return cached;
+  const rows = loadUnitsByDimension(d);
+  dimUnitsCache.set(d, rows);
+  return rows;
+}
+
+function round3(n: number): number {
+  return Math.round(n * 1000) / 1000;
 }
 
 export type AddItemInput =
@@ -210,11 +456,17 @@ export class ShoppingApiError extends Error {
 
 const GRACE_SECONDS = 24 * 60 * 60;
 
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
 /**
- * Adds a single item to the list. Mirrors the merge-on-add behaviour for
- * ingredients (same `(ingredient_id, dimension)` bucket merges with an
- * existing unchecked item; checked-in-grace reactivates). Products always
- * create a new row — duplicates are intentionally allowed for raw products.
+ * Adds a single manual item to the list. Always at most one shopping_item
+ * row per ingredient — a fresh add against an existing item simply bumps
+ * the version and (if the new add carries a quantity) replaces the manual
+ * quantity. Checked items inside the 24 h grace window get reactivated.
+ *
+ * Products always create a new row — same-name product duplicates are
+ * intentionally allowed since "1× Toilettenpapier" + "1× Toilettenpapier"
+ * isn't meaningful to merge.
  */
 export function addManualItem(input: AddItemInput): {
   item: ShoppingItemView;
@@ -230,7 +482,6 @@ export function addManualItem(input: AddItemInput): {
   if ("productId" in input) {
     return addProductItem(input.productId, input);
   }
-  // newProduct
   const created = createProductFromName(
     input.newProduct.name,
     input.newProduct.defaultCategoryId ?? null,
@@ -254,7 +505,6 @@ function addByName(
     }
     return addProductItem(candidate.id, input);
   }
-  // none → create product
   const created = createProductFromName(input.byName);
   return finishCreatedProduct(created, input);
 }
@@ -283,11 +533,7 @@ function addIngredientItem(
       .get();
     if (!ing) throw new ShoppingApiError("ingredient not found", 404);
 
-    const dim = input.unitId
-      ? (tx.select({ d: unit.dimension }).from(unit).where(eq(unit.id, input.unitId)).get()?.d ?? null)
-      : null;
-
-    const existing = findExistingForIngredient(tx, ingredientId, dim);
+    const existing = findExistingForIngredient(tx, ingredientId);
     let itemId: number;
     let action: AddItemAction;
     if (!existing) {
@@ -328,18 +574,16 @@ function addIngredientItem(
       itemId = existing.id;
       action = "reactivated";
     } else {
-      // Increment, mirroring merge.ts: keep existing unit; sum in base.
-      const nextQty = sumQuantities(
-        existing.quantity,
-        existing.unitId,
-        input.quantity ?? null,
-        input.unitId ?? null,
-      );
+      // Existing unchecked: only replace the manual quantity if the caller
+      // sent one (otherwise just bump version — source-derived amounts
+      // already cover everything else).
+      const patch: Partial<typeof shoppingItem.$inferInsert> = {};
+      if (input.quantity !== undefined) patch.quantity = input.quantity ?? null;
+      if (input.unitId !== undefined) patch.unitId = input.unitId ?? null;
+      if (input.note !== undefined) patch.note = input.note ?? null;
       tx.update(shoppingItem)
         .set({
-          quantity: nextQty.qty,
-          unitId: nextQty.unitId ?? existing.unitId,
-          note: input.note ?? existing.note,
+          ...patch,
           version: sql`${shoppingItem.version} + 1`,
           updatedAt: sql`unixepoch()`,
         })
@@ -410,9 +654,8 @@ function finishCreatedProduct(
 }
 
 function findExistingForIngredient(
-  tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
+  tx: Tx,
   ingredientId: number,
-  dim: string | null,
 ): {
   id: number;
   quantity: number | null;
@@ -421,7 +664,7 @@ function findExistingForIngredient(
   checkedAt: number | null;
   note: string | null;
 } | null {
-  const rows = tx
+  const row = tx
     .select({
       id: shoppingItem.id,
       quantity: shoppingItem.quantity,
@@ -429,63 +672,27 @@ function findExistingForIngredient(
       checked: shoppingItem.checked,
       checkedAt: shoppingItem.checkedAt,
       note: shoppingItem.note,
-      itemDim: unit.dimension,
     })
     .from(shoppingItem)
-    .leftJoin(unit, eq(unit.id, shoppingItem.unitId))
     .where(eq(shoppingItem.ingredientId, ingredientId))
-    .all();
-  for (const r of rows) {
-    const rowDim = (r.itemDim ?? null) as string | null;
-    if (rowDim === dim) {
-      return {
-        id: r.id,
-        quantity: r.quantity,
-        unitId: r.unitId,
-        checked: !!r.checked,
-        checkedAt: r.checkedAt,
-        note: r.note,
-      };
-    }
-  }
-  return null;
+    .get();
+  if (!row) return null;
+  return {
+    id: row.id,
+    quantity: row.quantity,
+    unitId: row.unitId,
+    checked: !!row.checked,
+    checkedAt: row.checkedAt,
+    note: row.note,
+  };
 }
 
-function nextSortOrder(tx: Parameters<Parameters<typeof db.transaction>[0]>[0]): number {
+function nextSortOrder(tx: Tx): number {
   const row = tx
     .select({ max: sql<number | null>`MAX(${shoppingItem.sortOrder})` })
     .from(shoppingItem)
     .get();
   return (row?.max ?? -1) + 1;
-}
-
-function sumQuantities(
-  existingQty: number | null,
-  existingUnitId: number | null,
-  addQty: number | null,
-  addUnitId: number | null,
-): { qty: number | null; unitId: number | null } {
-  if (addQty == null) return { qty: existingQty, unitId: existingUnitId };
-  if (existingQty == null) return { qty: addQty, unitId: addUnitId };
-  if (existingUnitId == null || addUnitId == null) {
-    // Unitless + unitless → numeric sum.
-    if (existingUnitId == null && addUnitId == null) {
-      return { qty: existingQty + addQty, unitId: null };
-    }
-    // Mismatch: keep existing.
-    return { qty: existingQty + addQty, unitId: existingUnitId ?? addUnitId };
-  }
-  const rows = db
-    .select({ id: unit.id, factor: unit.factor })
-    .from(unit)
-    .where(inArray(unit.id, [existingUnitId, addUnitId]))
-    .all();
-  const factors = new Map(rows.map((r) => [r.id, r.factor]));
-  const existingBase = existingQty * (factors.get(existingUnitId) ?? 1);
-  const addBase = addQty * (factors.get(addUnitId) ?? 1);
-  const total = existingBase + addBase;
-  const qty = Math.round((total / (factors.get(existingUnitId) ?? 1)) * 1000) / 1000;
-  return { qty, unitId: existingUnitId };
 }
 
 export type PatchInput = {
