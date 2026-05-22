@@ -83,6 +83,64 @@ const TEXT_AMOUNT_HALF = new Set([
 ]);
 
 /**
+ * Text amounts that mean exactly 1/4. "viertel TL" → quantity 0.25. The
+ * German noun form ("ein Viertel") and the bare adjective ("viertel") both
+ * land here; case is already lowered before lookup.
+ */
+const TEXT_AMOUNT_QUARTER = new Set([
+  "viertel",
+  "viertels",
+  "quarter",
+]);
+
+/**
+ * Leading preparation nouns that describe what we're using *from* an
+ * ingredient rather than the ingredient itself: "Saft einer halben Zitrone"
+ * → 0.5 Zitrone, notes "Saft". The noun is moved to notes and the parser
+ * then sees the remaining "(von|einer|...) halben Zitrone" fragment.
+ *
+ * Kept conservative: every entry here MUST be a word that doesn't itself
+ * appear as the start of a real ingredient name (so e.g. "Blätter" is not
+ * included — "Blätter Petersilie" is a quantity, not a preparation phrase).
+ */
+const PREP_LEADING_NOUNS = new Set([
+  "saft",
+  "schale",
+  "abrieb",
+  "zest",
+  "juice",
+  "peel",
+  "rind",
+]);
+
+/**
+ * Tokens that legitimately follow a preparation noun and that we want to
+ * recognise as "yes, this really is a preparation phrase". Without one of
+ * these next, "Saft" / "Schale" stays untouched as the ingredient name.
+ */
+const PREP_FOLLOWUP_TOKENS = new Set([
+  "von",
+  "vom",
+  "of",
+  "from",
+  "ein",
+  "eine",
+  "einer",
+  "eines",
+  "einem",
+  "einen",
+  "a",
+  "an",
+  "der",
+  "die",
+  "das",
+  "des",
+  "dem",
+  "den",
+  "the",
+]);
+
+/**
  * Text amount tokens that mean "a small unspecified quantity". They produce
  * `quantity = null` and the matched word becomes part of the notes. Covers
  * "Etwas Salz", "some pepper", "a little bit of …".
@@ -187,6 +245,27 @@ const SIZE_MODIFIER_TOKENS = new Set([
   "mittlerer",
   "mittleres",
   "mittel",
+  // Compound "mittelgroß" + inflections. The bare "mittel" above covers
+  // single-word "mittel große", but most recipes use the closed compound.
+  "mittelgroß",
+  "mittelgroße",
+  "mittelgroßer",
+  "mittelgroßes",
+  "mittelgroßen",
+  "mittelgross",
+  "mittelgrosse",
+  "mittelgrosser",
+  "mittelgrosses",
+  "mittelgrossen",
+  // English size descriptors. Like the German set, these describe which
+  // specimen to grab, not what to buy — strip to notes.
+  "large",
+  "medium",
+  "small",
+  "big",
+  "jumbo",
+  "tiny",
+  "huge",
   // "gestrichener TL" / "gehäufter TL" — fill-level modifiers.
   "gestrichen",
   "gestrichene",
@@ -703,14 +782,39 @@ export function parseIngredientString(
 
   dropLeadingFiller(tokens);
 
+  // Leading preparation nouns — "Saft einer halben Zitrone", "Abrieb einer
+  // Bio-Orange", "juice of half a lemon". We only treat the noun as
+  // preparatory when the next token is an article / preposition; otherwise
+  // it might be a real ingredient name on its own ("Saft" the boxed juice).
+  if (
+    tokens.length >= 2 &&
+    PREP_LEADING_NOUNS.has(tokens[0].toLowerCase()) &&
+    PREP_FOLLOWUP_TOKENS.has(tokens[1].toLowerCase().replace(/[.,;]$/, ""))
+  ) {
+    capturedNotes.push(tokens.shift()!);
+    // Re-strip filler so the next stage sees the actual quantity / unit
+    // token, not "von" / "einer".
+    dropLeadingFiller(tokens);
+  }
+
   // Pre-quantity size modifiers — "Heaping 1 teaspoon", "Scant ½ cup",
   // "Gehäuft 1 EL". The same modifier can also sit between quantity and
   // unit ("1 heaping teaspoon"), which the post-quantity loop below
   // handles. Both paths fill the same `sizeModifiers` array.
   const sizeModifiers: string[] = [];
   while (tokens.length > 0) {
-    const lower = tokens[0].toLowerCase().replace(/\.$/, "");
-    if (SIZE_MODIFIER_TOKENS.has(lower)) {
+    const raw = tokens[0].toLowerCase();
+    const lower = raw.replace(/\.$/, "");
+    // Some tokens live in both sets — "gr" is German shorthand for "groß"
+    // (size modifier) AND for "Gramm" (mass unit). When a unit reading is
+    // possible, prefer it: "150 gr. Joghurt" should resolve to grams, not
+    // "groß" + Joghurt. The unit detector below will re-check the same
+    // token shapes (`raw`, `lower`, `lower + "."`).
+    const isUnit =
+      knownUnitTokens.has(raw) ||
+      knownUnitTokens.has(lower) ||
+      knownUnitTokens.has(`${lower}.`);
+    if (SIZE_MODIFIER_TOKENS.has(lower) && !isUnit) {
       sizeModifiers.push(tokens.shift()!);
     } else {
       break;
@@ -731,9 +835,34 @@ export function parseIngredientString(
     } else if (TEXT_AMOUNT_ONE.has(firstLower)) {
       tokens.shift();
       quantity = 1;
+      // "ein halber TL", "eine halbe Tasse", "ein viertel TL" — indefinite
+      // article + fraction word together still mean the fraction, not 1.
+      // Peel the follow-up so the downstream unit detector sees the real
+      // unit token next.
+      if (tokens.length > 0) {
+        const nextLower = tokens[0].toLowerCase();
+        if (TEXT_AMOUNT_HALF.has(nextLower)) {
+          tokens.shift();
+          quantity = 0.5;
+        } else if (TEXT_AMOUNT_QUARTER.has(nextLower)) {
+          tokens.shift();
+          quantity = 0.25;
+        }
+      }
     } else if (TEXT_AMOUNT_HALF.has(firstLower)) {
       tokens.shift();
       quantity = 0.5;
+      // "half a teaspoon" — drop the trailing article so the unit detector
+      // sees the unit token next.
+      if (tokens.length > 0 && TEXT_AMOUNT_ONE.has(tokens[0].toLowerCase())) {
+        tokens.shift();
+      }
+    } else if (TEXT_AMOUNT_QUARTER.has(firstLower)) {
+      tokens.shift();
+      quantity = 0.25;
+      if (tokens.length > 0 && TEXT_AMOUNT_ONE.has(tokens[0].toLowerCase())) {
+        tokens.shift();
+      }
     } else {
       const range = consumeQuantity(tokens);
       if (range) {
@@ -746,8 +875,18 @@ export function parseIngredientString(
   // Post-quantity size modifiers ("1 kl. Dose", "2 große Eier") — these
   // sit between the quantity and the unit. Both paths share `sizeModifiers`.
   while (tokens.length > 0) {
-    const lower = tokens[0].toLowerCase().replace(/\.$/, "");
-    if (SIZE_MODIFIER_TOKENS.has(lower)) {
+    const raw = tokens[0].toLowerCase();
+    const lower = raw.replace(/\.$/, "");
+    // Some tokens live in both sets — "gr" is German shorthand for "groß"
+    // (size modifier) AND for "Gramm" (mass unit). When a unit reading is
+    // possible, prefer it: "150 gr. Joghurt" should resolve to grams, not
+    // "groß" + Joghurt. The unit detector below will re-check the same
+    // token shapes (`raw`, `lower`, `lower + "."`).
+    const isUnit =
+      knownUnitTokens.has(raw) ||
+      knownUnitTokens.has(lower) ||
+      knownUnitTokens.has(`${lower}.`);
+    if (SIZE_MODIFIER_TOKENS.has(lower) && !isUnit) {
       sizeModifiers.push(tokens.shift()!);
     } else {
       break;
@@ -942,33 +1081,47 @@ export function parseIngredientString(
       .filter((p) => p.length > 0)
       .join(", ") || null;
 
-  // Produce the prep-stripped alternative. Peel leading PREP_LEADING_TOKENS
-  // off the name area; the stripped tokens become extra notes. Only emit
-  // an alternative if we'd actually have a non-empty name left AND we did
-  // strip something — otherwise return null to signal "no choice".
-  const stripped: string[] = [];
+  // Produce the prep-stripped alternative. Peel PREP_LEADING_TOKENS off
+  // BOTH ends of the name area; the stripped tokens become extra notes.
+  // Trailing peel catches "1 large onion chopped" / "1 onion finely chopped"
+  // where the prep follows the noun with no comma to separate it. Only
+  // emit an alt if we'd have a non-empty name left AND we did strip
+  // something — otherwise return null to signal "no choice".
+  const leadingStripped: string[] = [];
   let firstKept = 0;
   while (
     firstKept < nameTokens.length &&
-    PREP_LEADING_TOKENS.has(nameTokens[firstKept].toLowerCase())
+    isPrepLeadingToken(nameTokens[firstKept])
   ) {
-    stripped.push(nameTokens[firstKept]);
+    leadingStripped.push(nameTokens[firstKept]);
     firstKept += 1;
   }
+  const trailingStripped: string[] = [];
+  let lastKept = nameTokens.length;
+  while (
+    lastKept > firstKept &&
+    isPrepLeadingToken(nameTokens[lastKept - 1])
+  ) {
+    // Build the trailing list in source order so the notes read naturally.
+    trailingStripped.unshift(nameTokens[lastKept - 1]);
+    lastKept -= 1;
+  }
   let altWithPrepStripped: ParsedIngredient["altWithPrepStripped"] = null;
-  if (stripped.length > 0 && firstKept < nameTokens.length) {
+  const totalStripped = leadingStripped.length + trailingStripped.length;
+  if (totalStripped > 0 && firstKept < lastKept) {
     const altName = nameTokens
-      .slice(firstKept)
+      .slice(firstKept, lastKept)
       .join(" ")
       .replace(/[()]/g, "")
       .replace(/\s+/g, " ")
       .trim();
+    const stripNote = [...leadingStripped, ...trailingStripped].join(" ");
     const altNotes =
       [
         sizeNote,
         ...rangeNotes,
         ...secondaryAmounts,
-        stripped.join(" "),
+        stripNote,
         noteBody,
         ...capturedNotes,
       ]
@@ -1001,6 +1154,26 @@ export function parseIngredientString(
  * either a prep instruction or part of the canonical name, so we leave
  * them in.
  */
+/**
+ * Match a token against PREP_LEADING_TOKENS, accounting for German adjective
+ * inflection. "gehackte/gehackter/gehacktes/gehackten" all reduce to the
+ * base "gehackt" before lookup, so the set only needs one entry per stem.
+ * False positives are unlikely because the base forms are participles /
+ * adverbs that don't overlap with ingredient names.
+ */
+function isPrepLeadingToken(token: string): boolean {
+  const lower = token.toLowerCase();
+  if (PREP_LEADING_TOKENS.has(lower)) return true;
+  // Try stripping the typical German declined-adjective suffixes.
+  for (const suffix of ["er", "en", "es", "em", "e"]) {
+    if (lower.endsWith(suffix)) {
+      const stem = lower.slice(0, -suffix.length);
+      if (PREP_LEADING_TOKENS.has(stem)) return true;
+    }
+  }
+  return false;
+}
+
 export const PREP_LEADING_TOKENS = new Set([
   // English past participles
   "chopped",
@@ -1052,9 +1225,29 @@ export const PREP_LEADING_TOKENS = new Set([
   "geknetet",
   "gemischt",
   "geraspelt",
+  // NOTE: "gemahlen" is NOT in this set — ground spices are a distinct
+  // product on the shelf and the descriptor needs to stay in the name.
+  // Same goes for "frozen" / "TK" / "getrocknet" — see
+  // feedback_prep_vs_identity_tokens.md for the rule.
   // German adverbs
   "fein",
   "grob",
+  "frisch",
+  // Temperature / state-at-use adverbs — describe how you USE the ingredient,
+  // not what to buy ("120 ml heißes Wasser" → boil water at use time, you
+  // still buy plain Wasser). Inflections (heißes/heiße/heißer/heißen,
+  // kalter/kaltes/kalten, …) are picked up by isPrepLeadingToken's suffix
+  // stripper.
+  "heiß",
+  "kalt",
+  "eiskalt",
+  "warm",
+  "lauwarm",
+  "lukewarm",
+  "hot",
+  "cold",
+  "ice-cold",
+  "icy",
 ]);
 
 export type SplitConjunctionsOptions = {
@@ -1073,6 +1266,52 @@ export type SplitConjunctionsOptions = {
    */
   knownIngredients?: ReadonlySet<string>;
 };
+
+/**
+ * Color/variety adjectives that don't stand alone as ingredients. When a
+ * conjunction sits between two of these ("yellow and red grape tomatoes"),
+ * the two sides describe the same noun and must not be split apart —
+ * otherwise we'd produce a phantom "yellow" ingredient. Inflection-aware
+ * lookup catches German declined forms ("gelbe"/"gelber"/"gelben" → "gelb").
+ */
+const COLOR_ADJECTIVE_BASES = new Set([
+  // English
+  "yellow",
+  "red",
+  "green",
+  "blue",
+  "white",
+  "black",
+  "purple",
+  "pink",
+  "brown",
+  "gray",
+  "grey",
+  // German bases — declined forms collapse via the suffix stripper below.
+  "gelb",
+  "rot",
+  "grün",
+  "blau",
+  "weiß",
+  "weiss",
+  "schwarz",
+  "lila",
+  "rosa",
+  "braun",
+  "grau",
+]);
+
+function isColorAdjective(token: string): boolean {
+  const lower = token.toLowerCase();
+  if (COLOR_ADJECTIVE_BASES.has(lower)) return true;
+  for (const suffix of ["er", "en", "es", "em", "e"]) {
+    if (lower.endsWith(suffix)) {
+      const stem = lower.slice(0, -suffix.length);
+      if (COLOR_ADJECTIVE_BASES.has(stem)) return true;
+    }
+  }
+  return false;
+}
 
 export function splitConjunctions(
   raw: string,
@@ -1136,6 +1375,22 @@ export function splitConjunctions(
     if (lastChar === "-" || lastChar === "–") continue;
     // Comma guard.
     if (commaBefore(idx)) continue;
+    // Color-adjective guard: "yellow and red grape tomatoes" / "Black and
+    // White Pepper" — the conjunction connects parallel adjectives that
+    // modify the same downstream noun, NOT two ingredients. Look at the
+    // token immediately before and after the conjunction; if both are
+    // color adjectives, skip the split.
+    const wordBefore = /(\S+)\s*$/.exec(beforeTrimmed)?.[1] ?? "";
+    const after = trimmed.slice(idx + match[0].length).trimStart();
+    const wordAfter = /^(\S+)/.exec(after)?.[1] ?? "";
+    if (
+      wordBefore.length > 0 &&
+      wordAfter.length > 0 &&
+      isColorAdjective(wordBefore) &&
+      isColorAdjective(wordAfter)
+    ) {
+      continue;
+    }
     // Overlap guard: an existing ingredient name spans the conjunction —
     // user already has it as one row, so don't split.
     if (options?.knownIngredients && options.knownIngredients.size > 0) {

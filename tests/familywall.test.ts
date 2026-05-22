@@ -110,6 +110,18 @@ describe("transformFamilywallRecipe", () => {
     expect(ing.notes).toBeNull();
   });
 
+  it("'halbe Bio-Orange' → 0.5 Stück Bio-Orange (Stück default kicks in)", () => {
+    const out = transformFamilywallRecipe(
+      makeRaw({ ingredients: ["halbe Bio-Orange"] }),
+      makeLookups(),
+      null,
+    );
+    const ing = out.sections[0].ingredients[0];
+    expect(ing.quantity).toBe(0.5);
+    expect(ing.unitId).toBe(3); // Stück
+    expect(ing.ingredientName).toBe("Bio-Orange");
+  });
+
   it("english unit token resolves via the alias lookup", () => {
     const out = transformFamilywallRecipe(
       makeRaw({ ingredients: ["2 tablespoon Olivenöl"] }),

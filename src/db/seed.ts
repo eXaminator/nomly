@@ -95,6 +95,11 @@ const fullWordUnitAliases: Record<string, string> = {
   grams: "g",
   Gramm: "g",
   gramm: "g",
+  // German shortform abbreviation — common in recipe sites ("150 gr.
+  // Joghurt", "200 gr Mehl"). Parser strips trailing periods before lookup,
+  // so the `"gr."` entry is just belt-and-suspenders.
+  gr: "g",
+  "gr.": "g",
   kilogram: "kg",
   kilograms: "kg",
   Kilogramm: "kg",
@@ -260,6 +265,13 @@ const topUpUnits: Array<{
     factor: 1,
     isContainer: true,
     aliases: ["Schachteln", "box", "boxes"],
+  },
+  {
+    name: "Beutel",
+    dimension: "count",
+    factor: 1,
+    isContainer: true,
+    aliases: ["Beuteln", "sachet", "sachets", "bag", "bags"],
   },
 ];
 

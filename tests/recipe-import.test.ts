@@ -303,6 +303,94 @@ describe("parseIngredientString — extended cases", () => {
     expect(r.unitName).toBe("TL");
     expect(r.name).toBe("Nelkenpulver");
   });
+  it("'ein halber TL Nelkenpulver' → quantity 0.5, unit TL", () => {
+    const r = parse("ein halber TL Nelkenpulver");
+    expect(r.quantity).toBe(0.5);
+    expect(r.unitName).toBe("TL");
+    expect(r.name).toBe("Nelkenpulver");
+  });
+  it("'eine halbe Tasse Mehl' → quantity 0.5, unit Tasse", () => {
+    const r = parse("eine halbe Tasse Mehl");
+    expect(r.quantity).toBe(0.5);
+    expect(r.unitName).toBe("Tasse");
+    expect(r.name).toBe("Mehl");
+  });
+  it("'halbe Bio-Orange' → quantity 0.5, no explicit unit, name stripped", () => {
+    // No unit token follows "halbe" — the parser leaves unitName null and
+    // lets resolveUnit() default to Stück on the integration side.
+    const r = parse("halbe Bio-Orange");
+    expect(r.quantity).toBe(0.5);
+    expect(r.unitName).toBeNull();
+    expect(r.name).toBe("Bio-Orange");
+  });
+  it("'viertel TL Salz' → quantity 0.25, unit TL", () => {
+    const r = parse("viertel TL Salz");
+    expect(r.quantity).toBe(0.25);
+    expect(r.unitName).toBe("TL");
+    expect(r.name).toBe("Salz");
+  });
+  it("'ein viertel TL Salz' → quantity 0.25, unit TL", () => {
+    const r = parse("ein viertel TL Salz");
+    expect(r.quantity).toBe(0.25);
+    expect(r.unitName).toBe("TL");
+    expect(r.name).toBe("Salz");
+  });
+  it("'quarter cup Mehl' → quantity 0.25, unit cup", () => {
+    const r = parse("quarter cup Mehl");
+    expect(r.quantity).toBe(0.25);
+    expect(r.unitName).toBe("cup");
+    expect(r.name).toBe("Mehl");
+  });
+  it("'half a teaspoon Salt' → drops follow-up article", () => {
+    const r = parse("half a teaspoon Salt");
+    expect(r.quantity).toBe(0.5);
+    expect(r.unitName).toBe("teaspoon");
+    expect(r.name).toBe("Salt");
+  });
+
+  it("'Saft einer halben Zitrone' → 0.5 Zitrone, prep noun moves to notes", () => {
+    const r = parse("Saft einer halben Zitrone");
+    expect(r.quantity).toBe(0.5);
+    expect(r.unitName).toBeNull();
+    expect(r.name).toBe("Zitrone");
+    expect(r.notes).toBe("Saft");
+  });
+  it("'Saft einer Zitrone' → 1 Zitrone, prep noun moves to notes", () => {
+    const r = parse("Saft einer Zitrone");
+    expect(r.quantity).toBe(1);
+    expect(r.unitName).toBeNull();
+    expect(r.name).toBe("Zitrone");
+    expect(r.notes).toBe("Saft");
+  });
+  it("'Schale von 2 Bio-Orangen' → 2 Bio-Orangen, notes Schale", () => {
+    const r = parse("Schale von 2 Bio-Orangen");
+    expect(r.quantity).toBe(2);
+    expect(r.name).toBe("Bio-Orangen");
+    expect(r.notes).toBe("Schale");
+  });
+  it("'juice of half a lemon' → 0.5 lemon, notes juice", () => {
+    const r = parse("juice of half a lemon");
+    expect(r.quantity).toBe(0.5);
+    expect(r.name).toBe("lemon");
+    expect(r.notes).toBe("juice");
+  });
+  it("'1 large onion chopped' strips leading size + trailing prep via alt", () => {
+    const r = parse("1 large onion chopped");
+    expect(r.quantity).toBe(1);
+    expect(r.altWithPrepStripped).toEqual({
+      name: "onion",
+      notes: expect.stringMatching(/chopped/),
+    });
+    expect(r.altWithPrepStripped?.notes).toMatch(/large/);
+  });
+
+  it("'200 ml Saft' keeps Saft as the ingredient (no leading prep article)", () => {
+    const r = parse("200 ml Saft");
+    expect(r.quantity).toBe(200);
+    expect(r.unitName).toBe("ml");
+    expect(r.name).toBe("Saft");
+    expect(r.notes).toBeNull();
+  });
   it("'gestrichener TL Zimt' → size modifier 'gestrichen'", () => {
     const r = parse("gestrichener TL Zimt");
     expect(r.unitName).toBe("TL");
@@ -558,6 +646,24 @@ describe("splitConjunctions", () => {
   });
   it("splits on ' and '", () => {
     expect(splitConjunctions("Salt and Pepper")).toEqual(["Salt", "Pepper"]);
+  });
+  it("keeps 'yellow and red grape tomatoes' as one ingredient (color + color)", () => {
+    // Regression: family-wall "Chickpea Salad" recipe had this line and
+    // we were splitting into "2 cups mixed yellow" + "red grape tomatoes",
+    // producing a phantom "yellow" ingredient.
+    expect(
+      splitConjunctions(
+        "2 cups mixed yellow and red grape tomatoes (halved)",
+      ),
+    ).toEqual(["2 cups mixed yellow and red grape tomatoes (halved)"]);
+  });
+  it("keeps 'gelbe und rote Paprika' as one ingredient", () => {
+    expect(splitConjunctions("gelbe und rote Paprika")).toEqual([
+      "gelbe und rote Paprika",
+    ]);
+  });
+  it("still splits when the conjunction sits between real ingredients", () => {
+    expect(splitConjunctions("yogurt and milk")).toEqual(["yogurt", "milk"]);
   });
   it("keeps 'Weizen- oder Dinkelmehl' as one ingredient", () => {
     expect(splitConjunctions("Weizen- und Dinkelmehl")).toEqual([
