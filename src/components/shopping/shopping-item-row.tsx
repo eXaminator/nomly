@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import type {
   ShoppingItemAmount,
+  ShoppingItemManualAmount,
   ShoppingItemSourceView,
   ShoppingItemView,
 } from "@/lib/shopping/items";
@@ -101,10 +102,13 @@ export function ShoppingItemRow({
               </span>
             ) : null}
           </div>
-          {item.sources.length > 0 ? (
+          {item.sources.length > 0 || item.manualAmounts.length > 0 ? (
             <ul className="flex flex-col gap-0.5 text-xs text-[var(--color-muted-fg)]">
               {item.sources.map((s) => (
-                <SourceLine key={s.sourceId} source={s} />
+                <SourceLine key={`src-${s.sourceId}`} source={s} />
+              ))}
+              {item.manualAmounts.map((m) => (
+                <ManualLine key={`man-${m.id}`} manual={m} />
               ))}
             </ul>
           ) : null}
@@ -168,6 +172,20 @@ function AmountList({ amounts }: { amounts: ShoppingItemAmount[] }) {
         </React.Fragment>
       ))}
     </span>
+  );
+}
+
+function ManualLine({ manual }: { manual: ShoppingItemManualAmount }) {
+  return (
+    <li className="inline-flex flex-wrap items-baseline gap-x-1.5 px-1">
+      <span className="font-medium text-[var(--color-fg)]/80">Manuell</span>
+      {manual.quantity != null || manual.unitName ? (
+        <span>
+          {manual.quantity != null ? formatQty(manual.quantity) : ""}
+          {manual.unitName ? ` ${manual.unitName}` : ""}
+        </span>
+      ) : null}
+    </li>
   );
 }
 
