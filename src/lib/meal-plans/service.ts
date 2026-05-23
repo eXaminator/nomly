@@ -97,10 +97,13 @@ export function updateMeal(id: number, patch: MealPlanUpdateInput): void {
   if (Object.keys(patchData).length === 0) return;
 
   db.transaction((tx) => {
-    // If the effective servings changed, scale this meal's shopping-list
-    // contributions by the same factor so the list reflects the new size.
-    // Source rows hold absolute amounts (recipe.qty × old_scale, possibly
-    // with a user edit on top); we just multiply by new/old.
+    // When the effective servings change, recompute each source's
+    // contributed quantity from the recipe's original `recipe_ingredient`
+    // value × new_scale. This intentionally discards any prior manual
+    // edit on the source — the planner is the source of truth for what a
+    // meal contributes; if the user edited the amount in the shopping
+    // list, the planner's portion change is treated as a reset back to
+    // the recipe-derived value.
     if (Object.prototype.hasOwnProperty.call(patch, "servingsOverride")) {
       const current = tx
         .select({
@@ -119,26 +122,35 @@ export function updateMeal(id: number, patch: MealPlanUpdateInput): void {
         const recipeServings = recipeRow?.servings ?? 1;
         const oldEffective = current.oldOverride ?? recipeServings;
         const newEffective = patch.servingsOverride ?? recipeServings;
-        if (oldEffective > 0 && newEffective !== oldEffective) {
-          const factor = newEffective / oldEffective;
-          tx.update(shoppingItemSource)
-            .set({
-              contributedQuantity: sql`${shoppingItemSource.contributedQuantity} * ${factor}`,
+        if (recipeServings > 0 && newEffective !== oldEffective) {
+          const newScale = newEffective / recipeServings;
+          // Recompute every source row from the recipe ingredient. Source
+          // rows whose recipe_ingredient.quantity is null stay null
+          // (open-ended).
+          const sources = tx
+            .select({
+              id: shoppingItemSource.id,
+              itemId: shoppingItemSource.itemId,
+              recipeQty: recipeIngredient.quantity,
             })
-            .where(
-              and(
-                eq(shoppingItemSource.mealPlanId, id),
-                sql`${shoppingItemSource.contributedQuantity} IS NOT NULL`,
-              ),
-            )
-            .run();
-          // Bump version on every affected shopping item so clients refresh.
-          const affected = tx
-            .select({ itemId: shoppingItemSource.itemId })
             .from(shoppingItemSource)
+            .innerJoin(
+              recipeIngredient,
+              eq(recipeIngredient.id, shoppingItemSource.recipeIngredientId),
+            )
             .where(eq(shoppingItemSource.mealPlanId, id))
             .all();
-          const itemIds = Array.from(new Set(affected.map((r) => r.itemId)));
+          for (const s of sources) {
+            const nextQty =
+              s.recipeQty == null
+                ? null
+                : Math.round(s.recipeQty * newScale * 1000) / 1000;
+            tx.update(shoppingItemSource)
+              .set({ contributedQuantity: nextQty })
+              .where(eq(shoppingItemSource.id, s.id))
+              .run();
+          }
+          const itemIds = Array.from(new Set(sources.map((s) => s.itemId)));
           if (itemIds.length > 0) {
             tx.update(shoppingItem)
               .set({

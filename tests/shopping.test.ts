@@ -381,6 +381,42 @@ describe("portion changes re-scale source contributions", () => {
     ctx = await seed();
   });
 
+  it("portion change discards a manual edit and recomputes from the recipe", async () => {
+    const { previewMeals } = await import("@/lib/shopping/preview");
+    const { addMealsToList } = await import("@/lib/shopping/merge");
+    const {
+      listShoppingItems,
+      setSourceQuantity,
+    } = await import("@/lib/shopping/items");
+    const { updateMeal } = await import("@/lib/meal-plans/service");
+
+    // Recipe says 500 g for 2 portions. Planned 4 portions → scale 2 →
+    // source = 1000 g.
+    const meals = previewMeals("2026-05-23", 1);
+    addMealsToList([
+      {
+        mealPlanId: ctx.mealPlanId,
+        ingredients: meals[0].ingredients.map((i) => ({
+          recipeIngredientId: i.recipeIngredientId,
+        })),
+      },
+    ]);
+    const before = listShoppingItems().find((i) => i.name === "Tomate")!;
+    expect(before.sources[0].contributedQuantity).toBe(1000);
+
+    // User manually drops it to 300 g via the row editor.
+    setSourceQuantity(before.id, before.sources[0].sourceId, 300);
+    const edited = listShoppingItems().find((i) => i.name === "Tomate")!;
+    expect(edited.sources[0].contributedQuantity).toBe(300);
+
+    // Planner change to 6 portions → new scale 3 → recipe.qty × 3 = 1500 g.
+    // The manual edit (300 g) is intentionally discarded; the planner is
+    // the source of truth for what a meal contributes.
+    updateMeal(ctx.mealPlanId, { servingsOverride: 6 });
+    const after = listShoppingItems().find((i) => i.name === "Tomate")!;
+    expect(after.sources[0].contributedQuantity).toBe(1500);
+  });
+
   it("doubling the planned servings doubles each contributed quantity", async () => {
     const { previewMeals } = await import("@/lib/shopping/preview");
     const { addMealsToList } = await import("@/lib/shopping/merge");
