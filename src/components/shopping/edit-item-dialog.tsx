@@ -131,14 +131,38 @@ function EditItemDialogBody({
   );
   // Pending new manual rows — local-only until Speichern.
   const [pendingNew, setPendingNew] = React.useState<PendingNew[]>([]);
-  const [defaultUnit, setDefaultUnit] = React.useState<ComboboxItem | null>(null);
   const [note, setNote] = React.useState(item.note ?? "");
   const [saving, setSaving] = React.useState(false);
 
-  // Fetch the "Stück" default unit once for new rows. Lazy: only triggers
-  // when the user adds the first row.
+  // Default unit for a freshly-added row: pick the first unit that's
+  // already present on this item (sources first, then manual amounts).
+  // If nothing on the item has a unit, fall back to "Stück" via the lazy
+  // lookup below. Cheap loop — the item never has many rows, so we just
+  // recompute each render rather than fight the memoization lint rule.
+  let itemDefaultUnit: ComboboxItem | null = null;
+  for (const s of item.sources) {
+    if (s.contributedUnitId != null && s.contributedUnit) {
+      itemDefaultUnit = { id: s.contributedUnitId, name: s.contributedUnit };
+      break;
+    }
+  }
+  if (itemDefaultUnit == null) {
+    for (const m of item.manualAmounts) {
+      if (m.unitId != null && m.unitName) {
+        itemDefaultUnit = { id: m.unitId, name: m.unitName };
+        break;
+      }
+    }
+  }
+
+  const [stueckFallback, setStueckFallback] = React.useState<ComboboxItem | null>(
+    null,
+  );
   React.useEffect(() => {
-    if (pendingNew.length === 0 || defaultUnit != null) return;
+    // Only fetch the fallback when the item itself has no usable unit AND
+    // the user actually opens a new row.
+    if (itemDefaultUnit != null) return;
+    if (pendingNew.length === 0 || stueckFallback != null) return;
     let cancelled = false;
     void (async () => {
       try {
@@ -152,11 +176,10 @@ function EditItemDialogBody({
         };
         const hit = data.items.find((u) => u.name === "Stück") ?? data.items[0];
         if (!cancelled && hit) {
-          setDefaultUnit({ id: hit.id, name: hit.name });
+          const found = { id: hit.id, name: hit.name };
+          setStueckFallback(found);
           setPendingNew((prev) =>
-            prev.map((p) =>
-              p.unit == null ? { ...p, unit: { id: hit.id, name: hit.name } } : p,
-            ),
+            prev.map((p) => (p.unit == null ? { ...p, unit: found } : p)),
           );
         }
       } catch {
@@ -166,7 +189,9 @@ function EditItemDialogBody({
     return () => {
       cancelled = true;
     };
-  }, [pendingNew, defaultUnit]);
+  }, [itemDefaultUnit, pendingNew, stueckFallback]);
+
+  const defaultUnit = itemDefaultUnit ?? stueckFallback;
 
   const nextTempIdRef = React.useRef(1);
 

@@ -28,6 +28,7 @@ export type ShoppingItemSourceView = {
   recipeTitle: string;
   recipeIngredientId: number;
   contributedQuantity: number | null;
+  contributedUnitId: number | null;
   contributedUnit: string | null;
   recipeNotes: string | null;
 };
@@ -125,7 +126,7 @@ export function listShoppingItems(): ShoppingItemView[] {
   ];
 
   const itemIds = baseRows.map((r) => r.id);
-  type RawSource = ShoppingItemSourceView & { contributedUnitId: number | null };
+  type RawSource = ShoppingItemSourceView;
   const sourcesByItem = new Map<number, RawSource[]>();
   if (itemIds.length > 0) {
     const sources = db
@@ -312,6 +313,7 @@ export function listShoppingItems(): ShoppingItemView[] {
         recipeTitle: s.recipeTitle,
         recipeIngredientId: s.recipeIngredientId,
         contributedQuantity: s.contributedQuantity,
+        contributedUnitId: s.contributedUnitId,
         contributedUnit: s.contributedUnit,
         recipeNotes: s.recipeNotes,
       })),
