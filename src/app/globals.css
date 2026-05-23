@@ -51,13 +51,28 @@
        surfaces are the explicit ones (main content, recipe panel, etc.). */
     overscroll-behavior: none;
     /* Tell the browser whether we're in light or dark mode so native
-       widgets (date picker icon, number spinners, scrollbars) pick a
-       matching foreground colour instead of defaulting to black on dark. */
+       widgets (number spinners, scrollbars) pick a matching foreground
+       instead of defaulting to black on dark. The calendar picker icon
+       is handled separately below (color-scheme alone doesn't recolour
+       it reliably across browsers when the input has a custom
+       background). */
     color-scheme: light;
   }
   :root.dark,
   :root.dark body {
     color-scheme: dark;
+  }
+
+  /* The native date / time / week / datetime-local pickers ship a tiny
+     calendar / clock icon at the trailing edge. Browsers paint it as a
+     dark glyph regardless of color-scheme when the input has a custom
+     background, so flip its colours via filter in dark mode. */
+  :root.dark input[type="date"]::-webkit-calendar-picker-indicator,
+  :root.dark input[type="time"]::-webkit-calendar-picker-indicator,
+  :root.dark input[type="week"]::-webkit-calendar-picker-indicator,
+  :root.dark input[type="month"]::-webkit-calendar-picker-indicator,
+  :root.dark input[type="datetime-local"]::-webkit-calendar-picker-indicator {
+    filter: invert(1) brightness(0.85);
   }
 
   body {
