@@ -57,11 +57,6 @@ const STAMMDATEN_LINKS: Array<{
     description:
       "Sichtbare Tage und Beginn der Woche für den Mahlzeitenplaner.",
   },
-  {
-    href: "/einstellungen/einkauf",
-    title: "Einkauf",
-    description: "Vorgabe-Länge für den Mahlzeiten-Übernahme-Dialog.",
-  },
 ];
 
 const PLACEHOLDERS = [

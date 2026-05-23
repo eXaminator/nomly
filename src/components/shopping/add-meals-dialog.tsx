@@ -35,7 +35,9 @@ function daysBetween(start: string, end: string): number {
 type Props = {
   open: boolean;
   defaultLengthDays: number;
-  today: string;
+  /** ISO date the range should start on when the dialog opens. Caller picks
+   *  this — usually the planner's currently-visible start. */
+  defaultStart: string;
   onClose: () => void;
   onAdded: () => void;
 };
@@ -67,11 +69,11 @@ function shortWeekday(iso: string): string {
 export function AddMealsDialog({
   open,
   defaultLengthDays,
-  today,
+  defaultStart,
   onClose,
   onAdded,
 }: Props) {
-  const [start, setStart] = React.useState(today);
+  const [start, setStart] = React.useState(defaultStart);
   const [length, setLength] = React.useState(defaultLengthDays);
   const [meals, setMeals] = React.useState<PreviewMeal[] | null>(null);
   const [loading, setLoading] = React.useState(false);
@@ -91,9 +93,9 @@ export function AddMealsDialog({
       return;
     }
     // Reset to defaults each time the dialog opens.
-    setStart(today);
+    setStart(defaultStart);
     setLength(defaultLengthDays);
-  }, [open, today, defaultLengthDays]);
+  }, [open, defaultStart, defaultLengthDays]);
 
   // Server fetch as the external synchronisation source — setState in the
   // effect body is intentional here (loading/error scaffolding).

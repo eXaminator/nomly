@@ -33,14 +33,14 @@ type Props = {
   initialItems: ShoppingItemView[];
   supermarkets: SupermarketSummary[];
   defaultLengthDays: number;
-  today: string;
+  defaultStart: string;
 };
 
 export function ShoppingListView({
   initialItems,
   supermarkets,
   defaultLengthDays,
-  today,
+  defaultStart,
 }: Props) {
   const router = useRouter();
   const [items, setItems] = React.useState(initialItems);
@@ -375,7 +375,7 @@ export function ShoppingListView({
       <AddMealsDialog
         open={addMealsOpen}
         defaultLengthDays={defaultLengthDays}
-        today={today}
+        defaultStart={defaultStart}
         onClose={() => setAddMealsOpen(false)}
         onAdded={() => {
           setAddMealsOpen(false);

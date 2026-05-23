@@ -5,8 +5,8 @@ import {
   getSupermarketDetail,
   listSupermarkets,
 } from "@/lib/stammdaten/supermarket/service";
-import { getShoppingSettings } from "@/lib/shopping/settings";
-import { todayIso } from "@/lib/meal-plans/dates";
+import { alignToStartWeekday, todayIso } from "@/lib/meal-plans/dates";
+import { getPlannerSettings } from "@/lib/settings/planner";
 
 export const dynamic = "force-dynamic";
 
@@ -24,15 +24,20 @@ export default async function ShoppingPage() {
         sortOrder: c.sortOrder,
       })),
     }));
-  const settings = getShoppingSettings();
+  // Default the add-meals dialog's date range to whatever the meal planner
+  // would currently show: window of `daysVisible` aligned to the
+  // configured start weekday. Keeps the planner and the shopping list in
+  // sync without a separate "default length" setting.
+  const planner = getPlannerSettings();
   const today = todayIso();
+  const defaultStart = alignToStartWeekday(today, planner.startWeekday);
   return (
     <AppShell>
       <ShoppingListView
         initialItems={items}
         supermarkets={supermarkets}
-        defaultLengthDays={settings.defaultLengthDays}
-        today={today}
+        defaultLengthDays={planner.daysVisible}
+        defaultStart={defaultStart}
       />
     </AppShell>
   );
