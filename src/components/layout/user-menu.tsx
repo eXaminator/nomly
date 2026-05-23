@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { LogOut, Moon, Sun, User as UserIcon } from "lucide-react";
-import { useTheme } from "next-themes";
+import { useTheme } from "@/components/theme-provider";
 import {
   DropdownMenu,
   DropdownMenuContent,

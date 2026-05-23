@@ -251,6 +251,35 @@ export const shoppingItem = sqliteTable(
   ],
 );
 
+/**
+ * Additive manual amounts on a shopping item. Each row is its own
+ * contribution — the aggregator sums these together with the per-meal
+ * `shopping_item_source` contributions for the matching dimension.
+ *
+ * Multiple rows per (item, dimension) are allowed: the "Weitere Menge"
+ * button always inserts a fresh row, and edits to displayed amounts
+ * proportionally scale whatever's already in that dimension.
+ */
+export const shoppingItemAmount = sqliteTable(
+  "shopping_item_amount",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    itemId: integer("item_id")
+      .notNull()
+      .references((): AnySQLiteColumn => shoppingItem.id, { onDelete: "cascade" }),
+    unitId: integer("unit_id").references(() => unit.id, { onDelete: "set null" }),
+    quantity: real("quantity"),
+    /**
+     * Persisted (not derived) so the aggregator can group without a unit
+     * join. Must match `unit.dimension` when `unit_id` is set, else "none".
+     */
+    dimension: text("dimension", {
+      enum: ["mass", "volume", "count", "none"],
+    }).notNull(),
+  },
+  (t) => [index("shopping_item_amount_item_idx").on(t.itemId)],
+);
+
 export const shoppingItemSource = sqliteTable(
   "shopping_item_source",
   {
@@ -274,6 +303,38 @@ export const shoppingItemSource = sqliteTable(
     index("shopping_item_source_item_idx").on(t.itemId),
     index("shopping_item_source_meal_idx").on(t.mealPlanId),
   ],
+);
+
+/**
+ * Marker rows: `(ingredient_id, supermarket_id)` means "this ingredient is
+ * not carried at this supermarket". The shopping list renders matching items
+ * in a muted bottom group when that supermarket is the active filter (spec
+ * §6). Composite primary key — at most one row per pair.
+ */
+export const ingredientSupermarketUnavailable = sqliteTable(
+  "ingredient_supermarket_unavailable",
+  {
+    ingredientId: integer("ingredient_id")
+      .notNull()
+      .references(() => ingredient.id, { onDelete: "cascade" }),
+    supermarketId: integer("supermarket_id")
+      .notNull()
+      .references(() => supermarket.id, { onDelete: "cascade" }),
+  },
+  (t) => [primaryKey({ columns: [t.ingredientId, t.supermarketId] })],
+);
+
+export const productSupermarketUnavailable = sqliteTable(
+  "product_supermarket_unavailable",
+  {
+    productId: integer("product_id")
+      .notNull()
+      .references(() => product.id, { onDelete: "cascade" }),
+    supermarketId: integer("supermarket_id")
+      .notNull()
+      .references(() => supermarket.id, { onDelete: "cascade" }),
+  },
+  (t) => [primaryKey({ columns: [t.productId, t.supermarketId] })],
 );
 
 export const icalFeed = sqliteTable("ical_feed", {

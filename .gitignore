@@ -52,6 +52,8 @@ next-env.d.ts
 /data/*
 !/data/seed/
 .playwright-mcp/
-editor-bottom-border.png
+# Ad-hoc debug screenshots written by the Playwright MCP tools.
+*.png
+!public/**/*.png
 
 .claude/

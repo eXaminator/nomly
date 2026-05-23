@@ -4,6 +4,7 @@ import * as React from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { DateInputWithWeekday } from "@/components/ui/date-input-with-weekday";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -13,7 +14,16 @@ import { cn } from "@/lib/cn";
 type Props = {
   meal: MealPlanView | null;
   onClose: () => void;
-  onSave: (id: number, patch: { servingsOverride: number | null; note: string | null }) => Promise<void>;
+  onSave: (
+    id: number,
+    patch: {
+      servingsOverride: number | null;
+      note: string | null;
+      /** Optional. When set, moves the meal to this ISO date (and re-sorts
+       *  it at the bottom of the day). Omit to keep the meal's date. */
+      date?: string;
+    },
+  ) => Promise<void>;
   onDelete: (id: number) => Promise<void>;
 };
 
@@ -34,6 +44,7 @@ function MealEditorDialog({ meal, onClose, onSave, onDelete }: Props) {
   const [servings, setServings] = React.useState<number>(
     meal?.servings ?? 1,
   );
+  const [date, setDate] = React.useState<string>(meal?.date ?? "");
   const [note, setNote] = React.useState<string>(meal?.note ?? "");
   const [saving, setSaving] = React.useState(false);
   const [confirmingDelete, setConfirmingDelete] = React.useState(false);
@@ -46,9 +57,14 @@ function MealEditorDialog({ meal, onClose, onSave, onDelete }: Props) {
     try {
       const override = servings === meal.recipe.baseServings ? null : servings;
       const trimmed = note.trim();
+      const isoDate = /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : meal.date;
       await onSave(meal.id, {
         servingsOverride: override,
         note: trimmed.length > 0 ? trimmed : null,
+        // Only include the date when it actually changed so meals whose
+        // date is untouched skip the extra `moveMealToDay` round-trip and
+        // keep their sort order intact.
+        ...(isoDate !== meal.date ? { date: isoDate } : {}),
       });
       onClose();
     } finally {
@@ -101,6 +117,15 @@ function MealEditorDialog({ meal, onClose, onSave, onDelete }: Props) {
           </div>
 
           <div className="flex-1 space-y-5 overflow-y-auto px-5 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="meal-date">Datum</Label>
+              <DateInputWithWeekday
+                id="meal-date"
+                value={date}
+                onChange={setDate}
+                className="w-44"
+              />
+            </div>
             <div className="space-y-2">
               <Label htmlFor="servings">Portionen</Label>
               <Input

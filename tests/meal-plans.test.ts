@@ -77,10 +77,11 @@ describe("meal-plan service", () => {
     expect(rows.find((r) => r.id === id)?.servingsOverride).toBe(2);
   });
 
-  it("createMeal bumps a recipe's schema-default `servings = 1` up to 2", async () => {
-    // Most imported recipes never explicitly set `servings` and inherit the
-    // schema default of 1 — which feels too small for a planned meal. The
-    // service falls back to `defaultMealPortions` for the bump.
+  it("createMeal honours a recipe's `servings = 1` without bumping it", async () => {
+    // Previously the service bumped 1-portion recipes to 2 for the household.
+    // That silently doubled every ingredient in the shopping list, so we now
+    // honour the recipe's own value — the user adjusts individual meals via
+    // the editor when they want more.
     const { db } = await import("@/db");
     const { recipe } = await import("@/db/schema");
     const onePortionRecipe = db
@@ -92,7 +93,7 @@ describe("meal-plan service", () => {
     const { createMeal } = await import("@/lib/meal-plans/service");
     const id = createMeal({ recipeId: onePortionRecipe, date: "2026-05-22" });
     const rows = await listOnDate("2026-05-22");
-    expect(rows.find((r) => r.id === id)?.servingsOverride).toBe(2);
+    expect(rows.find((r) => r.id === id)?.servingsOverride).toBe(1);
   });
 
   it("createMeal preserves an explicit override even when it would be below the default", async () => {

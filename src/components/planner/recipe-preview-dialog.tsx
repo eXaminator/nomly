@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Clock, ExternalLink, Pencil, Users } from "lucide-react";
 import {
   Dialog,
+  DialogBody,
   DialogContent,
   DialogHeader,
   DialogTitle,
@@ -30,10 +31,14 @@ export function RecipePreviewDialog({ recipeId, onClose }: Props) {
   const open = recipeId != null;
   return (
     <Dialog open={open} onOpenChange={(v) => (!v ? onClose() : undefined)}>
-      <DialogContent className="max-h-[85vh] max-w-3xl overflow-y-auto p-0">
+      <DialogContent className="sm:max-w-3xl">
         {/* Remount on every new recipeId so the inner body re-fetches with
             a fresh loading state — avoids setState-in-effect resets. */}
-        {recipeId != null ? <RecipeBody key={recipeId} recipeId={recipeId} /> : null}
+        <DialogBody className="p-0">
+          {recipeId != null ? (
+            <RecipeBody key={recipeId} recipeId={recipeId} />
+          ) : null}
+        </DialogBody>
       </DialogContent>
     </Dialog>
   );

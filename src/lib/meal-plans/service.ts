@@ -5,6 +5,8 @@ import {
   recipe,
   recipeSection,
   recipeIngredient,
+  shoppingItem,
+  shoppingItemSource,
   ingredient as ingredientTable,
 } from "../../db/schema.ts";
 import { deriveDiet, type IngredientDietaryClass, type RecipeDiet } from "../recipes/diet.ts";
@@ -93,7 +95,77 @@ export function updateMeal(id: number, patch: MealPlanUpdateInput): void {
     patchData.note = patch.note ?? null;
   }
   if (Object.keys(patchData).length === 0) return;
-  db.update(mealPlan).set(patchData).where(eq(mealPlan.id, id)).run();
+
+  db.transaction((tx) => {
+    // When the effective servings change, recompute each source's
+    // contributed quantity from the recipe's original `recipe_ingredient`
+    // value × new_scale. This intentionally discards any prior manual
+    // edit on the source — the planner is the source of truth for what a
+    // meal contributes; if the user edited the amount in the shopping
+    // list, the planner's portion change is treated as a reset back to
+    // the recipe-derived value.
+    if (Object.prototype.hasOwnProperty.call(patch, "servingsOverride")) {
+      const current = tx
+        .select({
+          recipeId: mealPlan.recipeId,
+          oldOverride: mealPlan.servingsOverride,
+        })
+        .from(mealPlan)
+        .where(eq(mealPlan.id, id))
+        .get();
+      if (current) {
+        const recipeRow = tx
+          .select({ servings: recipe.servings })
+          .from(recipe)
+          .where(eq(recipe.id, current.recipeId))
+          .get();
+        const recipeServings = recipeRow?.servings ?? 1;
+        const oldEffective = current.oldOverride ?? recipeServings;
+        const newEffective = patch.servingsOverride ?? recipeServings;
+        if (recipeServings > 0 && newEffective !== oldEffective) {
+          const newScale = newEffective / recipeServings;
+          // Recompute every source row from the recipe ingredient. Source
+          // rows whose recipe_ingredient.quantity is null stay null
+          // (open-ended).
+          const sources = tx
+            .select({
+              id: shoppingItemSource.id,
+              itemId: shoppingItemSource.itemId,
+              recipeQty: recipeIngredient.quantity,
+            })
+            .from(shoppingItemSource)
+            .innerJoin(
+              recipeIngredient,
+              eq(recipeIngredient.id, shoppingItemSource.recipeIngredientId),
+            )
+            .where(eq(shoppingItemSource.mealPlanId, id))
+            .all();
+          for (const s of sources) {
+            const nextQty =
+              s.recipeQty == null
+                ? null
+                : Math.round(s.recipeQty * newScale * 1000) / 1000;
+            tx.update(shoppingItemSource)
+              .set({ contributedQuantity: nextQty })
+              .where(eq(shoppingItemSource.id, s.id))
+              .run();
+          }
+          const itemIds = Array.from(new Set(sources.map((s) => s.itemId)));
+          if (itemIds.length > 0) {
+            tx.update(shoppingItem)
+              .set({
+                version: sql`${shoppingItem.version} + 1`,
+                updatedAt: sql`unixepoch()`,
+              })
+              .where(inArray(shoppingItem.id, itemIds))
+              .run();
+          }
+        }
+      }
+    }
+
+    tx.update(mealPlan).set(patchData).where(eq(mealPlan.id, id)).run();
+  });
 }
 
 /**
@@ -259,6 +331,14 @@ export function listByDateRange(from: string, to: string): MealPlanView[] {
     Array.from(new Set(meals.map((m) => m.recipeId))),
   );
 
+  const shoppingHits = db
+    .select({ mealPlanId: shoppingItemSource.mealPlanId })
+    .from(shoppingItemSource)
+    .where(inArray(shoppingItemSource.mealPlanId, meals.map((m) => m.id)))
+    .groupBy(shoppingItemSource.mealPlanId)
+    .all();
+  const hasShopping = new Set(shoppingHits.map((r) => r.mealPlanId));
+
   return meals.map((m) => {
     const diet = dietByRecipe.get(m.recipeId) ?? { isVegan: null, isVegetarian: null };
     const servings = m.servingsOverride ?? m.recipeServings;
@@ -269,6 +349,7 @@ export function listByDateRange(from: string, to: string): MealPlanView[] {
       servingsOverride: m.servingsOverride,
       note: m.note,
       sortOrder: m.sortOrder,
+      hasShoppingImpact: hasShopping.has(m.id),
       recipe: {
         id: m.recipeId,
         title: m.recipeTitle,

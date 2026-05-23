@@ -41,6 +41,7 @@ import { RecipePreviewDialog } from "./recipe-preview-dialog";
 import {
   apiCreateMeal,
   apiDeleteMeal,
+  apiDeleteMealWithShopping,
   apiMoveMeal,
   apiReorderDay,
   apiReorderMeal,
@@ -130,6 +131,7 @@ export function PlannerView({
       servingsOverride: servings,
       note,
       sortOrder: maxSortOrderForDate(date) + 1,
+      hasShoppingImpact: false,
       recipe: {
         id: recipe.id,
         title: recipe.title,
@@ -215,7 +217,11 @@ export function PlannerView({
 
   async function handleSaveEdit(
     id: number,
-    patch: { servingsOverride: number | null; note: string | null },
+    patch: {
+      servingsOverride: number | null;
+      note: string | null;
+      date?: string;
+    },
   ) {
     // Optimistic edit so the side panel closes against the new values.
     setMealPlans((prev) =>
@@ -228,22 +234,34 @@ export function PlannerView({
           servings,
           servingsOverride: patch.servingsOverride,
           note: patch.note,
+          date: patch.date ?? m.date,
         };
       }),
     );
     await withBusy(async () => {
-      await apiUpdateMeal(id, patch);
+      await apiUpdateMeal(id, {
+        servingsOverride: patch.servingsOverride,
+        note: patch.note,
+      });
+      if (patch.date) {
+        await apiMoveMeal(id, patch.date);
+      }
       router.refresh();
     });
   }
 
   async function handleDelete(id: number) {
-    // Remove from local state immediately — feels instant. The server call
-    // and refresh run in the background; if either fails, withBusy() triggers
-    // a refresh that puts the meal back from the canonical SSR snapshot.
+    const meal = mealPlans.find((m) => m.id === id);
     setMealPlans((prev) => prev.filter((m) => m.id !== id));
     await withBusy(async () => {
-      await apiDeleteMeal(id);
+      // Always subtract the meal's shopping-list contributions so the list
+      // and the plan stay in sync. For meals with no shopping impact this
+      // is identical to a plain delete (no sources → nothing to subtract).
+      if (meal?.hasShoppingImpact) {
+        await apiDeleteMealWithShopping(id, "subtract");
+      } else {
+        await apiDeleteMeal(id);
+      }
       router.refresh();
     });
   }

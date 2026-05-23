@@ -21,6 +21,7 @@ async function main() {
   const { sessionOptions, isSessionLive } = await import("./src/lib/session.ts");
   type SessionData = import("./src/lib/session.ts").SessionData;
   const { extractBearer, verifyBearer } = await import("./src/lib/bearer.ts");
+  const { sweepCheckedItems } = await import("./src/lib/shopping/sweeper.ts");
 
   const port = parseInt(process.env.PORT ?? "3000", 10);
   const hostname = process.env.HOSTNAME ?? "0.0.0.0";
@@ -117,6 +118,29 @@ async function main() {
     const proto = process.env.BASE_URL?.startsWith("https") ? "https" : "http";
     console.log(`> nomly listening at ${proto}://${hostname}:${port}`);
   });
+
+  // Shopping-list sweeper: removes items checked off > 24h ago. Runs once at
+  // boot (so restarts catch up) and every 60 minutes thereafter. WS broadcast
+  // for the deletions arrives with Epic 9; until then this just logs.
+  const SWEEP_INTERVAL_MS = 60 * 60 * 1000;
+  function runSweep() {
+    try {
+      const { deletedIds } = sweepCheckedItems();
+      if (deletedIds.length > 0) {
+        console.log(
+          `> shopping sweeper removed ${deletedIds.length} item(s):`,
+          deletedIds,
+        );
+      }
+    } catch (err) {
+      console.error("shopping sweeper failed", err);
+    }
+  }
+  runSweep();
+  const sweepHandle = setInterval(runSweep, SWEEP_INTERVAL_MS);
+  // Don't keep the process alive just for the sweeper — the HTTP server is
+  // the primary ref.
+  sweepHandle.unref?.();
 }
 
 main().catch((err) => {

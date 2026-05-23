@@ -7,7 +7,9 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
+  DialogBody,
   DialogContent,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -218,6 +220,7 @@ export function MergeProposalsDialog({
             Ähnliche {labels.plural} zusammenführen
           </DialogTitle>
         </DialogHeader>
+        <DialogBody className="flex flex-col gap-4">
 
         <p className="text-sm text-[var(--color-muted-fg)]">
           Vorschläge basieren auf Namensähnlichkeit (Plurale, Schreibvarianten,
@@ -361,30 +364,29 @@ export function MergeProposalsDialog({
             Wird zusammengeführt… ({progress.done} / {progress.total})
           </p>
         )}
+        </DialogBody>
 
-        <div className="flex items-center justify-between gap-2">
-          <span className="text-xs text-[var(--color-muted-fg)]">
+        <DialogFooter className="sm:items-center sm:justify-between">
+          <span className="text-xs text-[var(--color-muted-fg)] sm:mr-auto">
             {selectedClusters.length} von {clusters.length} Gruppen zur
             Zusammenführung ausgewählt
           </span>
-          <div className="flex gap-2">
-            <Button variant="ghost" onClick={onClose} disabled={saving}>
-              Abbrechen
-            </Button>
-            <Button
-              onClick={save}
-              disabled={saving || selectedClusters.length === 0}
-            >
-              {saving ? (
-                <>
-                  <Loader2 className="animate-spin" /> Speichert…
-                </>
-              ) : (
-                `${selectedClusters.length} Gruppen zusammenführen`
-              )}
-            </Button>
-          </div>
-        </div>
+          <Button variant="ghost" onClick={onClose} disabled={saving}>
+            Abbrechen
+          </Button>
+          <Button
+            onClick={save}
+            disabled={saving || selectedClusters.length === 0}
+          >
+            {saving ? (
+              <>
+                <Loader2 className="animate-spin" /> Speichert…
+              </>
+            ) : (
+              `${selectedClusters.length} Gruppen zusammenführen`
+            )}
+          </Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );
