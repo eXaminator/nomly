@@ -12,6 +12,7 @@ import { AddItemDialog } from "./add-item-dialog";
 import { AddMealsDialog } from "./add-meals-dialog";
 import { SupermarketFilter } from "./supermarket-filter";
 import { ClearListDialog } from "./clear-list-dialog";
+import { EditItemDialog } from "./edit-item-dialog";
 import {
   addItemAmount as apiAddAmount,
   clearListSelective as apiClearList,
@@ -52,6 +53,14 @@ export function ShoppingListView({
   const [addMealsOpen, setAddMealsOpen] = React.useState(false);
   const [previewRecipeId, setPreviewRecipeId] = React.useState<number | null>(null);
   const [clearOpen, setClearOpen] = React.useState(false);
+  // Identify by id so the dialog body re-keys to fresh state when a
+  // different item is opened. The actual item passed in comes from the
+  // live `items` array so quick updates from other paths flow through.
+  const [editingItemId, setEditingItemId] = React.useState<number | null>(null);
+  const editingItem = React.useMemo(
+    () => (editingItemId != null ? items.find((i) => i.id === editingItemId) ?? null : null),
+    [editingItemId, items],
+  );
   // Stack of item ids in the order they were checked off this session. The
   // header's "Rückgängig" button pops one at a time. We don't persist this
   // across reloads on purpose — undo is meant for "wait, I already had that"
@@ -365,10 +374,7 @@ export function ShoppingListView({
                       activeSupermarketId={supermarketId}
                       onPreviewRecipe={(id) => setPreviewRecipeId(id)}
                       onToggle={onToggleCheck}
-                      onAddAmount={onAddAmount}
-                      onSetSourceQuantity={onSetSourceQuantity}
-                      onSetManualAmountQuantity={onSetManualAmountQuantity}
-                      onPatchNote={onPatchNote}
+                      onEdit={(i) => setEditingItemId(i.id)}
                       onDelete={onDelete}
                       onToggleUnavailable={onToggleUnavailable}
                     />
@@ -406,6 +412,14 @@ export function ShoppingListView({
         open={clearOpen}
         onClose={() => setClearOpen(false)}
         onConfirm={onClear}
+      />
+      <EditItemDialog
+        item={editingItem}
+        onClose={() => setEditingItemId(null)}
+        onAddAmount={onAddAmount}
+        onSetSourceQuantity={onSetSourceQuantity}
+        onSetManualAmountQuantity={onSetManualAmountQuantity}
+        onPatchNote={onPatchNote}
       />
     </div>
   );
