@@ -217,7 +217,11 @@ export function PlannerView({
 
   async function handleSaveEdit(
     id: number,
-    patch: { servingsOverride: number | null; note: string | null },
+    patch: {
+      servingsOverride: number | null;
+      note: string | null;
+      date?: string;
+    },
   ) {
     // Optimistic edit so the side panel closes against the new values.
     setMealPlans((prev) =>
@@ -230,11 +234,18 @@ export function PlannerView({
           servings,
           servingsOverride: patch.servingsOverride,
           note: patch.note,
+          date: patch.date ?? m.date,
         };
       }),
     );
     await withBusy(async () => {
-      await apiUpdateMeal(id, patch);
+      await apiUpdateMeal(id, {
+        servingsOverride: patch.servingsOverride,
+        note: patch.note,
+      });
+      if (patch.date) {
+        await apiMoveMeal(id, patch.date);
+      }
       router.refresh();
     });
   }
