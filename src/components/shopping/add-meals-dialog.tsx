@@ -485,11 +485,11 @@ function IngredientCheckbox({
             onChange={(e) => onChangeQuantity(e.target.value)}
             className="h-7 w-16 rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-bg)] px-2 text-right text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
           />
-          {ing.unitName ? (
-            <span className="min-w-8 text-xs text-[var(--color-muted-fg)]">
-              {ing.unitName}
-            </span>
-          ) : null}
+          {/* Fixed-width slot so the inputs above all line up regardless of
+              the unit's character count (or absence). */}
+          <span className="w-10 text-xs text-[var(--color-muted-fg)]">
+            {ing.unitName ?? ""}
+          </span>
         </span>
       </label>
     </li>
