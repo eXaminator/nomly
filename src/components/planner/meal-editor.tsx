@@ -4,6 +4,7 @@ import * as React from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { DateInputWithWeekday } from "@/components/ui/date-input-with-weekday";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -118,11 +119,11 @@ function MealEditorDialog({ meal, onClose, onSave, onDelete }: Props) {
           <div className="flex-1 space-y-5 overflow-y-auto px-5 py-4">
             <div className="space-y-2">
               <Label htmlFor="meal-date">Datum</Label>
-              <Input
+              <DateInputWithWeekday
                 id="meal-date"
-                type="date"
                 value={date}
-                onChange={(e) => setDate(e.target.value)}
+                onChange={setDate}
+                className="w-44"
               />
             </div>
             <div className="space-y-2">

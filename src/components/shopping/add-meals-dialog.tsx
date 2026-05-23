@@ -11,6 +11,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { DateInputWithWeekday } from "@/components/ui/date-input-with-weekday";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { addDays } from "@/lib/meal-plans/dates";
@@ -56,14 +57,6 @@ function formatScaledQty(q: number | null): string {
   if (q == null) return "";
   const rounded = Math.round(q * 100) / 100;
   return Number.isInteger(rounded) ? String(rounded) : String(rounded);
-}
-
-function shortWeekday(iso: string): string {
-  if (!ISO_DATE_RE.test(iso)) return "";
-  // Treat the ISO date as a calendar day in UTC so the weekday doesn't
-  // flip across DST boundaries depending on the user's timezone.
-  const dt = new Date(`${iso}T00:00:00Z`);
-  return dt.toLocaleDateString("de-DE", { weekday: "short", timeZone: "UTC" });
 }
 
 export function AddMealsDialog({
@@ -333,46 +326,6 @@ export function AddMealsDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
-  );
-}
-
-/**
- * Native `<input type="date">` can't be told to display the weekday alongside
- * the date — the browser picks the format. Wrap the input in a relative
- * positioned div and float a small weekday badge in the input's leading
- * padding so the user sees "Sa  23.05.2026" without needing a custom picker.
- */
-function DateInputWithWeekday({
-  id,
-  value,
-  onChange,
-  min,
-}: {
-  id: string;
-  value: string;
-  onChange: (next: string) => void;
-  min?: string;
-}) {
-  const weekday = shortWeekday(value);
-  return (
-    <div className="relative">
-      <Input
-        id={id}
-        type="date"
-        value={value}
-        min={min}
-        onChange={(e) => onChange(e.target.value)}
-        className={weekday ? "pl-12" : undefined}
-      />
-      {weekday ? (
-        <span
-          aria-hidden
-          className="pointer-events-none absolute inset-y-0 left-2 flex items-center text-xs font-medium uppercase tracking-wider text-[var(--color-muted-fg)]"
-        >
-          {weekday}
-        </span>
-      ) : null}
-    </div>
   );
 }
 
