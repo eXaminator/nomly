@@ -63,18 +63,6 @@
     color-scheme: dark;
   }
 
-  /* The native date / time / week / datetime-local pickers ship a tiny
-     calendar / clock icon at the trailing edge. Browsers paint it as a
-     dark glyph regardless of color-scheme when the input has a custom
-     background, so flip its colours via filter in dark mode. */
-  :root.dark input[type="date"]::-webkit-calendar-picker-indicator,
-  :root.dark input[type="time"]::-webkit-calendar-picker-indicator,
-  :root.dark input[type="week"]::-webkit-calendar-picker-indicator,
-  :root.dark input[type="month"]::-webkit-calendar-picker-indicator,
-  :root.dark input[type="datetime-local"]::-webkit-calendar-picker-indicator {
-    filter: invert(1) brightness(0.85);
-  }
-
   body {
     font-feature-settings: "cv11", "ss01";
   }
@@ -88,6 +76,21 @@
       transition-duration: 0.001ms !important;
     }
   }
+}
+
+/* The native date / time / week / datetime-local pickers ship a tiny
+   calendar / clock icon at the trailing edge. Chromium ignores
+   `color-scheme` when the input has a custom background — the glyph is
+   painted as a dark icon regardless — so explicitly invert it on the
+   dark theme. Lives OUTSIDE @layer base so it beats layered rules.
+   `!important` because pseudo-element filters seem to need it under
+   some browser builds. */
+.dark input[type="date"]::-webkit-calendar-picker-indicator,
+.dark input[type="time"]::-webkit-calendar-picker-indicator,
+.dark input[type="week"]::-webkit-calendar-picker-indicator,
+.dark input[type="month"]::-webkit-calendar-picker-indicator,
+.dark input[type="datetime-local"]::-webkit-calendar-picker-indicator {
+  filter: invert(1) brightness(0.85) !important;
 }
 
 /* Restore the conventional pointer cursor on interactive controls.
