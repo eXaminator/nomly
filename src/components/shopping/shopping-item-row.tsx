@@ -30,17 +30,23 @@ type Props = {
   /** Opens the recipe preview dialog. Triggered from the context menu only. */
   onPreviewRecipe: (recipeId: number) => void;
   onToggle: (item: ShoppingItemView) => void;
-  /** Scales the existing contributions of one dimension to match the typed
-   *  total. Used by the inline per-amount edit inputs. */
-  onSetAmount: (
-    id: number,
-    amount: { quantity: number | null; unitId: number | null },
-  ) => Promise<void>;
   /** Inserts a fresh manual amount on top of whatever already contributes.
    *  Used by the "Weitere Menge" form so amounts can be additive. */
   onAddAmount: (
     id: number,
     amount: { quantity: number | null; unitId: number | null },
+  ) => Promise<void>;
+  /** Updates a single recipe-derived source row's contributed quantity. */
+  onSetSourceQuantity: (
+    id: number,
+    sourceId: number,
+    quantity: number | null,
+  ) => Promise<void>;
+  /** Updates a single manual-amount row's quantity. */
+  onSetManualAmountQuantity: (
+    id: number,
+    amountId: number,
+    quantity: number | null,
   ) => Promise<void>;
   onPatchNote: (id: number, note: string | null) => Promise<void>;
   onDelete: (id: number) => Promise<void>;
@@ -52,15 +58,31 @@ export function ShoppingItemRow({
   activeSupermarketId,
   onPreviewRecipe,
   onToggle,
-  onSetAmount,
   onAddAmount,
+  onSetSourceQuantity,
+  onSetManualAmountQuantity,
   onPatchNote,
   onDelete,
   onToggleUnavailable,
 }: Props) {
   const [editing, setEditing] = React.useState(false);
-  const [amountInputs, setAmountInputs] = React.useState<string[]>(() =>
-    item.amounts.map((a) => (a.quantity != null ? String(a.quantity) : "")),
+  // Per-source and per-manual inputs are keyed by their row id so we can
+  // diff against the original to know which ones changed on save.
+  const [sourceInputs, setSourceInputs] = React.useState<Record<number, string>>(() =>
+    Object.fromEntries(
+      item.sources.map((s) => [
+        s.sourceId,
+        s.contributedQuantity != null ? String(s.contributedQuantity) : "",
+      ]),
+    ),
+  );
+  const [manualInputs, setManualInputs] = React.useState<Record<number, string>>(() =>
+    Object.fromEntries(
+      item.manualAmounts.map((m) => [
+        m.id,
+        m.quantity != null ? String(m.quantity) : "",
+      ]),
+    ),
   );
   const [note, setNote] = React.useState(item.note ?? "");
   const [saving, setSaving] = React.useState(false);
@@ -99,14 +121,27 @@ export function ShoppingItemRow({
 
   React.useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setAmountInputs(
-      item.amounts.map((a) => (a.quantity != null ? String(a.quantity) : "")),
+    setSourceInputs(
+      Object.fromEntries(
+        item.sources.map((s) => [
+          s.sourceId,
+          s.contributedQuantity != null ? String(s.contributedQuantity) : "",
+        ]),
+      ),
+    );
+    setManualInputs(
+      Object.fromEntries(
+        item.manualAmounts.map((m) => [
+          m.id,
+          m.quantity != null ? String(m.quantity) : "",
+        ]),
+      ),
     );
     setNote(item.note ?? "");
     setNewAmountQty("");
     setNewAmountUnit(null);
     setAddingNew(false);
-  }, [item.id, item.amounts, item.note]);
+  }, [item.id, item.sources, item.manualAmounts, item.note]);
 
   async function addNewAmount() {
     const raw = newAmountQty.trim().replace(",", ".");
@@ -136,32 +171,35 @@ export function ShoppingItemRow({
     return data.items.map((u) => ({ id: u.id, name: u.name }));
   }
 
+  function parseInput(raw: string | undefined): number | null {
+    if (raw == null) return null;
+    const trimmed = raw.trim().replace(",", ".");
+    if (trimmed.length === 0) return null;
+    const n = Number(trimmed);
+    return Number.isFinite(n) ? n : null;
+  }
+
   async function commit() {
     setSaving(true);
     try {
-      // Persist amount edits first — each dimension is independent. Send only
-      // the ones whose input differs from the displayed value.
-      const tasks: Array<Promise<unknown>> = [];
-      for (let i = 0; i < item.amounts.length; i += 1) {
-        const original = item.amounts[i];
-        const raw = (amountInputs[i] ?? "").trim().replace(",", ".");
-        const next = raw.length === 0 ? null : Number(raw);
-        const parsed =
-          next != null && Number.isFinite(next) ? next : null;
-        if (parsed === original.quantity) continue;
-        tasks.push(
-          onSetAmount(item.id, {
-            quantity: parsed,
-            unitId: original.unitId,
-          }),
-        );
+      // Sequential not parallel: writes against the same item's version
+      // would race in flight and stomp on each other. Each call returns
+      // the updated item from the server.
+      for (const s of item.sources) {
+        const next = parseInput(sourceInputs[s.sourceId]);
+        if (next === s.contributedQuantity) continue;
+        await onSetSourceQuantity(item.id, s.sourceId, next);
+      }
+      for (const m of item.manualAmounts) {
+        const next = parseInput(manualInputs[m.id]);
+        if (next === m.quantity) continue;
+        await onSetManualAmountQuantity(item.id, m.id, next);
       }
       const trimmedNote = note.trim();
       const nextNote = trimmedNote.length > 0 ? trimmedNote : null;
       if (nextNote !== (item.note ?? null)) {
-        tasks.push(onPatchNote(item.id, nextNote));
+        await onPatchNote(item.id, nextNote);
       }
-      await Promise.all(tasks);
       setEditing(false);
     } finally {
       setSaving(false);
@@ -218,35 +256,68 @@ export function ShoppingItemRow({
                 {item.refType === "product" ? "Produkt" : "Zutat"}
               </span>
             </div>
-            {item.amounts.length > 0 ? (
+            {item.sources.length === 0 && item.manualAmounts.length === 0 ? (
+              <p className="text-xs text-[var(--color-muted-fg)]">
+                Keine Mengen erfasst.
+              </p>
+            ) : (
               <ul className="flex flex-col gap-1.5">
-                {item.amounts.map((a, i) => (
+                {item.sources.map((s) => (
                   <li
-                    key={`${a.dimension}-${a.unitId ?? "none"}`}
-                    className="flex items-center gap-2"
+                    key={`src-${s.sourceId}`}
+                    className="flex flex-wrap items-center gap-2"
                   >
+                    <span className="min-w-0 flex-1 truncate text-xs text-[var(--color-muted-fg)]">
+                      <span className="font-medium text-[var(--color-fg)]/80">
+                        {s.recipeTitle}
+                      </span>
+                      <span className="ml-1">({formatDate(s.mealDate)})</span>
+                    </span>
                     <Input
                       type="text"
                       inputMode="decimal"
-                      value={amountInputs[i] ?? ""}
-                      onChange={(e) => {
-                        const next = [...amountInputs];
-                        next[i] = e.target.value;
-                        setAmountInputs(next);
-                      }}
+                      value={sourceInputs[s.sourceId] ?? ""}
+                      onChange={(e) =>
+                        setSourceInputs((prev) => ({
+                          ...prev,
+                          [s.sourceId]: e.target.value,
+                        }))
+                      }
                       placeholder="Menge"
                       className="w-24"
                     />
-                    <span className="text-sm text-[var(--color-muted-fg)]">
-                      {a.unitName ?? "—"}
+                    <span className="w-10 text-xs text-[var(--color-muted-fg)]">
+                      {s.contributedUnit ?? ""}
+                    </span>
+                  </li>
+                ))}
+                {item.manualAmounts.map((m) => (
+                  <li
+                    key={`man-${m.id}`}
+                    className="flex flex-wrap items-center gap-2"
+                  >
+                    <span className="min-w-0 flex-1 text-xs italic text-[var(--color-muted-fg)]">
+                      Manuell
+                    </span>
+                    <Input
+                      type="text"
+                      inputMode="decimal"
+                      value={manualInputs[m.id] ?? ""}
+                      onChange={(e) =>
+                        setManualInputs((prev) => ({
+                          ...prev,
+                          [m.id]: e.target.value,
+                        }))
+                      }
+                      placeholder="Menge"
+                      className="w-24"
+                    />
+                    <span className="w-10 text-xs text-[var(--color-muted-fg)]">
+                      {m.unitName ?? ""}
                     </span>
                   </li>
                 ))}
               </ul>
-            ) : (
-              <p className="text-xs text-[var(--color-muted-fg)]">
-                Keine Mengen erfasst.
-              </p>
             )}
             {addingNew ? (
               <div className="flex flex-wrap items-center gap-2">

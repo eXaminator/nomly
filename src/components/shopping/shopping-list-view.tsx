@@ -17,7 +17,8 @@ import {
   clearListSelective as apiClearList,
   deleteItem as apiDelete,
   patchItem as apiPatch,
-  setItemAmount as apiSetAmount,
+  setManualAmountQuantity as apiSetManualQty,
+  setSourceQuantity as apiSetSourceQty,
   setUnavailable as apiSetUnavailable,
 } from "./api";
 
@@ -145,12 +146,26 @@ export function ShoppingListView({
     }
   }
 
-  async function onSetAmount(
+  async function onSetSourceQuantity(
     id: number,
-    amount: { quantity: number | null; unitId: number | null },
+    sourceId: number,
+    quantity: number | null,
   ) {
     try {
-      const updated = await apiSetAmount(id, amount);
+      const updated = await apiSetSourceQty(id, sourceId, quantity);
+      setItems((prev) => prev.map((i) => (i.id === updated.id ? updated : i)));
+    } catch {
+      router.refresh();
+    }
+  }
+
+  async function onSetManualAmountQuantity(
+    id: number,
+    amountId: number,
+    quantity: number | null,
+  ) {
+    try {
+      const updated = await apiSetManualQty(id, amountId, quantity);
       setItems((prev) => prev.map((i) => (i.id === updated.id ? updated : i)));
     } catch {
       router.refresh();
@@ -350,8 +365,9 @@ export function ShoppingListView({
                       activeSupermarketId={supermarketId}
                       onPreviewRecipe={(id) => setPreviewRecipeId(id)}
                       onToggle={onToggleCheck}
-                      onSetAmount={onSetAmount}
                       onAddAmount={onAddAmount}
+                      onSetSourceQuantity={onSetSourceQuantity}
+                      onSetManualAmountQuantity={onSetManualAmountQuantity}
                       onPatchNote={onPatchNote}
                       onDelete={onDelete}
                       onToggleUnavailable={onToggleUnavailable}

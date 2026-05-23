@@ -49,6 +49,14 @@ export type ShoppingItemAmount = {
   manualAmountId: number | null;
 };
 
+export type ShoppingItemManualAmount = {
+  id: number;
+  quantity: number | null;
+  unitId: number | null;
+  unitName: string | null;
+  dimension: AmountDimension;
+};
+
 export type ShoppingItemView = {
   id: number;
   refType: "ingredient" | "product";
@@ -66,6 +74,8 @@ export type ShoppingItemView = {
   updatedAt: number;
   unavailableSupermarketIds: number[];
   sources: ShoppingItemSourceView[];
+  /** Individual user-added manual amounts (additive on top of sources). */
+  manualAmounts: ShoppingItemManualAmount[];
 };
 
 export function listShoppingItems(): ShoppingItemView[] {
@@ -304,6 +314,13 @@ export function listShoppingItems(): ShoppingItemView[] {
         contributedQuantity: s.contributedQuantity,
         contributedUnit: s.contributedUnit,
         recipeNotes: s.recipeNotes,
+      })),
+      manualAmounts: manuals.map((m) => ({
+        id: m.id,
+        quantity: m.quantity,
+        unitId: m.unitId,
+        unitName: m.unitName,
+        dimension: m.dimension,
       })),
     };
   });
@@ -998,6 +1015,83 @@ export function addItemAmount(
       quantity: input.quantity,
       unitId: input.unitId,
     });
+    tx.update(shoppingItem)
+      .set({
+        version: sql`${shoppingItem.version} + 1`,
+        updatedAt: sql`unixepoch()`,
+      })
+      .where(eq(shoppingItem.id, itemId))
+      .run();
+  });
+  const view = getItemView(itemId);
+  if (!view) throw new ShoppingApiError("item not found", 404);
+  return view;
+}
+
+/**
+ * Update the contributed quantity of a single recipe-derived source row.
+ * Used by the row editor's per-source inputs so the user can adjust a meal's
+ * specific contribution without scaling the whole dimension.
+ */
+export function setSourceQuantity(
+  itemId: number,
+  sourceId: number,
+  quantity: number | null,
+): ShoppingItemView {
+  const row = db
+    .select({ id: shoppingItemSource.id })
+    .from(shoppingItemSource)
+    .where(
+      and(
+        eq(shoppingItemSource.id, sourceId),
+        eq(shoppingItemSource.itemId, itemId),
+      ),
+    )
+    .get();
+  if (!row) throw new ShoppingApiError("source not found", 404);
+  db.transaction((tx) => {
+    tx.update(shoppingItemSource)
+      .set({ contributedQuantity: quantity })
+      .where(eq(shoppingItemSource.id, sourceId))
+      .run();
+    tx.update(shoppingItem)
+      .set({
+        version: sql`${shoppingItem.version} + 1`,
+        updatedAt: sql`unixepoch()`,
+      })
+      .where(eq(shoppingItem.id, itemId))
+      .run();
+  });
+  const view = getItemView(itemId);
+  if (!view) throw new ShoppingApiError("item not found", 404);
+  return view;
+}
+
+/**
+ * Update the quantity of a specific manual amount row. Used by the row
+ * editor's per-manual inputs.
+ */
+export function setManualAmountQuantity(
+  itemId: number,
+  amountId: number,
+  quantity: number | null,
+): ShoppingItemView {
+  const row = db
+    .select({ id: shoppingItemAmount.id })
+    .from(shoppingItemAmount)
+    .where(
+      and(
+        eq(shoppingItemAmount.id, amountId),
+        eq(shoppingItemAmount.itemId, itemId),
+      ),
+    )
+    .get();
+  if (!row) throw new ShoppingApiError("amount not found", 404);
+  db.transaction((tx) => {
+    tx.update(shoppingItemAmount)
+      .set({ quantity })
+      .where(eq(shoppingItemAmount.id, amountId))
+      .run();
     tx.update(shoppingItem)
       .set({
         version: sql`${shoppingItem.version} + 1`,

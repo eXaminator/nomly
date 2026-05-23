@@ -91,6 +91,40 @@ export async function addItemAmount(
   return data.item;
 }
 
+export async function setSourceQuantity(
+  itemId: number,
+  sourceId: number,
+  quantity: number | null,
+): Promise<ShoppingItemView> {
+  const res = await fetch(
+    `/api/v1/shopping/items/${itemId}/source/${sourceId}`,
+    {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ quantity }),
+    },
+  );
+  const data = (await jsonOrThrow(res)) as { item: ShoppingItemView };
+  return data.item;
+}
+
+export async function setManualAmountQuantity(
+  itemId: number,
+  amountId: number,
+  quantity: number | null,
+): Promise<ShoppingItemView> {
+  const res = await fetch(
+    `/api/v1/shopping/items/${itemId}/manual/${amountId}`,
+    {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ quantity }),
+    },
+  );
+  const data = (await jsonOrThrow(res)) as { item: ShoppingItemView };
+  return data.item;
+}
+
 export async function deleteItemAmount(
   id: number,
   amountId: number,
