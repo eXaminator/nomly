@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Check, Plus, X } from "lucide-react";
+import { Plus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Combobox, type ComboboxItem } from "@/components/ui/combobox";
 import {
@@ -17,8 +17,7 @@ import { Label } from "@/components/ui/label";
 import type { ShoppingItemView } from "@/lib/shopping/items";
 
 type Props = {
-  /** When null the dialog is closed. Open/close is controlled by the parent
-   *  swapping this between an item and null. */
+  /** When null the dialog is closed. */
   item: ShoppingItemView | null;
   onClose: () => void;
   onAddAmount: (
@@ -35,6 +34,8 @@ type Props = {
     amountId: number,
     quantity: number | null,
   ) => Promise<void>;
+  onDeleteSource: (id: number, sourceId: number) => Promise<void>;
+  onDeleteManualAmount: (id: number, amountId: number) => Promise<void>;
   onPatchNote: (id: number, note: string | null) => Promise<void>;
 };
 
@@ -72,9 +73,6 @@ async function searchUnits(query: string): Promise<ComboboxItem[]> {
 }
 
 export function EditItemDialog(props: Props) {
-  // Mount the body keyed by item.id so opening a different row resets the
-  // local form state — the outer Dialog stays mounted so its close
-  // animation can play out when the parent flips item back to null.
   return (
     <Dialog
       open={props.item != null}
@@ -89,12 +87,20 @@ export function EditItemDialog(props: Props) {
   );
 }
 
+type PendingNew = {
+  tempId: number;
+  quantity: string;
+  unit: ComboboxItem | null;
+};
+
 function EditItemDialogBody({
   item,
   onClose,
   onAddAmount,
   onSetSourceQuantity,
   onSetManualAmountQuantity,
+  onDeleteSource,
+  onDeleteManualAmount,
   onPatchNote,
 }: Props & { item: ShoppingItemView }) {
   const [sourceInputs, setSourceInputs] = React.useState<Record<number, string>>(
@@ -115,19 +121,24 @@ function EditItemDialogBody({
         ]),
       ),
   );
+  // Rows the user has flagged for deletion. The actual DELETE call happens
+  // on Speichern.
+  const [removedSources, setRemovedSources] = React.useState<Set<number>>(
+    () => new Set(),
+  );
+  const [removedManuals, setRemovedManuals] = React.useState<Set<number>>(
+    () => new Set(),
+  );
+  // Pending new manual rows — local-only until Speichern.
+  const [pendingNew, setPendingNew] = React.useState<PendingNew[]>([]);
+  const [defaultUnit, setDefaultUnit] = React.useState<ComboboxItem | null>(null);
   const [note, setNote] = React.useState(item.note ?? "");
   const [saving, setSaving] = React.useState(false);
-  const [addingNew, setAddingNew] = React.useState(false);
-  const [newAmountQty, setNewAmountQty] = React.useState("");
-  const [newAmountUnit, setNewAmountUnit] = React.useState<ComboboxItem | null>(
-    null,
-  );
 
-  // Default the new-amount unit to "Stück" the first time the inline
-  // "Weitere Menge" form opens — by a wide margin the most common ad-hoc
-  // unit. Lazy so the lookup only fires when the user actually opens it.
+  // Fetch the "Stück" default unit once for new rows. Lazy: only triggers
+  // when the user adds the first row.
   React.useEffect(() => {
-    if (!addingNew || newAmountUnit != null) return;
+    if (pendingNew.length === 0 || defaultUnit != null) return;
     let cancelled = false;
     void (async () => {
       try {
@@ -141,45 +152,89 @@ function EditItemDialogBody({
         };
         const hit = data.items.find((u) => u.name === "Stück") ?? data.items[0];
         if (!cancelled && hit) {
-          setNewAmountUnit({ id: hit.id, name: hit.name });
+          setDefaultUnit({ id: hit.id, name: hit.name });
+          setPendingNew((prev) =>
+            prev.map((p) =>
+              p.unit == null ? { ...p, unit: { id: hit.id, name: hit.name } } : p,
+            ),
+          );
         }
       } catch {
-        // Best-effort default; leave the picker empty if the lookup fails.
+        // Best-effort default.
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [addingNew, newAmountUnit]);
+  }, [pendingNew, defaultUnit]);
 
-  async function addNewAmount() {
-    const n = parseInput(newAmountQty);
-    if (n == null || !newAmountUnit) return;
-    setSaving(true);
-    try {
-      await onAddAmount(item.id, { quantity: n, unitId: newAmountUnit.id });
-      setNewAmountQty("");
-      setNewAmountUnit(null);
-      setAddingNew(false);
-    } finally {
-      setSaving(false);
-    }
+  const nextTempIdRef = React.useRef(1);
+
+  function addPending() {
+    const tempId = nextTempIdRef.current++;
+    setPendingNew((prev) => [
+      ...prev,
+      { tempId, quantity: "", unit: defaultUnit },
+    ]);
+  }
+
+  function updatePending(tempId: number, patch: Partial<PendingNew>) {
+    setPendingNew((prev) =>
+      prev.map((p) => (p.tempId === tempId ? { ...p, ...patch } : p)),
+    );
+  }
+
+  function removePending(tempId: number) {
+    setPendingNew((prev) => prev.filter((p) => p.tempId !== tempId));
+  }
+
+  function toggleRemoveSource(sourceId: number) {
+    setRemovedSources((prev) => {
+      const next = new Set(prev);
+      if (next.has(sourceId)) next.delete(sourceId);
+      else next.add(sourceId);
+      return next;
+    });
+  }
+
+  function toggleRemoveManual(amountId: number) {
+    setRemovedManuals((prev) => {
+      const next = new Set(prev);
+      if (next.has(amountId)) next.delete(amountId);
+      else next.add(amountId);
+      return next;
+    });
   }
 
   async function commit() {
     setSaving(true);
     try {
-      // Sequential — each PATCH bumps the item's version, so parallel calls
-      // would race over the same row.
+      // Apply changes sequentially — each call bumps the item's version, so
+      // parallel writes against the same row would race.
       for (const s of item.sources) {
+        if (removedSources.has(s.sourceId)) {
+          await onDeleteSource(item.id, s.sourceId);
+          continue;
+        }
         const next = parseInput(sourceInputs[s.sourceId]);
-        if (next === s.contributedQuantity) continue;
-        await onSetSourceQuantity(item.id, s.sourceId, next);
+        if (next !== s.contributedQuantity) {
+          await onSetSourceQuantity(item.id, s.sourceId, next);
+        }
       }
       for (const m of item.manualAmounts) {
+        if (removedManuals.has(m.id)) {
+          await onDeleteManualAmount(item.id, m.id);
+          continue;
+        }
         const next = parseInput(manualInputs[m.id]);
-        if (next === m.quantity) continue;
-        await onSetManualAmountQuantity(item.id, m.id, next);
+        if (next !== m.quantity) {
+          await onSetManualAmountQuantity(item.id, m.id, next);
+        }
+      }
+      for (const p of pendingNew) {
+        const n = parseInput(p.quantity);
+        if (n == null || !p.unit) continue;
+        await onAddAmount(item.id, { quantity: n, unitId: p.unit.id });
       }
       const trimmedNote = note.trim();
       const nextNote = trimmedNote.length > 0 ? trimmedNote : null;
@@ -203,123 +258,153 @@ function EditItemDialogBody({
         </div>
       </DialogHeader>
       <DialogBody className="flex flex-col gap-4">
-        {item.sources.length === 0 && item.manualAmounts.length === 0 ? (
+        {item.sources.length === 0 &&
+        item.manualAmounts.length === 0 &&
+        pendingNew.length === 0 ? (
           <p className="text-sm text-[var(--color-muted-fg)]">
             Keine Mengen erfasst.
           </p>
         ) : (
           <ul className="flex flex-col gap-2">
-            {item.sources.map((s) => (
+            {item.sources.map((s) => {
+              const removed = removedSources.has(s.sourceId);
+              return (
+                <li
+                  key={`src-${s.sourceId}`}
+                  className="flex flex-wrap items-center gap-2"
+                >
+                  <span
+                    className={`min-w-0 flex-1 text-sm ${
+                      removed ? "line-through opacity-50" : ""
+                    }`}
+                  >
+                    <span className="font-medium">{s.recipeTitle}</span>
+                    <span className="ml-1 text-xs text-[var(--color-muted-fg)]">
+                      ({formatDate(s.mealDate)})
+                    </span>
+                  </span>
+                  <Input
+                    type="text"
+                    inputMode="decimal"
+                    value={sourceInputs[s.sourceId] ?? ""}
+                    onChange={(e) =>
+                      setSourceInputs((prev) => ({
+                        ...prev,
+                        [s.sourceId]: e.target.value,
+                      }))
+                    }
+                    placeholder="Menge"
+                    disabled={removed}
+                    className="w-24"
+                  />
+                  <span className="w-10 text-xs text-[var(--color-muted-fg)]">
+                    {s.contributedUnit ?? ""}
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    aria-label={removed ? "Entfernen rückgängig" : "Entfernen"}
+                    title={removed ? "Entfernen rückgängig" : "Entfernen"}
+                    onClick={() => toggleRemoveSource(s.sourceId)}
+                  >
+                    <X className="size-4" />
+                  </Button>
+                </li>
+              );
+            })}
+            {item.manualAmounts.map((m) => {
+              const removed = removedManuals.has(m.id);
+              return (
+                <li
+                  key={`man-${m.id}`}
+                  className="flex flex-wrap items-center gap-2"
+                >
+                  <span
+                    className={`min-w-0 flex-1 text-sm ${
+                      removed ? "line-through opacity-50" : ""
+                    }`}
+                  >
+                    <span className="font-medium">Manuell</span>
+                  </span>
+                  <Input
+                    type="text"
+                    inputMode="decimal"
+                    value={manualInputs[m.id] ?? ""}
+                    onChange={(e) =>
+                      setManualInputs((prev) => ({
+                        ...prev,
+                        [m.id]: e.target.value,
+                      }))
+                    }
+                    placeholder="Menge"
+                    disabled={removed}
+                    className="w-24"
+                  />
+                  <span className="w-10 text-xs text-[var(--color-muted-fg)]">
+                    {m.unitName ?? ""}
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    aria-label={removed ? "Entfernen rückgängig" : "Entfernen"}
+                    title={removed ? "Entfernen rückgängig" : "Entfernen"}
+                    onClick={() => toggleRemoveManual(m.id)}
+                  >
+                    <X className="size-4" />
+                  </Button>
+                </li>
+              );
+            })}
+            {pendingNew.map((p) => (
               <li
-                key={`src-${s.sourceId}`}
+                key={`new-${p.tempId}`}
                 className="flex flex-wrap items-center gap-2"
               >
                 <span className="min-w-0 flex-1 text-sm">
-                  <span className="font-medium">{s.recipeTitle}</span>
+                  <span className="font-medium">Manuell</span>
                   <span className="ml-1 text-xs text-[var(--color-muted-fg)]">
-                    ({formatDate(s.mealDate)})
+                    (neu)
                   </span>
                 </span>
                 <Input
                   type="text"
                   inputMode="decimal"
-                  value={sourceInputs[s.sourceId] ?? ""}
+                  value={p.quantity}
                   onChange={(e) =>
-                    setSourceInputs((prev) => ({
-                      ...prev,
-                      [s.sourceId]: e.target.value,
-                    }))
+                    updatePending(p.tempId, { quantity: e.target.value })
                   }
                   placeholder="Menge"
                   className="w-24"
                 />
-                <span className="w-10 text-xs text-[var(--color-muted-fg)]">
-                  {s.contributedUnit ?? ""}
-                </span>
-              </li>
-            ))}
-            {item.manualAmounts.map((m) => (
-              <li
-                key={`man-${m.id}`}
-                className="flex flex-wrap items-center gap-2"
-              >
-                <span className="min-w-0 flex-1 text-sm italic text-[var(--color-muted-fg)]">
-                  Manuell
-                </span>
-                <Input
-                  type="text"
-                  inputMode="decimal"
-                  value={manualInputs[m.id] ?? ""}
-                  onChange={(e) =>
-                    setManualInputs((prev) => ({
-                      ...prev,
-                      [m.id]: e.target.value,
-                    }))
-                  }
-                  placeholder="Menge"
+                <Combobox
+                  value={p.unit}
+                  onChange={(u) => updatePending(p.tempId, { unit: u })}
+                  search={searchUnits}
+                  placeholder="Einheit"
                   className="w-24"
                 />
-                <span className="w-10 text-xs text-[var(--color-muted-fg)]">
-                  {m.unitName ?? ""}
-                </span>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  aria-label="Entfernen"
+                  title="Entfernen"
+                  onClick={() => removePending(p.tempId)}
+                >
+                  <X className="size-4" />
+                </Button>
               </li>
             ))}
           </ul>
         )}
-        {addingNew ? (
-          <div className="flex flex-wrap items-center gap-2">
-            <Input
-              type="text"
-              inputMode="decimal"
-              value={newAmountQty}
-              onChange={(e) => setNewAmountQty(e.target.value)}
-              placeholder="Menge"
-              className="w-24"
-              autoFocus
-            />
-            <Combobox
-              value={newAmountUnit}
-              onChange={setNewAmountUnit}
-              search={searchUnits}
-              placeholder="Einheit"
-              className="min-w-[8rem] flex-1"
-            />
-            <Button
-              variant="ghost"
-              size="icon"
-              aria-label="Hinzufügen"
-              onClick={addNewAmount}
-              disabled={
-                saving || newAmountQty.trim().length === 0 || newAmountUnit == null
-              }
-            >
-              <Check className="size-4" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              aria-label="Abbrechen"
-              onClick={() => {
-                setAddingNew(false);
-                setNewAmountQty("");
-                setNewAmountUnit(null);
-              }}
-              disabled={saving}
-            >
-              <X className="size-4" />
-            </Button>
-          </div>
-        ) : (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setAddingNew(true)}
-            className="self-start"
-          >
-            <Plus className="size-4" />
-            Weitere Menge
-          </Button>
-        )}
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={addPending}
+          className="self-start"
+        >
+          <Plus className="size-4" />
+          Weitere Menge
+        </Button>
         <div className="flex flex-col gap-2">
           <Label htmlFor={`edit-note-${item.id}`}>Notiz</Label>
           <Input

@@ -17,6 +17,8 @@ import {
   addItemAmount as apiAddAmount,
   clearListSelective as apiClearList,
   deleteItem as apiDelete,
+  deleteManualAmount as apiDeleteManual,
+  deleteSource as apiDeleteSource,
   patchItem as apiPatch,
   setManualAmountQuantity as apiSetManualQty,
   setSourceQuantity as apiSetSourceQty,
@@ -175,6 +177,24 @@ export function ShoppingListView({
   ) {
     try {
       const updated = await apiSetManualQty(id, amountId, quantity);
+      setItems((prev) => prev.map((i) => (i.id === updated.id ? updated : i)));
+    } catch {
+      router.refresh();
+    }
+  }
+
+  async function onDeleteSource(id: number, sourceId: number) {
+    try {
+      const updated = await apiDeleteSource(id, sourceId);
+      setItems((prev) => prev.map((i) => (i.id === updated.id ? updated : i)));
+    } catch {
+      router.refresh();
+    }
+  }
+
+  async function onDeleteManualAmount(id: number, amountId: number) {
+    try {
+      const updated = await apiDeleteManual(id, amountId);
       setItems((prev) => prev.map((i) => (i.id === updated.id ? updated : i)));
     } catch {
       router.refresh();
@@ -419,6 +439,8 @@ export function ShoppingListView({
         onAddAmount={onAddAmount}
         onSetSourceQuantity={onSetSourceQuantity}
         onSetManualAmountQuantity={onSetManualAmountQuantity}
+        onDeleteSource={onDeleteSource}
+        onDeleteManualAmount={onDeleteManualAmount}
         onPatchNote={onPatchNote}
       />
     </div>

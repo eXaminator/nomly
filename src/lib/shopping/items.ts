@@ -1105,6 +1105,39 @@ export function setManualAmountQuantity(
   return view;
 }
 
+/**
+ * Remove a single recipe-derived source row. Different from the meal-level
+ * subtract (which drops every source for a given meal) — this targets one
+ * specific contribution so the user can prune individual amounts from the
+ * editor without un-planning the meal.
+ */
+export function deleteSource(itemId: number, sourceId: number): ShoppingItemView {
+  const row = db
+    .select({ id: shoppingItemSource.id })
+    .from(shoppingItemSource)
+    .where(
+      and(
+        eq(shoppingItemSource.id, sourceId),
+        eq(shoppingItemSource.itemId, itemId),
+      ),
+    )
+    .get();
+  if (!row) throw new ShoppingApiError("source not found", 404);
+  db.transaction((tx) => {
+    tx.delete(shoppingItemSource).where(eq(shoppingItemSource.id, sourceId)).run();
+    tx.update(shoppingItem)
+      .set({
+        version: sql`${shoppingItem.version} + 1`,
+        updatedAt: sql`unixepoch()`,
+      })
+      .where(eq(shoppingItem.id, itemId))
+      .run();
+  });
+  const view = getItemView(itemId);
+  if (!view) throw new ShoppingApiError("item not found", 404);
+  return view;
+}
+
 export function deleteItemAmount(itemId: number, amountId: number): ShoppingItemView {
   const row = db
     .select({ id: shoppingItemAmount.id })

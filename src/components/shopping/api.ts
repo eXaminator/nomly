@@ -125,6 +125,30 @@ export async function setManualAmountQuantity(
   return data.item;
 }
 
+export async function deleteSource(
+  itemId: number,
+  sourceId: number,
+): Promise<ShoppingItemView> {
+  const res = await fetch(
+    `/api/v1/shopping/items/${itemId}/source/${sourceId}`,
+    { method: "DELETE" },
+  );
+  const data = (await jsonOrThrow(res)) as { item: ShoppingItemView };
+  return data.item;
+}
+
+export async function deleteManualAmount(
+  itemId: number,
+  amountId: number,
+): Promise<ShoppingItemView> {
+  const res = await fetch(
+    `/api/v1/shopping/items/${itemId}/manual/${amountId}`,
+    { method: "DELETE" },
+  );
+  const data = (await jsonOrThrow(res)) as { item: ShoppingItemView };
+  return data.item;
+}
+
 export async function deleteItemAmount(
   id: number,
   amountId: number,

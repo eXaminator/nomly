@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { setSourceQuantity, ShoppingApiError } from "@/lib/shopping/items";
+import {
+  deleteSource,
+  setSourceQuantity,
+  ShoppingApiError,
+} from "@/lib/shopping/items";
 
 const schema = z
   .object({
@@ -38,6 +42,28 @@ export async function PATCH(
   }
   try {
     const item = setSourceQuantity(itemId, sourceId, parsed.data.quantity);
+    return NextResponse.json({ item });
+  } catch (err) {
+    if (err instanceof ShoppingApiError) {
+      return NextResponse.json({ error: err.message }, { status: err.status });
+    }
+    throw err;
+  }
+}
+
+/** Remove a single recipe-source contribution from this item. */
+export async function DELETE(
+  _request: Request,
+  ctx: { params: Promise<{ id: string; sourceId: string }> },
+) {
+  const { id: rawId, sourceId: rawSource } = await ctx.params;
+  const itemId = parseId(rawId);
+  const sourceId = parseId(rawSource);
+  if (!itemId || !sourceId) {
+    return NextResponse.json({ error: "not found" }, { status: 404 });
+  }
+  try {
+    const item = deleteSource(itemId, sourceId);
     return NextResponse.json({ item });
   } catch (err) {
     if (err instanceof ShoppingApiError) {
