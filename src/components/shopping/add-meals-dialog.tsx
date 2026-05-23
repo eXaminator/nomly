@@ -56,6 +56,14 @@ function formatScaledQty(q: number | null): string {
   return Number.isInteger(rounded) ? String(rounded) : String(rounded);
 }
 
+function shortWeekday(iso: string): string {
+  if (!ISO_DATE_RE.test(iso)) return "";
+  // Treat the ISO date as a calendar day in UTC so the weekday doesn't
+  // flip across DST boundaries depending on the user's timezone.
+  const dt = new Date(`${iso}T00:00:00Z`);
+  return dt.toLocaleDateString("de-DE", { weekday: "short", timeZone: "UTC" });
+}
+
 export function AddMealsDialog({
   open,
   defaultLengthDays,
@@ -224,25 +232,20 @@ export function AddMealsDialog({
           <div className="flex flex-wrap items-end gap-3">
             <div className="flex flex-col gap-1">
               <Label htmlFor="meals-start">Startdatum</Label>
-              <Input
+              <DateInputWithWeekday
                 id="meals-start"
-                type="date"
                 value={start}
-                onChange={(e) => setStart(e.target.value)}
+                onChange={setStart}
               />
             </div>
             <div className="flex flex-col gap-1">
               <Label htmlFor="meals-end">Enddatum</Label>
-              <Input
+              <DateInputWithWeekday
                 id="meals-end"
-                type="date"
-                min={start}
                 value={addDays(start, Math.max(0, length - 1))}
-                onChange={(e) => {
-                  const next = e.target.value;
+                min={start}
+                onChange={(next) => {
                   if (!ISO_DATE_RE.test(next)) return;
-                  // End-before-start would produce a non-positive length;
-                  // clamp via daysBetween's floor (1).
                   setLength(Math.min(60, daysBetween(start, next)));
                 }}
               />
@@ -328,6 +331,46 @@ export function AddMealsDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/**
+ * Native `<input type="date">` can't be told to display the weekday alongside
+ * the date — the browser picks the format. Wrap the input in a relative
+ * positioned div and float a small weekday badge in the input's leading
+ * padding so the user sees "Sa  23.05.2026" without needing a custom picker.
+ */
+function DateInputWithWeekday({
+  id,
+  value,
+  onChange,
+  min,
+}: {
+  id: string;
+  value: string;
+  onChange: (next: string) => void;
+  min?: string;
+}) {
+  const weekday = shortWeekday(value);
+  return (
+    <div className="relative">
+      <Input
+        id={id}
+        type="date"
+        value={value}
+        min={min}
+        onChange={(e) => onChange(e.target.value)}
+        className={weekday ? "pl-12" : undefined}
+      />
+      {weekday ? (
+        <span
+          aria-hidden
+          className="pointer-events-none absolute inset-y-0 left-2 flex items-center text-xs font-medium uppercase tracking-wider text-[var(--color-muted-fg)]"
+        >
+          {weekday}
+        </span>
+      ) : null}
+    </div>
   );
 }
 
