@@ -30,8 +30,15 @@ type Props = {
   /** Opens the recipe preview dialog. Triggered from the context menu only. */
   onPreviewRecipe: (recipeId: number) => void;
   onToggle: (item: ShoppingItemView) => void;
-  /** Sets a manual override quantity for one dimension of the item. */
+  /** Scales the existing contributions of one dimension to match the typed
+   *  total. Used by the inline per-amount edit inputs. */
   onSetAmount: (
+    id: number,
+    amount: { quantity: number | null; unitId: number | null },
+  ) => Promise<void>;
+  /** Inserts a fresh manual amount on top of whatever already contributes.
+   *  Used by the "Weitere Menge" form so amounts can be additive. */
+  onAddAmount: (
     id: number,
     amount: { quantity: number | null; unitId: number | null },
   ) => Promise<void>;
@@ -46,6 +53,7 @@ export function ShoppingItemRow({
   onPreviewRecipe,
   onToggle,
   onSetAmount,
+  onAddAmount,
   onPatchNote,
   onDelete,
   onToggleUnavailable,
@@ -107,7 +115,7 @@ export function ShoppingItemRow({
     if (!Number.isFinite(n)) return;
     setSaving(true);
     try {
-      await onSetAmount(item.id, { quantity: n, unitId: newAmountUnit.id });
+      await onAddAmount(item.id, { quantity: n, unitId: newAmountUnit.id });
       // Reset the inline form; the surrounding list will refresh via the
       // parent's optimistic update.
       setNewAmountQty("");

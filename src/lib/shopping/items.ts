@@ -316,6 +316,8 @@ export function listShoppingItems(): ShoppingItemView[] {
   return all;
 }
 
+type Contribution = { quantity: number | null; unit: UnitRow | null };
+
 type AggregateInput = {
   manuals: Array<{
     id: number;
@@ -323,51 +325,34 @@ type AggregateInput = {
     unit: UnitRow | null;
     dimension: AmountDimension;
   }>;
-  sources: Array<{ quantity: number | null; unit: UnitRow | null }>;
+  sources: Contribution[];
 };
 
 /**
- * Per-dimension override: when a manual amount exists for a dimension it
- * REPLACES the sources sum entirely. Each manual row carries its own id so
- * the UI editor can target it on save. Source-only dimensions fall through
- * to the existing sources-sum logic (largest sensible unit, etc.).
+ * Additive aggregation: source contributions and manual entries combine via
+ * straight sum within each dimension. Editing a displayed amount scales the
+ * underlying contributions (sources first, manuals second); deleting a meal
+ * subtracts only its source rows. The on-screen amounts always equal
+ * `sum(source) + sum(manuals)` for each dimension, never an override.
  */
 function buildAggregatedAmounts(input: AggregateInput): ShoppingItemAmount[] {
-  const manualByDim = new Map<AmountDimension, AggregateInput["manuals"][number]>();
-  for (const m of input.manuals) manualByDim.set(m.dimension, m);
-
-  const sourceByDim = new Map<
-    AmountDimension,
-    Array<{ quantity: number | null; unit: UnitRow | null }>
-  >();
+  const byDim = new Map<AmountDimension, Contribution[]>();
   for (const s of input.sources) {
     const dim: AmountDimension = s.unit?.dimension ?? "none";
-    const arr = sourceByDim.get(dim) ?? [];
+    const arr = byDim.get(dim) ?? [];
     arr.push(s);
-    sourceByDim.set(dim, arr);
+    byDim.set(dim, arr);
+  }
+  for (const m of input.manuals) {
+    const arr = byDim.get(m.dimension) ?? [];
+    arr.push({ quantity: m.quantity, unit: m.unit });
+    byDim.set(m.dimension, arr);
   }
 
-  const dimensions = new Set<AmountDimension>([
-    ...manualByDim.keys(),
-    ...sourceByDim.keys(),
-  ]);
-
   const out: ShoppingItemAmount[] = [];
-  for (const dim of dimensions) {
-    const manual = manualByDim.get(dim);
-    if (manual) {
-      out.push({
-        quantity: manual.quantity,
-        unitId: manual.unit?.id ?? null,
-        unitName: manual.unit?.name ?? null,
-        dimension: dim,
-        manualAmountId: manual.id,
-      });
-      continue;
-    }
-    const sources = sourceByDim.get(dim) ?? [];
+  for (const [dim, contribs] of byDim) {
     out.push({
-      ...computeSourcesSum(sources, dim),
+      ...computeSourcesSum(contribs, dim),
       manualAmountId: null,
     });
   }
@@ -381,7 +366,7 @@ function buildAggregatedAmounts(input: AggregateInput): ShoppingItemAmount[] {
 }
 
 function computeSourcesSum(
-  sources: Array<{ quantity: number | null; unit: UnitRow | null }>,
+  sources: Contribution[],
   dim: AmountDimension,
 ): Omit<ShoppingItemAmount, "manualAmountId"> {
   if (dim === "none") {
@@ -567,39 +552,149 @@ function dimensionForUnitId(tx: Tx, unitId: number | null): AmountDimension {
   return (row?.d as AmountDimension | undefined) ?? "none";
 }
 
-function upsertAmount(
+function insertManualAmount(
   tx: Tx,
-  input: {
-    itemId: number;
-    quantity: number | null;
-    unitId: number | null;
-    note?: string | null;
-  },
+  input: { itemId: number; quantity: number | null; unitId: number | null },
 ): void {
   const dim = dimensionForUnitId(tx, input.unitId);
-  const existing = tx
-    .select({ id: shoppingItemAmount.id })
+  tx.insert(shoppingItemAmount)
+    .values({
+      itemId: input.itemId,
+      quantity: input.quantity,
+      unitId: input.unitId,
+      dimension: dim,
+    })
+    .run();
+}
+
+/**
+ * Scale every contribution (source rows + manual rows) for one dimension
+ * of `itemId` so the displayed total becomes `targetQuantity` in
+ * `targetUnitId`. When the current total is zero (or every contribution
+ * is open-ended), there's nothing to scale — fall back to inserting a
+ * single manual amount with the target value.
+ */
+function scaleDimensionTo(
+  tx: Tx,
+  itemId: number,
+  targetUnitId: number | null,
+  targetQuantity: number | null,
+): void {
+  const dim = dimensionForUnitId(tx, targetUnitId);
+  // Compute current total in base units.
+  const sources = tx
+    .select({
+      id: shoppingItemSource.id,
+      qty: shoppingItemSource.contributedQuantity,
+      unitId: shoppingItemSource.contributedUnitId,
+      factor: unit.factor,
+      sourceDim: unit.dimension,
+    })
+    .from(shoppingItemSource)
+    .leftJoin(unit, eq(unit.id, shoppingItemSource.contributedUnitId))
+    .where(eq(shoppingItemSource.itemId, itemId))
+    .all();
+  const manuals = tx
+    .select({
+      id: shoppingItemAmount.id,
+      qty: shoppingItemAmount.quantity,
+      unitId: shoppingItemAmount.unitId,
+      factor: unit.factor,
+      dim: shoppingItemAmount.dimension,
+    })
     .from(shoppingItemAmount)
-    .where(
-      and(
-        eq(shoppingItemAmount.itemId, input.itemId),
-        eq(shoppingItemAmount.dimension, dim),
-      ),
-    )
-    .get();
-  if (existing) {
-    tx.update(shoppingItemAmount)
-      .set({ quantity: input.quantity, unitId: input.unitId })
-      .where(eq(shoppingItemAmount.id, existing.id))
+    .leftJoin(unit, eq(unit.id, shoppingItemAmount.unitId))
+    .where(eq(shoppingItemAmount.itemId, itemId))
+    .all();
+
+  // Filter to this dimension.
+  const sourcesInDim = sources.filter((s) => {
+    const sDim = (s.sourceDim as AmountDimension | null) ?? "none";
+    return sDim === dim;
+  });
+  const manualsInDim = manuals.filter((m) => m.dim === dim);
+
+  // Current total in base units (factor 1 == base; unitless rows count
+  // their raw quantity).
+  let currentBase = 0;
+  let anyKnown = false;
+  for (const s of sourcesInDim) {
+    if (s.qty == null) continue;
+    anyKnown = true;
+    currentBase += s.qty * (s.factor ?? 1);
+  }
+  for (const m of manualsInDim) {
+    if (m.qty == null) continue;
+    anyKnown = true;
+    currentBase += m.qty * (m.factor ?? 1);
+  }
+
+  // Compute target in base units. We need the factor of the target unit;
+  // unitless target → factor 1.
+  let targetFactor = 1;
+  if (targetUnitId != null) {
+    const t = tx
+      .select({ factor: unit.factor })
+      .from(unit)
+      .where(eq(unit.id, targetUnitId))
+      .get();
+    targetFactor = t?.factor ?? 1;
+  }
+  const targetBase =
+    targetQuantity == null ? null : targetQuantity * targetFactor;
+
+  if (!anyKnown || currentBase === 0) {
+    // Nothing to scale → replace any open-ended/manuals in this dim with a
+    // single manual entry carrying the target value.
+    for (const m of manualsInDim) {
+      tx.delete(shoppingItemAmount).where(eq(shoppingItemAmount.id, m.id)).run();
+    }
+    if (targetQuantity != null) {
+      tx.insert(shoppingItemAmount)
+        .values({
+          itemId,
+          quantity: targetQuantity,
+          unitId: targetUnitId,
+          dimension: dim,
+        })
+        .run();
+    }
+    return;
+  }
+
+  if (targetBase == null) {
+    // Edit "to open-ended" — clear known quantities. Drop manuals; null out
+    // source contributions.
+    for (const m of manualsInDim) {
+      tx.delete(shoppingItemAmount).where(eq(shoppingItemAmount.id, m.id)).run();
+    }
+    if (sourcesInDim.length > 0) {
+      tx.update(shoppingItemSource)
+        .set({ contributedQuantity: null })
+        .where(
+          inArray(
+            shoppingItemSource.id,
+            sourcesInDim.map((s) => s.id),
+          ),
+        )
+        .run();
+    }
+    return;
+  }
+
+  const factor = targetBase / currentBase;
+  for (const s of sourcesInDim) {
+    if (s.qty == null) continue;
+    tx.update(shoppingItemSource)
+      .set({ contributedQuantity: round3(s.qty * factor) })
+      .where(eq(shoppingItemSource.id, s.id))
       .run();
-  } else {
-    tx.insert(shoppingItemAmount)
-      .values({
-        itemId: input.itemId,
-        quantity: input.quantity,
-        unitId: input.unitId,
-        dimension: dim,
-      })
+  }
+  for (const m of manualsInDim) {
+    if (m.qty == null) continue;
+    tx.update(shoppingItemAmount)
+      .set({ quantity: round3(m.qty * factor) })
+      .where(eq(shoppingItemAmount.id, m.id))
       .run();
   }
 }
@@ -686,7 +781,7 @@ function addIngredientItem(
     }
 
     if (input.quantity != null || input.unitId != null) {
-      upsertAmount(tx, {
+      insertManualAmount(tx, {
         itemId,
         quantity: input.quantity ?? null,
         unitId: input.unitId ?? null,
@@ -734,7 +829,7 @@ function addProductItem(
       .all();
     const itemId = created[0].id;
     if (input.quantity != null || input.unitId != null) {
-      upsertAmount(tx, {
+      insertManualAmount(tx, {
         itemId,
         quantity: input.quantity ?? null,
         unitId: input.unitId ?? null,
@@ -847,9 +942,13 @@ export type SetAmountInput = {
 };
 
 /**
- * Upserts a manual override for a specific dimension. The dimension is
- * derived from `unitId` (unitless when null). Sets the displayed amount
- * for that dimension regardless of what the meal-source contributions say.
+ * Set the displayed amount for one dimension to `quantity` of `unitId` by
+ * proportionally scaling whatever already contributes (source rows + manual
+ * amounts). Removing a contributing meal later will subtract its (already
+ * scaled) share from the total, so edits compose cleanly with deletions.
+ *
+ * When no contribution exists yet for the dimension, a fresh manual amount
+ * carries the typed value — same effect as `addItemAmount`.
  */
 export function setItemAmount(
   itemId: number,
@@ -863,7 +962,38 @@ export function setItemAmount(
   if (!exists) throw new ShoppingApiError("item not found", 404);
 
   db.transaction((tx) => {
-    upsertAmount(tx, {
+    scaleDimensionTo(tx, itemId, input.unitId, input.quantity);
+    tx.update(shoppingItem)
+      .set({
+        version: sql`${shoppingItem.version} + 1`,
+        updatedAt: sql`unixepoch()`,
+      })
+      .where(eq(shoppingItem.id, itemId))
+      .run();
+  });
+  const view = getItemView(itemId);
+  if (!view) throw new ShoppingApiError("item not found", 404);
+  return view;
+}
+
+/**
+ * Always inserts a new manual amount row, regardless of whether the
+ * dimension already has contributions. Used by the row editor's "Weitere
+ * Menge" button to add on top of existing amounts.
+ */
+export function addItemAmount(
+  itemId: number,
+  input: SetAmountInput,
+): ShoppingItemView {
+  const exists = db
+    .select({ id: shoppingItem.id })
+    .from(shoppingItem)
+    .where(eq(shoppingItem.id, itemId))
+    .get();
+  if (!exists) throw new ShoppingApiError("item not found", 404);
+
+  db.transaction((tx) => {
+    insertManualAmount(tx, {
       itemId,
       quantity: input.quantity,
       unitId: input.unitId,

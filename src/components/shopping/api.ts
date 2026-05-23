@@ -78,6 +78,19 @@ export async function setItemAmount(
   return data.item;
 }
 
+export async function addItemAmount(
+  id: number,
+  amount: { quantity: number | null; unitId: number | null },
+): Promise<ShoppingItemView> {
+  const res = await fetch(`/api/v1/shopping/items/${id}/amount`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(amount),
+  });
+  const data = (await jsonOrThrow(res)) as { item: ShoppingItemView };
+  return data.item;
+}
+
 export async function deleteItemAmount(
   id: number,
   amountId: number,

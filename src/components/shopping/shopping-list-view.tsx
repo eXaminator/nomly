@@ -13,6 +13,7 @@ import { AddMealsDialog } from "./add-meals-dialog";
 import { SupermarketFilter } from "./supermarket-filter";
 import { ClearListDialog } from "./clear-list-dialog";
 import {
+  addItemAmount as apiAddAmount,
   clearListSelective as apiClearList,
   deleteItem as apiDelete,
   patchItem as apiPatch,
@@ -150,6 +151,18 @@ export function ShoppingListView({
   ) {
     try {
       const updated = await apiSetAmount(id, amount);
+      setItems((prev) => prev.map((i) => (i.id === updated.id ? updated : i)));
+    } catch {
+      router.refresh();
+    }
+  }
+
+  async function onAddAmount(
+    id: number,
+    amount: { quantity: number | null; unitId: number | null },
+  ) {
+    try {
+      const updated = await apiAddAmount(id, amount);
       setItems((prev) => prev.map((i) => (i.id === updated.id ? updated : i)));
     } catch {
       router.refresh();
@@ -338,6 +351,7 @@ export function ShoppingListView({
                       onPreviewRecipe={(id) => setPreviewRecipeId(id)}
                       onToggle={onToggleCheck}
                       onSetAmount={onSetAmount}
+                      onAddAmount={onAddAmount}
                       onPatchNote={onPatchNote}
                       onDelete={onDelete}
                       onToggleUnavailable={onToggleUnavailable}

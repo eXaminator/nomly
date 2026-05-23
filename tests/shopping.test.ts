@@ -453,6 +453,71 @@ describe("selective clear", () => {
   });
 });
 
+describe("amount edits scale sources (so meal removal subtracts cleanly)", () => {
+  let ctx: Ctx;
+
+  beforeEach(async () => {
+    ctx = await seed();
+  });
+
+  it("editing 1000 g down to 500 g halves the source contribution and a delete clears the dimension", async () => {
+    const { previewMeals } = await import("@/lib/shopping/preview");
+    const { addMealsToList } = await import("@/lib/shopping/merge");
+    const { listShoppingItems, setItemAmount } = await import("@/lib/shopping/items");
+    const { deleteMealAndIngredients } = await import("@/lib/shopping/meals");
+
+    const meals = previewMeals("2026-05-23", 1);
+    addMealsToList([
+      {
+        mealPlanId: ctx.mealPlanId,
+        ingredients: meals[0].ingredients.map((i) => ({
+          recipeIngredientId: i.recipeIngredientId,
+        })),
+      },
+    ]);
+    // Tomate is 500 g for 2 portions × 2 scale = 1000 g (displayed as 1 kg).
+    const before = listShoppingItems().find((i) => i.name === "Tomate")!;
+    expect(before.amounts[0].quantity).toBe(1);
+    expect(before.amounts[0].unitName).toBe("kg");
+
+    // User halves it.
+    setItemAmount(before.id, { quantity: 500, unitId: ctx.unitIds.g });
+    const after = listShoppingItems().find((i) => i.name === "Tomate")!;
+    expect(after.amounts[0].quantity).toBe(500);
+    expect(after.amounts[0].unitName).toBe("g");
+    // Source row mirrors the scale.
+    expect(after.sources[0].contributedQuantity).toBe(500);
+
+    // Removing the meal now removes the whole (scaled) contribution, not
+    // a stale override.
+    deleteMealAndIngredients(ctx.mealPlanId);
+    expect(listShoppingItems().find((i) => i.name === "Tomate")).toBeUndefined();
+  });
+
+  it("addItemAmount stacks on top of existing source contributions", async () => {
+    const { previewMeals } = await import("@/lib/shopping/preview");
+    const { addMealsToList } = await import("@/lib/shopping/merge");
+    const { addItemAmount, listShoppingItems } = await import("@/lib/shopping/items");
+
+    const meals = previewMeals("2026-05-23", 1);
+    addMealsToList([
+      {
+        mealPlanId: ctx.mealPlanId,
+        ingredients: meals[0].ingredients.map((i) => ({
+          recipeIngredientId: i.recipeIngredientId,
+        })),
+      },
+    ]);
+    const tomate = listShoppingItems().find((i) => i.name === "Tomate")!;
+    // Currently 1 kg (1000 g) from the source. Adding 200 g manually should
+    // result in 1.2 kg total — never an override.
+    addItemAmount(tomate.id, { quantity: 200, unitId: ctx.unitIds.g });
+    const after = listShoppingItems().find((i) => i.name === "Tomate")!;
+    expect(after.amounts[0].unitName).toBe("kg");
+    expect(after.amounts[0].quantity).toBe(1.2);
+  });
+});
+
 describe("per-dimension manual override", () => {
   let ctx: Ctx;
 

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import {
+  addItemAmount,
   deleteItemAmount,
   setItemAmount,
   ShoppingApiError,
@@ -19,10 +20,10 @@ function parseId(raw: string): number | null {
 }
 
 /**
- * Upsert a manual amount override for one dimension of an item. The
- * dimension is implied by `unitId` (unitless when null). Existing
- * sources for that dimension stay in the database but no longer drive
- * the displayed value — the override wins.
+ * Edit a displayed dimension's amount: scales the underlying source
+ * contributions (and any manual amounts in that dimension) so the total
+ * becomes the typed value. Deleting a contributing meal later subtracts
+ * only that meal's (already-scaled) share.
  */
 export async function PATCH(
   request: Request,
@@ -42,6 +43,37 @@ export async function PATCH(
   try {
     const item = setItemAmount(id, parsed.data);
     return NextResponse.json({ item });
+  } catch (err) {
+    if (err instanceof ShoppingApiError) {
+      return NextResponse.json({ error: err.message }, { status: err.status });
+    }
+    throw err;
+  }
+}
+
+/**
+ * Insert a fresh manual amount on top of whatever already contributes —
+ * used by the row editor's "Weitere Menge" button so additional amounts
+ * never overwrite existing ones.
+ */
+export async function POST(
+  request: Request,
+  ctx: { params: Promise<{ id: string }> },
+) {
+  const { id: rawId } = await ctx.params;
+  const id = parseId(rawId);
+  if (!id) return NextResponse.json({ error: "not found" }, { status: 404 });
+  const body = await request.json().catch(() => null);
+  const parsed = setSchema.safeParse(body);
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: "validation", details: parsed.error.flatten() },
+      { status: 400 },
+    );
+  }
+  try {
+    const item = addItemAmount(id, parsed.data);
+    return NextResponse.json({ item }, { status: 201 });
   } catch (err) {
     if (err instanceof ShoppingApiError) {
       return NextResponse.json({ error: err.message }, { status: err.status });
