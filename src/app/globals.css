@@ -50,6 +50,14 @@
     /* Kill rubber-band / overscroll on the page level so the only scrolling
        surfaces are the explicit ones (main content, recipe panel, etc.). */
     overscroll-behavior: none;
+    /* Tell the browser whether we're in light or dark mode so native
+       widgets (date picker icon, number spinners, scrollbars) pick a
+       matching foreground colour instead of defaulting to black on dark. */
+    color-scheme: light;
+  }
+  :root.dark,
+  :root.dark body {
+    color-scheme: dark;
   }
 
   body {
