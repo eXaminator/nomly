@@ -29,6 +29,29 @@ export async function clearAll(): Promise<{ deletedCount: number }> {
   return (await jsonOrThrow(res)) as { deletedCount: number };
 }
 
+export async function clearListSelective(input: {
+  removeAll: boolean;
+  mealPlanIds: number[];
+  removeProducts: boolean;
+}): Promise<{
+  itemsDeleted?: number;
+  itemsUpdated?: number;
+  productsDeleted?: number;
+  deletedCount?: number;
+}> {
+  const res = await fetch("/api/v1/shopping/clear", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  return (await jsonOrThrow(res)) as {
+    itemsDeleted?: number;
+    itemsUpdated?: number;
+    productsDeleted?: number;
+    deletedCount?: number;
+  };
+}
+
 export async function patchItem(
   id: number,
   patch: { checked?: boolean; note?: string | null },

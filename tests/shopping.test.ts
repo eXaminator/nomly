@@ -374,6 +374,85 @@ describe("shopping merge-on-add", () => {
   });
 });
 
+describe("portion changes re-scale source contributions", () => {
+  let ctx: Ctx;
+
+  beforeEach(async () => {
+    ctx = await seed();
+  });
+
+  it("doubling the planned servings doubles each contributed quantity", async () => {
+    const { previewMeals } = await import("@/lib/shopping/preview");
+    const { addMealsToList } = await import("@/lib/shopping/merge");
+    const { listShoppingItems } = await import("@/lib/shopping/items");
+    const { updateMeal } = await import("@/lib/meal-plans/service");
+
+    const meals = previewMeals("2026-05-23", 1);
+    addMealsToList([
+      {
+        mealPlanId: ctx.mealPlanId,
+        ingredients: meals[0].ingredients.map((i) => ({
+          recipeIngredientId: i.recipeIngredientId,
+        })),
+      },
+    ]);
+    // Recipe servings = 2, plan = 4 → scale 2. Tomate contributes 1000 g.
+    const before = listShoppingItems();
+    const tomate = before.find((i) => i.name === "Tomate");
+    expect(tomate?.amounts[0].quantity).toBe(1); // 1000g formatted as kg
+    expect(tomate?.amounts[0].unitName).toBe("kg");
+
+    // Double the plan to 8 portions → scale 4 → 2000 g per source.
+    updateMeal(ctx.mealPlanId, { servingsOverride: 8 });
+    const after = listShoppingItems();
+    const tomateAfter = after.find((i) => i.name === "Tomate");
+    expect(tomateAfter?.amounts[0].quantity).toBe(2);
+    expect(tomateAfter?.amounts[0].unitName).toBe("kg");
+  });
+});
+
+describe("selective clear", () => {
+  let ctx: Ctx;
+
+  beforeEach(async () => {
+    ctx = await seed();
+  });
+
+  it("removes one meal's contributions without deleting the meal", async () => {
+    const { previewMeals } = await import("@/lib/shopping/preview");
+    const { addMealsToList } = await import("@/lib/shopping/merge");
+    const { listShoppingItems } = await import("@/lib/shopping/items");
+    const { clearShoppingListSelective } = await import("@/lib/shopping/meals");
+    const { db } = await import("@/db");
+    const { mealPlan } = await import("@/db/schema");
+    const { eq } = await import("drizzle-orm");
+
+    const meals = previewMeals("2026-05-23", 1);
+    addMealsToList([
+      {
+        mealPlanId: ctx.mealPlanId,
+        ingredients: meals[0].ingredients.map((i) => ({
+          recipeIngredientId: i.recipeIngredientId,
+        })),
+      },
+    ]);
+    expect(listShoppingItems().length).toBeGreaterThan(0);
+
+    clearShoppingListSelective({
+      mealPlanIds: [ctx.mealPlanId],
+      removeProducts: false,
+    });
+
+    expect(listShoppingItems()).toHaveLength(0);
+    const stillPlanned = db
+      .select({ id: mealPlan.id })
+      .from(mealPlan)
+      .where(eq(mealPlan.id, ctx.mealPlanId))
+      .get();
+    expect(stillPlanned).toBeDefined();
+  });
+});
+
 describe("per-dimension manual override", () => {
   let ctx: Ctx;
 

@@ -47,7 +47,6 @@ import {
   apiReorderMeal,
   apiUpdateMeal,
 } from "./api";
-import { ShoppingAwareDeleteDialog } from "./shopping-aware-delete-dialog";
 import type { DragData, DropData } from "./types";
 
 type Props = {
@@ -240,36 +239,18 @@ export function PlannerView({
     });
   }
 
-  // When set, the planner shows the shopping-aware 3-button confirm instead
-  // of the meal-card's plain inline confirm. Cleared on cancel/choice.
-  const [pendingShoppingDelete, setPendingShoppingDelete] = React.useState<
-    MealPlanView | null
-  >(null);
-
-  async function performPlainDelete(id: number) {
-    setMealPlans((prev) => prev.filter((m) => m.id !== id));
-    await withBusy(async () => {
-      await apiDeleteMeal(id);
-      router.refresh();
-    });
-  }
-
   async function handleDelete(id: number) {
     const meal = mealPlans.find((m) => m.id === id);
-    if (meal?.hasShoppingImpact) {
-      setPendingShoppingDelete(meal);
-      return;
-    }
-    await performPlainDelete(id);
-  }
-
-  async function handleShoppingChoice(choice: "keep" | "subtract") {
-    const meal = pendingShoppingDelete;
-    if (!meal) return;
-    setMealPlans((prev) => prev.filter((m) => m.id !== meal.id));
-    setPendingShoppingDelete(null);
+    setMealPlans((prev) => prev.filter((m) => m.id !== id));
     await withBusy(async () => {
-      await apiDeleteMealWithShopping(meal.id, choice);
+      // Always subtract the meal's shopping-list contributions so the list
+      // and the plan stay in sync. For meals with no shopping impact this
+      // is identical to a plain delete (no sources → nothing to subtract).
+      if (meal?.hasShoppingImpact) {
+        await apiDeleteMealWithShopping(id, "subtract");
+      } else {
+        await apiDeleteMeal(id);
+      }
       router.refresh();
     });
   }
@@ -723,13 +704,6 @@ export function PlannerView({
         onClose={() => setEditing(null)}
         onSave={handleSaveEdit}
         onDelete={handleDelete}
-      />
-      <ShoppingAwareDeleteDialog
-        open={pendingShoppingDelete != null}
-        mealTitle={pendingShoppingDelete?.recipe.title ?? ""}
-        itemCount={null}
-        onChoose={handleShoppingChoice}
-        onCancel={() => setPendingShoppingDelete(null)}
       />
       <AddMealModal
         date={addingForDate}

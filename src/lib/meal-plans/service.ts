@@ -5,6 +5,7 @@ import {
   recipe,
   recipeSection,
   recipeIngredient,
+  shoppingItem,
   shoppingItemSource,
   ingredient as ingredientTable,
 } from "../../db/schema.ts";
@@ -94,7 +95,65 @@ export function updateMeal(id: number, patch: MealPlanUpdateInput): void {
     patchData.note = patch.note ?? null;
   }
   if (Object.keys(patchData).length === 0) return;
-  db.update(mealPlan).set(patchData).where(eq(mealPlan.id, id)).run();
+
+  db.transaction((tx) => {
+    // If the effective servings changed, scale this meal's shopping-list
+    // contributions by the same factor so the list reflects the new size.
+    // Source rows hold absolute amounts (recipe.qty × old_scale, possibly
+    // with a user edit on top); we just multiply by new/old.
+    if (Object.prototype.hasOwnProperty.call(patch, "servingsOverride")) {
+      const current = tx
+        .select({
+          recipeId: mealPlan.recipeId,
+          oldOverride: mealPlan.servingsOverride,
+        })
+        .from(mealPlan)
+        .where(eq(mealPlan.id, id))
+        .get();
+      if (current) {
+        const recipeRow = tx
+          .select({ servings: recipe.servings })
+          .from(recipe)
+          .where(eq(recipe.id, current.recipeId))
+          .get();
+        const recipeServings = recipeRow?.servings ?? 1;
+        const oldEffective = current.oldOverride ?? recipeServings;
+        const newEffective = patch.servingsOverride ?? recipeServings;
+        if (oldEffective > 0 && newEffective !== oldEffective) {
+          const factor = newEffective / oldEffective;
+          tx.update(shoppingItemSource)
+            .set({
+              contributedQuantity: sql`${shoppingItemSource.contributedQuantity} * ${factor}`,
+            })
+            .where(
+              and(
+                eq(shoppingItemSource.mealPlanId, id),
+                sql`${shoppingItemSource.contributedQuantity} IS NOT NULL`,
+              ),
+            )
+            .run();
+          // Bump version on every affected shopping item so clients refresh.
+          const affected = tx
+            .select({ itemId: shoppingItemSource.itemId })
+            .from(shoppingItemSource)
+            .where(eq(shoppingItemSource.mealPlanId, id))
+            .all();
+          const itemIds = Array.from(new Set(affected.map((r) => r.itemId)));
+          if (itemIds.length > 0) {
+            tx.update(shoppingItem)
+              .set({
+                version: sql`${shoppingItem.version} + 1`,
+                updatedAt: sql`unixepoch()`,
+              })
+              .where(inArray(shoppingItem.id, itemIds))
+              .run();
+          }
+        }
+      }
+    }
+
+    tx.update(mealPlan).set(patchData).where(eq(mealPlan.id, id)).run();
+  });
 }
 
 /**

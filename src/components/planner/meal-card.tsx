@@ -230,13 +230,6 @@ export function MealCard({
             onPointerDown={(e) => e.stopPropagation()}
             onClick={(e) => {
               e.stopPropagation();
-              // When the meal has shopping items on the list, skip the
-              // inline two-click confirm — the planner's shopping-aware
-              // dialog (§4.3.3) is now the only confirm step.
-              if (meal.hasShoppingImpact) {
-                onDelete(meal.id);
-                return;
-              }
               if (confirmDelete) {
                 setConfirmDelete(false);
                 onDelete(meal.id);

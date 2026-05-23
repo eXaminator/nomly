@@ -1,4 +1,4 @@
-import { eq, sql } from "drizzle-orm";
+import { eq, isNotNull, sql } from "drizzle-orm";
 import { db } from "../../db/index.ts";
 import {
   mealPlan,
@@ -55,6 +55,27 @@ function applyDeleteWithIngredients(
   tx: Tx,
   mealPlanId: number,
 ): { itemsDeleted: number; itemsUpdated: number } {
+  const result = stripMealContributions(tx, mealPlanId);
+  tx.delete(mealPlan).where(eq(mealPlan.id, mealPlanId)).run();
+  return result;
+}
+
+/**
+ * Remove one meal's shopping-list contributions but leave the meal_plan
+ * row itself untouched. Used by the "Liste leeren" picker so the user
+ * can clear a meal's items from the list without un-planning the meal.
+ */
+export function removeMealFromShoppingList(mealPlanId: number): {
+  itemsDeleted: number;
+  itemsUpdated: number;
+} {
+  return db.transaction((tx) => stripMealContributions(tx, mealPlanId));
+}
+
+function stripMealContributions(
+  tx: Tx,
+  mealPlanId: number,
+): { itemsDeleted: number; itemsUpdated: number } {
   const affected = tx
     .select({ itemId: shoppingItemSource.itemId })
     .from(shoppingItemSource)
@@ -62,8 +83,6 @@ function applyDeleteWithIngredients(
     .all();
   const itemIds = Array.from(new Set(affected.map((r) => r.itemId)));
 
-  // Drop this meal's contribution rows so the remaining-sources check is
-  // accurate.
   tx.delete(shoppingItemSource)
     .where(eq(shoppingItemSource.mealPlanId, mealPlanId))
     .run();
@@ -78,8 +97,6 @@ function applyDeleteWithIngredients(
       .where(eq(shoppingItemSource.itemId, itemId))
       .get();
     if (remaining) {
-      // Sources survived → the read-side aggregation reflects the new
-      // total automatically. Just bump version so clients refetch.
       tx.update(shoppingItem)
         .set({
           version: sql`${shoppingItem.version} + 1`,
@@ -90,9 +107,6 @@ function applyDeleteWithIngredients(
       itemsUpdated += 1;
       continue;
     }
-    // No source left. Drop the item iff the user hasn't put any manual
-    // amounts or a note on it (those are the signals that the item still
-    // matters to the user beyond what the meals contributed).
     const item = tx
       .select({ note: shoppingItem.note })
       .from(shoppingItem)
@@ -123,7 +137,48 @@ function applyDeleteWithIngredients(
     }
   }
 
-  tx.delete(mealPlan).where(eq(mealPlan.id, mealPlanId)).run();
   return { itemsDeleted, itemsUpdated };
 }
+
+/**
+ * Delete every shopping_item that belongs to a product (i.e. has a non-null
+ * `product_id`). Used by the "Liste leeren" picker's "Produkte" checkbox.
+ */
+export function removeAllProductsFromShoppingList(): { deletedCount: number } {
+  const result = db
+    .delete(shoppingItem)
+    .where(isNotNull(shoppingItem.productId))
+    .run();
+  return { deletedCount: result.changes };
+}
+
+/**
+ * Per-group selective clear. Pass meal plan ids whose contributions should
+ * be subtracted, optionally also wipe all products. The summed effect of
+ * one call is reported back so the UI can confirm what happened.
+ */
+export function clearShoppingListSelective(input: {
+  mealPlanIds: number[];
+  removeProducts: boolean;
+}): { itemsDeleted: number; itemsUpdated: number; productsDeleted: number } {
+  return db.transaction((tx) => {
+    let itemsDeleted = 0;
+    let itemsUpdated = 0;
+    for (const mealId of input.mealPlanIds) {
+      const r = stripMealContributions(tx, mealId);
+      itemsDeleted += r.itemsDeleted;
+      itemsUpdated += r.itemsUpdated;
+    }
+    let productsDeleted = 0;
+    if (input.removeProducts) {
+      const res = tx
+        .delete(shoppingItem)
+        .where(isNotNull(shoppingItem.productId))
+        .run();
+      productsDeleted = res.changes;
+    }
+    return { itemsDeleted, itemsUpdated, productsDeleted };
+  });
+}
+
 

@@ -11,8 +11,9 @@ import { ShoppingItemRow } from "./shopping-item-row";
 import { AddItemDialog } from "./add-item-dialog";
 import { AddMealsDialog } from "./add-meals-dialog";
 import { SupermarketFilter } from "./supermarket-filter";
+import { ClearListDialog } from "./clear-list-dialog";
 import {
-  clearAll as apiClearAll,
+  clearListSelective as apiClearList,
   deleteItem as apiDelete,
   patchItem as apiPatch,
   setItemAmount as apiSetAmount,
@@ -48,7 +49,7 @@ export function ShoppingListView({
   const [addItemOpen, setAddItemOpen] = React.useState(false);
   const [addMealsOpen, setAddMealsOpen] = React.useState(false);
   const [previewRecipeId, setPreviewRecipeId] = React.useState<number | null>(null);
-  const [confirmingClear, setConfirmingClear] = React.useState(false);
+  const [clearOpen, setClearOpen] = React.useState(false);
   // Stack of item ids in the order they were checked off this session. The
   // header's "Rückgängig" button pops one at a time. We don't persist this
   // across reloads on purpose — undo is meant for "wait, I already had that"
@@ -164,17 +165,14 @@ export function ShoppingListView({
     }
   }
 
-  async function onClearAll() {
-    setConfirmingClear(false);
-    const prev = items;
-    setItems([]);
-    try {
-      await apiClearAll();
-      router.refresh();
-    } catch {
-      setItems(prev);
-      router.refresh();
-    }
+  async function onClear(selection: {
+    removeAll: boolean;
+    mealPlanIds: number[];
+    removeProducts: boolean;
+  }) {
+    await apiClearList(selection);
+    setClearOpen(false);
+    router.refresh();
   }
 
   async function onToggleUnavailable(item: ShoppingItemView, supermarketId: number) {
@@ -271,31 +269,15 @@ export function ShoppingListView({
           <span className="hidden sm:inline">Artikel hinzufügen</span>
         </Button>
         {items.length > 0 ? (
-          confirmingClear ? (
-            <div className="flex items-center gap-2 rounded-[var(--radius)] border border-[var(--color-danger)] px-3 py-1 text-sm">
-              <span className="text-[var(--color-fg)]">Liste leeren?</span>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setConfirmingClear(false)}
-              >
-                Abbrechen
-              </Button>
-              <Button variant="danger" size="sm" onClick={onClearAll}>
-                Leeren
-              </Button>
-            </div>
-          ) : (
-            <Button
-              variant="ghost"
-              className="text-[var(--color-danger)]"
-              onClick={() => setConfirmingClear(true)}
-              aria-label="Liste leeren"
-            >
-              <Trash2 className="size-4" />
-              <span className="hidden sm:inline">Liste leeren</span>
-            </Button>
-          )
+          <Button
+            variant="ghost"
+            className="text-[var(--color-danger)]"
+            onClick={() => setClearOpen(true)}
+            aria-label="Liste leeren"
+          >
+            <Trash2 className="size-4" />
+            <span className="hidden sm:inline">Liste leeren</span>
+          </Button>
         ) : null}
       </div>
 
@@ -389,6 +371,11 @@ export function ShoppingListView({
       <RecipePreviewDialog
         recipeId={previewRecipeId}
         onClose={() => setPreviewRecipeId(null)}
+      />
+      <ClearListDialog
+        open={clearOpen}
+        onClose={() => setClearOpen(false)}
+        onConfirm={onClear}
       />
     </div>
   );
