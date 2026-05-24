@@ -3,10 +3,12 @@
 import * as React from "react";
 import {
   AlertTriangle,
+  CircleCheck,
+  CircleHelp,
   Lock,
-  Parentheses,
   RotateCw,
   Trash2,
+  Unlock,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -420,7 +422,7 @@ export function IngredientRow({ value, onChange, onRemove }: Props) {
   }
 
   return (
-    <div className={cn("flex flex-col gap-1", value.isOptional && "opacity-65")}>
+    <div className="flex flex-col gap-1">
     {value.rawText ? (
       <p
         className="truncate text-xs text-[var(--color-muted-fg)]"
@@ -473,6 +475,7 @@ export function IngredientRow({ value, onChange, onRemove }: Props) {
           name={value.name}
           candidates={serverMatches}
           selectedIngredientId={value.selectedIngredientId}
+          selectedCanonicalName={value.canonicalName}
           addAsAlias={value.addAsAlias}
           onSelectCandidate={selectCandidate}
           onSelectNew={selectNew}
@@ -504,7 +507,11 @@ export function IngredientRow({ value, onChange, onRemove }: Props) {
         }
         className="col-start-4 md:col-start-5"
       >
-        <Parentheses className="size-4" />
+        {value.isOptional ? (
+          <CircleHelp className="size-4" />
+        ) : (
+          <CircleCheck className="size-4" />
+        )}
       </Button>
       <Button
         variant={value.fixedAmount ? "secondary" : "ghost"}
@@ -523,7 +530,11 @@ export function IngredientRow({ value, onChange, onRemove }: Props) {
         }
         className="col-start-5 md:col-start-6"
       >
-        <Lock className="size-4" />
+        {value.fixedAmount ? (
+          <Lock className="size-4" />
+        ) : (
+          <Unlock className="size-4" />
+        )}
       </Button>
       <Button
         variant="ghost"
@@ -630,6 +641,7 @@ function CandidatePills({
   name,
   candidates,
   selectedIngredientId,
+  selectedCanonicalName,
   addAsAlias,
   onSelectCandidate,
   onSelectNew,
@@ -639,6 +651,10 @@ function CandidatePills({
   name: string;
   candidates: ServerMatch[];
   selectedIngredientId: number | null;
+  /** Canonical name of the currently-selected ingredient, when it differs
+   *  from the row's typed text. Surfaces on the anchor pill so a force-
+   *  matched row shows WHICH ingredient it's pinned to. */
+  selectedCanonicalName: string | null;
   addAsAlias: boolean;
   onSelectCandidate: (c: ServerMatch) => void;
   onSelectNew: () => void;
@@ -700,7 +716,7 @@ function CandidatePills({
               : "Diese Zeile ist fest mit einer Zutat verknüpft."
           }
         >
-          ⚓
+          <span>{selectedCanonicalName ?? trimmed}</span>
           {addAsAlias ? <span className="text-[0.65rem]">+ Alias</span> : null}
         </button>
       ) : null}
