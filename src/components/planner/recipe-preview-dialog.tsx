@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { Clock, ExternalLink, Pencil, Users } from "lucide-react";
+import { Clock, ExternalLink, Lock, Pencil, Users } from "lucide-react";
 import {
   Dialog,
   DialogBody,
@@ -189,8 +189,16 @@ function RecipeBody({ recipeId }: { recipeId: number }) {
                           ing.isOptional ? "flex gap-2 italic opacity-65" : "flex gap-2"
                         }
                       >
-                        <span className="min-w-12 font-mono text-[var(--color-muted-fg)]">
-                          {formatQuantity(ing.quantity)} {ing.unitName ?? ""}
+                        <span className="inline-flex min-w-12 items-center gap-1 font-mono text-[var(--color-muted-fg)]">
+                          {ing.fixedAmount ? (
+                            <Lock
+                              className="size-3 shrink-0"
+                              aria-label="Feste Menge"
+                            />
+                          ) : null}
+                          <span>
+                            {formatQuantity(ing.quantity)} {ing.unitName ?? ""}
+                          </span>
                         </span>
                         <span className="flex-1">
                           <IngredientLine

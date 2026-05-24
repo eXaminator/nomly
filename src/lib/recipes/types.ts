@@ -1,18 +1,55 @@
 export type RecipeIngredientInput = {
-  /** Freeform ingredient name. The service resolves it case-insensitively
-   *  against existing ingredient/alias names and inserts a new ingredient
-   *  if nothing matches. */
+  /** Freeform ingredient name. Surfaces as `display_name` on the persisted
+   *  row. When {@link ingredientId} is null/omitted, the server uses this
+   *  to look up an existing ingredient by case-insensitive canonical/alias
+   *  match — and creates a new ingredient row if nothing matches. */
   ingredientName: string;
+  /** Optional pre-resolved ingredient id, chosen via the pill UI in the
+   *  recipe form. When set, the server links the row directly to this
+   *  ingredient (skipping name-based resolution) and `ingredientName` is
+   *  preserved verbatim as the per-row display name. */
+  ingredientId?: number | null;
+  /** When set, the server inserts the row's `ingredientName` as an alias
+   *  of {@link ingredientId} (force-match flow). Ignored when
+   *  `ingredientId` is null. */
+  addAsAlias?: boolean;
   quantity: number | null;
   unitId: number | null;
+  /** Ingredient-scoped sub-unit reference. Mutually exclusive with
+   *  `unitId`: when set, `unitId` must be null and the quantity is in this
+   *  sub-unit. */
+  subUnitId: number | null;
+  /** Display override for the unit — used when the user picked / typed an
+   *  alias ("Tasse") for a canonical unit ("Cup"). NULL = render the
+   *  canonical unit name as before. */
+  displayUnit: string | null;
   notes: string | null;
   isOptional: boolean;
+  /** When true, the quantity does not scale with planned servings. */
+  fixedAmount: boolean;
+  /** Original source substring this row was parsed from. The URL importer
+   *  and Familywall importer thread this through so the edit form can show
+   *  the user the line the parser was working from. Null/omitted for
+   *  manually-added rows. */
+  rawLine?: string | null;
 };
 
 export type RecipeSectionInput = {
   title: string | null;
   instructions: string;
   ingredients: RecipeIngredientInput[];
+};
+
+/**
+ * Defaults to apply when the recipe save creates a new ingredient row. Keyed
+ * by the ingredient name (matched case-insensitively against the submitted
+ * `ingredientName`). Names that already exist as canonical/alias are ignored.
+ */
+export type NewIngredientDefaults = {
+  name: string;
+  defaultCategoryId: number | null;
+  dietaryClass: "vegan" | "vegetarian" | "meat" | null;
+  excludeFromShoppingList: boolean;
 };
 
 export type RecipeInput = {
@@ -26,6 +63,9 @@ export type RecipeInput = {
   photoPath: string | null;
   tags: string[];
   sections: RecipeSectionInput[];
+  /** Optional. Per-name defaults applied when the save inserts a new
+   *  ingredient row. */
+  newIngredientDefaults?: NewIngredientDefaults[];
 };
 
 /**
@@ -65,9 +105,23 @@ export type RecipeIngredientView = {
   canonicalIngredientName: string;
   quantity: number | null;
   unitId: number | null;
+  /** display_unit OR unit.name fallback OR sub-unit name (coalesced
+   *  server-side, in that order of preference). */
   unitName: string | null;
+  /** Set when the row was saved with an ingredient sub-unit instead of a
+   *  global unit. Surfaced for downstream conversion (shopping-list rollup). */
+  subUnitId: number | null;
+  /** How many sub-units make one purchase unit, for shopping aggregation.
+   *  Only meaningful when `subUnitId` is set. */
+  subUnitPerPurchase: number | null;
   notes: string | null;
   isOptional: boolean;
+  /** When true, this quantity is constant — meal-plan portion changes do not
+   *  rescale it. */
+  fixedAmount: boolean;
+  /** Source substring this row was originally parsed from. Null for rows
+   *  added manually after the initial import. */
+  rawLine: string | null;
   sortOrder: number;
 };
 

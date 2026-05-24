@@ -40,6 +40,21 @@ export function alignToStartWeekday(
   return addDays(today, -back);
 }
 
+/**
+ * Return today when today's ISO weekday equals `startWeekday`, otherwise the
+ * next future date that does. Used as the default start for the
+ * "Mahlzeiten hinzufügen" range so a fresh shopping pass starts on the
+ * planner's week boundary instead of mid-week.
+ */
+export function nextStartWeekdayOnOrAfter(
+  today: string,
+  startWeekday: number,
+): string {
+  const wd = isoWeekday(today);
+  const forward = (startWeekday - wd + 7) % 7;
+  return addDays(today, forward);
+}
+
 export function buildRange(from: string, daysVisible: number): {
   from: string;
   to: string;

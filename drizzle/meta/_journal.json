@@ -71,6 +71,41 @@
       "when": 1779522261029,
       "tag": "0009_fat_lila_cheney",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1779600000000,
+      "tag": "0010_fixed_amount",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1779700000000,
+      "tag": "0011_display_unit",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1779800000000,
+      "tag": "0012_alias_default_unit",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1779900000000,
+      "tag": "0013_ingredient_sub_units",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "6",
+      "when": 1779615868691,
+      "tag": "0014_raw_line",
+      "breakpoints": true
     }
   ]
 }

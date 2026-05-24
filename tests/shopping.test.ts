@@ -159,7 +159,7 @@ describe("shopping preview", () => {
     const meals = previewMeals("2026-05-23", 1);
     expect(meals).toHaveLength(1);
     const m = meals[0];
-    const tomate = m.ingredients.find((i) => i.ingredientName === "Tomate");
+    const tomate = m.sections.flatMap((s) => s.ingredients).find((i) => i.ingredientName === "Tomate");
     expect(tomate?.qty).toBe(1000); // 500 * (4/2)
   });
 
@@ -173,7 +173,7 @@ describe("shopping preview", () => {
       .run();
     const { previewMeals } = await import("@/lib/shopping/preview");
     const meals = previewMeals("2026-05-23", 1);
-    const names = meals[0].ingredients.map((i) => i.ingredientName);
+    const names = meals[0].sections.flatMap((s) => s.ingredients).map((i) => i.ingredientName);
     expect(names).not.toContain("Salz");
   });
 
@@ -187,10 +187,10 @@ describe("shopping preview", () => {
       .run();
     const { previewMeals } = await import("@/lib/shopping/preview");
     const meals = previewMeals("2026-05-23", 1);
-    const salz = meals[0].ingredients.find((i) => i.ingredientName === "Salz");
+    const salz = meals[0].sections.flatMap((s) => s.ingredients).find((i) => i.ingredientName === "Salz");
     expect(salz).toBeDefined();
     expect(salz?.isOptional).toBe(true);
-    const tomate = meals[0].ingredients.find((i) => i.ingredientName === "Tomate");
+    const tomate = meals[0].sections.flatMap((s) => s.ingredients).find((i) => i.ingredientName === "Tomate");
     expect(tomate?.isOptional).toBe(false);
   });
 
@@ -201,7 +201,7 @@ describe("shopping preview", () => {
     addMealsToList([
       {
         mealPlanId: ctx.mealPlanId,
-        ingredients: first[0].ingredients.map((i) => ({ recipeIngredientId: i.recipeIngredientId })),
+        ingredients: first[0].sections.flatMap((s) => s.ingredients).map((i) => ({ recipeIngredientId: i.recipeIngredientId })),
       },
     ]);
     const second = previewMeals("2026-05-23", 1);
@@ -235,7 +235,7 @@ describe("shopping merge-on-add", () => {
     addMealsToList([
       {
         mealPlanId: ctx.mealPlanId,
-        ingredients: meals[0].ingredients.map((i) => ({ recipeIngredientId: i.recipeIngredientId })),
+        ingredients: meals[0].sections.flatMap((s) => s.ingredients).map((i) => ({ recipeIngredientId: i.recipeIngredientId })),
       },
     ]);
 
@@ -268,7 +268,7 @@ describe("shopping merge-on-add", () => {
     addMealsToList([
       {
         mealPlanId: ctx.mealPlanId,
-        ingredients: meals[0].ingredients.map((i) => ({ recipeIngredientId: i.recipeIngredientId })),
+        ingredients: meals[0].sections.flatMap((s) => s.ingredients).map((i) => ({ recipeIngredientId: i.recipeIngredientId })),
       },
     ]);
     const items = listShoppingItems();
@@ -298,7 +298,7 @@ describe("shopping merge-on-add", () => {
     addMealsToList([
       {
         mealPlanId: ctx.mealPlanId,
-        ingredients: meals[0].ingredients.map((i) => ({ recipeIngredientId: i.recipeIngredientId })),
+        ingredients: meals[0].sections.flatMap((s) => s.ingredients).map((i) => ({ recipeIngredientId: i.recipeIngredientId })),
       },
     ]);
     const items = listShoppingItems();
@@ -318,7 +318,7 @@ describe("shopping merge-on-add", () => {
     addMealsToList([
       {
         mealPlanId: ctx.mealPlanId,
-        ingredients: meals[0].ingredients.map((i) => ({ recipeIngredientId: i.recipeIngredientId })),
+        ingredients: meals[0].sections.flatMap((s) => s.ingredients).map((i) => ({ recipeIngredientId: i.recipeIngredientId })),
       },
     ]);
 
@@ -343,9 +343,9 @@ describe("shopping merge-on-add", () => {
         mealPlanId: ctx.mealPlanId,
         ingredients: [
           {
-            recipeIngredientId: meals2[0].ingredients.find(
-              (i) => i.ingredientName === "Tomate",
-            )!.recipeIngredientId,
+            recipeIngredientId: meals2[0].sections
+              .flatMap((s) => s.ingredients)
+              .find((i) => i.ingredientName === "Tomate")!.recipeIngredientId,
           },
         ],
       },
@@ -364,7 +364,7 @@ describe("shopping merge-on-add", () => {
     addMealsToList([
       {
         mealPlanId: ctx.mealPlanId,
-        ingredients: meals[0].ingredients.map((i) => ({ recipeIngredientId: i.recipeIngredientId })),
+        ingredients: meals[0].sections.flatMap((s) => s.ingredients).map((i) => ({ recipeIngredientId: i.recipeIngredientId })),
       },
     ]);
     const items = listShoppingItems();
@@ -396,7 +396,7 @@ describe("portion changes re-scale source contributions", () => {
     addMealsToList([
       {
         mealPlanId: ctx.mealPlanId,
-        ingredients: meals[0].ingredients.map((i) => ({
+        ingredients: meals[0].sections.flatMap((s) => s.ingredients).map((i) => ({
           recipeIngredientId: i.recipeIngredientId,
         })),
       },
@@ -427,7 +427,7 @@ describe("portion changes re-scale source contributions", () => {
     addMealsToList([
       {
         mealPlanId: ctx.mealPlanId,
-        ingredients: meals[0].ingredients.map((i) => ({
+        ingredients: meals[0].sections.flatMap((s) => s.ingredients).map((i) => ({
           recipeIngredientId: i.recipeIngredientId,
         })),
       },
@@ -467,7 +467,7 @@ describe("selective clear", () => {
     addMealsToList([
       {
         mealPlanId: ctx.mealPlanId,
-        ingredients: meals[0].ingredients.map((i) => ({
+        ingredients: meals[0].sections.flatMap((s) => s.ingredients).map((i) => ({
           recipeIngredientId: i.recipeIngredientId,
         })),
       },
@@ -506,7 +506,7 @@ describe("amount edits scale sources (so meal removal subtracts cleanly)", () =>
     addMealsToList([
       {
         mealPlanId: ctx.mealPlanId,
-        ingredients: meals[0].ingredients.map((i) => ({
+        ingredients: meals[0].sections.flatMap((s) => s.ingredients).map((i) => ({
           recipeIngredientId: i.recipeIngredientId,
         })),
       },
@@ -539,7 +539,7 @@ describe("amount edits scale sources (so meal removal subtracts cleanly)", () =>
     addMealsToList([
       {
         mealPlanId: ctx.mealPlanId,
-        ingredients: meals[0].ingredients.map((i) => ({
+        ingredients: meals[0].sections.flatMap((s) => s.ingredients).map((i) => ({
           recipeIngredientId: i.recipeIngredientId,
         })),
       },
@@ -569,7 +569,7 @@ describe("per-dimension manual override", () => {
     addMealsToList([
       {
         mealPlanId: ctx.mealPlanId,
-        ingredients: meals[0].ingredients.map((i) => ({
+        ingredients: meals[0].sections.flatMap((s) => s.ingredients).map((i) => ({
           recipeIngredientId: i.recipeIngredientId,
         })),
       },
@@ -595,7 +595,7 @@ describe("per-dimension manual override", () => {
     const { addMealsToList } = await import("@/lib/shopping/merge");
     const { listShoppingItems } = await import("@/lib/shopping/items");
     const meals = previewMeals("2026-05-23", 1);
-    const tomate = meals[0].ingredients.find((i) => i.ingredientName === "Tomate")!;
+    const tomate = meals[0].sections.flatMap((s) => s.ingredients).find((i) => i.ingredientName === "Tomate")!;
     addMealsToList([
       {
         mealPlanId: ctx.mealPlanId,
@@ -660,7 +660,7 @@ describe("meal-removal subtraction", () => {
     addMealsToList([
       {
         mealPlanId: ctx.mealPlanId,
-        ingredients: meals[0].ingredients.map((i) => ({ recipeIngredientId: i.recipeIngredientId })),
+        ingredients: meals[0].sections.flatMap((s) => s.ingredients).map((i) => ({ recipeIngredientId: i.recipeIngredientId })),
       },
     ]);
     expect(listShoppingItems().length).toBeGreaterThan(0);
@@ -680,7 +680,7 @@ describe("meal-removal subtraction", () => {
     addMealsToList([
       {
         mealPlanId: ctx.mealPlanId,
-        ingredients: meals[0].ingredients.map((i) => ({ recipeIngredientId: i.recipeIngredientId })),
+        ingredients: meals[0].sections.flatMap((s) => s.ingredients).map((i) => ({ recipeIngredientId: i.recipeIngredientId })),
       },
     ]);
     const before = listShoppingItems().length;
@@ -714,7 +714,7 @@ describe("sweeper", () => {
     addMealsToList([
       {
         mealPlanId: ctx.mealPlanId,
-        ingredients: meals[0].ingredients.map((i) => ({ recipeIngredientId: i.recipeIngredientId })),
+        ingredients: meals[0].sections.flatMap((s) => s.ingredients).map((i) => ({ recipeIngredientId: i.recipeIngredientId })),
       },
     ]);
 
@@ -756,7 +756,7 @@ describe("meal-plan view reports shopping impact", () => {
     addMealsToList([
       {
         mealPlanId: ctx.mealPlanId,
-        ingredients: meals[0].ingredients.map((i) => ({ recipeIngredientId: i.recipeIngredientId })),
+        ingredients: meals[0].sections.flatMap((s) => s.ingredients).map((i) => ({ recipeIngredientId: i.recipeIngredientId })),
       },
     ]);
     const after = listByDateRange("2026-05-23", "2026-05-23");

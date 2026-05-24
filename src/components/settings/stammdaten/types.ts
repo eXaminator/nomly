@@ -22,9 +22,21 @@ export const ENTITY_LABELS: Record<
   },
 };
 
+export type RecipeIngredientUsage = {
+  quantity: number | null;
+  unitName: string | null;
+  subUnitName: string | null;
+  displayUnit: string | null;
+  displayName: string | null;
+  notes: string | null;
+  isOptional: boolean;
+  fixedAmount: boolean;
+};
+
 export type RecipeLink = {
   id: number;
   title: string;
+  usages?: RecipeIngredientUsage[];
 };
 
 export type ImpactRow = {

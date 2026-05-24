@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { NumberInput } from "@/components/ui/number-input";
 import { Label } from "@/components/ui/label";
 import type { PlannerSettings } from "@/lib/settings/planner";
 
@@ -48,15 +48,12 @@ export function PlannerSettingsForm({ initial }: { initial: PlannerSettings }) {
     <form onSubmit={onSave} className="flex flex-col gap-5">
       <div className="flex flex-col gap-2">
         <Label htmlFor="daysVisible">Sichtbare Tage</Label>
-        <Input
+        <NumberInput
           id="daysVisible"
-          type="number"
           min={1}
           max={28}
           value={daysVisible}
-          onChange={(e) =>
-            setDaysVisible(Math.max(1, Math.min(28, Number(e.target.value) || 1)))
-          }
+          onChange={(n) => setDaysVisible(n ?? 1)}
           className="w-32"
         />
         <p className="text-xs text-[var(--color-muted-fg)]">

@@ -5,7 +5,7 @@ import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DateInputWithWeekday } from "@/components/ui/date-input-with-weekday";
-import { Input } from "@/components/ui/input";
+import { NumberInput } from "@/components/ui/number-input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import type { MealPlanView } from "@/lib/meal-plans/types";
@@ -128,12 +128,11 @@ function MealEditorDialog({ meal, onClose, onSave, onDelete }: Props) {
             </div>
             <div className="space-y-2">
               <Label htmlFor="servings">Portionen</Label>
-              <Input
+              <NumberInput
                 id="servings"
-                type="number"
                 min={1}
                 value={servings}
-                onChange={(e) => setServings(Math.max(1, Number(e.target.value) || 1))}
+                onChange={(n) => setServings(n ?? 1)}
                 className="w-32"
               />
               {meal && servings !== meal.recipe.baseServings ? (

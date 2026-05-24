@@ -64,6 +64,7 @@ describe("parseIngredientString", () => {
       quantity: 500,
       unitName: "g",
       name: "Hackfleisch",
+      commaTailText: "",
       notes: null,
       isOptional: false,
       altWithPrepStripped: null,
@@ -74,6 +75,7 @@ describe("parseIngredientString", () => {
       quantity: 200,
       unitName: "g",
       name: "Speck",
+      commaTailText: "gewürfelt",
       notes: "gewürfelt",
       isOptional: false,
       altWithPrepStripped: null,
@@ -84,6 +86,7 @@ describe("parseIngredientString", () => {
       quantity: 0.5,
       unitName: "l",
       name: "Sahne",
+      commaTailText: "",
       notes: null,
       isOptional: false,
       altWithPrepStripped: null,
@@ -101,6 +104,7 @@ describe("parseIngredientString", () => {
       quantity: 0.5,
       unitName: "TL",
       name: "Salz",
+      commaTailText: "",
       notes: null,
       isOptional: false,
       altWithPrepStripped: null,
@@ -111,6 +115,7 @@ describe("parseIngredientString", () => {
       quantity: 300,
       unitName: "ml",
       name: "Brühe",
+      commaTailText: "",
       notes: null,
       isOptional: false,
       altWithPrepStripped: null,
@@ -121,6 +126,7 @@ describe("parseIngredientString", () => {
       quantity: 200,
       unitName: "g",
       name: "Käse",
+      commaTailText: "",
       notes: "100-200",
       isOptional: false,
       altWithPrepStripped: null,
@@ -145,6 +151,7 @@ describe("parseIngredientString", () => {
       quantity: 3,
       unitName: null,
       name: "Eier",
+      commaTailText: "",
       notes: null,
       isOptional: false,
       altWithPrepStripped: null,
@@ -155,6 +162,7 @@ describe("parseIngredientString", () => {
       quantity: null,
       unitName: null,
       name: "Salz",
+      commaTailText: "",
       notes: "nach geschmack",
       isOptional: false,
       altWithPrepStripped: null,
@@ -165,6 +173,7 @@ describe("parseIngredientString", () => {
       quantity: 1,
       unitName: "Pck",
       name: "Blätterteig",
+      commaTailText: "",
       notes: null,
       isOptional: false,
       altWithPrepStripped: null,
@@ -322,6 +331,38 @@ describe("parseIngredientString — extended cases", () => {
     expect(r.quantity).toBe(0.5);
     expect(r.unitName).toBeNull();
     expect(r.name).toBe("Bio-Orange");
+  });
+  // Familywall HTML rendering occasionally surrounds the dash in compound
+  // nouns with whitespace ("Bio - Honig", "Bio – Ei"). The tokenizer drops
+  // standalone dash tokens so the parser sees them as two-word names,
+  // avoiding the previous bug where "Bio" leaked out as a separate
+  // ingredient with the real noun shoved into notes.
+  it("'1 Bio - Honig' (hyphen w/ spaces) → name Bio Honig", () => {
+    const r = parse("1 Bio - Honig");
+    expect(r.quantity).toBe(1);
+    expect(r.name).toBe("Bio Honig");
+    expect(r.notes).toBeNull();
+  });
+  it("'1 Bio – Ei' (en-dash w/ spaces) → name Bio Ei", () => {
+    const r = parse("1 Bio – Ei");
+    expect(r.quantity).toBe(1);
+    expect(r.name).toBe("Bio Ei");
+    expect(r.notes).toBeNull();
+  });
+  it("'Bio - Zitrone' (no quantity) → name Bio Zitrone", () => {
+    const r = parse("Bio - Zitrone");
+    expect(r.quantity).toBeNull();
+    expect(r.name).toBe("Bio Zitrone");
+    expect(r.notes).toBeNull();
+  });
+  // "to taste" / "nach Geschmack" remains a notes annotation because the
+  // TO_TASTE_PHRASES preprocess (which also handles the leading dash)
+  // strips it BEFORE tokenisation runs. So dropping the standalone dash
+  // here doesn't regress.
+  it("'Salz - nach Geschmack' still routes 'nach Geschmack' to notes", () => {
+    const r = parse("Salz - nach Geschmack");
+    expect(r.name).toBe("Salz");
+    expect(r.notes).toMatch(/nach geschmack/i);
   });
   it("'viertel TL Salz' → quantity 0.25, unit TL", () => {
     const r = parse("viertel TL Salz");
@@ -503,11 +544,20 @@ describe("parseIngredientString — extended cases", () => {
     expect(r.unitName).toBe("teaspoon");
     expect(r.name).toBe("red pepper flakes");
   });
-  it("'bell pepper- thinly sliced' splits the dash into a note", () => {
+  it("'bell pepper- thinly sliced' routes the trailing prep words to the prep-stripped alternative", () => {
+    // The standalone dash token is dropped at tokenisation, so the name
+    // area collects ["bell", "pepper", "thinly", "sliced"]. The trailing
+    // prep-strip then peels "thinly sliced" off into altWithPrepStripped,
+    // which `pickNameAndNotes` uses downstream to land the row at name
+    // "bell pepper" + notes "thinly sliced". Same outcome as the no-dash
+    // form `"1 bell pepper thinly sliced"`.
     const r = parse("1 bell pepper- thinly sliced");
     expect(r.quantity).toBe(1);
     expect(r.name.toLowerCase()).toContain("bell pepper");
-    expect(r.notes?.toLowerCase()).toContain("thinly sliced");
+    expect(r.altWithPrepStripped?.name.toLowerCase()).toBe("bell pepper");
+    expect(r.altWithPrepStripped?.notes?.toLowerCase()).toContain(
+      "thinly sliced",
+    );
   });
   it("'optional' anywhere sets the flag and is stripped", () => {
     const r = parse("100 g Zucker (optional, fein)");

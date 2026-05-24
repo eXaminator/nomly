@@ -7,7 +7,7 @@ import {
   categoryAlias,
   ingredient,
   ingredientAlias,
-  supermarket,
+  ingredientSubUnit,
   unit,
   unitAlias,
 } from "./schema.ts";
@@ -27,20 +27,28 @@ type TandoorFood = {
   store_category?: string;
 };
 
-type TandoorStore = { name: string };
-
 type TandoorSeed = {
   unit: Record<string, TandoorUnit>;
   category: Record<string, TandoorCategory>;
   food: Record<string, TandoorFood>;
-  store: Record<string, TandoorStore>;
 };
 
 export type SeedCounts = {
   units: { added: number; skipped: number; aliasesAdded: number };
   categories: { added: number; skipped: number; aliasesAdded: number };
   ingredients: { added: number; skipped: number; aliasesAdded: number };
-  supermarkets: { added: number; skipped: number };
+  subUnits: {
+    /** New ingredient_sub_unit rows inserted (skips when one already exists
+     *  on the same (ingredient, name) — preserves user edits to per_purchase). */
+    added: number;
+    /** New compound-noun aliases inserted with default_sub_unit_id set
+     *  (e.g. "Knoblauchzehe" → Knoblauch + sub-unit Zehe). Existing aliases
+     *  are left untouched. */
+    aliasesAdded: number;
+    /** Ingredients whose `purchase_unit_id` got filled in from the top-up
+     *  table (skipped when the user already chose one). */
+    purchaseUnitsSet: number;
+  };
 };
 
 const norm = (s: string) => s.trim();
@@ -178,12 +186,10 @@ const topUpUnits: Array<{
     factor: 1,
     aliases: ["Hand voll", "handful", "handfuls"],
   },
-  {
-    name: "Zweig",
-    dimension: "count",
-    factor: 1,
-    aliases: ["Zweige", "twig", "twigs", "sprig", "sprigs"],
-  },
+  // Zehe and Zweig used to live here as global count units. They're now
+  // modelled as ingredient-scoped sub-units (Knoblauch → Zehe, Petersilie →
+  // Zweig), so the parser only recognises them in the context of an
+  // ingredient that defines them.
   {
     name: "Zoll",
     dimension: "count",
@@ -197,12 +203,6 @@ const topUpUnits: Array<{
     dimension: "count",
     factor: 1,
     aliases: ["zentimeter", "Zentimeter", "centimeter", "centimeters", "-cm"],
-  },
-  {
-    name: "Zehe",
-    dimension: "count",
-    factor: 1,
-    aliases: ["Zehen", "clove", "cloves"],
   },
   {
     name: "Packung",
@@ -275,6 +275,120 @@ const topUpUnits: Array<{
   },
 ];
 
+/**
+ * Per-ingredient purchase-unit + sub-unit + alias top-ups, keyed by Tandoor
+ * food key so we attach to whatever id the snapshot ended up with.
+ *
+ * `perPurchase` values are first-shopping-pass defaults — typical bulb /
+ * bunch yields the user can adjust in Stammdaten once they buy a few of
+ * each. Compound-noun aliases (e.g. "Knoblauchzehe") are inserted with
+ * `default_sub_unit_id` pointing at the same row, so the parser hits the
+ * sub-unit when it sees "1 Knoblauchzehe" without an explicit unit.
+ */
+const ingredientSubUnitTopUps: Array<{
+  foodKey: string;
+  /** Canonical name of the purchase unit (looked up against the unit table).
+   *  Null leaves the existing setting alone; for new ingredients that
+   *  effectively means "default to Stück" via NULL. */
+  purchaseUnitName: string | null;
+  subUnit: { name: string; perPurchase: number };
+  /** Compound-noun aliases that imply the sub-unit when matched. The seeder
+   *  inserts each as an `ingredient_alias` row with `default_sub_unit_id`
+   *  pointing at the sub-unit. Pre-existing aliases are left untouched. */
+  aliases: string[];
+}> = [
+  // Stück purchase unit, ~10 Zehen per Knoblauch bulb.
+  {
+    foodKey: "food-garlic-raw",
+    purchaseUnitName: null,
+    subUnit: { name: "Zehe", perPurchase: 10 },
+    aliases: [
+      "Knoblauchzehe",
+      "Knoblauchzehen",
+      "garlic clove",
+      "garlic cloves",
+    ],
+  },
+  // Bund purchase unit + Zweig sub-unit for the fresh-herb ingredients
+  // Tandoor ships in German.
+  {
+    foodKey: "food-parsley",
+    purchaseUnitName: "Bund",
+    subUnit: { name: "Zweig", perPurchase: 12 },
+    aliases: [
+      "Petersilienzweig",
+      "Petersilienzweige",
+      "parsley sprig",
+      "parsley sprigs",
+    ],
+  },
+  {
+    foodKey: "food-basil-fresh",
+    purchaseUnitName: "Bund",
+    subUnit: { name: "Zweig", perPurchase: 10 },
+    aliases: [
+      "Basilikumzweig",
+      "Basilikumzweige",
+      "basil sprig",
+      "basil sprigs",
+    ],
+  },
+  {
+    foodKey: "food-cilantro-raw",
+    purchaseUnitName: "Bund",
+    subUnit: { name: "Zweig", perPurchase: 12 },
+    aliases: [
+      "Korianderzweig",
+      "Korianderzweige",
+      "cilantro sprig",
+      "cilantro sprigs",
+      "coriander sprig",
+      "coriander sprigs",
+    ],
+  },
+  {
+    foodKey: "food-dill-fresh",
+    purchaseUnitName: "Bund",
+    subUnit: { name: "Zweig", perPurchase: 15 },
+    aliases: ["Dillzweig", "Dillzweige", "dill sprig", "dill sprigs"],
+  },
+  {
+    foodKey: "food-spearmint-fresh",
+    purchaseUnitName: "Bund",
+    subUnit: { name: "Zweig", perPurchase: 12 },
+    aliases: [
+      "Minzezweig",
+      "Minzezweige",
+      "Minzzweig",
+      "Minzzweige",
+      "mint sprig",
+      "mint sprigs",
+    ],
+  },
+  {
+    foodKey: "food-rosemary-fresh",
+    purchaseUnitName: "Bund",
+    subUnit: { name: "Zweig", perPurchase: 8 },
+    aliases: [
+      "Rosmarinzweig",
+      "Rosmarinzweige",
+      "rosemary sprig",
+      "rosemary sprigs",
+    ],
+  },
+  {
+    foodKey: "food-thyme-fresh",
+    purchaseUnitName: "Bund",
+    subUnit: { name: "Zweig", perPurchase: 10 },
+    aliases: [
+      "Thymianzweig",
+      "Thymianzweige",
+      "thyme sprig",
+      "thyme sprigs",
+    ],
+  },
+];
+
 function readSeed(file: string): TandoorSeed {
   const path = resolve(process.cwd(), "data/seed", file);
   return JSON.parse(readFileSync(path, "utf8")) as TandoorSeed;
@@ -296,7 +410,7 @@ export function runSeed(): SeedCounts {
     units: { added: 0, skipped: 0, aliasesAdded: 0 },
     categories: { added: 0, skipped: 0, aliasesAdded: 0 },
     ingredients: { added: 0, skipped: 0, aliasesAdded: 0 },
-    supermarkets: { added: 0, skipped: 0 },
+    subUnits: { added: 0, aliasesAdded: 0, purchaseUnitsSet: 0 },
   };
 
   db.transaction((tx) => {
@@ -433,25 +547,6 @@ export function runSeed(): SeedCounts {
       counts.categories.added += 1;
     }
 
-    // -- Supermarkets --
-    const existingMarkets = new Set(
-      tx
-        .select({ name: supermarket.name })
-        .from(supermarket)
-        .all()
-        .map((r) => lower(r.name)),
-    );
-    for (const [, s] of Object.entries(de.store)) {
-      const name = norm(s.name);
-      if (existingMarkets.has(lower(name))) {
-        counts.supermarkets.skipped += 1;
-        continue;
-      }
-      tx.insert(supermarket).values({ name }).run();
-      existingMarkets.add(lower(name));
-      counts.supermarkets.added += 1;
-    }
-
     // -- Ingredients --
     const ingredientIdByKey = new Map<string, number>();
     const ingredientIdByName = new Map<string, number>();
@@ -528,6 +623,91 @@ export function runSeed(): SeedCounts {
         addAlias(tx, "ingredient", id, f.plural_name, () => {
           counts.ingredients.aliasesAdded += 1;
         });
+      }
+    }
+
+    // -- Ingredient sub-units + alias defaults --
+    // Per-ingredient bits the Tandoor snapshot doesn't carry: Knoblauch's
+    // Zehe, Petersilie's Zweig, … plus compound-noun aliases that imply the
+    // sub-unit. Idempotent on re-runs (skips sub-unit rows that already
+    // exist; leaves user-edited per_purchase values alone).
+    for (const top of ingredientSubUnitTopUps) {
+      const ingredientId = ingredientIdByKey.get(top.foodKey);
+      if (ingredientId === undefined) continue;
+
+      if (top.purchaseUnitName) {
+        const purchaseUnitId = unitIdByName.get(lower(top.purchaseUnitName));
+        if (purchaseUnitId !== undefined) {
+          const updated = tx
+            .update(ingredient)
+            .set({ purchaseUnitId })
+            .where(
+              sql`${ingredient.id} = ${ingredientId} AND ${ingredient.purchaseUnitId} IS NULL`,
+            )
+            .run();
+          if ((updated.changes ?? 0) > 0) counts.subUnits.purchaseUnitsSet += 1;
+        }
+      }
+
+      // Preserve user-edited per_purchase values on re-run. The earlier
+      // migration created sub-unit rows with per_purchase=1 as a placeholder
+      // — anything that's still exactly 1 is treated as un-customised and
+      // gets the new seed default; anything else is left alone.
+      const existingSub = tx
+        .select({
+          id: ingredientSubUnit.id,
+          perPurchase: ingredientSubUnit.perPurchase,
+        })
+        .from(ingredientSubUnit)
+        .where(
+          sql`${ingredientSubUnit.ingredientId} = ${ingredientId} AND ${ingredientSubUnit.name} = ${top.subUnit.name}`,
+        )
+        .get();
+      let subUnitId: number;
+      if (existingSub) {
+        subUnitId = existingSub.id;
+        if (existingSub.perPurchase === 1 && top.subUnit.perPurchase !== 1) {
+          tx.update(ingredientSubUnit)
+            .set({ perPurchase: top.subUnit.perPurchase })
+            .where(eq(ingredientSubUnit.id, subUnitId))
+            .run();
+        }
+      } else {
+        const inserted = tx
+          .insert(ingredientSubUnit)
+          .values({
+            ingredientId,
+            name: top.subUnit.name,
+            perPurchase: top.subUnit.perPurchase,
+          })
+          .returning({ id: ingredientSubUnit.id })
+          .all();
+        subUnitId = inserted[0].id;
+        counts.subUnits.added += 1;
+      }
+
+      for (const aliasName of top.aliases) {
+        const cleaned = norm(aliasName);
+        if (cleaned.length === 0) continue;
+        const exists = tx
+          .select({ id: ingredientAlias.id })
+          .from(ingredientAlias)
+          .where(eq(ingredientAlias.name, cleaned))
+          .get();
+        if (exists) continue;
+        try {
+          tx.insert(ingredientAlias)
+            .values({
+              ingredientId,
+              name: cleaned,
+              defaultSubUnitId: subUnitId,
+            })
+            .run();
+          counts.subUnits.aliasesAdded += 1;
+        } catch {
+          // Globally-unique alias name collided with another entity. Skip —
+          // the user can resolve in Stammdaten.
+        }
       }
     }
   });

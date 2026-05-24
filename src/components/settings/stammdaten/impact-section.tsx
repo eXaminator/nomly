@@ -2,12 +2,13 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { ChevronDown, ExternalLink, Loader2 } from "lucide-react";
+import { ChevronDown, ExternalLink, Loader2, Lock } from "lucide-react";
 import { cn } from "@/lib/cn";
 
 import {
   type EntityKind,
   type ImpactRow,
+  type RecipeIngredientUsage,
   REF_LABELS,
   refsSum,
 } from "./types";
@@ -116,7 +117,7 @@ export function ImpactSection({ entityKind, id, initial }: ImpactSectionProps) {
                   <p className="mb-2 text-xs font-medium uppercase tracking-wider text-[var(--color-muted-fg)]">
                     Rezepte
                   </p>
-                  <ul className="flex flex-col gap-1">
+                  <ul className="flex flex-col gap-2">
                     {data.linkedRecipes.map((r) => (
                       <li key={r.id}>
                         <Link
@@ -126,15 +127,36 @@ export function ImpactSection({ entityKind, id, initial }: ImpactSectionProps) {
                           {r.title}
                           <ExternalLink className="size-3" />
                         </Link>
+                        {r.usages && r.usages.length > 0 && (
+                          <ul className="mt-1 ml-3 flex flex-col gap-0.5 text-xs">
+                            {r.usages.map((u, i) => (
+                              <UsageLine key={i} usage={u} />
+                            ))}
+                          </ul>
+                        )}
                       </li>
                     ))}
                   </ul>
-                  {(data.refs.recipes ?? 0) > data.linkedRecipes.length && (
-                    <p className="mt-1 text-xs text-[var(--color-muted-fg)]">
-                      … und {(data.refs.recipes ?? 0) - data.linkedRecipes.length}{" "}
-                      weitere.
-                    </p>
-                  )}
+                  {(() => {
+                    // `refs.recipes` counts recipe_ingredient ROWS, not
+                    // distinct recipes — so for ingredients that show up in
+                    // multiple rows of the same recipe, the raw count
+                    // outruns `linkedRecipes.length`. Comparing against the
+                    // total number of usage lines we actually render (sum
+                    // of `usages` arrays, falling back to 1 per recipe when
+                    // we don't carry usages) is the honest threshold.
+                    const totalShown = data.linkedRecipes!.reduce(
+                      (n, r) => n + (r.usages?.length ?? 1),
+                      0,
+                    );
+                    const total = data.refs.recipes ?? 0;
+                    if (total <= totalShown) return null;
+                    return (
+                      <p className="mt-1 text-xs text-[var(--color-muted-fg)]">
+                        … und {total - totalShown} weitere.
+                      </p>
+                    );
+                  })()}
                 </div>
               )}
             </div>
@@ -142,6 +164,51 @@ export function ImpactSection({ entityKind, id, initial }: ImpactSectionProps) {
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * Mirrors the recipe-view ingredient row (see `src/app/rezepte/[id]/page.tsx`)
+ * so the "Verwendung" list reads the same way the recipe does: a monospace
+ * quantity + unit on the left, the display name in the middle, and notes
+ * after an em-dash. Optional rows render italic/muted; fixed-amount rows
+ * get the lock icon.
+ */
+function UsageLine({ usage: u }: { usage: RecipeIngredientUsage }) {
+  const unitLabel = u.displayUnit ?? u.subUnitName ?? u.unitName ?? "";
+  return (
+    <li
+      className={cn(
+        "flex gap-2",
+        u.isOptional && "italic opacity-65",
+      )}
+    >
+      <span className="inline-flex min-w-10 items-center gap-1 font-mono text-[var(--color-muted-fg)]">
+        {u.fixedAmount ? (
+          <Lock className="size-3 shrink-0" aria-label="Feste Menge" />
+        ) : null}
+        <span>
+          {u.quantity != null ? formatQuantity(u.quantity) : ""}
+          {unitLabel ? ` ${unitLabel}` : ""}
+        </span>
+      </span>
+      <span className="flex-1 text-[var(--color-fg)]">
+        {u.displayName ?? ""}
+        {u.notes ? (
+          <span className="text-[var(--color-muted-fg)]"> – {u.notes}</span>
+        ) : null}
+        {u.isOptional ? (
+          <span className="ml-1 text-[var(--color-muted-fg)]">(optional)</span>
+        ) : null}
+      </span>
+    </li>
+  );
+}
+
+function formatQuantity(q: number): string {
+  const rounded = Math.round(q * 100) / 100;
+  return new Intl.NumberFormat("de-DE", { maximumFractionDigits: 2 }).format(
+    rounded,
   );
 }
 

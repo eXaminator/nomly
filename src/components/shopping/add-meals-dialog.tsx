@@ -12,10 +12,17 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { DateInputWithWeekday } from "@/components/ui/date-input-with-weekday";
-import { Input } from "@/components/ui/input";
+import { NumberInput } from "@/components/ui/number-input";
 import { Label } from "@/components/ui/label";
 import { addDays } from "@/lib/meal-plans/dates";
 import type { PreviewMeal, PreviewIngredient } from "@/lib/shopping/preview";
+
+/** Iterates a meal's ingredients across all its sections. Used for the
+ *  selection/quantity bookkeeping that doesn't care about section
+ *  grouping. */
+function flattenIngredients(meal: PreviewMeal): PreviewIngredient[] {
+  return meal.sections.flatMap((s) => s.ingredients);
+}
 import { previewMeals as apiPreview, addMealsToList } from "./api";
 
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -109,7 +116,7 @@ export function AddMealsDialog({
         const qs = new Map<string, string>();
         for (const m of rows) {
           sel.set(m.mealPlanId, new Set());
-          for (const i of m.ingredients) {
+          for (const i of flattenIngredients(m)) {
             qs.set(
               qtyKey(m.mealPlanId, i.recipeIngredientId),
               formatScaledQty(i.qty),
@@ -146,7 +153,7 @@ export function AddMealsDialog({
     setSelection((prev) => {
       const next = new Map(prev);
       const existing = next.get(meal.mealPlanId) ?? new Set();
-      const all = meal.ingredients.map((i) => i.recipeIngredientId);
+      const all = flattenIngredients(meal).map((i) => i.recipeIngredientId);
       const allChecked = all.every((id) => existing.has(id));
       next.set(
         meal.mealPlanId,
@@ -162,7 +169,9 @@ export function AddMealsDialog({
     for (const m of meals) {
       next.set(
         m.mealPlanId,
-        check ? new Set(m.ingredients.map((i) => i.recipeIngredientId)) : new Set(),
+        check
+          ? new Set(flattenIngredients(m).map((i) => i.recipeIngredientId))
+          : new Set(),
       );
     }
     setSelection(next);
@@ -247,15 +256,12 @@ export function AddMealsDialog({
             </div>
             <div className="flex flex-col gap-1">
               <Label htmlFor="meals-length">Länge (Tage)</Label>
-              <Input
+              <NumberInput
                 id="meals-length"
-                type="number"
                 min={1}
                 max={60}
                 value={length}
-                onChange={(e) =>
-                  setLength(Math.max(1, Math.min(60, Number(e.target.value) || 1)))
-                }
+                onChange={(n) => setLength(n ?? 1)}
                 className="w-24"
               />
             </div>
@@ -344,9 +350,16 @@ function MealRow({
   onToggleIngredient: (riId: number) => void;
   onChangeQuantity: (riId: number, value: string) => void;
 }) {
-  const all = meal.ingredients.length;
+  const flat = flattenIngredients(meal);
+  const all = flat.length;
   const checked = selected.size;
   const state = checked === 0 ? "none" : checked === all ? "all" : "some";
+  // Only render section headings when the recipe actually has more than
+  // one (or a single titled) section — a vanilla single-unnamed-section
+  // recipe should still read as a flat list.
+  const showSectionHeadings =
+    meal.sections.length > 1 ||
+    (meal.sections.length === 1 && meal.sections[0].title !== null);
 
   return (
     <li className="flex flex-col gap-1.5 px-3 py-2">
@@ -372,20 +385,31 @@ function MealRow({
           ) : null}
         </span>
       </label>
-      <ul className="ml-6 flex flex-col gap-1">
-        {meal.ingredients.map((ing) => (
-          <IngredientCheckbox
-            key={ing.recipeIngredientId}
-            ing={ing}
-            checked={selected.has(ing.recipeIngredientId)}
-            quantityValue={
-              quantities.get(qtyKey(meal.mealPlanId, ing.recipeIngredientId)) ?? ""
-            }
-            onToggle={() => onToggleIngredient(ing.recipeIngredientId)}
-            onChangeQuantity={(v) => onChangeQuantity(ing.recipeIngredientId, v)}
-          />
+      <div className="ml-6 flex flex-col gap-1.5">
+        {meal.sections.map((section) => (
+          <div key={section.sectionId} className="flex flex-col gap-1">
+            {showSectionHeadings ? (
+              <p className="text-xs font-medium uppercase tracking-wide text-[var(--color-muted-fg)]">
+                {section.title ?? "Allgemein"}
+              </p>
+            ) : null}
+            <ul className="flex flex-col gap-1">
+              {section.ingredients.map((ing) => (
+                <IngredientCheckbox
+                  key={ing.recipeIngredientId}
+                  ing={ing}
+                  checked={selected.has(ing.recipeIngredientId)}
+                  quantityValue={
+                    quantities.get(qtyKey(meal.mealPlanId, ing.recipeIngredientId)) ?? ""
+                  }
+                  onToggle={() => onToggleIngredient(ing.recipeIngredientId)}
+                  onChangeQuantity={(v) => onChangeQuantity(ing.recipeIngredientId, v)}
+                />
+              ))}
+            </ul>
+          </div>
         ))}
-      </ul>
+      </div>
     </li>
   );
 }

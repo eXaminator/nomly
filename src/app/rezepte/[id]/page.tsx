@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Clock, ExternalLink, Pencil, Users } from "lucide-react";
+import { Clock, ExternalLink, Lock, Pencil, Users } from "lucide-react";
 import { AppShell } from "@/components/layout/app-shell";
 import { Button } from "@/components/ui/button";
 import { DietBadge } from "@/components/recipes/diet-badge";
@@ -120,8 +120,16 @@ export default async function RecipeViewPage({
                   key={ing.id}
                   className={ing.isOptional ? "flex gap-2 italic opacity-65" : "flex gap-2"}
                 >
-                  <span className="min-w-12 font-mono text-[var(--color-muted-fg)]">
-                    {formatQuantity(ing.quantity)} {ing.unitName ?? ""}
+                  <span className="inline-flex min-w-12 items-center gap-1 font-mono text-[var(--color-muted-fg)]">
+                    {ing.fixedAmount ? (
+                      <Lock
+                        className="size-3 shrink-0"
+                        aria-label="Feste Menge"
+                      />
+                    ) : null}
+                    <span>
+                      {formatQuantity(ing.quantity)} {ing.unitName ?? ""}
+                    </span>
                   </span>
                   <span className="flex-1">
                     <IngredientLine

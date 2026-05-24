@@ -9,6 +9,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { NumberInput } from "@/components/ui/number-input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { DietBadge } from "@/components/recipes/diet-badge";
@@ -180,12 +181,11 @@ function AddMealModalInner({
             </div>
             <div className="space-y-2">
               <Label htmlFor="add-servings">Portionen</Label>
-              <Input
+              <NumberInput
                 id="add-servings"
-                type="number"
                 min={1}
                 value={servings}
-                onChange={(e) => setServings(Math.max(1, Number(e.target.value) || 1))}
+                onChange={(n) => setServings(n ?? 1)}
                 className="w-32"
               />
             </div>

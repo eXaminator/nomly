@@ -24,6 +24,7 @@ export function TagInput({
   const [open, setOpen] = React.useState(false);
   const [activeIdx, setActiveIdx] = React.useState(0);
   const inputRef = React.useRef<HTMLInputElement>(null);
+  const listRef = React.useRef<HTMLUListElement>(null);
 
   function addTag(raw: string) {
     const cleaned = raw.trim().replace(/,$/, "").trim();
@@ -45,7 +46,9 @@ export function TagInput({
     const q = draft.trim().toLowerCase();
     const taken = new Set(value.map((v) => v.toLowerCase()));
     const pool = suggestions.filter((s) => !taken.has(s.toLowerCase()));
-    if (q.length === 0) return pool.slice(0, 8);
+    // No query → show the full pool (scrollable). The user explicitly asked
+    // for the whole list on focus.
+    if (q.length === 0) return pool;
     return pool
       .filter((s) => s.toLowerCase().includes(q))
       .sort((a, b) => {
@@ -53,7 +56,7 @@ export function TagInput({
         const bStarts = b.toLowerCase().startsWith(q) ? 0 : 1;
         return aStarts - bStarts || a.localeCompare(b, "de");
       })
-      .slice(0, 8);
+      .slice(0, 12);
   }, [draft, suggestions, value]);
 
   const exactInSuggestions = filtered.some(
@@ -74,6 +77,21 @@ export function TagInput({
       addTag(draft);
     }
   }
+
+  // Keep the highlighted suggestion in view as the user arrow-keys past
+  // the visible portion of the list.
+  React.useEffect(() => {
+    if (!open) return;
+    const list = listRef.current;
+    if (!list) return;
+    const active = list.children[activeIdx] as HTMLElement | undefined;
+    if (!active) return;
+    const top = active.offsetTop;
+    const bottom = top + active.offsetHeight;
+    if (top < list.scrollTop) list.scrollTop = top;
+    else if (bottom > list.scrollTop + list.clientHeight)
+      list.scrollTop = bottom - list.clientHeight;
+  }, [activeIdx, open, rows]);
 
   function onKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
     if (e.key === "Enter") {
@@ -152,7 +170,26 @@ export function TagInput({
           onOpenAutoFocus={(e) => e.preventDefault()}
           className="z-50 w-[var(--radix-popover-trigger-width)] overflow-hidden rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-card)] shadow-lg"
         >
-          <ul className="max-h-72 overflow-auto py-1" role="listbox">
+          <ul
+            ref={listRef}
+            className="max-h-72 overflow-auto py-1 overscroll-contain"
+            role="listbox"
+            onWheel={(e) => {
+              // Manual wheel handling for the same reason as `SelectSearch`:
+              // when the popover is portaled inside a Radix Dialog/Drawer,
+              // `react-remove-scroll` preventDefaults wheel events outside
+              // the dialog body and the listbox stops scrolling.
+              const el = e.currentTarget;
+              if (el.scrollHeight <= el.clientHeight) return;
+              const atTop = e.deltaY < 0 && el.scrollTop === 0;
+              const atBottom =
+                e.deltaY > 0 &&
+                Math.ceil(el.scrollTop + el.clientHeight) >= el.scrollHeight;
+              if (atTop || atBottom) return;
+              el.scrollTop += e.deltaY;
+              e.preventDefault();
+            }}
+          >
             {filtered.map((s, idx) => (
               <li
                 key={s}

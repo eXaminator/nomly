@@ -224,6 +224,10 @@ const CASES: Case[] = [
   { raw: "1 kleine Chilischote (gehackt, optional je nach Schärfe der Currypaste)", ideal: { quantity: 1, unitName: null, name: "Chilischote", isOptional: true, notesContains: ["klein", "gehackt", "Schärfe"] } },
   { raw: "1 kleiner TL Orangenabrieb", ideal: { quantity: 1, unitName: "TL", name: "Orangenabrieb", notesContains: ["klein"] } },
   { raw: "5 mittelgroße Apfel", ideal: { quantity: 5, unitName: null, name: "Apfel", notesContains: ["mittelgroß"] } },
+  // Slash-separated size alternatives — the tokenizer pads "/" between
+  // letters so each adjective reaches the size-modifier loop separately.
+  { raw: "1 kleine/mittlere Paprika", ideal: { quantity: 1, unitName: null, name: "Paprika", notesContains: ["klein", "mittler"] } },
+  { raw: "kleine/mittlere Paprika", ideal: { quantity: null, unitName: null, name: "Paprika", notesContains: ["klein", "mittler"] } },
   { raw: "3 large eggs", ideal: { quantity: 3, unitName: null, name: "eggs", notesContains: ["large"] } },
   // Real line from the family-wall cache. Tests trailing prep without a
   // comma separator AND leading size descriptor in one pass.

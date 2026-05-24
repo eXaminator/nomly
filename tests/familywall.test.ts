@@ -2,11 +2,13 @@ import { describe, it, expect } from "vitest";
 import { transformFamilywallRecipe } from "@/lib/familywall/transform";
 import type {
   IngredientLookup,
+  ParseLookups,
+  SubUnitLookup,
   UnitLookup,
 } from "@/lib/recipe-import/index";
 import type { FamilywallRawRecipe } from "@/lib/familywall/types";
 
-function makeLookups(): { units: UnitLookup; ingredients: IngredientLookup } {
+function makeLookups(): ParseLookups {
   const units: UnitLookup = {
     byNameOrAlias: new Map([
       ["g", { id: 1, name: "g", isContainer: false }],
@@ -28,7 +30,8 @@ function makeLookups(): { units: UnitLookup; ingredients: IngredientLookup } {
     ["zwiebel", { id: 11, canonicalName: "Zwiebel" }],
     ["onion", { id: 11, canonicalName: "Zwiebel" }],
   ]);
-  return { units, ingredients };
+  const subUnits: SubUnitLookup = new Map();
+  return { units, ingredients, subUnits };
 }
 
 function makeRaw(over: Partial<FamilywallRawRecipe> = {}): FamilywallRawRecipe {
@@ -61,11 +64,50 @@ describe("transformFamilywallRecipe", () => {
     expect(out.sections[0].instructions).toBe("1. Anbraten.\n2. Schmoren.");
     expect(out.sections[0].ingredients[0]).toEqual({
       ingredientName: "Hackfleisch",
+      // No catalog hit for "Hackfleisch" in the test lookup → ingredientId
+      // stays null and the server will create the row by name on save.
+      ingredientId: null,
       quantity: 500,
       unitId: 1, // g
+      subUnitId: null,
+      displayUnit: null,
       notes: null,
       isOptional: false,
+      fixedAmount: false,
+      rawLine: "500 g Hackfleisch",
     });
+  });
+
+  it("threads the matcher's resolved ingredientId through to the save payload", () => {
+    // Regression guard: when the matcher picks an existing catalog entry,
+    // transform.ts must surface its ingredientId on the payload. Without
+    // this, the displayName-preservation change from Phase A degrades into
+    // duplicate canonicals because `service.resolveIngredient` falls back
+    // to looking up by the (un-canonical) display name.
+    const lookups = makeLookups();
+    // Seed the catalog with Paprikapulver canonical so the matcher can hit.
+    lookups.ingredients.set("paprikapulver", {
+      id: 99,
+      canonicalName: "Paprikapulver",
+    });
+    lookups.ingredientCatalog = [
+      {
+        ingredientId: 99,
+        canonicalName: "Paprikapulver",
+        aliasName: "Paprikapulver",
+        tokens: ["paprikapulver"],
+      },
+    ];
+    const out = transformFamilywallRecipe(
+      makeRaw({ ingredients: ["1 g Paprika-Pulver"] }),
+      lookups,
+      null,
+    );
+    const ing = out.sections[0].ingredients[0];
+    // displayName keeps the user's "Paprika-Pulver" spelling, but the row
+    // is pinned to the existing Paprikapulver canonical.
+    expect(ing.ingredientName).toBe("Paprika-Pulver");
+    expect(ing.ingredientId).toBe(99);
   });
 
   it("missing servings → defaults to 1", () => {
@@ -309,7 +351,7 @@ describe("transformFamilywallRecipe", () => {
     expect(ing.quantity).toBe(1);
     expect(ing.unitId).toBe(8); // Packung
     expect(ing.ingredientName).toBe("Blätterteig");
-    expect(ing.notes).toBe("Blätterteig-Rolle , TK");
+    expect(ing.notes).toBe("Blätterteig-Rolle, TK");
   });
 
   it("recognises 'Dose' after a size modifier 'kl.'", () => {

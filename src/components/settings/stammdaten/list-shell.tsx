@@ -52,6 +52,13 @@ export type ListShellProps<TItem> = {
   /** When true, an "Ähnliche zusammenführen" button opens the merge-proposals
    *  dialog. Server side needs a `/api/v1/<entity>/merge-proposals` endpoint. */
   enableMergeProposals?: boolean;
+  /** Optional entity-specific bulk-edit slot rendered in the sticky selection
+   *  bar. Receives the current selection and a callback that clears the
+   *  selection and refreshes the list after the bulk patch lands. */
+  renderBulkActions?: (args: {
+    selectedIds: number[];
+    onApplied: () => void;
+  }) => React.ReactNode;
 };
 
 export function ListShell<TItem>({
@@ -68,6 +75,7 @@ export function ListShell<TItem>({
   mergeWarning,
   searchMatches,
   enableMergeProposals,
+  renderBulkActions,
 }: ListShellProps<TItem>) {
   const router = useRouter();
   const labels = ENTITY_LABELS[entityKind];
@@ -362,10 +370,17 @@ export function ListShell<TItem>({
       </p>
 
       {selectedItems.length > 0 && (
-        <div className="sticky bottom-4 mx-auto flex items-center gap-2 rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-card)] px-3 py-2 shadow-lg">
+        <div className="sticky bottom-4 mx-auto flex flex-wrap items-center gap-2 rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-card)] px-3 py-2 shadow-lg">
           <span className="text-sm font-medium">
             {selectedItems.length} ausgewählt
           </span>
+          {renderBulkActions?.({
+            selectedIds: selectedItems.map((i) => idOf(i)),
+            onApplied: () => {
+              setSelectedIds(new Set());
+              router.refresh();
+            },
+          })}
           <Button
             variant="outline"
             size="sm"

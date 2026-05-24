@@ -2,29 +2,98 @@ import { asc, eq, inArray } from "drizzle-orm";
 
 import { db } from "../../../db/index.ts";
 import {
+  ingredientSubUnit,
   recipe,
   recipeIngredient,
   recipeSection,
   recipeTag,
+  unit,
 } from "../../../db/schema.ts";
 
-import type { RecipeLink } from "./types.ts";
+import type { RecipeIngredientUsage, RecipeLink } from "./types.ts";
 
 const LIMIT_PER_ID = 50;
 
 /**
- * Returns up to `LIMIT_PER_ID` distinct recipes per ingredient id, joined
- * through `recipe_section`. Used by the impact endpoint to render a
- * clickable "Verwendung" list in the ingredient editor.
+ * Returns every distinct recipe per ingredient id (no cap — the
+ * "Verwendung" UI shows the full list), joined through `recipe_section`.
+ * Each link carries the per-row usage details (quantity, unit, notes, …)
+ * so the UI can show *how* the ingredient is used in each recipe, not just
+ * which recipes use it.
  */
 export function linkedRecipesForIngredients(
   ingredientIds: number[],
 ): Map<number, RecipeLink[]> {
-  return collectRecipeJoin(
-    ingredientIds,
-    recipeIngredient.ingredientId,
-    /* viaSection */ true,
-  );
+  const out = new Map<number, RecipeLink[]>();
+  if (ingredientIds.length === 0) return out;
+  for (const id of ingredientIds) out.set(id, []);
+
+  // Per-recipe aggregation: each ingredient may appear multiple times in the
+  // same recipe (different sections, parallel rows), and we want one list
+  // entry per recipe with all its usages collected.
+  const linksByOwner = new Map<number, Map<number, RecipeLink>>();
+  for (const id of ingredientIds) linksByOwner.set(id, new Map());
+
+  const rows = db
+    .select({
+      ownerId: recipeIngredient.ingredientId,
+      recipeId: recipe.id,
+      recipeTitle: recipe.title,
+      quantity: recipeIngredient.quantity,
+      unitName: unit.name,
+      subUnitName: ingredientSubUnit.name,
+      displayUnit: recipeIngredient.displayUnit,
+      displayName: recipeIngredient.displayName,
+      notes: recipeIngredient.notes,
+      isOptional: recipeIngredient.isOptional,
+      fixedAmount: recipeIngredient.fixedAmount,
+    })
+    .from(recipeIngredient)
+    .innerJoin(
+      recipeSection,
+      eq(recipeSection.id, recipeIngredient.sectionId),
+    )
+    .innerJoin(recipe, eq(recipe.id, recipeSection.recipeId))
+    .leftJoin(unit, eq(unit.id, recipeIngredient.unitId))
+    .leftJoin(
+      ingredientSubUnit,
+      eq(ingredientSubUnit.id, recipeIngredient.subUnitId),
+    )
+    .where(inArray(recipeIngredient.ingredientId, ingredientIds))
+    .orderBy(asc(recipe.title))
+    .all();
+
+  for (const r of rows) {
+    if (r.ownerId == null) continue;
+    const byRecipe = linksByOwner.get(r.ownerId);
+    const list = out.get(r.ownerId);
+    if (!byRecipe || !list) continue;
+
+    const usage: RecipeIngredientUsage = {
+      quantity: r.quantity,
+      unitName: r.unitName,
+      subUnitName: r.subUnitName,
+      displayUnit: r.displayUnit,
+      displayName: r.displayName,
+      notes: r.notes,
+      isOptional: r.isOptional,
+      fixedAmount: r.fixedAmount,
+    };
+
+    const existing = byRecipe.get(r.recipeId);
+    if (existing) {
+      existing.usages!.push(usage);
+      continue;
+    }
+    const link: RecipeLink = {
+      id: r.recipeId,
+      title: r.recipeTitle,
+      usages: [usage],
+    };
+    byRecipe.set(r.recipeId, link);
+    list.push(link);
+  }
+  return out;
 }
 
 export function linkedRecipesForUnits(

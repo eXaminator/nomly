@@ -1,0 +1,1 @@
+ALTER TABLE `recipe_ingredient` ADD `raw_line` text;

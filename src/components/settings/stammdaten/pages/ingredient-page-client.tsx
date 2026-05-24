@@ -4,6 +4,9 @@ import * as React from "react";
 
 import { Badge } from "@/components/ui/badge";
 
+import { Button } from "@/components/ui/button";
+
+import { BulkIngredientDialog } from "../bulk-ingredient-dialog";
 import {
   IngredientForm,
   type IngredientItem,
@@ -103,6 +106,10 @@ export function IngredientPageClient({
   const [diet, setDiet] = React.useState<DietFilter>("all");
   const [excludedOnly, setExcludedOnly] = React.useState(false);
   const [unusedOnly, setUnusedOnly] = React.useState(false);
+  const [bulkDialog, setBulkDialog] = React.useState<{
+    ids: number[];
+    onApplied: () => void;
+  } | null>(null);
 
   const applyFilters = React.useCallback(
     (item: IngredientItem) => {
@@ -170,20 +177,40 @@ export function IngredientPageClient({
   );
 
   return (
-    <ListShell<IngredientItem>
-      entityKind="ingredient"
-      initialItems={initialItems}
-      columns={columns}
-      idOf={(i) => i.id}
-      nameOf={(i) => i.name}
-      applyFilters={applyFilters}
-      searchMatches={searchMatches}
-      filterControls={filterControls}
-      EditForm={IngredientForm}
-      hardDeleteAllowed={false}
-      hardDeleteDisabledReason="Diese Zutat wird in Rezepten oder Einkaufslisten verwendet — eine Ersatz-Zutat ist erforderlich."
-      enableMergeProposals
-    />
+    <>
+      <ListShell<IngredientItem>
+        entityKind="ingredient"
+        initialItems={initialItems}
+        columns={columns}
+        idOf={(i) => i.id}
+        nameOf={(i) => i.name}
+        applyFilters={applyFilters}
+        searchMatches={searchMatches}
+        filterControls={filterControls}
+        EditForm={IngredientForm}
+        hardDeleteAllowed={false}
+        hardDeleteDisabledReason="Diese Zutat wird in Rezepten oder Einkaufslisten verwendet — eine Ersatz-Zutat ist erforderlich."
+        enableMergeProposals
+        renderBulkActions={({ selectedIds, onApplied }) => (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setBulkDialog({ ids: selectedIds, onApplied })}
+          >
+            Bearbeiten
+          </Button>
+        )}
+      />
+      {bulkDialog ? (
+        <BulkIngredientDialog
+          open={true}
+          selectedCount={bulkDialog.ids.length}
+          selectedIds={bulkDialog.ids}
+          onClose={() => setBulkDialog(null)}
+          onApplied={bulkDialog.onApplied}
+        />
+      ) : null}
+    </>
   );
 }
 

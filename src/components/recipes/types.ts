@@ -21,22 +21,65 @@ export type ImportAnnotation = {
   rawUnit: string | null;
 };
 
+export type DraftSubUnit = {
+  /** ingredient_sub_unit.id from the resolved ingredient. */
+  id: number;
+  name: string;
+};
+
+export type DraftIngredientCandidate = {
+  ingredientId: number;
+  /** Canonical name of the matched ingredient (the underlying identity). */
+  canonicalName: string;
+  /** Name of the catalog row that actually matched — the alias name when
+   *  the hit came via an alias, otherwise equal to `canonicalName`. The
+   *  pill UI displays this so the user can see WHY a row matched (e.g. a
+   *  recipe says "Erbsen, TK", the matcher hits the alias "TK Erbsen" of
+   *  canonical "Erbsen", and the pill reads "TK Erbsen"). */
+  matchedName: string;
+  /** Match score from the server-side matcher. Used purely for sort
+   *  stability and the auto-select rules; never rendered to the user. */
+  score: number;
+};
+
 export type DraftIngredient = {
   uid: string;
-  /** Freeform name — resolved server-side to an existing ingredient by
-   *  case-insensitive canonical/alias match, or auto-created on save. */
+  /** Freeform name — what the recipe row displays. NOT directly used for
+   *  ingredient identity (that's `selectedIngredientId`); on save it becomes
+   *  the row's `display_name`. */
   name: string;
-  /** Canonical ingredient name (the row that `name` resolves to via alias).
-   *  Populated when loading an existing recipe or after an alias match in
-   *  autocomplete; shown as a small pill under the input when it differs
-   *  from `name`. Cleared as soon as the user edits the field. */
+  /** Canonical name of the selected ingredient when it differs from
+   *  `name`. Shown as a small pill under the input. Cleared on edit. */
   canonicalName: string | null;
+  /** Pre-resolved ingredient id chosen via the pill UI. `null` means "save
+   *  as new ingredient with `name`". Auto-set by the matcher when text
+   *  changes; manually-set when the user clicks a candidate pill. */
+  selectedIngredientId: number | null;
+  /** Candidate ingredient matches for the current `name`. Re-fetched on
+   *  text change (debounced). The selected pill is highlighted in the UI. */
+  candidates: DraftIngredientCandidate[];
+  /** When true, force-match was used AND the user opted to persist the
+   *  current `name` as an alias of `selectedIngredientId` on save. */
+  addAsAlias: boolean;
   quantity: string;
   unit: ComboboxItem | null;
+  /** Set when the parser or the user picked an ingredient-scoped sub-unit
+   *  ("Zehe" for Knoblauch). Mutually exclusive with `unit` — the form picks
+   *  whichever is set when rendering. */
+  subUnit: DraftSubUnit | null;
   notes: string;
   /** When true, the row renders dimmed/italic in the read view and is skipped
    *  by the shopping-list builder. Edited via a per-row toggle. */
   isOptional: boolean;
+  /** When true, the quantity is treated as portion-independent — changing a
+   *  planned meal's servings does not rescale this ingredient. */
+  fixedAmount: boolean;
+  /** Original source substring (after table pairing / conjunction splitting,
+   *  before quantity-unit-notes extraction). Populated by the URL importer
+   *  and the clipboard parser so the import-review UI can show the user what
+   *  the parser was working from. Undefined for manually-added rows and for
+   *  rows loaded from an existing recipe. */
+  rawText?: string;
   importAnnotation?: ImportAnnotation;
 };
 
@@ -71,16 +114,34 @@ export type DraftRecipe = {
 export type ParsedIngredientResponse = {
   quantity: number | null;
   unit: { id: number; name: string } | null;
+  /** Set when the parser resolved an ingredient-scoped sub-unit instead of a
+   *  global unit. Mutually exclusive with `unit`. */
+  subUnit: { id: number; name: string; perPurchase: number } | null;
   unitMatch: "matched" | "defaulted" | "unresolved" | "empty";
   rawUnit: string | null;
   name: string;
   ingredientId: number | null;
   ingredientMatch: "existing" | "new";
   canonicalIngredientName: string | null;
+  /** Ranked candidate matches from the substring matcher, already sorted
+   *  server-side (score desc → alias-length desc → alphabetical). The pill
+   *  UI renders these in order. */
+  candidateMatches?: Array<{
+    ingredientId: number;
+    canonicalName: string;
+    matchedName: string;
+    score: number;
+  }>;
   notes: string | null;
   /** Server marked the row as optional from an "opt." / "Optional:" /
    *  "evtl." / "(optional)" marker in the source. */
   isOptional?: boolean;
+  /** Server marked the row's amount as fixed (no portion scaling). Auto-set
+   *  on import for entries with no parsed quantity. */
+  fixedAmount?: boolean;
+  /** Source substring the parser worked from (after table pairing /
+   *  conjunction splitting). Surfaced under the row in the import-review UI. */
+  rawText?: string;
 };
 
 export function parsedIngredientToDraft(
@@ -93,16 +154,42 @@ export function parsedIngredientToDraft(
   const annotation: ImportAnnotation = {
     ingredientIsNew: i.ingredientMatch === "new",
     unitState,
-    rawUnit: i.rawUnit,
+    // For clean alias hits we now route the alias name into the picker
+    // itself (see `unitDisplayName` below), so clearing rawUnit here keeps
+    // the badge from showing the same text twice.
+    rawUnit: i.unitMatch === "matched" ? null : i.rawUnit,
   };
+  // When the parser resolved the unit via an alias (e.g. source said "Tasse"
+  // for canonical "Cup"), keep the alias as the displayed unit so the saved
+  // recipe reads as the source intended.
+  const unitDisplayName =
+    i.unit !== null
+      ? i.rawUnit && i.unitMatch === "matched"
+        ? i.rawUnit
+        : i.unit.name
+      : null;
   return {
     uid: crypto.randomUUID(),
     name: i.name,
     canonicalName: i.canonicalIngredientName,
+    selectedIngredientId: i.ingredientId,
+    candidates: (i.candidateMatches ?? []).map((c) => ({
+      ingredientId: c.ingredientId,
+      canonicalName: c.canonicalName,
+      matchedName: c.matchedName,
+      score: c.score,
+    })),
+    addAsAlias: false,
     quantity: quantityToInputString(i.quantity),
-    unit: i.unit ? { id: i.unit.id, name: i.unit.name } : null,
+    unit:
+      i.unit && unitDisplayName !== null
+        ? { id: i.unit.id, name: unitDisplayName }
+        : null,
+    subUnit: i.subUnit ? { id: i.subUnit.id, name: i.subUnit.name } : null,
     notes: i.notes ?? "",
     isOptional: i.isOptional ?? false,
+    fixedAmount: i.fixedAmount ?? false,
+    rawText: i.rawText,
     importAnnotation: annotation,
   };
 }
@@ -129,10 +216,15 @@ export function emptyIngredient(): DraftIngredient {
     uid: crypto.randomUUID(),
     name: "",
     canonicalName: null,
+    selectedIngredientId: null,
+    candidates: [],
+    addAsAlias: false,
     quantity: "",
     unit: null,
+    subUnit: null,
     notes: "",
     isOptional: false,
+    fixedAmount: false,
   };
 }
 
@@ -175,10 +267,15 @@ export function emptyRecipe(): DraftRecipe {
             uid: "initial-ingredient",
             name: "",
             canonicalName: null,
+            selectedIngredientId: null,
+            candidates: [],
+            addAsAlias: false,
             quantity: "",
             unit: null,
+            subUnit: null,
             notes: "",
             isOptional: false,
+            fixedAmount: false,
           },
         ],
       },
