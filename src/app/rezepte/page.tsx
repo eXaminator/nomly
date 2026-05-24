@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { asc } from "drizzle-orm";
-import { Plus } from "lucide-react";
+import { Download, Plus } from "lucide-react";
 import { AppShell } from "@/components/layout/app-shell";
 import { Button } from "@/components/ui/button";
 import { RecipeGrid } from "@/components/recipes/recipe-grid";
@@ -35,12 +35,20 @@ export default async function RezeptePage({
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Rezepte</h1>
         </div>
-        <Button asChild>
-          <Link href="/rezepte/neu">
-            <Plus className="size-4" />
-            Neues Rezept
-          </Link>
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button asChild variant="outline">
+            <Link href="/rezepte/importieren">
+              <Download className="size-4" />
+              Importieren
+            </Link>
+          </Button>
+          <Button asChild>
+            <Link href="/rezepte/neu">
+              <Plus className="size-4" />
+              Neues Rezept
+            </Link>
+          </Button>
+        </div>
       </div>
 
       <div className="mt-6">
