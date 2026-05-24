@@ -23,6 +23,14 @@ import type { PreviewMeal, PreviewIngredient } from "@/lib/shopping/preview";
 function flattenIngredients(meal: PreviewMeal): PreviewIngredient[] {
   return meal.sections.flatMap((s) => s.ingredients);
 }
+
+/** Ids of ingredients that should be included when the user clicks a
+ *  "select all" affordance (top button, meal-level checkbox, or section
+ *  checkbox). Optional ingredients are skipped — the user opts in to
+ *  those individually. */
+function defaultSelectableIds(items: PreviewIngredient[]): number[] {
+  return items.filter((i) => !i.isOptional).map((i) => i.recipeIngredientId);
+}
 import { previewMeals as apiPreview, addMealsToList } from "./api";
 
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -153,12 +161,39 @@ export function AddMealsDialog({
     setSelection((prev) => {
       const next = new Map(prev);
       const existing = next.get(meal.mealPlanId) ?? new Set();
-      const all = flattenIngredients(meal).map((i) => i.recipeIngredientId);
-      const allChecked = all.every((id) => existing.has(id));
+      const defaultIds = defaultSelectableIds(flattenIngredients(meal));
+      const allDefaultChecked =
+        defaultIds.length > 0 && defaultIds.every((id) => existing.has(id));
+      // "All required already checked" → clear the whole meal (including any
+      // optional the user opted into). Otherwise → check all required; any
+      // optional the user already opted into stays opted in.
       next.set(
         meal.mealPlanId,
-        allChecked ? new Set() : new Set(all),
+        allDefaultChecked
+          ? new Set()
+          : new Set([...existing, ...defaultIds]),
       );
+      return next;
+    });
+  }
+
+  function toggleSection(mealId: number, section: PreviewMeal["sections"][number]) {
+    setSelection((prev) => {
+      const next = new Map(prev);
+      const existing = next.get(mealId) ?? new Set();
+      const defaultIds = defaultSelectableIds(section.ingredients);
+      const allDefaultChecked =
+        defaultIds.length > 0 && defaultIds.every((id) => existing.has(id));
+      const updated = new Set(existing);
+      if (allDefaultChecked) {
+        // Clear EVERY ingredient of this section (incl. user-checked
+        // optionals) so the section's checkbox-toggle round-trip lands
+        // back at "none".
+        for (const i of section.ingredients) updated.delete(i.recipeIngredientId);
+      } else {
+        for (const id of defaultIds) updated.add(id);
+      }
+      next.set(mealId, updated);
       return next;
     });
   }
@@ -167,10 +202,11 @@ export function AddMealsDialog({
     if (!meals) return;
     const next = new Map<number, Set<number>>();
     for (const m of meals) {
+      const existing = selection.get(m.mealPlanId) ?? new Set();
       next.set(
         m.mealPlanId,
         check
-          ? new Set(flattenIngredients(m).map((i) => i.recipeIngredientId))
+          ? new Set([...existing, ...defaultSelectableIds(flattenIngredients(m))])
           : new Set(),
       );
     }
@@ -307,6 +343,7 @@ export function AddMealsDialog({
                     selected={selection.get(m.mealPlanId) ?? new Set()}
                     quantities={quantities}
                     onToggleMeal={() => toggleMeal(m)}
+                    onToggleSection={(section) => toggleSection(m.mealPlanId, section)}
                     onToggleIngredient={(riId) => toggleIngredient(m.mealPlanId, riId)}
                     onChangeQuantity={(riId, value) => setQty(m.mealPlanId, riId, value)}
                   />
@@ -340,6 +377,7 @@ function MealRow({
   selected,
   quantities,
   onToggleMeal,
+  onToggleSection,
   onToggleIngredient,
   onChangeQuantity,
 }: {
@@ -347,16 +385,24 @@ function MealRow({
   selected: Set<number>;
   quantities: QuantityState;
   onToggleMeal: () => void;
+  onToggleSection: (section: PreviewMeal["sections"][number]) => void;
   onToggleIngredient: (riId: number) => void;
   onChangeQuantity: (riId: number, value: string) => void;
 }) {
-  const flat = flattenIngredients(meal);
-  const all = flat.length;
-  const checked = selected.size;
-  const state = checked === 0 ? "none" : checked === all ? "all" : "some";
-  // Only render section headings when the recipe actually has more than
-  // one (or a single titled) section — a vanilla single-unnamed-section
-  // recipe should still read as a flat list.
+  // Selection state on the meal-level checkbox tracks ONLY non-optional
+  // ingredients — "select this meal" means "everything required from this
+  // recipe lands on the list". Optional ingredients still count toward
+  // `some` so a meal with only optionals checked renders indeterminate
+  // rather than empty.
+  const state = mealSelectionState(flattenIngredients(meal), selected);
+  // Section-level "select all" rendered when the recipe has more than one
+  // section, so the user can tick "all of section X" without manually
+  // checking each row. Single-section recipes (titled or not) stay flat.
+  const showSectionCheckboxes = meal.sections.length > 1;
+  // Section HEADINGS are shown either when there are multiple sections OR
+  // when the lone section has a real title — the latter is useful for
+  // single-section recipes that name their section ("Für den Teig"), even
+  // though no section checkbox is rendered there.
   const showSectionHeadings =
     meal.sections.length > 1 ||
     (meal.sections.length === 1 && meal.sections[0].title !== null);
@@ -386,32 +432,75 @@ function MealRow({
         </span>
       </label>
       <div className="ml-6 flex flex-col gap-1.5">
-        {meal.sections.map((section) => (
-          <div key={section.sectionId} className="flex flex-col gap-1">
-            {showSectionHeadings ? (
-              <p className="text-xs font-medium uppercase tracking-wide text-[var(--color-muted-fg)]">
-                {section.title ?? "Allgemein"}
-              </p>
-            ) : null}
-            <ul className="flex flex-col gap-1">
-              {section.ingredients.map((ing) => (
-                <IngredientCheckbox
-                  key={ing.recipeIngredientId}
-                  ing={ing}
-                  checked={selected.has(ing.recipeIngredientId)}
-                  quantityValue={
-                    quantities.get(qtyKey(meal.mealPlanId, ing.recipeIngredientId)) ?? ""
-                  }
-                  onToggle={() => onToggleIngredient(ing.recipeIngredientId)}
-                  onChangeQuantity={(v) => onChangeQuantity(ing.recipeIngredientId, v)}
-                />
-              ))}
-            </ul>
-          </div>
-        ))}
+        {meal.sections.map((section) => {
+          const sectionState = mealSelectionState(section.ingredients, selected);
+          return (
+            <div key={section.sectionId} className="flex flex-col gap-1">
+              {showSectionHeadings ? (
+                showSectionCheckboxes ? (
+                  <label className="flex cursor-pointer items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={sectionState === "all"}
+                      ref={(el) => {
+                        if (el) el.indeterminate = sectionState === "some";
+                      }}
+                      onChange={() => onToggleSection(section)}
+                      className="size-3.5"
+                    />
+                    <span className="text-xs font-medium uppercase tracking-wide text-[var(--color-muted-fg)]">
+                      {section.title ?? "Allgemein"}
+                    </span>
+                  </label>
+                ) : (
+                  <p className="text-xs font-medium uppercase tracking-wide text-[var(--color-muted-fg)]">
+                    {section.title ?? "Allgemein"}
+                  </p>
+                )
+              ) : null}
+              <ul
+                className={`flex flex-col gap-1${
+                  showSectionHeadings ? " ml-5" : ""
+                }`}
+              >
+                {section.ingredients.map((ing) => (
+                  <IngredientCheckbox
+                    key={ing.recipeIngredientId}
+                    ing={ing}
+                    checked={selected.has(ing.recipeIngredientId)}
+                    quantityValue={
+                      quantities.get(qtyKey(meal.mealPlanId, ing.recipeIngredientId)) ?? ""
+                    }
+                    onToggle={() => onToggleIngredient(ing.recipeIngredientId)}
+                    onChangeQuantity={(v) => onChangeQuantity(ing.recipeIngredientId, v)}
+                  />
+                ))}
+              </ul>
+            </div>
+          );
+        })}
       </div>
     </li>
   );
+}
+
+/** Tri-state ("none" / "some" / "all") for a select-all checkbox over a
+ *  group of ingredients. "all" reflects every NON-optional id being
+ *  selected — clicking the checkbox in the "all" state clears the group
+ *  entirely (incl. any optionals the user opted into manually). */
+function mealSelectionState(
+  items: PreviewIngredient[],
+  selected: Set<number>,
+): "none" | "some" | "all" {
+  if (items.length === 0) return "none";
+  const required = items.filter((i) => !i.isOptional);
+  const anySelected = items.some((i) => selected.has(i.recipeIngredientId));
+  if (!anySelected) return "none";
+  if (required.length === 0) return "some";
+  const allRequiredSelected = required.every((i) =>
+    selected.has(i.recipeIngredientId),
+  );
+  return allRequiredSelected ? "all" : "some";
 }
 
 function IngredientCheckbox({
@@ -430,15 +519,18 @@ function IngredientCheckbox({
   return (
     <li>
       <label
-        className={`flex cursor-pointer items-center gap-2 text-sm ${
+        className={`flex cursor-pointer items-start gap-2 text-sm ${
           ing.isOptional ? "text-[var(--color-muted-fg)] italic" : ""
         }`}
       >
+        {/* mt-1 keeps the checkbox visually centered on the FIRST text line
+            (rather than centered on the wrapped multi-line block) when the
+            notes are long enough to break onto their own line. */}
         <input
           type="checkbox"
           checked={checked}
           onChange={onToggle}
-          className="size-3.5"
+          className="mt-1 size-3.5"
         />
         <span className="flex flex-1 flex-wrap items-center gap-2">
           <span>{ing.ingredientName}</span>
