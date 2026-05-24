@@ -73,7 +73,7 @@ export function ProductForm({
       </div>
 
       <div className="flex flex-col gap-2">
-        <Label>Default-Kategorie</Label>
+        <Label>Kategorie</Label>
         <SelectSearch
           value={category}
           onChange={setCategory}

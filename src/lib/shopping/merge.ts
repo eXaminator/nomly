@@ -41,6 +41,7 @@ type RecipeIngredientRow = {
   quantity: number | null;
   unitId: number | null;
   notes: string | null;
+  fixedAmount: boolean;
 };
 
 type MealMeta = {
@@ -106,12 +107,15 @@ function applyAdd(tx: Tx, selection: AddMealsSelection[]): AddMealsResult {
     for (const sli of sel.ingredients) {
       const r = recipeRows.get(sli.recipeIngredientId);
       if (!r) continue;
+      // Fixed-amount rows keep the recipe's quantity verbatim; the meal's
+      // servings override does not multiply them.
+      const lineScale = r.fixedAmount ? 1 : scale;
       const qty =
         sli.quantity !== undefined
           ? sli.quantity
           : r.quantity == null
             ? null
-            : r.quantity * scale;
+            : r.quantity * lineScale;
       contributions.push({
         mealPlanId: sel.mealPlanId,
         recipeIngredientId: r.id,
@@ -213,6 +217,7 @@ function loadRecipeIngredients(
       quantity: recipeIngredient.quantity,
       unitId: recipeIngredient.unitId,
       notes: recipeIngredient.notes,
+      fixedAmount: recipeIngredient.fixedAmount,
     })
     .from(recipeIngredient)
     .where(sql`${recipeIngredient.id} IN (${sql.join(ids, sql`, `)})`)

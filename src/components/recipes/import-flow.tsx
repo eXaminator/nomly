@@ -14,6 +14,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RecipeForm } from "./recipe-form";
 import {
+  emptyIngredient,
   parsedIngredientToDraft,
   type DraftRecipe,
   type ParsedIngredientResponse,
@@ -60,17 +61,7 @@ function importedToDraft(
       instructions: s.instructions,
       ingredients:
         s.ingredients.length === 0
-          ? [
-              {
-                uid: crypto.randomUUID(),
-                name: "",
-                canonicalName: null,
-                quantity: "",
-                unit: null,
-                notes: "",
-                isOptional: false,
-              },
-            ]
+          ? [emptyIngredient()]
           : s.ingredients.map(parsedIngredientToDraft),
     })),
   };

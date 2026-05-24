@@ -1,12 +1,39 @@
 "use client";
 
 import * as React from "react";
-import { ArrowDown, ArrowUp, Loader2, X } from "lucide-react";
+import {
+  ArrowDown,
+  ArrowUp,
+  ChevronsDown,
+  ChevronsUp,
+  GripVertical,
+  ListPlus,
+  Loader2,
+  X,
+} from "lucide-react";
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  arrayMove,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { SelectSearch } from "@/components/ui/select-search";
+import { cn } from "@/lib/cn";
 
 import { ImpactSection } from "../impact-section";
 import type { EditFormProps } from "../list-shell";
@@ -88,26 +115,49 @@ export function SupermarketForm({
     );
   }, [name, orderedCategories, onPayloadChange]);
 
-  function moveUp(index: number) {
-    if (index <= 0) return;
-    setOrderedCategories((prev) => {
-      const next = [...prev];
-      [next[index - 1], next[index]] = [next[index], next[index - 1]];
-      return next;
-    });
-  }
-
-  function moveDown(index: number) {
-    setOrderedCategories((prev) => {
-      if (index >= prev.length - 1) return prev;
-      const next = [...prev];
-      [next[index], next[index + 1]] = [next[index + 1], next[index]];
-      return next;
-    });
-  }
-
   function removeAt(index: number) {
     setOrderedCategories((prev) => prev.filter((_, i) => i !== index));
+  }
+
+  function moveByOffset(index: number, offset: -1 | 1) {
+    setOrderedCategories((prev) => {
+      const j = index + offset;
+      if (j < 0 || j >= prev.length) return prev;
+      const next = [...prev];
+      [next[index], next[j]] = [next[j], next[index]];
+      return next;
+    });
+  }
+
+  function moveToEdge(index: number, edge: "top" | "bottom") {
+    setOrderedCategories((prev) => {
+      if (index < 0 || index >= prev.length) return prev;
+      const next = [...prev];
+      const [row] = next.splice(index, 1);
+      if (edge === "top") next.unshift(row);
+      else next.push(row);
+      return next;
+    });
+  }
+
+  const sensors = useSensors(
+    // Small activation distance so a row-level click that wasn't intended as a
+    // drag (e.g. tap on the trash icon) doesn't accidentally trigger one.
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    }),
+  );
+
+  function onDragEnd(e: DragEndEvent) {
+    const { active, over } = e;
+    if (!over || active.id === over.id) return;
+    setOrderedCategories((prev) => {
+      const from = prev.findIndex((c) => c.categoryId === active.id);
+      const to = prev.findIndex((c) => c.categoryId === over.id);
+      if (from === -1 || to === -1) return prev;
+      return arrayMove(prev, from, to);
+    });
   }
 
   const searchCategories = React.useCallback(
@@ -133,6 +183,34 @@ export function SupermarketForm({
       if (prev.some((c) => c.categoryId === picked.id)) return prev;
       return [...prev, { categoryId: picked.id, categoryName: picked.name }];
     });
+  }
+
+  const [addingAll, setAddingAll] = React.useState(false);
+  const [addAllError, setAddAllError] = React.useState<string | null>(null);
+
+  async function addAllRemaining() {
+    setAddingAll(true);
+    setAddAllError(null);
+    try {
+      const res = await fetch("/api/v1/categories?q=");
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const body = (await res.json()) as {
+        items: Array<{ id: number; name: string }>;
+      };
+      setOrderedCategories((prev) => {
+        const taken = new Set(prev.map((c) => c.categoryId));
+        const additions = body.items
+          .filter((i) => !taken.has(i.id))
+          .map((i) => ({ categoryId: i.id, categoryName: i.name }));
+        return [...prev, ...additions];
+      });
+    } catch (e) {
+      setAddAllError(
+        e instanceof Error ? e.message : "Konnte Kategorien nicht laden.",
+      );
+    } finally {
+      setAddingAll(false);
+    }
   }
 
   return (
@@ -161,57 +239,172 @@ export function SupermarketForm({
             Ende zu hängen.
           </div>
         ) : (
-          <ol className="flex flex-col divide-y divide-[var(--color-border)] overflow-hidden rounded-[var(--radius)] border border-[var(--color-border)]">
-            {orderedCategories.map((c, idx) => (
-              <li
-                key={c.categoryId}
-                className="flex items-center gap-2 px-3 py-2"
-              >
-                <span className="w-6 text-xs tabular-nums text-[var(--color-muted-fg)]">
-                  {idx + 1}.
-                </span>
-                <span className="flex-1 truncate text-sm">{c.categoryName}</span>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => moveUp(idx)}
-                  disabled={idx === 0}
-                  aria-label={`${c.categoryName} nach oben verschieben`}
-                >
-                  <ArrowUp className="size-4" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => moveDown(idx)}
-                  disabled={idx === orderedCategories.length - 1}
-                  aria-label={`${c.categoryName} nach unten verschieben`}
-                >
-                  <ArrowDown className="size-4" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => removeAt(idx)}
-                  aria-label={`${c.categoryName} entfernen`}
-                >
-                  <X className="size-4" />
-                </Button>
-              </li>
-            ))}
-          </ol>
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            onDragEnd={onDragEnd}
+          >
+            <SortableContext
+              items={orderedCategories.map((c) => c.categoryId)}
+              strategy={verticalListSortingStrategy}
+            >
+              <ol className="flex flex-col divide-y divide-[var(--color-border)] overflow-hidden rounded-[var(--radius)] border border-[var(--color-border)]">
+                {orderedCategories.map((c, idx) => (
+                  <SortableCategoryRow
+                    key={c.categoryId}
+                    id={c.categoryId}
+                    index={idx}
+                    total={orderedCategories.length}
+                    name={c.categoryName}
+                    onMoveToTop={() => moveToEdge(idx, "top")}
+                    onMoveUp={() => moveByOffset(idx, -1)}
+                    onMoveDown={() => moveByOffset(idx, 1)}
+                    onMoveToBottom={() => moveToEdge(idx, "bottom")}
+                    onRemove={() => removeAt(idx)}
+                  />
+                ))}
+              </ol>
+            </SortableContext>
+          </DndContext>
         )}
         {!loadingDetail && (
-          <SelectSearch
-            value={null}
-            onChange={handlePickCategory}
-            search={searchCategories}
-            placeholder="Kategorie hinzufügen…"
-          />
+          <div className="flex flex-col gap-2">
+            <SelectSearch
+              value={null}
+              onChange={handlePickCategory}
+              search={searchCategories}
+              placeholder="Kategorie hinzufügen…"
+            />
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={addAllRemaining}
+                disabled={addingAll}
+              >
+                {addingAll ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : (
+                  <ListPlus className="size-4" />
+                )}
+                Alle verbleibenden Kategorien hinzufügen
+              </Button>
+              {addAllError ? (
+                <span className="text-xs text-[var(--color-danger)]">
+                  {addAllError}
+                </span>
+              ) : null}
+            </div>
+          </div>
         )}
       </div>
 
       {item && <ImpactSection entityKind="supermarket" id={item.id} />}
     </div>
+  );
+}
+
+function SortableCategoryRow({
+  id,
+  index,
+  total,
+  name,
+  onMoveToTop,
+  onMoveUp,
+  onMoveDown,
+  onMoveToBottom,
+  onRemove,
+}: {
+  id: number;
+  index: number;
+  total: number;
+  name: string;
+  onMoveToTop: () => void;
+  onMoveUp: () => void;
+  onMoveDown: () => void;
+  onMoveToBottom: () => void;
+  onRemove: () => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+    useSortable({ id });
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+  };
+  const atTop = index === 0;
+  const atBottom = index === total - 1;
+  return (
+    <li
+      ref={setNodeRef}
+      style={style}
+      className={cn(
+        "flex items-center gap-1 bg-[var(--color-bg)] px-3 py-2",
+        isDragging && "relative z-10 shadow-lg",
+      )}
+    >
+      <button
+        type="button"
+        {...attributes}
+        {...listeners}
+        aria-label={`${name} per Drag-and-Drop verschieben`}
+        className="-ml-1 inline-flex h-7 w-7 cursor-grab items-center justify-center rounded-md text-[var(--color-muted-fg)] hover:bg-[var(--color-muted)] active:cursor-grabbing"
+      >
+        <GripVertical className="size-4" />
+      </button>
+      <span className="w-6 text-xs tabular-nums text-[var(--color-muted-fg)]">
+        {index + 1}.
+      </span>
+      <span className="flex-1 truncate text-sm">{name}</span>
+      <Button
+        variant="ghost"
+        size="icon"
+        onClick={onMoveToTop}
+        disabled={atTop}
+        aria-label={`${name} an den Anfang verschieben`}
+        title="An den Anfang"
+      >
+        <ChevronsUp className="size-4" />
+      </Button>
+      <Button
+        variant="ghost"
+        size="icon"
+        onClick={onMoveUp}
+        disabled={atTop}
+        aria-label={`${name} eine Position nach oben verschieben`}
+        title="Nach oben"
+      >
+        <ArrowUp className="size-4" />
+      </Button>
+      <Button
+        variant="ghost"
+        size="icon"
+        onClick={onMoveDown}
+        disabled={atBottom}
+        aria-label={`${name} eine Position nach unten verschieben`}
+        title="Nach unten"
+      >
+        <ArrowDown className="size-4" />
+      </Button>
+      <Button
+        variant="ghost"
+        size="icon"
+        onClick={onMoveToBottom}
+        disabled={atBottom}
+        aria-label={`${name} an das Ende verschieben`}
+        title="Ans Ende"
+      >
+        <ChevronsDown className="size-4" />
+      </Button>
+      <Button
+        variant="ghost"
+        size="icon"
+        onClick={onRemove}
+        aria-label={`${name} entfernen`}
+        title="Entfernen"
+      >
+        <X className="size-4" />
+      </Button>
+    </li>
   );
 }

@@ -11,7 +11,9 @@ import { and, eq, isNull, sql } from "drizzle-orm";
 import { db } from "../../db/index.ts";
 import { recipe } from "../../db/schema.ts";
 import {
+  buildIngredientCatalog,
   buildIngredientLookup,
+  buildSubUnitLookup,
   buildUnitLookup,
 } from "../recipe-import/index.ts";
 import { createRecipe, updateRecipe } from "../recipes/service.ts";
@@ -80,6 +82,8 @@ function buildLookups() {
   return {
     units: buildUnitLookup(),
     ingredients: buildIngredientLookup(),
+    ingredientCatalog: buildIngredientCatalog(),
+    subUnits: buildSubUnitLookup(),
   };
 }
 
@@ -162,7 +166,15 @@ function resolveQueue(opts: ImportOptions): string[] {
 export async function runFamilywallImport(
   opts: ImportOptions,
 ): Promise<FamilywallImportSummary> {
-  const lookups = buildLookups();
+  // `lookups` must be refreshed after every successful ingestion so the
+  // substring matcher in `parseIngredientLines` sees ingredients that earlier
+  // recipes in the same run just created. Without this, a fresh DB import
+  // produces duplicates whenever two recipes mention the same ingredient with
+  // different inflection / word order (e.g. "Paprikaschote" vs
+  // "Paprikaschoten", or "Paprikapulver rosenscharf" vs "rosenscharfes
+  // Paprikapulver"): neither variant is in the catalog when its row is
+  // processed, so both get created as new ingredients.
+  let lookups = buildLookups();
   const summary: FamilywallImportSummary = {
     imported: 0,
     updated: 0,
@@ -207,11 +219,15 @@ export async function runFamilywallImport(
         summary.imported += 1;
         summary.details.push({ title, outcome: "imported", recipeId: result.id });
         opts.onRecipe?.({ index, total: cap, title, outcome: "imported", recipeId: result.id });
+        // New ingredients may have been inserted; refresh lookups so the
+        // next recipe's matcher can see them.
+        lookups = buildLookups();
         break;
       case "updated":
         summary.updated += 1;
         summary.details.push({ title, outcome: "updated", recipeId: result.id });
         opts.onRecipe?.({ index, total: cap, title, outcome: "updated", recipeId: result.id });
+        lookups = buildLookups();
         break;
       case "would-import":
         summary.imported += 1;

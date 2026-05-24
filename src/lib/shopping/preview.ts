@@ -34,6 +34,17 @@ export type PreviewIngredient = {
   isOptional: boolean;
 };
 
+export type PreviewSection = {
+  /** Recipe section id. Stable within a recipe; surfaced so the UI can use
+   *  it as a React key. */
+  sectionId: number;
+  /** Section title from the recipe ("Für den Teig:"), or null for the
+   *  default unnamed section. The dialog renders the heading only when
+   *  it's non-null AND there's more than one section in the meal. */
+  title: string | null;
+  ingredients: PreviewIngredient[];
+};
+
 export type PreviewMeal = {
   mealPlanId: number;
   date: string;
@@ -41,7 +52,7 @@ export type PreviewMeal = {
   recipeTitle: string;
   servings: number;
   alreadyOnList: boolean;
-  ingredients: PreviewIngredient[];
+  sections: PreviewSection[];
 };
 
 /**
@@ -82,6 +93,9 @@ export function previewMeals(start: string, lengthDays: number): PreviewMeal[] {
   const lines = db
     .select({
       recipeId: recipeSection.recipeId,
+      sectionId: recipeSection.id,
+      sectionTitle: recipeSection.title,
+      sectionSortOrder: recipeSection.sortOrder,
       recipeIngredientId: recipeIngredient.id,
       ingredientId: recipeIngredient.ingredientId,
       ingredientName: ingredient.name,
@@ -90,6 +104,7 @@ export function previewMeals(start: string, lengthDays: number): PreviewMeal[] {
       unitName: unit.name,
       notes: recipeIngredient.notes,
       isOptional: recipeIngredient.isOptional,
+      fixedAmount: recipeIngredient.fixedAmount,
       excludeFromShoppingList: ingredient.excludeFromShoppingList,
     })
     .from(recipeIngredient)
@@ -97,7 +112,7 @@ export function previewMeals(start: string, lengthDays: number): PreviewMeal[] {
     .innerJoin(ingredient, eq(ingredient.id, recipeIngredient.ingredientId))
     .leftJoin(unit, eq(unit.id, recipeIngredient.unitId))
     .where(inArray(recipeSection.recipeId, recipeIds))
-    .orderBy(asc(recipeIngredient.sortOrder))
+    .orderBy(asc(recipeSection.sortOrder), asc(recipeIngredient.sortOrder))
     .all();
 
   const linesByRecipe = new Map<number, typeof lines>();
@@ -133,16 +148,40 @@ export function previewMeals(start: string, lengthDays: number): PreviewMeal[] {
     if (recipeLines.length === 0) continue;
     const servings = m.servingsOverride ?? m.recipeServings;
     const scale = m.recipeServings > 0 ? servings / m.recipeServings : 1;
-    const ingredients: PreviewIngredient[] = recipeLines.map((l) => ({
-      recipeIngredientId: l.recipeIngredientId,
-      ingredientId: l.ingredientId,
-      ingredientName: l.ingredientName,
-      qty: l.qty == null ? null : l.qty * scale,
-      unitId: l.unitId,
-      unitName: l.unitName,
-      notes: l.notes,
-      isOptional: !!l.isOptional,
-    }));
+    // Group ingredients by section, preserving section + ingredient order
+    // (already enforced via the ORDER BY on the query). The dialog uses
+    // these to render headings — when a recipe has just one unnamed
+    // section, the heading is suppressed in the UI.
+    const sectionsById = new Map<number, PreviewSection>();
+    const sectionOrder: number[] = [];
+    for (const l of recipeLines) {
+      let sec = sectionsById.get(l.sectionId);
+      if (!sec) {
+        sec = {
+          sectionId: l.sectionId,
+          title: l.sectionTitle,
+          ingredients: [],
+        };
+        sectionsById.set(l.sectionId, sec);
+        sectionOrder.push(l.sectionId);
+      }
+      sec.ingredients.push({
+        recipeIngredientId: l.recipeIngredientId,
+        ingredientId: l.ingredientId,
+        ingredientName: l.ingredientName,
+        // Fixed-amount lines (e.g. "1 Prise Salz") keep the recipe's value
+        // regardless of how the meal's portion override compares.
+        qty: l.qty == null ? null : l.fixedAmount ? l.qty : l.qty * scale,
+        unitId: l.unitId,
+        unitName: l.unitName,
+        notes: l.notes,
+        isOptional: !!l.isOptional,
+      });
+    }
+    const sections = sectionOrder
+      .map((id) => sectionsById.get(id)!)
+      .filter((s) => s.ingredients.length > 0);
+    if (sections.length === 0) continue;
     out.push({
       mealPlanId: m.mealPlanId,
       date: m.date,
@@ -150,7 +189,7 @@ export function previewMeals(start: string, lengthDays: number): PreviewMeal[] {
       recipeTitle: m.recipeTitle,
       servings,
       alreadyOnList: alreadyOnList.has(m.mealPlanId),
-      ingredients,
+      sections,
     });
   }
 

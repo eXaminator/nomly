@@ -14,9 +14,35 @@ export type EntityKind =
 
 export type RefBreakdown = Record<string, number>;
 
+export type RecipeIngredientUsage = {
+  /** null when the row had no parsed quantity ("Salz nach Geschmack"). */
+  quantity: number | null;
+  /** Canonical unit name (e.g. "g", "EL"). Null when the row resolved to a
+   *  sub-unit or carried no unit. */
+  unitName: string | null;
+  /** Ingredient-scoped sub-unit name when the row uses one (e.g. "Zehe"
+   *  for Knoblauch). Mutually exclusive with {@link unitName}. */
+  subUnitName: string | null;
+  /** Override spelling when the source said e.g. "Tasse" but the row
+   *  resolved to canonical unit "Cup". */
+  displayUnit: string | null;
+  /** Per-row name the recipe shows (e.g. "Tomaten" when the canonical is
+   *  "Tomate"). Falls back to the canonical name when the row didn't
+   *  override. */
+  displayName: string | null;
+  notes: string | null;
+  isOptional: boolean;
+  /** True for "Salz nach Geschmack" / "etwas Öl" rows — same flag the
+   *  recipe view uses to render the lock icon. */
+  fixedAmount: boolean;
+};
+
 export type RecipeLink = {
   id: number;
   title: string;
+  /** Per-row usage details. Only populated for ingredient-context links
+   *  (see {@link linkedRecipesForIngredients}); empty for unit / tag links. */
+  usages?: RecipeIngredientUsage[];
 };
 
 export type ImpactRow = {

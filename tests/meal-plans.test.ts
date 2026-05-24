@@ -355,6 +355,14 @@ describe("planner date helpers", () => {
     expect(alignToStartWeekday("2026-05-22", 7)).toBe("2026-05-17"); // previous Sunday
   });
 
+  it("nextStartWeekdayOnOrAfter rolls forward unless today already matches", async () => {
+    const { nextStartWeekdayOnOrAfter } = await import("@/lib/meal-plans/dates");
+    // 2026-05-22 is a Friday (ISO weekday 5).
+    expect(nextStartWeekdayOnOrAfter("2026-05-22", 5)).toBe("2026-05-22"); // today is Friday
+    expect(nextStartWeekdayOnOrAfter("2026-05-22", 1)).toBe("2026-05-25"); // next Monday
+    expect(nextStartWeekdayOnOrAfter("2026-05-22", 7)).toBe("2026-05-24"); // next Sunday
+  });
+
   it("buildRange returns daysVisible consecutive ISO dates", async () => {
     const { buildRange } = await import("@/lib/meal-plans/dates");
     const r = buildRange("2026-05-18", 7);

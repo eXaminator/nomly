@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { MarkdownEditor } from "@/components/ui/markdown-editor";
+import { NewIngredientsDialog } from "./new-ingredients-dialog";
 import { PhotoUpload } from "./photo-upload";
 import { SectionEditor } from "./section-editor";
 import { TagInput } from "./tag-input";
@@ -17,6 +18,7 @@ import {
   type DraftRecipe,
   type DraftSection,
 } from "./types";
+import type { NewIngredientDefaults } from "@/lib/recipes/types";
 
 type Props = {
   initial?: DraftRecipe;
@@ -34,12 +36,32 @@ function toNumberOrNull(raw: string): number | null {
 function ingredientToPayload(ing: DraftIngredient) {
   const name = ing.name.trim();
   if (name.length === 0) return null;
+  const hasSubUnit = ing.subUnit !== null;
   return {
     ingredientName: name,
+    // The pill UI determines ingredient identity. When the user explicitly
+    // picked a pill (or the matcher auto-selected one above threshold),
+    // `selectedIngredientId` is set and the server links the row directly,
+    // bypassing name-based resolution.
+    ingredientId: ing.selectedIngredientId,
+    // Only honoured when ingredientId is set; turns the row's display name
+    // into an alias of that ingredient on save (force-match opt-in).
+    addAsAlias: ing.addAsAlias,
     quantity: toNumberOrNull(ing.quantity),
-    unitId: ing.unit?.id ?? null,
+    // Sub-unit and unit are mutually exclusive; the server enforces it too.
+    unitId: hasSubUnit ? null : ing.unit?.id ?? null,
+    subUnitId: hasSubUnit ? ing.subUnit!.id : null,
+    // Display label the user sees in the picker. Server NULLs this back out
+    // if it matches the canonical unit name, so we don't bloat the DB with
+    // redundant strings — and we don't have to fetch canonicals client-side.
+    // Skipped for sub-units (their own name field is the source of truth).
+    displayUnit: hasSubUnit ? null : ing.unit?.name ?? null,
     notes: ing.notes.trim() || null,
     isOptional: ing.isOptional,
+    fixedAmount: ing.fixedAmount,
+    // Round-trip the source line: populated by the importer / clipboard
+    // parser, sticks through edit, surfaces in the row's "Original" hint.
+    rawLine: ing.rawText ?? null,
   };
 }
 
@@ -69,6 +91,13 @@ export function RecipeForm({ initial, recipeId, tagSuggestions }: Props) {
   const [draft, setDraft] = React.useState<DraftRecipe>(initial ?? emptyRecipe());
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  // Pending submit waiting on the new-ingredients dialog. When set, the
+  // dialog is open and `payload` is the validated draft to ship once the
+  // user fills in (or skips) the per-name metadata.
+  const [pendingSubmit, setPendingSubmit] = React.useState<{
+    payload: ReturnType<typeof buildPayload>;
+    newNames: string[];
+  } | null>(null);
 
   function setSection(i: number, next: DraftSection) {
     const sections = draft.sections.slice();
@@ -118,24 +147,82 @@ export function RecipeForm({ initial, recipeId, tagSuggestions }: Props) {
 
     setSaving(true);
     try {
-      const url = recipeId ? `/api/v1/recipes/${recipeId}` : "/api/v1/recipes";
-      const method = recipeId ? "PATCH" : "POST";
-      const res = await fetch(url, {
-        method,
+      // Ask the server which submitted ingredient names would be auto-
+      // created. If any, hand off to the dialog so the user can fill in
+      // category / diet / exclude in one step before the recipe POST runs.
+      //
+      // Only check rows WITHOUT a pre-resolved ingredientId. Rows with an
+      // explicit ingredientId (set by the pill UI's auto-select or the
+      // user picking a candidate) are pinned to an existing canonical
+      // already — the server's resolveIngredient won't run name-based
+      // lookup for them, so they can't surprise-create a new ingredient
+      // ("Zwiebeln" → linked to canonical "Zwiebel", false positive).
+      const allNames = Array.from(
+        new Set(
+          payload.sections.flatMap((s) =>
+            s.ingredients
+              .filter((i) => i.ingredientId == null)
+              .map((i) => i.ingredientName.trim()),
+          ),
+        ),
+      );
+      const checkRes = await fetch("/api/v1/ingredients/check", {
+        method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({ names: allNames }),
       });
-      if (!res.ok) {
-        const err = (await res.json().catch(() => ({}))) as { error?: string };
-        throw new Error(err.error ?? `HTTP ${res.status}`);
+      const checkData = checkRes.ok
+        ? ((await checkRes.json()) as { newNames: string[] })
+        : { newNames: [] };
+      if (checkData.newNames.length > 0) {
+        setPendingSubmit({ payload, newNames: checkData.newNames });
+        setSaving(false);
+        return;
       }
-      const data = (await res.json()) as { id?: number };
-      const targetId = recipeId ?? data.id;
-      router.push(targetId ? `/rezepte/${targetId}` : "/rezepte");
-      router.refresh();
+      await postRecipe(payload, undefined);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Speichern fehlgeschlagen.");
-    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function postRecipe(
+    payload: ReturnType<typeof buildPayload>,
+    newIngredientDefaults: NewIngredientDefaults[] | undefined,
+  ) {
+    const url = recipeId ? `/api/v1/recipes/${recipeId}` : "/api/v1/recipes";
+    const method = recipeId ? "PATCH" : "POST";
+    const res = await fetch(url, {
+      method,
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        ...payload,
+        ...(newIngredientDefaults && newIngredientDefaults.length > 0
+          ? { newIngredientDefaults }
+          : {}),
+      }),
+    });
+    if (!res.ok) {
+      const err = (await res.json().catch(() => ({}))) as { error?: string };
+      throw new Error(err.error ?? `HTTP ${res.status}`);
+    }
+    const data = (await res.json()) as { id?: number };
+    const targetId = recipeId ?? data.id;
+    router.push(targetId ? `/rezepte/${targetId}` : "/rezepte");
+    router.refresh();
+  }
+
+  async function onConfirmNewIngredients(
+    defaults: NewIngredientDefaults[],
+  ) {
+    if (!pendingSubmit) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await postRecipe(pendingSubmit.payload, defaults);
+      setPendingSubmit(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Speichern fehlgeschlagen.");
       setSaving(false);
     }
   }
@@ -287,6 +374,17 @@ export function RecipeForm({ initial, recipeId, tagSuggestions }: Props) {
           {error}
         </p>
       ) : null}
+
+      <NewIngredientsDialog
+        open={pendingSubmit != null}
+        newNames={pendingSubmit?.newNames ?? []}
+        saving={saving}
+        onCancel={() => {
+          setPendingSubmit(null);
+          setSaving(false);
+        }}
+        onConfirm={onConfirmNewIngredients}
+      />
 
       <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
         {recipeId ? (

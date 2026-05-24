@@ -20,7 +20,7 @@ const STAMMDATEN_LINKS: Array<{
     href: "/einstellungen/zutaten",
     title: "Zutaten",
     description:
-      "Namen, Aliase, Default-Kategorie, Diät-Klassifikation, Liste-Ausschluss.",
+      "Namen, Aliase, Kategorie, Diät-Klassifikation, Liste-Ausschluss.",
   },
   {
     href: "/einstellungen/produkte",

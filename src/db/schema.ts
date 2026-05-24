@@ -88,6 +88,15 @@ export const ingredient = sqliteTable("ingredient", {
   defaultCategoryId: integer("default_category_id").references(() => category.id, {
     onDelete: "set null",
   }),
+  /**
+   * The unit the user buys this ingredient in (e.g. Stück for garlic bulbs,
+   * Bund for parsley). Shopping-list aggregation rolls sub-unit quantities
+   * up to this unit and ceils to whole numbers. NULL means "no rollup
+   * configured" — items are aggregated as-is.
+   */
+  purchaseUnitId: integer("purchase_unit_id").references(() => unit.id, {
+    onDelete: "set null",
+  }),
   excludeFromShoppingList: integer("exclude_from_shopping_list", { mode: "boolean" })
     .notNull()
     .default(false),
@@ -111,7 +120,48 @@ export const ingredientAlias = sqliteTable("ingredient_alias", {
     .notNull()
     .references(() => ingredient.id, { onDelete: "cascade" }),
   name: text("name").notNull().unique(),
+  /**
+   * Per-alias default unit (global). Used when the parser hits this alias
+   * with no explicit unit and the alias doesn't point at a sub-unit. Rarely
+   * needed in practice — most defaults are sub-units. Kept around so an
+   * alias like "Olivenöl extra virgin" could still imply ml.
+   */
+  defaultUnitId: integer("default_unit_id").references(() => unit.id, {
+    onDelete: "set null",
+  }),
+  /**
+   * Per-alias default sub-unit. When the alias matches and the line has no
+   * explicit unit, the parser substitutes this ingredient sub-unit instead
+   * of the generic "Stück" fallback. Lets "Knoblauchzehe" (alias of
+   * "Knoblauch") carry sub-unit "Zehe" without making "Zehe" a global unit.
+   */
+  defaultSubUnitId: integer("default_sub_unit_id").references(
+    (): AnySQLiteColumn => ingredientSubUnit.id,
+    { onDelete: "set null" },
+  ),
 });
+
+export const ingredientSubUnit = sqliteTable(
+  "ingredient_sub_unit",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    ingredientId: integer("ingredient_id")
+      .notNull()
+      .references(() => ingredient.id, { onDelete: "cascade" }),
+    /** Display name of the sub-unit ("Zehe", "Zweig", "Stange"). Stored
+     *  ingredient-locally — the same name on a different ingredient is a
+     *  different row, with its own per_purchase value. */
+    name: text("name").notNull(),
+    /**
+     * How many sub-units make one purchase unit. For Knoblauch:Zehe this is
+     * 10 (10 Zehen per Stück). Stored as the multiplier the shopping-list
+     * aggregator divides by when converting sub-unit quantities into
+     * purchase-unit aggregates.
+     */
+    perPurchase: real("per_purchase").notNull().default(1),
+  },
+  (t) => [uniqueIndex("ingredient_sub_unit_unique").on(t.ingredientId, t.name)],
+);
 
 export const product = sqliteTable("product", {
   id: integer("id").primaryKey({ autoIncrement: true }),
@@ -151,6 +201,21 @@ export const recipeIngredient = sqliteTable(
     displayName: text("display_name"),
     quantity: real("quantity"),
     unitId: integer("unit_id").references(() => unit.id, { onDelete: "set null" }),
+    /**
+     * Mutually-exclusive alternative to `unit_id`: when set, the quantity is
+     * expressed in an ingredient-specific sub-unit ("12 Zehen", "3 Zweige").
+     * The shopping-list aggregator rolls these up into the ingredient's
+     * purchase unit via `ingredient_sub_unit.per_purchase`.
+     */
+    subUnitId: integer("sub_unit_id").references(() => ingredientSubUnit.id, {
+      onDelete: "set null",
+    }),
+    /**
+     * Mirror of `display_name` for units: when the source said "Tasse" but
+     * the row resolves to canonical unit "Cup", `display_unit` preserves
+     * "Tasse" for display. Shopping-list math still keys off `unit_id`.
+     */
+    displayUnit: text("display_unit"),
     notes: text("notes"),
     /**
      * When true, this ingredient is "(optional) garnish"-style — the recipe
@@ -158,6 +223,20 @@ export const recipeIngredient = sqliteTable(
      * shopping-list builder skips them when seeding from a meal plan.
      */
     isOptional: integer("is_optional", { mode: "boolean" }).notNull().default(false),
+    /**
+     * When true, the ingredient's quantity does NOT scale with the planned
+     * servings (e.g. "1 Prise Salz", "etwas Öl"). Shopping-list contributions
+     * use the recipe's amount verbatim regardless of the meal's
+     * `servings_override`. Auto-set on import for rows with no parsed quantity.
+     */
+    fixedAmount: integer("fixed_amount", { mode: "boolean" }).notNull().default(false),
+    /**
+     * Original source substring this row was parsed from — kept verbatim so
+     * the edit UI can show the user what the parser was working from, the
+     * same way the import-review screen surfaces it. Populated by importers
+     * (URL + Familywall + clipboard paste); null for manually-added rows.
+     */
+    rawLine: text("raw_line"),
     sortOrder: integer("sort_order").notNull().default(0),
   },
   (t) => [index("recipe_ingredient_section_idx").on(t.sectionId)],

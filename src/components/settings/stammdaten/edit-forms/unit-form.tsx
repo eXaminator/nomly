@@ -164,10 +164,7 @@ export function UnitForm({ item, onPayloadChange }: EditFormProps<UnitItem>) {
         <Label htmlFor="unit-factor">Faktor</Label>
         <Input
           id="unit-factor"
-          type="number"
           inputMode="decimal"
-          min={0}
-          step="any"
           value={factorText}
           onChange={(e) => setFactorText(e.target.value)}
         />

@@ -280,6 +280,114 @@ export function deleteSupermarket(
   return { deletedId: id };
 }
 
+export type SupermarketBulkPatch = {
+  /** Category IDs to append at the end of each selected supermarket's order
+   *  (skipped per-supermarket if already linked). */
+  addCategoryIds?: number[];
+  /** Category IDs to detach from each selected supermarket. */
+  removeCategoryIds?: number[];
+};
+
+export type SupermarketBulkResult = {
+  /** Per-supermarket count of new (supermarket, category) rows. */
+  added: Array<{ supermarketId: number; count: number }>;
+  /** Per-supermarket count of removed rows. */
+  removed: Array<{ supermarketId: number; count: number }>;
+};
+
+/**
+ * For each selected supermarket: optionally append a set of categories at the
+ * end of its ordered list (de-duplicated against existing links), and/or
+ * remove a set of category links. Validates that the referenced categories
+ * exist; raises 404 otherwise.
+ */
+export function bulkUpdateSupermarkets(
+  ids: number[],
+  patch: SupermarketBulkPatch,
+): SupermarketBulkResult {
+  const addIds = Array.from(new Set(patch.addCategoryIds ?? []));
+  const removeIds = Array.from(new Set(patch.removeCategoryIds ?? []));
+  if (ids.length === 0 || (addIds.length === 0 && removeIds.length === 0)) {
+    return { added: [], removed: [] };
+  }
+  const allCatIds = Array.from(new Set([...addIds, ...removeIds]));
+  if (allCatIds.length > 0) {
+    const found = db
+      .select({ id: category.id })
+      .from(category)
+      .where(inArray(category.id, allCatIds))
+      .all();
+    if (found.length !== allCatIds.length) {
+      const have = new Set(found.map((r) => r.id));
+      const missing = allCatIds.filter((id) => !have.has(id));
+      throw new SupermarketStammdatenError(
+        `Unbekannte Kategorien: ${missing.join(", ")}.`,
+        404,
+      );
+    }
+  }
+  const added: Array<{ supermarketId: number; count: number }> = [];
+  const removed: Array<{ supermarketId: number; count: number }> = [];
+
+  db.transaction((tx) => {
+    for (const supermarketId of ids) {
+      const exists = tx
+        .select({ id: supermarket.id })
+        .from(supermarket)
+        .where(eq(supermarket.id, supermarketId))
+        .get();
+      if (!exists) continue;
+      let removedCount = 0;
+      if (removeIds.length > 0) {
+        const r = tx
+          .delete(supermarketCategory)
+          .where(
+            and(
+              eq(supermarketCategory.supermarketId, supermarketId),
+              inArray(supermarketCategory.categoryId, removeIds),
+            ),
+          )
+          .run();
+        removedCount = Number(r.changes ?? 0);
+      }
+      let addedCount = 0;
+      if (addIds.length > 0) {
+        const existing = tx
+          .select({ categoryId: supermarketCategory.categoryId })
+          .from(supermarketCategory)
+          .where(eq(supermarketCategory.supermarketId, supermarketId))
+          .all();
+        const taken = new Set(existing.map((r) => r.categoryId));
+        const toInsert = addIds.filter((id) => !taken.has(id));
+        if (toInsert.length > 0) {
+          const maxRow = tx
+            .select({
+              max: sql<number | null>`MAX(${supermarketCategory.sortOrder})`,
+            })
+            .from(supermarketCategory)
+            .where(eq(supermarketCategory.supermarketId, supermarketId))
+            .get();
+          let nextSort = (maxRow?.max ?? -1) + 1;
+          tx.insert(supermarketCategory)
+            .values(
+              toInsert.map((categoryId) => ({
+                supermarketId,
+                categoryId,
+                sortOrder: nextSort++,
+              })),
+            )
+            .run();
+          addedCount = toInsert.length;
+        }
+      }
+      if (addedCount > 0) added.push({ supermarketId, count: addedCount });
+      if (removedCount > 0)
+        removed.push({ supermarketId, count: removedCount });
+    }
+  });
+  return { added, removed };
+}
+
 export function mergeSupermarkets(
   winnerId: number,
   loserIds: number[],

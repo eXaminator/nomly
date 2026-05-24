@@ -15,8 +15,7 @@ import {
   mergeIngredientAndInstructionSections,
   parseIngredientLinesIntoSections,
   parseInstructionsIntoSections,
-  type IngredientLookup,
-  type UnitLookup,
+  type ParseLookups,
 } from "../recipe-import/index.ts";
 import type { RecipeInput } from "../recipes/types.ts";
 import type { FamilywallRawRecipe } from "./types.ts";
@@ -82,7 +81,7 @@ function dedupeTags(tags: Iterable<string>): string[] {
 
 export function transformFamilywallRecipe(
   raw: FamilywallRawRecipe,
-  lookups: { units: UnitLookup; ingredients: IngredientLookup },
+  lookups: ParseLookups,
   /** Photo path the orchestrator stored before calling us, or null. */
   photoPath: string | null,
 ): RecipeInput {
@@ -118,10 +117,26 @@ export function transformFamilywallRecipe(
       ].filter((s): s is string => typeof s === "string" && s.length > 0);
       return {
         ingredientName: name,
+        // CRITICAL: thread the matcher's resolved ingredient id through to
+        // the save payload. Familywall imports go directly into createRecipe
+        // without a UI in between, so without this the service's name-based
+        // resolveIngredient runs against `parsed.name` (the user's text) —
+        // which after Phase A's displayName preservation no longer equals
+        // the canonical, so every "Paprika-Pulver" / "Tomaten" row would
+        // create a duplicate canonical instead of linking to an existing
+        // one. The matcher already picked the right ingredient id.
+        ingredientId: p.ingredientId,
         quantity: p.quantity,
-        unitId: p.unit ? p.unit.id : null,
+        unitId: p.subUnit ? null : p.unit ? p.unit.id : null,
+        subUnitId: p.subUnit ? p.subUnit.id : null,
+        // Keep the imported unit token verbatim (e.g. "Tasse"). Server NULLs
+        // it back out if it equals the canonical unit name. Skipped for
+        // sub-units (the sub-unit name is the source of truth).
+        displayUnit: p.subUnit ? null : (p.rawUnit ?? null),
         notes: noteParts.length > 0 ? noteParts.join(" – ") : null,
         isOptional: p.isOptional,
+        fixedAmount: p.fixedAmount,
+        rawLine: p.rawText || null,
       };
     }),
   }));

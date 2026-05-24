@@ -132,6 +132,7 @@ export function updateMeal(id: number, patch: MealPlanUpdateInput): void {
               id: shoppingItemSource.id,
               itemId: shoppingItemSource.itemId,
               recipeQty: recipeIngredient.quantity,
+              fixedAmount: recipeIngredient.fixedAmount,
             })
             .from(shoppingItemSource)
             .innerJoin(
@@ -141,10 +142,14 @@ export function updateMeal(id: number, patch: MealPlanUpdateInput): void {
             .where(eq(shoppingItemSource.mealPlanId, id))
             .all();
           for (const s of sources) {
+            // Fixed-amount lines (no portion scaling) keep the recipe's value
+            // verbatim — a "1 Prise Salz" contribution doesn't double when
+            // the meal grows from 2 to 4 portions.
+            const effectiveScale = s.fixedAmount ? 1 : newScale;
             const nextQty =
               s.recipeQty == null
                 ? null
-                : Math.round(s.recipeQty * newScale * 1000) / 1000;
+                : Math.round(s.recipeQty * effectiveScale * 1000) / 1000;
             tx.update(shoppingItemSource)
               .set({ contributedQuantity: nextQty })
               .where(eq(shoppingItemSource.id, s.id))

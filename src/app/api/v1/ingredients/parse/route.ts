@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import {
+  buildIngredientCatalog,
   buildIngredientLookup,
+  buildSubUnitLookup,
   buildUnitLookup,
   parseIngredientLinesIntoSections,
 } from "@/lib/recipe-import";
@@ -27,6 +29,8 @@ export async function POST(request: Request) {
   const lookups = {
     units: buildUnitLookup(),
     ingredients: buildIngredientLookup(),
+    ingredientCatalog: buildIngredientCatalog(),
+    subUnits: buildSubUnitLookup(),
   };
   const lines = pairTableLines(
     rawLines,

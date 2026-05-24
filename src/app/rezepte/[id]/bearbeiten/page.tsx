@@ -51,10 +51,30 @@ export default async function EditRecipePage({
           i.ingredientName.toLowerCase()
             ? null
             : i.canonicalIngredientName,
+        // The row already links to an ingredient; the pill UI starts with
+        // that pill selected. Candidates are populated lazily when the
+        // user edits the name (the matcher endpoint runs then).
+        selectedIngredientId: i.ingredientId,
+        candidates: [],
+        addAsAlias: false,
         quantity: quantityToInputString(i.quantity),
-        unit: i.unitId !== null && i.unitName ? { id: i.unitId, name: i.unitName } : null,
+        // sub_unit_id wins over unit_id (the writer keeps them mutually
+        // exclusive). The displayed name comes from the same `unitName`
+        // coalesce on the server, so we don't need to look it up twice.
+        unit:
+          i.subUnitId == null && i.unitId !== null && i.unitName
+            ? { id: i.unitId, name: i.unitName }
+            : null,
+        subUnit:
+          i.subUnitId !== null && i.unitName
+            ? { id: i.subUnitId, name: i.unitName }
+            : null,
         notes: i.notes ?? "",
         isOptional: i.isOptional,
+        fixedAmount: i.fixedAmount,
+        // Reuse the import-flow `rawText` slot — the existing
+        // IngredientRow already surfaces it as the "Original" hint.
+        rawText: i.rawLine ?? undefined,
       })),
     })),
   };

@@ -8,6 +8,7 @@ import {
   tag,
   ingredient as ingredientTable,
   ingredientAlias as ingredientAliasTable,
+  ingredientSubUnit as ingredientSubUnitTable,
   unit as unitTable,
 } from "../../db/schema.ts";
 import type { RecipeDiet } from "./diet.ts";
@@ -57,8 +58,17 @@ function resolveTags(tx: Tx, names: string[]): number[] {
  * Resolve a freeform ingredient name to an existing row, or insert a new one.
  * Matches case-insensitively against `ingredient.name` first, then against
  * `ingredient_alias.name`. The newly-created row preserves the user's casing.
+ *
+ * `defaultsByLowerName` (optional) carries per-name metadata the recipe form
+ * collected for ingredients that don't exist yet — category, dietary class,
+ * exclude flag. Applied only when inserting; ignored when resolving to an
+ * existing row.
  */
-function resolveIngredient(tx: Tx, rawName: string): number {
+function resolveIngredient(
+  tx: Tx,
+  rawName: string,
+  defaultsByLowerName?: Map<string, NewIngredientDefaultsFromInput>,
+): number {
   const cleaned = norm(rawName);
   if (cleaned.length === 0) {
     throw new Error("ingredient name is required");
@@ -86,19 +96,98 @@ function resolveIngredient(tx: Tx, rawName: string): number {
     .get();
   if (aliased) return aliased.id;
 
+  const defaults = defaultsByLowerName?.get(lowered);
   const inserted = tx
     .insert(ingredientTable)
-    .values({ name: cleaned })
+    .values({
+      name: cleaned,
+      defaultCategoryId: defaults?.defaultCategoryId ?? null,
+      dietaryClass: defaults?.dietaryClass ?? null,
+      excludeFromShoppingList: defaults?.excludeFromShoppingList ?? false,
+    })
     .returning({ id: ingredientTable.id })
     .all();
   return inserted[0].id;
+}
+
+/**
+ * Insert an alias of {@link ingredientId} with the given display name, but
+ * only when no existing canonical or alias row already covers it (case-
+ * insensitive, Unicode-aware). Used by the force-match flow on recipe save
+ * — the user explicitly opted in by checking "Als Alias hinzufügen" in the
+ * picker, so they accept a small catalog change.
+ */
+function addIngredientAlias(
+  tx: Tx,
+  ingredientId: number,
+  aliasName: string,
+): void {
+  const cleaned = norm(aliasName);
+  if (cleaned.length === 0) return;
+  const lowered = cleaned.toLowerCase();
+  const canonical = tx
+    .select({ id: ingredientTable.id })
+    .from(ingredientTable)
+    .where(sql`lower_u(${ingredientTable.name}) = ${lowered}`)
+    .get();
+  if (canonical) return;
+  const existingAlias = tx
+    .select({ id: ingredientAliasTable.ingredientId })
+    .from(ingredientAliasTable)
+    .where(sql`lower_u(${ingredientAliasTable.name}) = ${lowered}`)
+    .get();
+  if (existingAlias) return;
+  tx.insert(ingredientAliasTable)
+    .values({ ingredientId, name: cleaned })
+    .run();
+}
+
+function resolveDisplayUnit(
+  tx: Tx,
+  unitId: number | null,
+  displayUnit: string | null,
+): string | null {
+  const trimmed = displayUnit?.trim() ?? "";
+  if (trimmed.length === 0 || unitId == null) return null;
+  const row = tx
+    .select({ name: unitTable.name })
+    .from(unitTable)
+    .where(eq(unitTable.id, unitId))
+    .get();
+  if (row && row.name.toLowerCase() === trimmed.toLowerCase()) return null;
+  return trimmed;
+}
+
+type NewIngredientDefaultsFromInput = {
+  defaultCategoryId: number | null;
+  dietaryClass: "vegan" | "vegetarian" | "meat" | null;
+  excludeFromShoppingList: boolean;
+};
+
+function buildNewIngredientDefaultsMap(
+  defaults: RecipeInput["newIngredientDefaults"],
+): Map<string, NewIngredientDefaultsFromInput> {
+  const map = new Map<string, NewIngredientDefaultsFromInput>();
+  if (!defaults) return map;
+  for (const d of defaults) {
+    map.set(d.name.trim().toLowerCase(), {
+      defaultCategoryId: d.defaultCategoryId,
+      dietaryClass: d.dietaryClass,
+      excludeFromShoppingList: d.excludeFromShoppingList,
+    });
+  }
+  return map;
 }
 
 function writeSections(
   tx: Tx,
   recipeId: number,
   sections: RecipeInput["sections"],
+  newIngredientDefaults?: RecipeInput["newIngredientDefaults"],
 ) {
+  const defaultsByLowerName = buildNewIngredientDefaultsMap(
+    newIngredientDefaults,
+  );
   sections.forEach((section, sIdx) => {
     const sectionRow = tx
       .insert(recipeSection)
@@ -114,7 +203,20 @@ function writeSections(
 
     section.ingredients.forEach((ing, iIdx) => {
       const trimmedName = ing.ingredientName.trim();
-      const ingredientId = resolveIngredient(tx, trimmedName);
+      // Explicit ingredient id from the pill picker wins over name-based
+      // resolution. This is the path the new pill UI uses to keep a row's
+      // `display_name` decoupled from canonical lookup ("tomatoes" linked
+      // to canonical Tomate without name-equality games).
+      const ingredientId =
+        ing.ingredientId != null
+          ? ing.ingredientId
+          : resolveIngredient(tx, trimmedName, defaultsByLowerName);
+      // Force-match alias add: when the user pinned the row to a specific
+      // ingredient and asked to remember the spelling, insert it as an
+      // alias too (idempotent — duplicates are guarded by the lookup).
+      if (ing.ingredientId != null && ing.addAsAlias) {
+        addIngredientAlias(tx, ing.ingredientId, trimmedName);
+      }
       tx.insert(recipeIngredient)
         .values({
           sectionId,
@@ -123,9 +225,21 @@ function writeSections(
           // so it survives the round-trip on the recipe view + edit page.
           displayName: trimmedName,
           quantity: ing.quantity,
-          unitId: ing.unitId,
+          unitId: ing.subUnitId != null ? null : ing.unitId,
+          subUnitId: ing.subUnitId ?? null,
+          // Same alias-preservation as displayName, but for units. Stored
+          // only when it differs from the canonical unit name — keeps a
+          // unit rename in Stammdaten flowing through to existing recipes.
+          // Skipped when the row resolved to a sub-unit (whose name is the
+          // source of truth on its own).
+          displayUnit:
+            ing.subUnitId != null
+              ? null
+              : resolveDisplayUnit(tx, ing.unitId, ing.displayUnit),
           notes: ing.notes,
           isOptional: ing.isOptional,
+          fixedAmount: ing.fixedAmount,
+          rawLine: ing.rawLine ?? null,
           sortOrder: iIdx,
         })
         .run();
@@ -156,7 +270,7 @@ export function createRecipe(input: RecipeInput): number {
       .returning({ id: recipe.id })
       .all();
     const recipeId = inserted[0].id;
-    writeSections(tx, recipeId, input.sections);
+    writeSections(tx, recipeId, input.sections, input.newIngredientDefaults);
     writeTags(tx, recipeId, input.tags);
     return recipeId;
   });
@@ -185,7 +299,7 @@ export function updateRecipe(id: number, input: RecipeInput): void {
     tx.delete(recipeSection).where(eq(recipeSection.recipeId, id)).run();
     tx.delete(recipeTag).where(eq(recipeTag.recipeId, id)).run();
 
-    writeSections(tx, id, input.sections);
+    writeSections(tx, id, input.sections, input.newIngredientDefaults);
     writeTags(tx, id, input.tags);
   });
 }
@@ -216,8 +330,12 @@ export function getRecipe(id: number): RecipeView | null {
     quantity: number | null;
     unitId: number | null;
     unitName: string | null;
+    subUnitId: number | null;
+    subUnitPerPurchase: number | null;
     notes: string | null;
     isOptional: boolean;
+    fixedAmount: boolean;
+    rawLine: string | null;
     dietaryClass: IngredientDietaryClass;
     sortOrder: number;
   };
@@ -235,14 +353,28 @@ export function getRecipe(id: number): RecipeView | null {
             canonicalIngredientName: ingredientTable.name,
             quantity: recipeIngredient.quantity,
             unitId: recipeIngredient.unitId,
-            unitName: unitTable.name,
+            // Render order: display_unit override → sub-unit name → canonical
+            // unit name. Sub-units win over the unit join because the row
+            // can't have both set anyway (the writer keeps unit_id NULL
+            // whenever sub_unit_id is non-NULL).
+            unitName: sql<
+              string | null
+            >`coalesce(${recipeIngredient.displayUnit}, ${ingredientSubUnitTable.name}, ${unitTable.name})`,
+            subUnitId: recipeIngredient.subUnitId,
+            subUnitPerPurchase: ingredientSubUnitTable.perPurchase,
             notes: recipeIngredient.notes,
             isOptional: recipeIngredient.isOptional,
+            fixedAmount: recipeIngredient.fixedAmount,
+            rawLine: recipeIngredient.rawLine,
             dietaryClass: ingredientTable.dietaryClass,
             sortOrder: recipeIngredient.sortOrder,
           })
           .from(recipeIngredient)
           .leftJoin(unitTable, eq(unitTable.id, recipeIngredient.unitId))
+          .leftJoin(
+            ingredientSubUnitTable,
+            eq(ingredientSubUnitTable.id, recipeIngredient.subUnitId),
+          )
           .innerJoin(
             ingredientTable,
             eq(ingredientTable.id, recipeIngredient.ingredientId),
@@ -291,8 +423,12 @@ export function getRecipe(id: number): RecipeView | null {
           quantity: i.quantity,
           unitId: i.unitId,
           unitName: i.unitName,
+          subUnitId: i.subUnitId,
+          subUnitPerPurchase: i.subUnitPerPurchase,
           notes: i.notes,
           isOptional: i.isOptional,
+          fixedAmount: i.fixedAmount,
+          rawLine: i.rawLine,
           sortOrder: i.sortOrder,
         })),
     })),

@@ -7,10 +7,28 @@ import {
   listIngredients,
 } from "@/lib/stammdaten/ingredient/service";
 
+const aliasDefaultSchema = z
+  .object({
+    aliasName: z.string().min(1),
+    unitId: z.number().int().positive().nullable().default(null),
+    subUnitIndex: z.number().int().nonnegative().nullable().default(null),
+  })
+  .refine((v) => v.unitId != null || v.subUnitIndex != null, {
+    message: "Entweder unitId oder subUnitIndex muss gesetzt sein.",
+  });
+
+const subUnitSchema = z.object({
+  name: z.string().min(1),
+  perPurchase: z.number().positive().default(1),
+});
+
 const upsertSchema = z.object({
   name: z.string().min(1),
   aliases: z.array(z.string()).default([]),
+  aliasUnitDefaults: z.array(aliasDefaultSchema).default([]),
+  subUnits: z.array(subUnitSchema).default([]),
   defaultCategoryId: z.number().int().positive().nullable(),
+  purchaseUnitId: z.number().int().positive().nullable().default(null),
   excludeFromShoppingList: z.boolean(),
   dietaryClass: z.enum(["vegan", "vegetarian", "meat"]).nullable(),
 });

@@ -1,17 +1,35 @@
 import { z } from "zod";
 
-const ingredientSchema = z.object({
-  ingredientName: z.string().min(1, "Zutat ist erforderlich"),
-  quantity: z.number().nullable(),
-  unitId: z.number().int().positive().nullable(),
-  notes: z.string().nullable(),
-  isOptional: z.boolean().default(false),
-});
+const ingredientSchema = z
+  .object({
+    ingredientName: z.string().min(1, "Zutat ist erforderlich"),
+    ingredientId: z.number().int().positive().nullable().default(null),
+    addAsAlias: z.boolean().default(false),
+    quantity: z.number().nullable(),
+    unitId: z.number().int().positive().nullable(),
+    subUnitId: z.number().int().positive().nullable().default(null),
+    displayUnit: z.string().nullable().default(null),
+    notes: z.string().nullable(),
+    isOptional: z.boolean().default(false),
+    fixedAmount: z.boolean().default(false),
+    rawLine: z.string().nullable().default(null),
+  })
+  .refine((v) => !(v.unitId != null && v.subUnitId != null), {
+    message: "unitId und subUnitId schließen sich gegenseitig aus.",
+    path: ["subUnitId"],
+  });
 
 const sectionSchema = z.object({
   title: z.string().nullable(),
   instructions: z.string(),
   ingredients: z.array(ingredientSchema),
+});
+
+const newIngredientDefaultsSchema = z.object({
+  name: z.string().min(1),
+  defaultCategoryId: z.number().int().positive().nullable(),
+  dietaryClass: z.enum(["vegan", "vegetarian", "meat"]).nullable(),
+  excludeFromShoppingList: z.boolean(),
 });
 
 export const recipeInputSchema = z.object({
@@ -26,6 +44,7 @@ export const recipeInputSchema = z.object({
   photoUrl: z.string().nullable().optional(),
   tags: z.array(z.string()),
   sections: z.array(sectionSchema).min(1, "Mindestens einen Abschnitt anlegen"),
+  newIngredientDefaults: z.array(newIngredientDefaultsSchema).optional(),
 });
 
 export type ValidatedRecipeInput = z.infer<typeof recipeInputSchema>;

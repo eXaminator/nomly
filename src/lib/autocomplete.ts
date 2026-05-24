@@ -175,7 +175,15 @@ export function listUnitsByUsage(): Array<AutocompleteHit & { usageCount: number
 
 export function searchCategories(query: string): AutocompleteHit[] {
   const q = norm(query);
-  if (q.length === 0) return [];
+  if (q.length === 0) {
+    // Empty query → return the full alphabetical list so the autocomplete can
+    // show every category as soon as the picker is opened.
+    return db
+      .select({ id: category.id, name: category.name })
+      .from(category)
+      .orderBy(asc(category.name))
+      .all();
+  }
   const pattern = buildLikePattern(unaccent(q));
 
   const canonical = db

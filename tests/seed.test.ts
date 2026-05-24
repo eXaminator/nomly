@@ -34,7 +34,6 @@ describe("seed transform", () => {
     expect(first.units.added).toBeGreaterThanOrEqual(10);
     expect(first.categories.added).toBeGreaterThanOrEqual(20);
     expect(first.ingredients.added).toBeGreaterThanOrEqual(300);
-    expect(first.supermarkets.added).toBeGreaterThanOrEqual(50);
 
     const units = db.select().from(unit).all();
     const cats = db.select().from(category).all();
@@ -43,13 +42,14 @@ describe("seed transform", () => {
     expect(units.length).toBe(first.units.added);
     expect(cats.length).toBe(first.categories.added);
     expect(ings.length).toBe(first.ingredients.added);
-    expect(markets.length).toBe(first.supermarkets.added);
+    // Seeder no longer touches supermarkets — the table stays empty until the
+    // user adds one via the settings UI.
+    expect(markets.length).toBe(0);
 
     const second = runSeed();
     expect(second.units.added).toBe(0);
     expect(second.units.skipped).toBe(first.units.added);
     expect(second.ingredients.added).toBe(0);
-    expect(second.supermarkets.added).toBe(0);
   });
 });
 

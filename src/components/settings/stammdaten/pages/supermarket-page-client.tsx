@@ -2,6 +2,9 @@
 
 import * as React from "react";
 
+import { Button } from "@/components/ui/button";
+
+import { BulkSupermarketCategoryDialog } from "../bulk-supermarket-category-dialog";
 import {
   SupermarketForm,
   type SupermarketItem,
@@ -34,23 +37,89 @@ export function SupermarketPageClient({
     (item: SupermarketItem, q: string) => item.name.toLowerCase().includes(q),
     [],
   );
+  const [bulkDialog, setBulkDialog] = React.useState<{
+    ids: number[];
+    onApplied: () => void;
+  } | null>(null);
+  const [saving, setSaving] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+
+  async function applyBulk(mode: "add" | "remove", categoryIds: number[]) {
+    if (!bulkDialog) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/v1/supermarkets/bulk", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          ids: bulkDialog.ids,
+          ...(mode === "add"
+            ? { addCategoryIds: categoryIds }
+            : { removeCategoryIds: categoryIds }),
+        }),
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? `HTTP ${res.status}`);
+      }
+      bulkDialog.onApplied();
+      setBulkDialog(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Speichern fehlgeschlagen.");
+    } finally {
+      setSaving(false);
+    }
+  }
 
   return (
-    <ListShell<SupermarketItem>
-      entityKind="supermarket"
-      initialItems={initialItems}
-      columns={columns}
-      idOf={(i) => i.id}
-      nameOf={(i) => i.name}
-      searchMatches={searchMatches}
-      EditForm={SupermarketForm}
-      hardDeleteAllowed={true}
-      mergeWarning={
-        <>
-          Supermärkte zusammenzuführen ist ungewöhnlich. Bei Konflikten in der
-          Kategorienreihenfolge gewinnt der ausgewählte Supermarkt.
-        </>
-      }
-    />
+    <>
+      <ListShell<SupermarketItem>
+        entityKind="supermarket"
+        initialItems={initialItems}
+        columns={columns}
+        idOf={(i) => i.id}
+        nameOf={(i) => i.name}
+        searchMatches={searchMatches}
+        EditForm={SupermarketForm}
+        hardDeleteAllowed={true}
+        mergeWarning={
+          <>
+            Supermärkte zusammenzuführen ist ungewöhnlich. Bei Konflikten in
+            der Kategorienreihenfolge gewinnt der ausgewählte Supermarkt.
+          </>
+        }
+        renderBulkActions={({ selectedIds, onApplied }) => (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              setBulkDialog({ ids: selectedIds, onApplied });
+              setError(null);
+            }}
+          >
+            Kategorien zuordnen
+          </Button>
+        )}
+      />
+      {bulkDialog ? (
+        <BulkSupermarketCategoryDialog
+          open={true}
+          side={{
+            pickedNoun: "Kategorien",
+            pickedNounSingular: "Kategorie",
+            searchEndpoint: "/api/v1/categories/manage",
+          }}
+          selectionLabel={`${bulkDialog.ids.length} Supermärkte ausgewählt`}
+          saving={saving}
+          error={error}
+          onClose={() => {
+            setBulkDialog(null);
+            setError(null);
+          }}
+          onApply={applyBulk}
+        />
+      ) : null}
+    </>
   );
 }

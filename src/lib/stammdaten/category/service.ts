@@ -1,4 +1,4 @@
-import { asc, eq, inArray, or, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, or, sql } from "drizzle-orm";
 
 import { db } from "../../../db/index.ts";
 import {
@@ -7,6 +7,7 @@ import {
   ingredient,
   product,
   shoppingItem,
+  supermarket,
   supermarketCategory,
 } from "../../../db/schema.ts";
 import { getImpact } from "../shared/impact.ts";
@@ -316,6 +317,112 @@ export function deleteCategory(
   // out / cascade automatically.
   db.delete(category).where(eq(category.id, id)).run();
   return { deletedId: id };
+}
+
+export type CategoryBulkPatch = {
+  /** Supermarkets to which each selected category is appended (skipped per
+   *  pair if the link already exists). */
+  addToSupermarketIds?: number[];
+  /** Supermarkets from which each selected category is detached. */
+  removeFromSupermarketIds?: number[];
+};
+
+export type CategoryBulkResult = {
+  added: Array<{ categoryId: number; supermarketId: number }>;
+  removed: Array<{ categoryId: number; supermarketId: number }>;
+};
+
+/**
+ * For each (selected category, target supermarket) pair: append the category
+ * at the end of that supermarket's order (or detach it). Mirrors
+ * `bulkUpdateSupermarkets` but with the loop nested the other way around so
+ * "set this category on N markets" is a single round-trip.
+ */
+export function bulkUpdateCategories(
+  categoryIds: number[],
+  patch: CategoryBulkPatch,
+): CategoryBulkResult {
+  const addIds = Array.from(new Set(patch.addToSupermarketIds ?? []));
+  const removeIds = Array.from(new Set(patch.removeFromSupermarketIds ?? []));
+  if (
+    categoryIds.length === 0 ||
+    (addIds.length === 0 && removeIds.length === 0)
+  ) {
+    return { added: [], removed: [] };
+  }
+  const allMarketIds = Array.from(new Set([...addIds, ...removeIds]));
+  if (allMarketIds.length > 0) {
+    const found = db
+      .select({ id: supermarket.id })
+      .from(supermarket)
+      .where(inArray(supermarket.id, allMarketIds))
+      .all();
+    if (found.length !== allMarketIds.length) {
+      const have = new Set(found.map((r) => r.id));
+      const missing = allMarketIds.filter((id) => !have.has(id));
+      throw new CategoryStammdatenError(
+        `Unbekannte Supermärkte: ${missing.join(", ")}.`,
+        404,
+      );
+    }
+  }
+  const added: Array<{ categoryId: number; supermarketId: number }> = [];
+  const removed: Array<{ categoryId: number; supermarketId: number }> = [];
+
+  db.transaction((tx) => {
+    for (const supermarketId of addIds) {
+      const existing = tx
+        .select({ categoryId: supermarketCategory.categoryId })
+        .from(supermarketCategory)
+        .where(eq(supermarketCategory.supermarketId, supermarketId))
+        .all();
+      const taken = new Set(existing.map((r) => r.categoryId));
+      const toInsert = categoryIds.filter((id) => !taken.has(id));
+      if (toInsert.length === 0) continue;
+      const maxRow = tx
+        .select({
+          max: sql<number | null>`MAX(${supermarketCategory.sortOrder})`,
+        })
+        .from(supermarketCategory)
+        .where(eq(supermarketCategory.supermarketId, supermarketId))
+        .get();
+      let nextSort = (maxRow?.max ?? -1) + 1;
+      tx.insert(supermarketCategory)
+        .values(
+          toInsert.map((categoryId) => ({
+            supermarketId,
+            categoryId,
+            sortOrder: nextSort++,
+          })),
+        )
+        .run();
+      for (const categoryId of toInsert) added.push({ categoryId, supermarketId });
+    }
+    for (const supermarketId of removeIds) {
+      const existing = tx
+        .select({ categoryId: supermarketCategory.categoryId })
+        .from(supermarketCategory)
+        .where(
+          and(
+            eq(supermarketCategory.supermarketId, supermarketId),
+            inArray(supermarketCategory.categoryId, categoryIds),
+          ),
+        )
+        .all();
+      if (existing.length === 0) continue;
+      tx.delete(supermarketCategory)
+        .where(
+          and(
+            eq(supermarketCategory.supermarketId, supermarketId),
+            inArray(supermarketCategory.categoryId, categoryIds),
+          ),
+        )
+        .run();
+      for (const r of existing)
+        removed.push({ categoryId: r.categoryId, supermarketId });
+    }
+  });
+  return { added, removed };
 }
 
 export function mergeCategories(

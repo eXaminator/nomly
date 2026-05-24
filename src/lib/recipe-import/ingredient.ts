@@ -26,6 +26,16 @@ export type ParsedIngredient = {
   quantity: number | null;
   unitName: string | null;
   name: string;
+  /**
+   * The portion of the input that ended up in notes via a comma / dash /
+   * usage-prefix boundary (i.e. things the user separated from the name with
+   * punctuation, but NOT things hoisted out of parens / brackets / "to
+   * taste" phrases). The ingredient matcher treats commas as whitespace, so
+   * it joins `name + " " + commaTailText` to find aliases like
+   * `Paprikapulver rosenscharf` regardless of whether the source wrote a
+   * comma between them.
+   */
+  commaTailText: string;
   notes: string | null;
   /** True when the source marked the ingredient as optional ("opt. 2 EL …",
    * "Optional: …", "evtl.", "(optional)", "nach Belieben", "wenn vorhanden",
@@ -225,7 +235,7 @@ const NAME_FILLER_TOKENS = new Set([
  * Compared case-insensitively against the token with any trailing
  * period stripped — so both "kl." and "kl" match.
  */
-const SIZE_MODIFIER_TOKENS = new Set([
+export const SIZE_MODIFIER_TOKENS = new Set([
   "kl",
   "kleine",
   "kleiner",
@@ -640,8 +650,12 @@ function preprocess(raw: string): {
   text = text.replace(/^\s*[~∼]\s*/, "");
 
   // " / " and " o. " → " or " — keep both alternatives but route them through
-  // the existing NOTE_BOUNDARY logic.
-  text = text.replace(/\s+\/\s+/g, " or ").replace(/\s+o\.\s+/gi, " or ");
+  // the existing NOTE_BOUNDARY logic. The negative lookahead skips German
+  // "o. Ä." / "o. ä." ("oder Ähnliche/-s" = "or similar"), which is a fixed
+  // phrase that belongs in the notes verbatim, not a conjunction.
+  text = text
+    .replace(/\s+\/\s+/g, " or ")
+    .replace(/\s+o\.\s+(?!ä\.)/gi, " or ");
 
   // Range with repeated unit: "25 g – 50 g" / "100 ml - 200 ml" → "25-50 g"
   // (the duplicated unit is redundant; collapsing it lets the existing range
@@ -729,6 +743,14 @@ function tokenize(input: string): string[] {
     .replace(/(\d)([½¼¾⅓⅔⅛⅜⅝⅞])/g, "$1 $2")
     .replace(/(\d)([a-zA-ZäöüÄÖÜß])/g, "$1 $2")
     .replace(/([½¼¾⅓⅔⅛⅜⅝⅞])([a-zA-ZäöüÄÖÜß])/g, "$1 $2")
+    // Slash between two letters splits into separate tokens
+    // ("kleine/mittlere Paprika" → "kleine mittlere Paprika"). The size-
+    // modifier loop can then strip each adjective independently. Numeric
+    // fractions ("1/2", "1/4") survive because both sides need to be
+    // letters. Short suffix shorthands ("Dose/n", "Tomate(n)/T/n") are
+    // already collapsed in `preprocess` before this point, so they don't
+    // reach the tokenizer.
+    .replace(/(\p{L})\/(\p{L})/gu, "$1 $2")
     // A dash adjacent to whitespace acts as a note separator
     // ("bell pepper- thinly sliced" → pad to a standalone "-" token). Don't
     // touch dashes inside compounds where neither side has whitespace
@@ -742,7 +764,20 @@ function tokenize(input: string): string[] {
       "$1 $2 $3",
     )
     .replace(/(\s)([-–])([\p{L}\(])/gu, "$1$2 $3");
-  return padded.split(/\s+/).filter((t) => t.length > 0);
+  // Drop standalone dash tokens entirely. They show up when the source
+  // had whitespace around a dash ("Bio - Honig", "Salz – nach Geschmack")
+  // and don't carry information the downstream parser needs:
+  //   - "to taste" / "nach Geschmack" follow-ups are already captured by
+  //     {@link TO_TASTE_PHRASES} in preprocess (which strips the leading
+  //     dash with them);
+  //   - intra-name compounds ("Bio - Honig") should collapse to a single
+  //     name "Bio Honig" rather than splitting "Bio" off as its own
+  //     ingredient with the noun shoved into notes.
+  // We keep dashes that stay glued inside a multi-char token
+  // ("Bio-Honig", "Weizen-Vollkornmehl") — those are part of the name.
+  return padded
+    .split(/\s+/)
+    .filter((t) => t.length > 0 && !/^[-–—]+$/.test(t));
 }
 
 /**
@@ -773,6 +808,7 @@ export function parseIngredientString(
       quantity: null,
       unitName: null,
       name: "",
+      commaTailText: "",
       notes,
       isOptional,
       altWithPrepStripped: null,
@@ -918,11 +954,27 @@ export function parseIngredientString(
   // shouldn't be part of the name.
   const nameTokens: string[] = [];
   const noteTokens: string[] = [];
+  // Tokens that landed in noteTokens specifically because of a TRUE
+  // comma at name-area depth 0. Used downstream as `commaTailText` so the
+  // matcher can fold "Paprikapulver, rosenscharf" back to a single
+  // "Paprikapulver rosenscharf" alias hit — without also grabbing
+  // parens-captured or USAGE_PREFIX content.
+  const commaTailTokens: string[] = [];
   let inNotes = false;
+  let inCommaTail = false;
   let parenDepth = 0;
   for (const t of tokens) {
     if (t === "(") {
+      // When the parens block follows a non-empty stretch of notes,
+      // emit a comma so the reader sees them as separate phrases:
+      //   "Paprikaschote, rote (fein gehackt)" → notes "rote, fein gehackt"
+      // instead of "rote fein gehackt".
+      if (parenDepth === 0 && inNotes && noteTokens.length > 0) {
+        noteTokens.push(",");
+      }
       parenDepth += 1;
+      // Entering a parens block ends any active comma-tail run.
+      inCommaTail = false;
       continue;
     }
     if (t === ")") {
@@ -936,10 +988,14 @@ export function parseIngredientString(
     const lower = t.toLowerCase();
     if (!inNotes && t === ",") {
       inNotes = true;
+      inCommaTail = true;
       continue;
     }
     if (t === "," || t === ";") {
       if (inNotes) noteTokens.push(",");
+      // Another comma ends the in-comma-tail run, even though notes mode
+      // stays on.
+      inCommaTail = false;
       continue;
     }
     if (!inNotes && USAGE_PREFIX_TOKENS.has(lower) && nameTokens.length > 0) {
@@ -961,13 +1017,12 @@ export function parseIngredientString(
       noteTokens.push(t);
       continue;
     }
-    // Standalone dash separator: "Flaked Almond - to taste" — when a name has
-    // already been collected, a bare dash demotes the rest to notes.
-    if (!inNotes && (t === "-" || t === "–") && nameTokens.length > 0) {
-      inNotes = true;
-      continue;
+    if (inNotes) {
+      noteTokens.push(t);
+      if (inCommaTail) commaTailTokens.push(t);
+    } else {
+      nameTokens.push(t);
     }
-    (inNotes ? noteTokens : nameTokens).push(t);
   }
 
   // Tidy: trim trailing filler from the name area.
@@ -1067,11 +1122,22 @@ export function parseIngredientString(
     .replace(/[()]/g, "")
     .replace(/\s+/g, " ")
     .trim();
+  // Just the post-comma name-area portion. Parens-captured and USAGE_PREFIX-
+  // triggered tokens land in noteTokens but not here, so the matcher can
+  // safely consume `commaTailText` without re-grabbing user-marked notes.
+  const commaTailText = commaTailTokens
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .replace(/^[\s,;]+|[\s,;]+$/g, "")
+    .trim();
   const noteBody =
     noteTokens
       .join(" ")
       .replace(/[()]/g, "")
       .replace(/\s+/g, " ")
+      // Tidy spaces around comma/semicolon separators that came from the
+      // paren-boundary commas or the ", " inside the source line.
+      .replace(/\s*([,;])\s*/g, "$1 ")
       .replace(/^[\s,;]+|[\s,;]+$/g, "")
       .trim();
   const sizeNote = sizeModifiers.join(" ").trim();
@@ -1131,7 +1197,15 @@ export function parseIngredientString(
     altWithPrepStripped = { name: altName, notes: altNotes };
   }
 
-  return { quantity, unitName, name, notes, isOptional, altWithPrepStripped };
+  return {
+    quantity,
+    unitName,
+    name,
+    commaTailText,
+    notes,
+    isOptional,
+    altWithPrepStripped,
+  };
 }
 
 /**
@@ -1161,14 +1235,21 @@ export function parseIngredientString(
  * False positives are unlikely because the base forms are participles /
  * adverbs that don't overlap with ingredient names.
  */
-function isPrepLeadingToken(token: string): boolean {
+export function isPrepLeadingToken(token: string): boolean {
   const lower = token.toLowerCase();
   if (PREP_LEADING_TOKENS.has(lower)) return true;
+  // Size modifiers ("klein", "groß", "mittelgroß", …) qualify too when they
+  // land in the trailing position of the name area — e.g. "Tomaten klein
+  // gehackt" → strip "gehackt" then "klein", leaving "Tomaten" as the
+  // identity. Without this, "klein" survives and pushes the cleaned name
+  // ("Tomaten klein") out of matcher range.
+  if (SIZE_MODIFIER_TOKENS.has(lower)) return true;
   // Try stripping the typical German declined-adjective suffixes.
   for (const suffix of ["er", "en", "es", "em", "e"]) {
     if (lower.endsWith(suffix)) {
       const stem = lower.slice(0, -suffix.length);
-      if (PREP_LEADING_TOKENS.has(stem)) return true;
+      if (PREP_LEADING_TOKENS.has(stem) || SIZE_MODIFIER_TOKENS.has(stem))
+        return true;
     }
   }
   return false;
@@ -1225,6 +1306,10 @@ export const PREP_LEADING_TOKENS = new Set([
   "geknetet",
   "gemischt",
   "geraspelt",
+  // "gepresst(e/r/n)" — describes a prep action (pressing garlic, citrus, …)
+  // not a product identity. "gepresste Knoblauchzehen" → name
+  // "Knoblauchzehen" (matches the alias → sub-unit Zehe), notes "gepresst".
+  "gepresst",
   // NOTE: "gemahlen" is NOT in this set — ground spices are a distinct
   // product on the shelf and the descriptor needs to stay in the name.
   // Same goes for "frozen" / "TK" / "getrocknet" — see

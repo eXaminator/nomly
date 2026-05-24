@@ -58,6 +58,20 @@ export function SelectSearch({
   const [activeIdx, setActiveIdx] = React.useState(0);
   const reqRef = React.useRef(0);
   const inputRef = React.useRef<HTMLInputElement>(null);
+  const contentRef = React.useRef<HTMLDivElement>(null);
+  const listRef = React.useRef<HTMLUListElement>(null);
+  // Most callers pass `search` as an inline closure and rely on the default
+  // `defaultItems = []` parameter, so both references change on every parent
+  // render. Tunnel them through refs so the fetch effect only re-runs on
+  // intent-bearing changes (query / open), not on every parent re-render —
+  // otherwise the loader spins forever and `activeIdx` resets just as the
+  // user is navigating with arrow keys.
+  const searchRef = React.useRef(search);
+  const defaultItemsRef = React.useRef(defaultItems);
+  React.useEffect(() => {
+    searchRef.current = search;
+    defaultItemsRef.current = defaultItems;
+  });
 
   const trimmedQuery = query.trim();
   const exactMatch = React.useMemo(() => {
@@ -92,7 +106,15 @@ export function SelectSearch({
     const my = ++reqRef.current;
     const handle = window.setTimeout(async () => {
       try {
-        const result = q.length === 0 ? defaultItems : await search(q);
+        // Prefer caller-supplied `defaultItems` as the empty-query listing
+        // (lets callers pre-bake "most used" rows). Otherwise hit the search
+        // endpoint with an empty query — the server is expected to return the
+        // full list for that case.
+        const currentDefaults = defaultItemsRef.current;
+        const useDefaults = q.length === 0 && currentDefaults.length > 0;
+        const result = useDefaults
+          ? currentDefaults
+          : await searchRef.current(q);
         if (my === reqRef.current) {
           setItems(result);
           setActiveIdx(0);
@@ -102,7 +124,7 @@ export function SelectSearch({
       }
     }, DEBOUNCE_MS);
     return () => window.clearTimeout(handle);
-  }, [query, open, search, defaultItems]);
+  }, [query, open]);
 
   React.useEffect(() => {
     if (open) {
@@ -117,6 +139,23 @@ export function SelectSearch({
       setQuery("");
     }
   }, [open]);
+
+  // Keep the active option in view when keyboard navigation moves it past
+  // the visible region of the (potentially long) list.
+  React.useEffect(() => {
+    if (!open) return;
+    const list = listRef.current;
+    if (!list) return;
+    const active = list.children[activeIdx] as HTMLElement | undefined;
+    if (!active) return;
+    const top = active.offsetTop;
+    const bottom = top + active.offsetHeight;
+    if (top < list.scrollTop) {
+      list.scrollTop = top;
+    } else if (bottom > list.scrollTop + list.clientHeight) {
+      list.scrollTop = bottom - list.clientHeight;
+    }
+  }, [activeIdx, open, items.length]);
 
   function commit(item: SelectSearchItem) {
     onChange(item);
@@ -202,9 +241,29 @@ export function SelectSearch({
       </Popover.Trigger>
       <Popover.Portal>
         <Popover.Content
+          ref={contentRef}
           align="start"
           sideOffset={4}
           onOpenAutoFocus={(e) => e.preventDefault()}
+          onPointerDownOutside={(e) => {
+            // Workaround: in Chrome/macOS the pointer-down event for a
+            // scrollbar inside the popover reports a target outside the
+            // content node, which Radix would treat as an outside click and
+            // close the popover — making the list impossible to scroll via
+            // the scrollbar. Compare against the bounding rect instead and
+            // keep the popover open when the click is inside it.
+            const rect = contentRef.current?.getBoundingClientRect();
+            if (!rect) return;
+            const ev = e.detail.originalEvent;
+            if (
+              ev.clientX >= rect.left &&
+              ev.clientX <= rect.right &&
+              ev.clientY >= rect.top &&
+              ev.clientY <= rect.bottom
+            ) {
+              e.preventDefault();
+            }
+          }}
           className="z-50 w-[var(--radix-popover-trigger-width)] min-w-[14rem] overflow-hidden rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-card)] shadow-lg"
         >
           <div className="relative border-b border-[var(--color-border)]">
@@ -223,10 +282,35 @@ export function SelectSearch({
               <Loader2 className="absolute right-3 top-1/2 size-4 -translate-y-1/2 animate-spin text-[var(--color-muted-fg)]" />
             ) : null}
           </div>
-          <ul className="max-h-72 overflow-auto py-1" role="listbox">
+          <ul
+            ref={listRef}
+            className="max-h-72 overflow-auto py-1 overscroll-contain"
+            role="listbox"
+            onWheel={(e) => {
+              // Inside a Radix Dialog/Drawer the parent uses
+              // `react-remove-scroll`, which preventDefaults wheel events on
+              // anything outside the dialog body — including this portaled
+              // popover, leaving the listbox unscrollable. Scroll manually
+              // and preventDefault so this stays consistent inside and
+              // outside dialogs (no double-scroll).
+              const el = e.currentTarget;
+              if (el.scrollHeight <= el.clientHeight) return;
+              const atTop = e.deltaY < 0 && el.scrollTop === 0;
+              const atBottom =
+                e.deltaY > 0 &&
+                Math.ceil(el.scrollTop + el.clientHeight) >= el.scrollHeight;
+              if (atTop || atBottom) return;
+              el.scrollTop += e.deltaY;
+              e.preventDefault();
+            }}
+          >
             {items.length === 0 && !canCreate ? (
               <li className="px-3 py-2 text-sm text-[var(--color-muted-fg)]">
-                {trimmedQuery.length === 0 ? "Tippen, um zu suchen…" : emptyHint}
+                {loading
+                  ? "Lade…"
+                  : trimmedQuery.length === 0
+                    ? "Keine Einträge vorhanden."
+                    : emptyHint}
               </li>
             ) : null}
             {items.map((item, idx) => (
