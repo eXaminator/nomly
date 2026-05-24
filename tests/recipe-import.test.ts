@@ -21,6 +21,15 @@ describe("parseIsoDurationToMinutes", () => {
     expect(parseIsoDurationToMinutes("PT2H")).toBe(120);
     expect(parseIsoDurationToMinutes("PT90S")).toBe(2); // rounded
   });
+  it("parses forms with a days/weeks portion", () => {
+    // chefkoch.de stamps "P0DT0H20M" — zero days but the D component is
+    // present and the regex used to reject the whole string.
+    expect(parseIsoDurationToMinutes("P0DT0H20M")).toBe(20);
+    expect(parseIsoDurationToMinutes("P0DT0H0M")).toBeNull();
+    // Genuine overnight-marinade recipes occasionally use a non-zero D.
+    expect(parseIsoDurationToMinutes("P1DT2H")).toBe(24 * 60 + 120);
+    expect(parseIsoDurationToMinutes("P1W")).toBe(7 * 24 * 60);
+  });
   it("falls back to bare integers", () => {
     expect(parseIsoDurationToMinutes("30")).toBe(30);
     expect(parseIsoDurationToMinutes(45)).toBe(45);
