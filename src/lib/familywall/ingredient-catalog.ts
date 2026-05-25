@@ -22,25 +22,8 @@ export type CatalogEntry = {
   section: string;
   /** Canonical German singular as written in the data file. */
   canonicalName: string;
-  /**
-   * Primary Tandoor food-key, or `null` for `tandoor: NEW`. When merging,
-   * additional food-keys are listed in `mergeFoodKeys` (the primary stays
-   * here).
-   */
-  tandoorFoodKey: string | null;
-  /**
-   * Extra food-keys this entry merges into the primary. Each maps to a row
-   * in the Tandoor seed that needs its FKs redirected to the primary then
-   * deleted.
-   */
-  mergeFoodKeys: string[];
-  /**
-   * Name the row currently has in the Tandoor seed that this entry renames
-   * into `canonicalName`. `null` when no rename is intended (anchor or NEW).
-   */
-  renameFrom: string | null;
   /** Category name. Looked up against the `category` table. */
-  category: string;
+  category: string | null;
   /** Diet class (`undecided` = leave NULL). */
   dietary: Dietary;
   /** When true, the seeder sets `ingredient.is_equipment = true`. */

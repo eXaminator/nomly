@@ -198,6 +198,44 @@ describe("parseIngredientLines — substring matcher + threshold", () => {
     expect(mehlMatch?.isEquipment).toBe(false);
   });
 
+  it("collapses multiple aliases of the same ingredient into a single pill, preferring the canonical row", () => {
+    // When a catalog has the canonical row PLUS one or more aliases that
+    // all match a candidate equally well, the dedup must keep exactly one
+    // match per ingredient, and it should be the canonical row so the pill
+    // label leads with the canonical name. Without the canonical-row
+    // tiebreak the longer alias would win arbitrarily.
+    const catalog: IngredientCatalog = [
+      // Two aliases of the same ingredient that BOTH exactly match the
+      // candidate text "Paprika".
+      {
+        ingredientId: 1,
+        canonicalName: "Paprika",
+        aliasName: "Paprika",
+        tokens: ["paprika"],
+      },
+      {
+        ingredientId: 1,
+        canonicalName: "Paprika",
+        // Synthetic same-token alias to exercise the tiebreak path —
+        // would tie on score with the canonical without the boost.
+        aliasName: "Paprika frisch",
+        tokens: ["paprika"],
+      },
+    ];
+    const out = parseIngredientLines(
+      ["1 g Paprika"],
+      makeLookups(catalog),
+    );
+    expect(out).toHaveLength(1);
+    // Dedup by ingredientId: only one match for ingredient 1.
+    const paprikaMatches = out[0].candidateMatches.filter(
+      (c) => c.ingredientId === 1,
+    );
+    expect(paprikaMatches).toHaveLength(1);
+    // Canonical row wins the within-ingredient tiebreak.
+    expect(paprikaMatches[0].matchedName).toBe("Paprika");
+  });
+
   it("exposes uncoveredText on candidate matches so the pill UI can move tokens to notes", () => {
     // A wide-text match that didn't auto-pick still surfaces as a pill. The
     // matcher reports which raw candidate tokens the entry did NOT cover so

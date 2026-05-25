@@ -23,7 +23,7 @@ afterAll(() => {
 });
 
 describe("seed transform", () => {
-  it("imports the Tandoor snapshot and is idempotent on rerun", async () => {
+  it("inserts curated units + categories and is idempotent on rerun", async () => {
     const { runSeed } = await import("@/db/seed");
     const { db } = await import("@/db");
     const { ingredient, unit, category, supermarket } = await import(
@@ -31,9 +31,10 @@ describe("seed transform", () => {
     );
 
     const first = runSeed();
+    // SEED_UNITS plus the topUpUnits the app needs (containers etc.).
     expect(first.units.added).toBeGreaterThanOrEqual(10);
+    // SEED_CATEGORIES (supermarket-style) plus the household top-ups.
     expect(first.categories.added).toBeGreaterThanOrEqual(20);
-    expect(first.ingredients.added).toBeGreaterThanOrEqual(300);
 
     const units = db.select().from(unit).all();
     const cats = db.select().from(category).all();
@@ -41,15 +42,17 @@ describe("seed transform", () => {
     const markets = db.select().from(supermarket).all();
     expect(units.length).toBe(first.units.added);
     expect(cats.length).toBe(first.categories.added);
-    expect(ings.length).toBe(first.ingredients.added);
-    // Seeder no longer touches supermarkets — the table stays empty until the
+    // Ingredient rows are owned by the catalog seed — runSeed leaves them
+    // untouched so the table is empty after this pass.
+    expect(ings.length).toBe(0);
+    // Seeder doesn't touch supermarkets — the table stays empty until the
     // user adds one via the settings UI.
     expect(markets.length).toBe(0);
 
     const second = runSeed();
     expect(second.units.added).toBe(0);
     expect(second.units.skipped).toBe(first.units.added);
-    expect(second.ingredients.added).toBe(0);
+    expect(second.categories.added).toBe(0);
   });
 });
 

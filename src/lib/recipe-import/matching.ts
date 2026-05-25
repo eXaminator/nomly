@@ -87,6 +87,14 @@ export type IngredientCandidateMatch = {
    *  is "rote". The pill UI uses it to move uncovered tokens into notes
    *  when the user picks a low-confidence match manually. */
   uncoveredText: string;
+  /** True when this match came in via the catalog row whose `aliasName`
+   *  equals its `canonicalName` (i.e. the canonical row itself, not one of
+   *  the ingredient's aliases). Acts as a "slight boost" tiebreaker:
+   *  - within an ingredient, the canonical row wins over equal-scoring
+   *    aliases (so the pill label leads with the canonical name);
+   *  - across ingredients with equal scores, the candidate that hit via
+   *    the canonical row is preferred. */
+  isCanonical: boolean;
 };
 
 /** A token of the candidate text — both the normalised form (used for
@@ -169,11 +177,21 @@ function bestMatchForEntry(
     // products into broader catalog entries.
     const fullCoverageFromStart =
       start === 0 && entry.tokens.length === candidate.length;
-    const score = scoreMatch({
-      matches: aligned.matches,
-      inOrder,
-      isFullCoverageFromStart: fullCoverageFromStart,
-    });
+    // The "canonical row" is the catalog entry whose aliasName equals its
+    // canonicalName (vs. an alias row with a distinct aliasName). Give it
+    // a tiny +1 boost so it slightly outranks otherwise-equal alias hits
+    // when both belong to the same ingredient OR when two different
+    // ingredients tie on score. +1 is below all other scoring increments
+    // (the smallest is +5) so it can't shift a match across the 135
+    // auto-merge gate on its own — it's purely a tiebreaker in shape.
+    const isCanonical =
+      entry.aliasName.toLowerCase() === entry.canonicalName.toLowerCase();
+    const score =
+      scoreMatch({
+        matches: aligned.matches,
+        inOrder,
+        isFullCoverageFromStart: fullCoverageFromStart,
+      }) + (isCanonical ? 1 : 0);
     if (!best || score > best.score) {
       const coveredSet = new Set(coveredCandidateTokens);
       const uncoveredText = candidate
@@ -193,6 +211,7 @@ function bestMatchForEntry(
         defaultSubUnit: entry.defaultSubUnit,
         isEquipment: entry.isEquipment,
         uncoveredText,
+        isCanonical,
       };
     }
   }
@@ -382,7 +401,10 @@ export function findIngredientCandidates(
   const limit = options.limit ?? 5;
 
   // One best entry per ingredient id, plus a remember of which variant
-  // produced it so we can return that variant as `candidate`.
+  // produced it so we can return that variant as `candidate`. Within an
+  // ingredient, score wins; ties favor the canonical row (so the pill
+  // surfaces the canonical name when an alias of the same ingredient
+  // scored just as well); further ties favor the longer alias.
   const bestById = new Map<
     number,
     { match: IngredientCandidateMatch; variant: CandidateToken[] }
@@ -396,6 +418,9 @@ export function findIngredientCandidates(
         !existing ||
         m.score > existing.match.score ||
         (m.score === existing.match.score &&
+          m.isCanonical && !existing.match.isCanonical) ||
+        (m.score === existing.match.score &&
+          m.isCanonical === existing.match.isCanonical &&
           m.aliasName.length > existing.match.aliasName.length)
       ) {
         bestById.set(m.ingredientId, { match: m, variant });
@@ -404,6 +429,13 @@ export function findIngredientCandidates(
   }
   const sorted = Array.from(bestById.values()).sort((a, b) => {
     if (b.match.score !== a.match.score) return b.match.score - a.match.score;
+    // Cross-ingredient tiebreak: prefer the candidate whose winning row is
+    // the canonical (a redundant guard since canonicals already get a +1
+    // score boost in bestMatchForEntry, but explicit here so the sort
+    // stays robust if the boost is ever tuned).
+    if (a.match.isCanonical !== b.match.isCanonical) {
+      return a.match.isCanonical ? -1 : 1;
+    }
     if (a.match.aliasName.length !== b.match.aliasName.length)
       return b.match.aliasName.length - a.match.aliasName.length;
     return a.match.canonicalName.localeCompare(b.match.canonicalName, "de");

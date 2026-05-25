@@ -28,9 +28,10 @@ import { parseIngredientString } from "@/lib/recipe-import/ingredient";
 
 /**
  * The full set of unit tokens the parser sees in production — names +
- * aliases from `src/db/seed.ts` (topUpUnits + fullWordUnitAliases) and
- * `data/seed/tandoor-{de,en}.json`. If you add a unit/alias to the seed,
- * mirror it here so the golden test stays representative.
+ * aliases from `src/db/seed-data/units.ts` (the curated `SEED_UNITS` list)
+ * plus the app-specific `topUpUnits` in `src/db/seed.ts`. If you add a
+ * unit/alias to the seed, mirror it here so the golden test stays
+ * representative.
  */
 const TEST_UNITS = new Set(
   [

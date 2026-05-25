@@ -12,21 +12,13 @@ describe("loadIngredientCatalog", () => {
     expect(entries.length).toBeGreaterThan(700);
   });
 
-  it("includes the four documented entry modes", () => {
+  it("exposes a stable mix of curated + auto-imported entries", () => {
     const { entries } = loadIngredientCatalog();
-    const news = entries.filter((e) => e.tandoorFoodKey === null);
-    const anchors = entries.filter(
-      (e) =>
-        e.tandoorFoodKey !== null &&
-        e.renameFrom === null &&
-        e.mergeFoodKeys.length === 0,
-    );
-    const renames = entries.filter((e) => e.renameFrom !== null);
-    const merges = entries.filter((e) => e.mergeFoodKeys.length > 0);
-    expect(news.length).toBeGreaterThan(300);
-    expect(anchors.length).toBeGreaterThan(200);
-    expect(renames.length).toBeGreaterThan(50);
-    expect(merges.length).toBe(6);
+    // Every entry has a non-empty canonical and aliases array (possibly empty
+    // list for newly-auto-imported rows). Canonicals are globally unique
+    // (case-insensitive) — duplicates would point to the same DB row on seed.
+    const canonicalLowers = entries.map((e) => e.canonicalName.toLowerCase());
+    expect(new Set(canonicalLowers).size).toBe(entries.length);
   });
 
   it("exposes the Ei entry with eggs/Eier plural aliases", () => {
@@ -59,9 +51,6 @@ describe("findAliasCollisions", () => {
     const stub = (name: string, aliases: string[]): CatalogEntry => ({
       section: "test",
       canonicalName: name,
-      tandoorFoodKey: null,
-      mergeFoodKeys: [],
-      renameFrom: null,
       category: "Fleisch",
       dietary: "meat",
       equipment: false,
@@ -89,9 +78,6 @@ describe("findAliasCollisions", () => {
     ): CatalogEntry => ({
       section: "test",
       canonicalName: name,
-      tandoorFoodKey: null,
-      mergeFoodKeys: [],
-      renameFrom: null,
       category: "Obst und Gemüse",
       dietary: "vegan",
       equipment: false,

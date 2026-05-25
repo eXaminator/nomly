@@ -42,11 +42,10 @@ describe("runFamilywallCatalogSeed", () => {
     expect(firstRunCounts.warnings).toEqual([]);
   });
 
-  it("inserts NEW canonicals, renames Tandoor anchors, and merges duplicates", () => {
-    expect(firstRunCounts.inserted).toBeGreaterThan(300);
-    expect(firstRunCounts.renamed).toBeGreaterThan(50);
-    // 10 documented secondary food-keys across the 6 merge entries.
-    expect(firstRunCounts.mergedAway).toBe(10);
+  it("inserts every catalog entry as its canonical row", () => {
+    // The catalog now owns ingredient identity end-to-end — every entry
+    // becomes a canonical row on first seed. No rename / merge steps.
+    expect(firstRunCounts.inserted).toBeGreaterThan(700);
     expect(firstRunCounts.aliasesAdded).toBeGreaterThan(1000);
     expect(firstRunCounts.subUnitsAdded).toBeGreaterThan(15);
     expect(firstRunCounts.subUnitAliasesAdded).toBeGreaterThan(40);
@@ -55,14 +54,12 @@ describe("runFamilywallCatalogSeed", () => {
   it("is idempotent on a second run", () => {
     expect(secondRunCounts.warnings).toEqual([]);
     expect(secondRunCounts.inserted).toBe(0);
-    expect(secondRunCounts.renamed).toBe(0);
-    expect(secondRunCounts.mergedAway).toBe(0);
     expect(secondRunCounts.aliasesAdded).toBe(0);
     expect(secondRunCounts.subUnitsAdded).toBe(0);
     expect(secondRunCounts.subUnitAliasesAdded).toBe(0);
   });
 
-  it("renames buggy food-pear-raw row 'Pfirsich' → 'Birne' and inserts a fresh peach 'Pfirsich'", async () => {
+  it("creates 'Birne' and 'Pfirsich' as distinct canonical rows", async () => {
     const { db } = await import("@/db");
     const { ingredient } = await import("@/db/schema");
     const { sql } = await import("drizzle-orm");
@@ -77,7 +74,7 @@ describe("runFamilywallCatalogSeed", () => {
     expect(byName.get("Birne")).not.toBe(byName.get("Pfirsich"));
   });
 
-  it("renames food-spices-paprika 'Paprika' → 'Paprikapulver' and keeps 'Paprika' as the fresh-pepper canonical", async () => {
+  it("creates 'Paprika' and 'Paprikapulver' as distinct canonical rows", async () => {
     const { db } = await import("@/db");
     const { ingredient } = await import("@/db/schema");
     const { sql } = await import("drizzle-orm");
@@ -89,13 +86,6 @@ describe("runFamilywallCatalogSeed", () => {
     const byName = new Map(rows.map((r) => [r.name, r.id]));
     expect(byName.has("Paprika")).toBe(true);
     expect(byName.has("Paprikapulver")).toBe(true);
-    // The 'Paprika, gelb' / 'Paprika, rot' Tandoor rows must be merged away.
-    const variants = db
-      .select({ name: ingredient.name })
-      .from(ingredient)
-      .where(sql`name in (${"Paprika, gelb"}, ${"Paprika, rot"})`)
-      .all();
-    expect(variants).toEqual([]);
   });
 
   it("attaches dietary class, category, and (when set) is_equipment", async () => {
@@ -194,15 +184,14 @@ describe("runFamilywallCatalogSeed", () => {
     expect(u?.name).toBe("Kolben");
   });
 
-  it("merges Apfel variants (Gala/Granny/Honeycrisp/Fuji) into a single canonical row", async () => {
+  it("creates a single Apfel canonical (no per-variety duplicate rows)", async () => {
     const { db } = await import("@/db");
     const { ingredient } = await import("@/db/schema");
     const { sql } = await import("drizzle-orm");
 
-    // The four Tandoor variant rows (Äpfel Gala / Granny Smith / Honeycrisp,
-    // and the original Äpfel from food-apples-fuji-with-skin-raw) must all
-    // collapse into one canonical "Apfel". They should NOT survive as their
-    // own ingredient rows.
+    // The catalog folds apple varieties into the single "Apfel" canonical
+    // via aliases; the per-variety strings should NOT survive as standalone
+    // ingredient rows.
     const variantNames = [
       "Äpfel",
       "Äpfel Gala",

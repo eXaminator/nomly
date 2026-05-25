@@ -786,15 +786,19 @@ function CandidatePills({
     <div className="flex flex-wrap gap-1">
       {candidates.map((c) => {
         const isCurrent = c.ingredientId === selectedIngredientId;
-        // Show the alias name that the matcher actually hit on (when it
-        // differs from the canonical). For most rows this is the canonical
-        // itself; for alias hits ("TK Erbsen" alias → canonical "Erbsen")
-        // the pill reads "TK Erbsen" so the user sees WHY a row matched.
-        const label = c.matchedName || c.canonicalName;
+        // The matcher carries both names: `canonicalName` is the underlying
+        // identity, `matchedName` is the catalog row that actually hit
+        // (often an alias). Render canonical first so the user sees WHAT
+        // the row resolves to, with the alias in parens when it differs so
+        // they also see WHY it matched ("Erbsen (TK Erbsen)").
+        const aliasDiffers =
+          c.matchedName.length > 0 &&
+          c.matchedName.toLowerCase() !== c.canonicalName.toLowerCase();
         return (
           <CandidatePill
             key={c.ingredientId}
-            label={label}
+            canonicalName={c.canonicalName}
+            aliasName={aliasDiffers ? c.matchedName : null}
             isSelected={isCurrent}
             onSelect={() => onSelectCandidate(c)}
             onUseCanonical={() => onUseCanonical(c)}
@@ -831,16 +835,27 @@ function CandidatePills({
 }
 
 function CandidatePill({
-  label,
+  canonicalName,
+  aliasName,
   isSelected,
   onSelect,
   onUseCanonical,
 }: {
-  label: string;
+  canonicalName: string;
+  /** Alias the matcher hit on, when it differs from the canonical. Rendered
+   *  in parens after the canonical so the user sees both WHAT the row
+   *  resolves to and WHY it matched. `null` means the match hit the
+   *  canonical directly — render just the canonical. */
+  aliasName: string | null;
   isSelected: boolean;
   onSelect: () => void;
   onUseCanonical: () => void;
 }) {
+  // The pill's primary action (select) keys off the canonical identity, so
+  // tooltips lead with the canonical. The "↻" action copies the alias name
+  // into the input (or the canonical when no alias is involved) — keep its
+  // tooltip aligned with what actually lands in the field.
+  const copyTarget = aliasName ?? canonicalName;
   return (
     <span
       className={cn(
@@ -860,11 +875,14 @@ function CandidatePill({
         )}
         title={
           isSelected
-            ? `Aktuell ausgewählt: „${label}".`
-            : `„${label}" als Zutat verwenden.`
+            ? `Aktuell ausgewählt: „${canonicalName}".`
+            : `„${canonicalName}" als Zutat verwenden.`
         }
       >
-        {label}
+        {canonicalName}
+        {aliasName ? (
+          <span className="ml-1 opacity-70">({aliasName})</span>
+        ) : null}
       </button>
       <button
         type="button"
@@ -875,8 +893,8 @@ function CandidatePill({
             ? "hover:bg-[color-mix(in_srgb,var(--color-accent-fg),var(--color-accent)_75%)]"
             : "hover:bg-[color-mix(in_srgb,var(--color-accent),var(--color-bg)_75%)]",
         )}
-        title={`„${label}" in das Namensfeld übernehmen.`}
-        aria-label={`„${label}" in das Namensfeld übernehmen`}
+        title={`„${copyTarget}" in das Namensfeld übernehmen.`}
+        aria-label={`„${copyTarget}" in das Namensfeld übernehmen`}
       >
         <RotateCw className="size-3" />
       </button>
