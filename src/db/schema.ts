@@ -370,6 +370,81 @@ export const shoppingItemSource = sqliteTable(
   ],
 );
 
+export const stapleGroup = sqliteTable("staple_group", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  name: text("name").notNull().unique(),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdAt: integer("created_at").notNull().default(now),
+  updatedAt: integer("updated_at").notNull().default(now),
+});
+
+export const stapleGroupItem = sqliteTable(
+  "staple_group_item",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    groupId: integer("group_id")
+      .notNull()
+      .references(() => stapleGroup.id, { onDelete: "cascade" }),
+    ingredientId: integer("ingredient_id")
+      .notNull()
+      .references(() => ingredient.id, { onDelete: "cascade" }),
+    /**
+     * Optional default quantity. NULL = no quantity preset; the add still
+     * writes a `shopping_item_staple_source` row (with NULL quantity) so the
+     * contribution is traceable, but it does not contribute to displayed
+     * amounts.
+     */
+    quantity: real("quantity"),
+    unitId: integer("unit_id").references(() => unit.id, {
+      onDelete: "set null",
+    }),
+    note: text("note"),
+    sortOrder: integer("sort_order").notNull().default(0),
+  },
+  (t) => [
+    uniqueIndex("staple_group_item_unique").on(t.groupId, t.ingredientId),
+    index("staple_group_item_group_idx").on(t.groupId),
+  ],
+);
+
+/**
+ * Mirrors `shopping_item_source` for staple-group adds. One row per
+ * "this shopping item received a contribution from this staple group".
+ * The read-side aggregator sums these alongside meal sources and manual
+ * amounts; the "Liste leeren" dialog groups by `staple_group_id` to offer
+ * per-group removal.
+ */
+export const shoppingItemStapleSource = sqliteTable(
+  "shopping_item_staple_source",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    itemId: integer("item_id")
+      .notNull()
+      .references(() => shoppingItem.id, { onDelete: "cascade" }),
+    stapleGroupId: integer("staple_group_id")
+      .notNull()
+      .references(() => stapleGroup.id, { onDelete: "cascade" }),
+    /**
+     * Nullable so removing a single staple-group entry doesn't retroactively
+     * strip past contributions from the running list. The clear dialog
+     * groups by `staple_group_id` regardless.
+     */
+    stapleGroupItemId: integer("staple_group_item_id").references(
+      () => stapleGroupItem.id,
+      { onDelete: "set null" },
+    ),
+    contributedQuantity: real("contributed_quantity"),
+    contributedUnitId: integer("contributed_unit_id").references(() => unit.id, {
+      onDelete: "set null",
+    }),
+    addedAt: integer("added_at").notNull().default(now),
+  },
+  (t) => [
+    index("shopping_item_staple_source_item_idx").on(t.itemId),
+    index("shopping_item_staple_source_group_idx").on(t.stapleGroupId),
+  ],
+);
+
 /**
  * Marker rows: `(ingredient_id, supermarket_id)` means "this ingredient is
  * not carried at this supermarket". The shopping list renders matching items
@@ -424,3 +499,6 @@ export type Supermarket = typeof supermarket.$inferSelect;
 export type ShoppingItem = typeof shoppingItem.$inferSelect;
 export type MealPlan = typeof mealPlan.$inferSelect;
 export type ApiToken = typeof apiToken.$inferSelect;
+export type StapleGroup = typeof stapleGroup.$inferSelect;
+export type StapleGroupItem = typeof stapleGroupItem.$inferSelect;
+export type ShoppingItemStapleSource = typeof shoppingItemStapleSource.$inferSelect;

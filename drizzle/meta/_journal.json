@@ -120,6 +120,13 @@
       "when": 1779637754366,
       "tag": "0016_drop_products",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "6",
+      "when": 1779736003231,
+      "tag": "0017_staple_groups",
+      "breakpoints": true
     }
   ]
 }
