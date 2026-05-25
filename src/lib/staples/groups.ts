@@ -252,6 +252,7 @@ export function addGroupItem(
 }
 
 export type UpdateGroupItemInput = {
+  ingredientId?: number;
   quantity?: number | null;
   unitId?: number | null;
   note?: string | null;
@@ -270,12 +271,32 @@ export function updateGroupItem(
   if (!current) {
     throw new StapleGroupError("not_found", "Eintrag nicht gefunden", 404);
   }
+  if (
+    input.ingredientId !== undefined &&
+    input.ingredientId !== current.ingredientId
+  ) {
+    const collision = db
+      .select({ id: stapleGroupItem.id })
+      .from(stapleGroupItem)
+      .where(
+        sql`${stapleGroupItem.groupId} = ${current.groupId} AND ${stapleGroupItem.ingredientId} = ${input.ingredientId}`,
+      )
+      .get();
+    if (collision && collision.id !== itemId) {
+      throw new StapleGroupError(
+        "duplicate_ingredient",
+        "Zutat ist bereits in dieser Gruppe",
+        409,
+      );
+    }
+  }
   const nextQuantity =
     input.quantity === undefined ? current.quantity : input.quantity;
   const nextUnitId =
     input.unitId === undefined ? current.unitId : input.unitId;
   validateAmount(nextQuantity, nextUnitId);
   const patch: Partial<typeof stapleGroupItem.$inferInsert> = {};
+  if (input.ingredientId !== undefined) patch.ingredientId = input.ingredientId;
   if (input.quantity !== undefined) patch.quantity = input.quantity;
   if (input.unitId !== undefined) patch.unitId = input.unitId;
   if (input.note !== undefined) patch.note = input.note;
