@@ -28,6 +28,12 @@ export type CatalogEntry = {
   dietary: Dietary;
   /** When true, the seeder sets `ingredient.is_equipment = true`. */
   equipment: boolean;
+  /** When true, the seeder sets `ingredient.exclude_from_shopping_list = true`
+   *  so the shopping-list builder skips this ingredient even when a recipe
+   *  references it. Use for pantry staples the user always has (Wasser, Salz).
+   *  Optional — entries without this flag leave the column at its default
+   *  (false). */
+  excludeFromShoppingList?: boolean;
   /** Cross-language + alternate-spelling aliases (no defaults attached). */
   aliases: string[];
   /** Default purchase unit name (looked up against `unit.name`), or null. */

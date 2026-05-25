@@ -7938,11 +7938,12 @@ export const INGREDIENT_CATALOG: CatalogEntry[] = [
     category: "Säfte",
     dietary: "vegan",
     equipment: false,
+    excludeFromShoppingList: true,
     aliases: ["water","tepid water","very hot water","boiling water","Mineralwasser","Sprudelwasser"],
     purchaseUnit: null,
     subUnit: null,
     subUnitAliases: [],
-    notes: null,
+    notes: "Pantry staple — excluded from shopping-list aggregation regardless of recipe references.",
   },
   {
     canonicalName: "Apfelsaft",

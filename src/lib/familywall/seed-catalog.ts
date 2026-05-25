@@ -178,6 +178,7 @@ function applyEntryMetadata(
   }
 
   if (entry.equipment) updates.isEquipment = true;
+  if (entry.excludeFromShoppingList) updates.excludeFromShoppingList = true;
 
   if (entry.purchaseUnit) {
     const unitId = ctx.unitIdByName.get(lower(entry.purchaseUnit));
