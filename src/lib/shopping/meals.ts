@@ -1,6 +1,10 @@
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { db } from "../../db/index.ts";
 import { mealPlan, shoppingItemSource } from "../../db/schema.ts";
+import {
+  collectStapleContributionItemIds,
+  deleteStapleSources,
+} from "../staples/clear.ts";
 import { cleanupOrphanShoppingItems } from "./cleanup.ts";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -61,37 +65,55 @@ export function stripMealContributions(
   tx: Tx,
   mealPlanId: number,
 ): { itemsDeleted: number; itemsUpdated: number } {
-  const affected = tx
+  const touched = collectMealContributionItemIds(tx, [mealPlanId]);
+  deleteMealSources(tx, [mealPlanId]);
+  return cleanupOrphanShoppingItems(tx, touched);
+}
+
+function collectMealContributionItemIds(
+  tx: Tx,
+  mealPlanIds: number[],
+): number[] {
+  if (mealPlanIds.length === 0) return [];
+  const rows = tx
     .select({ itemId: shoppingItemSource.itemId })
     .from(shoppingItemSource)
-    .where(eq(shoppingItemSource.mealPlanId, mealPlanId))
+    .where(inArray(shoppingItemSource.mealPlanId, mealPlanIds))
     .all();
-  const itemIds = Array.from(new Set(affected.map((r) => r.itemId)));
+  return Array.from(new Set(rows.map((r) => r.itemId)));
+}
 
+function deleteMealSources(tx: Tx, mealPlanIds: number[]): void {
+  if (mealPlanIds.length === 0) return;
   tx.delete(shoppingItemSource)
-    .where(eq(shoppingItemSource.mealPlanId, mealPlanId))
+    .where(inArray(shoppingItemSource.mealPlanId, mealPlanIds))
     .run();
-
-  return cleanupOrphanShoppingItems(tx, itemIds);
 }
 
 /**
- * Per-meal selective clear. Pass meal plan ids whose contributions should
- * be subtracted. The summed effect of one call is reported back so the UI
- * can confirm what happened. (Phase 5 extends this to also accept
- * `stapleGroupIds`.)
+ * Per-source selective clear. Pass meal plan ids and/or staple group ids
+ * whose contributions should be subtracted. Both strips run inside a
+ * single transaction and share one orphan-cleanup pass at the end.
  */
 export function clearShoppingListSelective(input: {
   mealPlanIds: number[];
+  stapleGroupIds?: number[];
 }): { itemsDeleted: number; itemsUpdated: number } {
+  const mealIds = input.mealPlanIds;
+  const stapleIds = input.stapleGroupIds ?? [];
+  if (mealIds.length === 0 && stapleIds.length === 0) {
+    return { itemsDeleted: 0, itemsUpdated: 0 };
+  }
   return db.transaction((tx) => {
-    let itemsDeleted = 0;
-    let itemsUpdated = 0;
-    for (const mealId of input.mealPlanIds) {
-      const r = stripMealContributions(tx, mealId);
-      itemsDeleted += r.itemsDeleted;
-      itemsUpdated += r.itemsUpdated;
+    const touched = new Set<number>();
+    for (const id of collectMealContributionItemIds(tx, mealIds)) {
+      touched.add(id);
     }
-    return { itemsDeleted, itemsUpdated };
+    for (const id of collectStapleContributionItemIds(tx, stapleIds)) {
+      touched.add(id);
+    }
+    deleteMealSources(tx, mealIds);
+    deleteStapleSources(tx, stapleIds);
+    return cleanupOrphanShoppingItems(tx, Array.from(touched));
   });
 }
