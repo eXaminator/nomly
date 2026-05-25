@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Search } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, Plus, Search } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -23,7 +23,36 @@ export type ColumnDef<TItem> = {
   header: string;
   cell: (item: TItem) => React.ReactNode;
   className?: string;
+  /** When provided, the column header becomes a clickable sort toggle. The
+   *  returned value drives the ordering — strings sort with locale "de",
+   *  numbers/booleans numerically, and `null` always lands at the end
+   *  regardless of direction (so empty cells don't crowd the top in desc). */
+  sortValue?: (item: TItem) => string | number | boolean | null;
 };
+
+type SortState = { key: string; dir: "asc" | "desc" } | null;
+
+function compareSortValues(
+  a: string | number | boolean | null,
+  b: string | number | boolean | null,
+  dir: "asc" | "desc",
+): number {
+  // Nulls always sink to the bottom — flipping direction doesn't lift them
+  // back to the top. Otherwise descending an "exclude only" column would
+  // pile the empty rows above the relevant ones.
+  if (a === null && b === null) return 0;
+  if (a === null) return 1;
+  if (b === null) return -1;
+  let cmp: number;
+  if (typeof a === "string" && typeof b === "string") {
+    cmp = a.localeCompare(b, "de", { sensitivity: "base" });
+  } else if (typeof a === "boolean" && typeof b === "boolean") {
+    cmp = a === b ? 0 : a ? 1 : -1;
+  } else {
+    cmp = (a as number) - (b as number);
+  }
+  return dir === "asc" ? cmp : -cmp;
+}
 
 export type EditFormProps<TItem> = {
   item: TItem | null;
@@ -118,6 +147,8 @@ export function ListShell<TItem>({
     [],
   );
 
+  const [sort, setSort] = React.useState<SortState>(null);
+
   const filtered = React.useMemo(() => {
     // Split on "|" so the user can OR-connect multiple terms
     // ("tomato|onion" → matches either). Empty terms are dropped so
@@ -127,7 +158,7 @@ export function ListShell<TItem>({
       .split("|")
       .map((t) => t.trim())
       .filter((t) => t.length > 0);
-    return items.filter((item) => {
+    const matched = items.filter((item) => {
       if (terms.length > 0) {
         const hit = searchMatches
           ? terms.some((t) => searchMatches(item, t))
@@ -137,7 +168,28 @@ export function ListShell<TItem>({
       if (applyFilters && !applyFilters(item)) return false;
       return true;
     });
-  }, [items, query, applyFilters, nameOf, searchMatches]);
+    if (!sort) return matched;
+    const column = columns.find((c) => c.key === sort.key);
+    if (!column?.sortValue) return matched;
+    const valueOf = column.sortValue;
+    // Stable sort: tag each row with its original index so equal-keyed
+    // rows preserve the underlying service-side order.
+    const tagged = matched.map((item, idx) => ({ item, idx }));
+    tagged.sort((a, b) => {
+      const cmp = compareSortValues(valueOf(a.item), valueOf(b.item), sort.dir);
+      return cmp !== 0 ? cmp : a.idx - b.idx;
+    });
+    return tagged.map((t) => t.item);
+  }, [items, query, applyFilters, nameOf, searchMatches, sort, columns]);
+
+  function toggleSort(key: string) {
+    setSort((prev) => {
+      if (!prev || prev.key !== key) return { key, dir: "asc" };
+      if (prev.dir === "asc") return { key, dir: "desc" };
+      // Third click clears the sort, restoring the service-side order.
+      return null;
+    });
+  }
 
   const allFilteredSelected =
     filtered.length > 0 && filtered.every((i) => selectedIds.has(idOf(i)));
@@ -344,11 +396,54 @@ export function ListShell<TItem>({
                     aria-label="Alle auswählen"
                   />
                 </th>
-                {columns.map((c) => (
-                  <th key={c.key} className={cn("px-3 py-2 font-medium", c.className)}>
-                    {c.header}
-                  </th>
-                ))}
+                {columns.map((c) => {
+                  const sortable = c.sortValue !== undefined;
+                  const active = sortable && sort?.key === c.key;
+                  const Icon = !sortable
+                    ? null
+                    : !active
+                      ? ArrowUpDown
+                      : sort?.dir === "asc"
+                        ? ArrowUp
+                        : ArrowDown;
+                  const ariaSort: "ascending" | "descending" | "none" = active
+                    ? sort?.dir === "asc"
+                      ? "ascending"
+                      : "descending"
+                    : "none";
+                  return (
+                    <th
+                      key={c.key}
+                      className={cn("px-3 py-2 font-medium", c.className)}
+                      aria-sort={sortable ? ariaSort : undefined}
+                    >
+                      {sortable ? (
+                        <button
+                          type="button"
+                          onClick={() => toggleSort(c.key)}
+                          className={cn(
+                            "inline-flex items-center gap-1 uppercase tracking-wide",
+                            active
+                              ? "text-[var(--color-fg)]"
+                              : "hover:text-[var(--color-fg)]",
+                          )}
+                        >
+                          {c.header}
+                          {Icon ? (
+                            <Icon
+                              className={cn(
+                                "size-3",
+                                active ? "opacity-100" : "opacity-40",
+                              )}
+                            />
+                          ) : null}
+                        </button>
+                      ) : (
+                        c.header
+                      )}
+                    </th>
+                  );
+                })}
               </tr>
             </thead>
             <ListTableBody

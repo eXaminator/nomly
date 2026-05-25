@@ -48,11 +48,20 @@ const DIET_VARIANT: Record<
   meat: "danger",
 };
 
+// Stable lexical ranking for dietary class: vegan < vegetarisch < tierisch.
+// Unknown (null) lands at the end via compareSortValues's null-sink rule.
+const DIET_RANK: Record<NonNullable<IngredientItem["dietaryClass"]>, number> = {
+  vegan: 0,
+  vegetarian: 1,
+  meat: 2,
+};
+
 const columns: ColumnDef<IngredientItem>[] = [
   {
     key: "name",
     header: "Name",
     cell: (item) => <span className="font-medium">{item.name}</span>,
+    sortValue: (item) => item.name,
   },
   {
     key: "aliases",
@@ -74,6 +83,7 @@ const columns: ColumnDef<IngredientItem>[] = [
         </span>
       );
     },
+    sortValue: (item) => item.aliases.length,
   },
   {
     key: "category",
@@ -84,6 +94,7 @@ const columns: ColumnDef<IngredientItem>[] = [
       ) : (
         <span className="text-[var(--color-muted-fg)]">—</span>
       ),
+    sortValue: (item) => item.defaultCategoryName,
   },
   {
     key: "diet",
@@ -96,12 +107,14 @@ const columns: ColumnDef<IngredientItem>[] = [
       ) : (
         <span className="text-[var(--color-muted-fg)]">—</span>
       ),
+    sortValue: (item) => (item.dietaryClass ? DIET_RANK[item.dietaryClass] : null),
   },
   {
     key: "equipment",
     header: "Typ",
     cell: (item) =>
       item.isEquipment ? <Badge variant="outline">Ausrüstung</Badge> : null,
+    sortValue: (item) => item.isEquipment,
   },
   {
     key: "exclude",
@@ -110,6 +123,7 @@ const columns: ColumnDef<IngredientItem>[] = [
       item.excludeFromShoppingList ? (
         <Badge variant="outline">ausgeschlossen</Badge>
       ) : null,
+    sortValue: (item) => item.excludeFromShoppingList,
   },
   {
     key: "refs",
@@ -119,8 +133,11 @@ const columns: ColumnDef<IngredientItem>[] = [
         {item.recipeRefCount} Rezepte
       </span>
     ),
+    sortValue: (item) => item.recipeRefCount,
   },
 ];
+
+const NO_CATEGORY_VALUE = "__none__";
 
 export function IngredientPageClient({
   initialItems,
@@ -129,8 +146,27 @@ export function IngredientPageClient({
 }) {
   const [kind, setKind] = React.useState<KindFilter>("all");
   const [diet, setDiet] = React.useState<DietFilter>("all");
+  /** "" = no filter; NO_CATEGORY_VALUE = match rows with NULL category;
+   *  otherwise the category name to match exactly. */
+  const [categoryFilter, setCategoryFilter] = React.useState<string>("");
   const [excludedOnly, setExcludedOnly] = React.useState(false);
   const [unusedOnly, setUnusedOnly] = React.useState(false);
+
+  // Build the category dropdown options from the items currently in scope.
+  // Sorted by German locale so the select reads naturally; "no category"
+  // is appended at the end as a sentinel option.
+  const categoryOptions = React.useMemo(() => {
+    const names = new Set<string>();
+    let anyMissing = false;
+    for (const item of initialItems) {
+      if (item.defaultCategoryName) names.add(item.defaultCategoryName);
+      else anyMissing = true;
+    }
+    const sorted = Array.from(names).sort((a, b) =>
+      a.localeCompare(b, "de", { sensitivity: "base" }),
+    );
+    return { names: sorted, anyMissing };
+  }, [initialItems]);
   const [bulkDialog, setBulkDialog] = React.useState<{
     ids: number[];
     onApplied: () => void;
@@ -146,6 +182,13 @@ export function IngredientPageClient({
         if (kind === "household" && !isHousehold) return false;
         if (kind === "food" && (isHousehold || item.isEquipment)) return false;
       }
+      if (categoryFilter) {
+        if (categoryFilter === NO_CATEGORY_VALUE) {
+          if (item.defaultCategoryName !== null) return false;
+        } else if (item.defaultCategoryName !== categoryFilter) {
+          return false;
+        }
+      }
       if (diet !== "all") {
         if (diet === "unknown" && item.dietaryClass !== null) return false;
         if (diet !== "unknown" && item.dietaryClass !== diet) return false;
@@ -154,7 +197,7 @@ export function IngredientPageClient({
       if (unusedOnly && item.recipeRefCount > 0) return false;
       return true;
     },
-    [kind, diet, excludedOnly, unusedOnly],
+    [kind, diet, categoryFilter, excludedOnly, unusedOnly],
   );
 
   const searchMatches = React.useCallback(
@@ -170,53 +213,42 @@ export function IngredientPageClient({
 
   const filterControls = (
     <>
-      <Chip
-        active={kind === "all"}
-        onClick={() => setKind("all")}
-        label="Alle"
+      <FilterSelect
+        label="Typ"
+        value={kind}
+        onChange={(v) => setKind(v as KindFilter)}
+        options={[
+          { value: "all", label: "Alle" },
+          { value: "food", label: "Lebensmittel" },
+          { value: "household", label: "Haushalt" },
+          { value: "equipment", label: "Ausrüstung" },
+        ]}
       />
-      <Chip
-        active={kind === "food"}
-        onClick={() => setKind("food")}
-        label="Lebensmittel"
+      <FilterSelect
+        label="Kategorie"
+        value={categoryFilter}
+        onChange={setCategoryFilter}
+        options={[
+          { value: "", label: "Alle Kategorien" },
+          ...(categoryOptions.anyMissing
+            ? [{ value: NO_CATEGORY_VALUE, label: "Ohne Kategorie" }]
+            : []),
+          ...categoryOptions.names.map((name) => ({ value: name, label: name })),
+        ]}
       />
-      <Chip
-        active={kind === "household"}
-        onClick={() => setKind("household")}
-        label="Haushalt"
+      <FilterSelect
+        label="Diät"
+        value={diet}
+        onChange={(v) => setDiet(v as DietFilter)}
+        options={[
+          { value: "all", label: "Alle Diäten" },
+          { value: "vegan", label: "Vegan" },
+          { value: "vegetarian", label: "Vegetarisch" },
+          { value: "meat", label: "Tierisch" },
+          { value: "unknown", label: "Unbekannt" },
+        ]}
       />
-      <Chip
-        active={kind === "equipment"}
-        onClick={() => setKind("equipment")}
-        label="Ausrüstung"
-      />
-      <span className="mx-2 h-5 w-px bg-[var(--color-border)]" />
-      <Chip
-        active={diet === "all"}
-        onClick={() => setDiet("all")}
-        label="Alle Diäten"
-      />
-      <Chip
-        active={diet === "vegan"}
-        onClick={() => setDiet("vegan")}
-        label="Vegan"
-      />
-      <Chip
-        active={diet === "vegetarian"}
-        onClick={() => setDiet("vegetarian")}
-        label="Vegetarisch"
-      />
-      <Chip
-        active={diet === "meat"}
-        onClick={() => setDiet("meat")}
-        label="Tierisch"
-      />
-      <Chip
-        active={diet === "unknown"}
-        onClick={() => setDiet("unknown")}
-        label="Unbekannt"
-      />
-      <span className="mx-2 h-5 w-px bg-[var(--color-border)]" />
+      <span className="mx-1 h-5 w-px bg-[var(--color-border)]" />
       <Chip
         active={excludedOnly}
         onClick={() => setExcludedOnly((v) => !v)}
@@ -290,5 +322,34 @@ function Chip({
     >
       {label}
     </button>
+  );
+}
+
+function FilterSelect({
+  label,
+  value,
+  onChange,
+  options,
+}: {
+  label: string;
+  value: string;
+  onChange: (next: string) => void;
+  options: Array<{ value: string; label: string }>;
+}) {
+  return (
+    <label className="flex items-center gap-1.5 text-xs text-[var(--color-muted-fg)]">
+      <span>{label}:</span>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="h-8 rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-bg)] px-2 text-xs text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+      >
+        {options.map((o) => (
+          <option key={o.value} value={o.value}>
+            {o.label}
+          </option>
+        ))}
+      </select>
+    </label>
   );
 }
