@@ -1,35 +1,47 @@
 /**
  * Recipe-level diet derived from ingredient-level `dietary_class` tags.
- * `null` = unknown — at least one non-optional ingredient is untagged.
+ *
+ *  - `definite`: every contributing ingredient is tagged, OR a definite
+ *    meat ruling.
+ *  - `probable`: some ingredients are untagged but enough are tagged to
+ *    make a best-effort claim (vegan/vegetarian only — never meat).
+ *  - `unknown`: nothing tagged → no claim. Badge stays hidden.
  */
+export type DietConfidence = "definite" | "probable" | "unknown";
+
 export type RecipeDiet = {
   isVegan: boolean | null;
   isVegetarian: boolean | null;
+  confidence: DietConfidence;
 };
 
 export type IngredientDietaryClass = "vegan" | "vegetarian" | "meat" | null;
 
-/**
- * Derive recipe-level vegan/vegetarian flags from the dietary class of each
- * *non-optional* contributing ingredient. Caller should pre-filter optional
- * rows out; this fn doesn't know about them.
- *
- *  - Any `meat`  → not vegan, not vegetarian (definitive).
- *  - Any `null`  → unknown (cannot claim either way).
- *  - Any `vegetarian` (no meat, no null) → vegetarian but not vegan.
- *  - All `vegan` (or empty) → both.
- */
 export function deriveDiet(classes: IngredientDietaryClass[]): RecipeDiet {
   let hasMeat = false;
   let hasVegetarian = false;
   let hasUnknown = false;
+  let hasVegan = false;
   for (const c of classes) {
     if (c === "meat") hasMeat = true;
     else if (c === "vegetarian") hasVegetarian = true;
-    else if (c === null) hasUnknown = true;
+    else if (c === "vegan") hasVegan = true;
+    else hasUnknown = true;
   }
-  if (hasMeat) return { isVegan: false, isVegetarian: false };
-  if (hasUnknown) return { isVegan: null, isVegetarian: null };
-  if (hasVegetarian) return { isVegan: false, isVegetarian: true };
-  return { isVegan: true, isVegetarian: true };
+  if (hasMeat) {
+    return { isVegan: false, isVegetarian: false, confidence: "definite" };
+  }
+  if (!hasUnknown) {
+    if (hasVegetarian) {
+      return { isVegan: false, isVegetarian: true, confidence: "definite" };
+    }
+    return { isVegan: true, isVegetarian: true, confidence: "definite" };
+  }
+  if (!hasVegan && !hasVegetarian) {
+    return { isVegan: null, isVegetarian: null, confidence: "unknown" };
+  }
+  if (hasVegetarian) {
+    return { isVegan: false, isVegetarian: true, confidence: "probable" };
+  }
+  return { isVegan: true, isVegetarian: true, confidence: "probable" };
 }
