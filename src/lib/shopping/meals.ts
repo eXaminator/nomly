@@ -1,11 +1,7 @@
-import { eq, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { db } from "../../db/index.ts";
-import {
-  mealPlan,
-  shoppingItem,
-  shoppingItemAmount,
-  shoppingItemSource,
-} from "../../db/schema.ts";
+import { mealPlan, shoppingItemSource } from "../../db/schema.ts";
+import { cleanupOrphanShoppingItems } from "./cleanup.ts";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -33,31 +29,20 @@ export function deleteMealOnly(mealPlanId: number): void {
 }
 
 /**
- * "Mahlzeit und Zutaten entfernen". The shopping-item amounts are derived
- * from sources at read time, so removing the meal's sources is enough to
- * update displayed quantities — no recomputation of `shopping_item.quantity`
- * needed. We do, however, delete items that:
- *   - have no remaining sources AND
- *   - have no manual quantity / unit / note (i.e. they only existed because
- *     of this meal — manual additions on top of the meal-derived item stay).
- *
- * Manual edits via the editor (which set quantity/unit/note) are preserved
- * because we only delete items where those are still null.
+ * "Mahlzeit und Zutaten entfernen". Strips this meal's contributions
+ * from the shopping list, then deletes the meal plan row itself. Orphan
+ * items (no remaining sources, staple sources, manual amounts, or note)
+ * are dropped; items with anything else holding them up survive.
  */
 export function deleteMealAndIngredients(mealPlanId: number): {
   itemsDeleted: number;
   itemsUpdated: number;
 } {
-  return db.transaction((tx) => applyDeleteWithIngredients(tx, mealPlanId));
-}
-
-function applyDeleteWithIngredients(
-  tx: Tx,
-  mealPlanId: number,
-): { itemsDeleted: number; itemsUpdated: number } {
-  const result = stripMealContributions(tx, mealPlanId);
-  tx.delete(mealPlan).where(eq(mealPlan.id, mealPlanId)).run();
-  return result;
+  return db.transaction((tx) => {
+    const result = stripMealContributions(tx, mealPlanId);
+    tx.delete(mealPlan).where(eq(mealPlan.id, mealPlanId)).run();
+    return result;
+  });
 }
 
 /**
@@ -72,7 +57,7 @@ export function removeMealFromShoppingList(mealPlanId: number): {
   return db.transaction((tx) => stripMealContributions(tx, mealPlanId));
 }
 
-function stripMealContributions(
+export function stripMealContributions(
   tx: Tx,
   mealPlanId: number,
 ): { itemsDeleted: number; itemsUpdated: number } {
@@ -87,63 +72,14 @@ function stripMealContributions(
     .where(eq(shoppingItemSource.mealPlanId, mealPlanId))
     .run();
 
-  let itemsDeleted = 0;
-  let itemsUpdated = 0;
-
-  for (const itemId of itemIds) {
-    const remaining = tx
-      .select({ id: shoppingItemSource.id })
-      .from(shoppingItemSource)
-      .where(eq(shoppingItemSource.itemId, itemId))
-      .get();
-    if (remaining) {
-      tx.update(shoppingItem)
-        .set({
-          version: sql`${shoppingItem.version} + 1`,
-          updatedAt: sql`unixepoch()`,
-        })
-        .where(eq(shoppingItem.id, itemId))
-        .run();
-      itemsUpdated += 1;
-      continue;
-    }
-    const item = tx
-      .select({ note: shoppingItem.note })
-      .from(shoppingItem)
-      .where(eq(shoppingItem.id, itemId))
-      .get();
-    const manual = tx
-      .select({ id: shoppingItemAmount.id })
-      .from(shoppingItemAmount)
-      .where(eq(shoppingItemAmount.itemId, itemId))
-      .limit(1)
-      .get();
-    if (
-      item != null &&
-      manual == null &&
-      (item.note == null || item.note === "")
-    ) {
-      tx.delete(shoppingItem).where(eq(shoppingItem.id, itemId)).run();
-      itemsDeleted += 1;
-    } else {
-      tx.update(shoppingItem)
-        .set({
-          version: sql`${shoppingItem.version} + 1`,
-          updatedAt: sql`unixepoch()`,
-        })
-        .where(eq(shoppingItem.id, itemId))
-        .run();
-      itemsUpdated += 1;
-    }
-  }
-
-  return { itemsDeleted, itemsUpdated };
+  return cleanupOrphanShoppingItems(tx, itemIds);
 }
 
 /**
- * Per-group selective clear. Pass meal plan ids whose contributions should
+ * Per-meal selective clear. Pass meal plan ids whose contributions should
  * be subtracted. The summed effect of one call is reported back so the UI
- * can confirm what happened.
+ * can confirm what happened. (Phase 5 extends this to also accept
+ * `stapleGroupIds`.)
  */
 export function clearShoppingListSelective(input: {
   mealPlanIds: number[];
@@ -159,5 +95,3 @@ export function clearShoppingListSelective(input: {
     return { itemsDeleted, itemsUpdated };
   });
 }
-
-
