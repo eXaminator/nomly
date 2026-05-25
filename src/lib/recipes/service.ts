@@ -1,4 +1,4 @@
-import { and, eq, inArray, like, or, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "../../db/index.ts";
 import {
   recipe,
@@ -18,6 +18,7 @@ import type {
   RecipeView,
 } from "./types.ts";
 import { deriveDiet, type IngredientDietaryClass } from "./diet.ts";
+import { fold, matchRecipe, parseQuery } from "./search.ts";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -453,51 +454,52 @@ export type ListRecipesOptions = {
   diet?: "vegetarian" | "vegan";
 };
 
-export function listRecipes(opts: ListRecipesOptions = {}): RecipeListItem[] {
-  const { query, mustTags = [], notTags = [] } = opts;
-  const trimmed = query?.trim() ?? "";
-  let rows: Array<typeof recipe.$inferSelect>;
-  if (trimmed.length === 0) {
-    rows = db.select().from(recipe).orderBy(recipe.title).all();
-  } else {
-    const pattern = `%${trimmed}%`;
-    // SQLite LIKE is case-insensitive for ASCII by default.
-    const titleHits = db
-      .select()
-      .from(recipe)
-      .where(like(recipe.title, pattern))
-      .all();
-
-    const tagHitIds = db
-      .selectDistinct({ recipeId: recipeTag.recipeId })
-      .from(recipeTag)
-      .innerJoin(tag, eq(tag.id, recipeTag.tagId))
-      .where(like(tag.name, pattern))
-      .all()
-      .map((r) => r.recipeId);
-
-    const extraRows =
-      tagHitIds.length === 0
-        ? []
-        : db
-            .select()
-            .from(recipe)
-            .where(
-              and(
-                inArray(recipe.id, tagHitIds),
-                or(...titleHits.map((r) => sql`${recipe.id} != ${r.id}`)) ??
-                  sql`1=1`,
-              ),
-            )
-            .all();
-
-    const merged = new Map<number, typeof recipe.$inferSelect>();
-    for (const r of [...titleHits, ...extraRows]) merged.set(r.id, r);
-    rows = Array.from(merged.values()).sort((a, b) =>
-      a.title.localeCompare(b.title, "de"),
-    );
+/**
+ * One folded `" "`-joined string per recipe containing canonical names +
+ * all aliases for every non-optional ingredient. Used only when the
+ * parsed query contains at least one `zutat:` token.
+ */
+function loadIngredientIndex(recipeIds: number[]): Map<number, string> {
+  if (recipeIds.length === 0) return new Map();
+  const rows = db
+    .select({
+      recipeId: recipeSection.recipeId,
+      canonical: ingredientTable.name,
+      alias: ingredientAliasTable.name,
+    })
+    .from(recipeIngredient)
+    .innerJoin(recipeSection, eq(recipeSection.id, recipeIngredient.sectionId))
+    .innerJoin(
+      ingredientTable,
+      eq(ingredientTable.id, recipeIngredient.ingredientId),
+    )
+    .leftJoin(
+      ingredientAliasTable,
+      eq(ingredientAliasTable.ingredientId, ingredientTable.id),
+    )
+    .where(
+      and(
+        inArray(recipeSection.recipeId, recipeIds),
+        eq(recipeIngredient.isOptional, false),
+      ),
+    )
+    .all();
+  const acc = new Map<number, Set<string>>();
+  for (const row of rows) {
+    const set = acc.get(row.recipeId) ?? new Set<string>();
+    set.add(fold(row.canonical));
+    if (row.alias) set.add(fold(row.alias));
+    acc.set(row.recipeId, set);
   }
+  const out = new Map<number, string>();
+  for (const [rid, set] of acc) out.set(rid, Array.from(set).join(" "));
+  return out;
+}
 
+export function listRecipes(opts: ListRecipesOptions = {}): RecipeListItem[] {
+  const { query, mustTags = [], notTags = [], diet } = opts;
+
+  const rows = db.select().from(recipe).all();
   if (rows.length === 0) return [];
 
   const ids = rows.map((r) => r.id);
@@ -515,41 +517,80 @@ export function listRecipes(opts: ListRecipesOptions = {}): RecipeListItem[] {
     tagsByRecipe.set(tr.recipeId, list);
   }
 
-  // Tag filtering happens in-memory against the already-joined tag map. Tag
-  // names are compared case-insensitively (search hits already are).
+  const parsed = parseQuery(query ?? "");
+  const needsIngredientIndex = parsed.tokens.some((t) => t.kind === "zutat");
+  const ingredientIndex = needsIngredientIndex
+    ? loadIngredientIndex(ids)
+    : new Map<number, string>();
+
   const mustLower = mustTags.map((t) => t.toLowerCase());
   const notLower = notTags.map((t) => t.toLowerCase());
-  const passesTagFilter = (recipeTags: string[]): boolean => {
-    if (mustLower.length === 0 && notLower.length === 0) return true;
-    const have = new Set(recipeTags.map((t) => t.toLowerCase()));
-    for (const m of mustLower) if (!have.has(m)) return false;
-    for (const n of notLower) if (have.has(n)) return false;
-    return true;
-  };
 
-  return rows.flatMap((r) => {
-    const recipeTags = (tagsByRecipe.get(r.id) ?? []).sort();
-    if (!passesTagFilter(recipeTags)) return [];
-    const diet = dietByRecipe.get(r.id) ?? {
+  type Scored = { row: (typeof rows)[number]; rank: number };
+  const scored: Scored[] = [];
+
+  for (const r of rows) {
+    const recipeTags = (tagsByRecipe.get(r.id) ?? []).map((t) => t.toLowerCase());
+    if (mustLower.length > 0 || notLower.length > 0) {
+      const have = new Set(recipeTags);
+      let pass = true;
+      for (const m of mustLower) {
+        if (!have.has(m)) {
+          pass = false;
+          break;
+        }
+      }
+      if (!pass) continue;
+      for (const n of notLower) {
+        if (have.has(n)) {
+          pass = false;
+          break;
+        }
+      }
+      if (!pass) continue;
+    }
+    const dietRow = dietByRecipe.get(r.id) ?? {
       isVegan: true,
       isVegetarian: true,
       confidence: "definite" as const,
     };
-    return [
-      {
-        id: r.id,
-        title: r.title,
-        description: r.description,
-        photoPath: r.photoPath,
-        servings: r.servings,
-        prepTimeMin: r.prepTimeMin,
-        cookTimeMin: r.cookTimeMin,
-        tags: recipeTags,
-        isVegan: diet.isVegan,
-        isVegetarian: diet.isVegetarian,
-        dietConfidence: diet.confidence,
-      },
-    ];
+    if (diet === "vegetarian" && dietRow.isVegetarian !== true) continue;
+    if (diet === "vegan" && dietRow.isVegan !== true) continue;
+
+    const match = matchRecipe(parsed, {
+      titleFolded: fold(r.title),
+      ingredientsFolded: ingredientIndex.get(r.id) ?? "",
+    });
+    if (!match.passes) continue;
+    scored.push({ row: r, rank: match.rank });
+  }
+
+  const queryActive = parsed.tokens.length > 0;
+  scored.sort((a, b) => {
+    if (queryActive && a.rank !== b.rank) return b.rank - a.rank;
+    return a.row.title.localeCompare(b.row.title, "de");
+  });
+
+  return scored.map(({ row: r }) => {
+    const recipeTags = (tagsByRecipe.get(r.id) ?? []).slice().sort();
+    const dietRow = dietByRecipe.get(r.id) ?? {
+      isVegan: true,
+      isVegetarian: true,
+      confidence: "definite" as const,
+    };
+    return {
+      id: r.id,
+      title: r.title,
+      description: r.description,
+      photoPath: r.photoPath,
+      servings: r.servings,
+      prepTimeMin: r.prepTimeMin,
+      cookTimeMin: r.cookTimeMin,
+      tags: recipeTags,
+      isVegan: dietRow.isVegan,
+      isVegetarian: dietRow.isVegetarian,
+      dietConfidence: dietRow.confidence,
+    };
   });
 }
 
