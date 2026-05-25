@@ -1117,6 +1117,43 @@ export function deleteSource(itemId: number, sourceId: number): ShoppingItemView
   return view;
 }
 
+/**
+ * Remove a single staple-group source contribution from this item. The
+ * group itself is untouched — this only prunes the contribution from the
+ * running list. Mirrors `deleteSource` for meal sources.
+ */
+export function deleteStapleSource(
+  itemId: number,
+  sourceId: number,
+): ShoppingItemView {
+  const row = db
+    .select({ id: shoppingItemStapleSource.id })
+    .from(shoppingItemStapleSource)
+    .where(
+      and(
+        eq(shoppingItemStapleSource.id, sourceId),
+        eq(shoppingItemStapleSource.itemId, itemId),
+      ),
+    )
+    .get();
+  if (!row) throw new ShoppingApiError("source not found", 404);
+  db.transaction((tx) => {
+    tx.delete(shoppingItemStapleSource)
+      .where(eq(shoppingItemStapleSource.id, sourceId))
+      .run();
+    tx.update(shoppingItem)
+      .set({
+        version: sql`${shoppingItem.version} + 1`,
+        updatedAt: sql`unixepoch()`,
+      })
+      .where(eq(shoppingItem.id, itemId))
+      .run();
+  });
+  const view = getItemView(itemId);
+  if (!view) throw new ShoppingApiError("item not found", 404);
+  return view;
+}
+
 export function deleteItemAmount(itemId: number, amountId: number): ShoppingItemView {
   const row = db
     .select({ id: shoppingItemAmount.id })
