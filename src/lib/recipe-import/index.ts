@@ -22,6 +22,8 @@ import {
   isPrepLeadingToken,
   normalizeForMatch,
   parseIngredientString,
+  isStandaloneDescriptor,
+  preprocessAlternatives,
   splitConjunctions,
   type ParsedIngredient,
 } from "./ingredient.ts";
@@ -108,6 +110,17 @@ export type ImportedCandidateMatch = {
   /** The alias-or-canonical name the matcher hit on. */
   matchedName: string;
   score: number;
+  /** Raw text of candidate tokens NOT covered by this match — e.g. "rote"
+   *  for candidate "Paprikaschote rote" matched against "Paprikaschoten".
+   *  Empty when the match covers everything. The pill UI uses this to move
+   *  uncovered tokens out of the name input and into the notes field when
+   *  the user manually picks a low-confidence match. */
+  uncoveredText: string;
+  /** True when the underlying ingredient is flagged as equipment. The pill
+   *  UI / live-match auto-select use this to default the row's
+   *  `isOptional` to true when a row resolves to an equipment item,
+   *  matching the import-time behavior in parseIngredientLines. */
+  isEquipment: boolean;
 };
 
 export type ImportedNameProposal = {
@@ -322,7 +335,11 @@ export function subUnitTokenSet(lookup: SubUnitLookup): Set<string> {
 export function buildIngredientCatalog(): IngredientCatalog {
   const out: IngredientCatalog = [];
   const canonicals = db
-    .select({ id: ingredient.id, name: ingredient.name })
+    .select({
+      id: ingredient.id,
+      name: ingredient.name,
+      isEquipment: ingredient.isEquipment,
+    })
     .from(ingredient)
     .all();
   for (const i of canonicals) {
@@ -331,12 +348,14 @@ export function buildIngredientCatalog(): IngredientCatalog {
       canonicalName: i.name,
       aliasName: i.name,
       tokens: tokenizeEntryNameForCatalog(i.name),
+      isEquipment: i.isEquipment || undefined,
     });
   }
   const aliases = db
     .select({
       id: ingredient.id,
       canonicalName: ingredient.name,
+      isEquipment: ingredient.isEquipment,
       aliasName: ingredientAlias.name,
       defaultUnitId: ingredientAlias.defaultUnitId,
       defaultUnitName: unit.name,
@@ -370,6 +389,7 @@ export function buildIngredientCatalog(): IngredientCatalog {
               perPurchase: a.defaultSubUnitPerPurchase ?? 1,
             }
           : undefined,
+      isEquipment: a.isEquipment || undefined,
     });
   }
   return out;
@@ -551,6 +571,7 @@ function resolveIngredientForRow(
   parsed: ParsedIngredient,
   rawLine: string,
   lookups: ParseLookups,
+  autoMatchScoreThreshold: number,
 ): {
   name: string;
   /** Combined notes — what the parser pre-extracted (parens, brackets, "to
@@ -565,6 +586,10 @@ function resolveIngredientForRow(
   /** Defaults attached to the resolved alias entry, if any. */
   defaultUnit: { id: number; name: string } | null;
   defaultSubUnit: SubUnitRef | null;
+  /** True when the matched ingredient is flagged as equipment — the caller
+   *  ORs this into the row's `isOptional` so equipment items default to
+   *  optional on every recipe row. */
+  isEquipment: boolean;
 } {
   const catalog = lookups.ingredientCatalog;
   // Gather candidates for both the wide-text pass (returns ALL ranked
@@ -581,7 +606,7 @@ function resolveIngredientForRow(
       const { matches, candidate } = findIngredientCandidates(wideText, catalog);
       wideMatches = matches;
       const top = matches[0];
-      if (top && top.score >= MIN_AUTO_MATCH_SCORE) {
+      if (top && top.score >= autoMatchScoreThreshold) {
         // Preserve the user's text as the row's displayName rather than
         // replacing it with the catalog's canonical name. The shopping-list
         // aggregator keys off `ingredientId` so cross-language merging
@@ -607,6 +632,7 @@ function resolveIngredientForRow(
           newNameProposals: [],
           defaultUnit: top.defaultUnit ?? null,
           defaultSubUnit: top.defaultSubUnit ?? null,
+          isEquipment: top.isEquipment ?? false,
         };
       }
     }
@@ -648,7 +674,7 @@ function resolveIngredientForRow(
       catalog,
     );
     const top = rematchMatches[0];
-    if (top && top.score >= MIN_AUTO_MATCH_SCORE) {
+    if (top && top.score >= autoMatchScoreThreshold) {
       // Use the prep-stripped form as displayName so the row reads cleanly
       // ("frischer Zucker" → name "Zucker", note "frischer") while still
       // preserving the user's original input minus the stripped prep.
@@ -672,6 +698,7 @@ function resolveIngredientForRow(
         newNameProposals: [],
         defaultUnit: top.defaultUnit ?? null,
         defaultSubUnit: top.defaultSubUnit ?? null,
+        isEquipment: top.isEquipment ?? false,
       };
     }
   }
@@ -715,6 +742,7 @@ function resolveIngredientForRow(
     newNameProposals: proposals,
     defaultUnit: null,
     defaultSubUnit: null,
+    isEquipment: false,
   };
 }
 
@@ -726,6 +754,8 @@ function toImportedCandidateMatch(
     canonicalName: m.canonicalName,
     matchedName: m.aliasName,
     score: m.score,
+    uncoveredText: m.uncoveredText,
+    isEquipment: m.isEquipment ?? false,
   };
 }
 
@@ -963,25 +993,61 @@ function pickFinalUnit(
   };
 }
 
+/**
+ * Per-importer knobs that loosen the parser's defensive defaults. URL /
+ * paste / API callers leave these unset (strict behavior). Familywall
+ * passes `alternativesMode: "first-wins"` + a relaxed
+ * `autoMatchScoreThreshold` because its catalog is exhaustive — falling
+ * back to "new ingredient" there is a worse outcome than absorbing a
+ * descriptor compound into the broader catalog row.
+ */
+export type ParseIngredientsOptions = {
+  /**
+   * How `X oder Y` alternatives + adjacent unconjoined pairs are handled:
+   *  - "preserve" (default) — leave the user's text alone, let the matcher
+   *    see "Butter oder Margarine" as a 3-token candidate.
+   *  - "first-wins" — drop "oder Y" tails (Butter wins), expand dash-prefix
+   *    "Weizen- oder Dinkelmehl" → "Weizenmehl", and inject `und` between
+   *    adjacent Salz/Pfeffer pairs so the conjunction splitter yields two
+   *    rows.
+   */
+  alternativesMode?: "preserve" | "first-wins";
+  /**
+   * Auto-match score gate. Default {@link MIN_AUTO_MATCH_SCORE}. Lower it
+   * (e.g. 130) only when the catalog is known to cover every ingredient
+   * the source might mention.
+   */
+  autoMatchScoreThreshold?: number;
+};
+
 export function parseIngredientLines(
   lines: readonly string[],
   lookups: ParseLookups,
+  options: ParseIngredientsOptions = {},
 ): ImportedIngredient[] {
   const knownUnitTokens = new Set<string>([
     ...lookups.units.byNameOrAlias.keys(),
     ...subUnitTokenSet(lookups.subUnits),
   ]);
+  const knownIngredientKeys = new Set(lookups.ingredients.keys());
   const splitOpts = {
     containerTokens: lookups.units.containerTokens,
-    knownIngredients: new Set(lookups.ingredients.keys()),
+    knownIngredients: knownIngredientKeys,
   };
+  const threshold = options.autoMatchScoreThreshold ?? MIN_AUTO_MATCH_SCORE;
+  const useFirstWins = options.alternativesMode === "first-wins";
   const out: ImportedIngredient[] = [];
-  for (const raw of lines) {
+  for (const rawLine of lines) {
     // Section headers (e.g. "Für den Teig:", "FÜR DIE FÜLLUNG") aren't
     // ingredients — section-aware callers use parseIngredientLinesIntoSections.
-    if (detectSectionHeader(raw)) continue;
+    if (detectSectionHeader(rawLine)) continue;
     // Skip pure-noise lines (no letters at all, e.g. "—–", "***").
-    if (!/\p{L}/u.test(raw)) continue;
+    if (!/\p{L}/u.test(rawLine)) continue;
+    // Familywall opt-in: pre-resolve "X oder Y" alternatives + adjacent-pair
+    // conjunctions (Salz Pfeffer) before the conjunction splitter runs.
+    const raw = useFirstWins
+      ? preprocessAlternatives(rawLine, knownIngredientKeys)
+      : rawLine;
     for (const piece of splitConjunctions(raw, splitOpts)) {
       const parsed = parseIngredientString(piece, knownUnitTokens);
       // Skip the row when the parser couldn't pull a real ingredient name
@@ -1001,6 +1067,13 @@ export function parseIngredientLines(
       // pre-colon part as a section title; this flat variant just drops
       // the row.
       if (parsed.name.includes(":")) continue;
+      // Familywall opt-in: drop rows whose name is a bare descriptor token
+      // ("frische", "fresh", "red") with no head noun — usually truncated
+      // source lines like "8 frische" or "1 cup fresh". Without this, the
+      // first such row creates a "frische" canonical and subsequent
+      // "frische X" lines tie at score 130 between the orphan and the real
+      // head-noun canonical, cascading more orphan matches.
+      if (useFirstWins && isStandaloneDescriptor(parsed.name)) continue;
       // A leading "or X" / "oder X" almost always means we just split a
       // conjunction that connected alternatives. Attach as a note on the
       // previous row instead of creating a separate ingredient.
@@ -1017,7 +1090,7 @@ export function parseIngredientLines(
         parsed.unitName,
         parsed.quantity,
       );
-      const resolved = resolveIngredientForRow(parsed, piece, lookups);
+      const resolved = resolveIngredientForRow(parsed, piece, lookups, threshold);
       const final = pickFinalUnit(
         initialUnit,
         parsed.unitName,
@@ -1037,7 +1110,10 @@ export function parseIngredientLines(
         ingredientMatch: resolved.match,
         canonicalIngredientName: resolved.canonicalIngredientName,
         notes: resolved.notes,
-        isOptional: parsed.isOptional,
+        // Equipment-flagged ingredients (Backpapier, Einmachgläser …)
+        // default to optional so the user decides per-recipe whether they
+        // actually need to shop them.
+        isOptional: parsed.isOptional || resolved.isEquipment,
         // No parsed quantity → treat the amount as constant. Catches
         // "Salz nach Geschmack" / "etwas Olivenöl" so changing the meal's
         // portion size doesn't multiply a non-existent number.
@@ -1067,24 +1143,31 @@ export type ParsedSectionGroup = {
 export function parseIngredientLinesIntoSections(
   lines: readonly string[],
   lookups: ParseLookups,
+  options: ParseIngredientsOptions = {},
 ): ParsedSectionGroup[] {
   const knownUnitTokens = new Set<string>([
     ...lookups.units.byNameOrAlias.keys(),
     ...subUnitTokenSet(lookups.subUnits),
   ]);
+  const knownIngredientKeys = new Set(lookups.ingredients.keys());
   const splitOpts = {
     containerTokens: lookups.units.containerTokens,
-    knownIngredients: new Set(lookups.ingredients.keys()),
+    knownIngredients: knownIngredientKeys,
   };
+  const threshold = options.autoMatchScoreThreshold ?? MIN_AUTO_MATCH_SCORE;
+  const useFirstWins = options.alternativesMode === "first-wins";
   const groups: ParsedSectionGroup[] = [{ title: null, ingredients: [] }];
 
-  for (const raw of lines) {
-    const header = detectSectionHeader(raw);
+  for (const rawLine of lines) {
+    const header = detectSectionHeader(rawLine);
     if (header) {
       groups.push({ title: header, ingredients: [] });
       continue;
     }
-    if (!/\p{L}/u.test(raw)) continue;
+    if (!/\p{L}/u.test(rawLine)) continue;
+    const raw = useFirstWins
+      ? preprocessAlternatives(rawLine, knownIngredientKeys)
+      : rawLine;
     for (const piece of splitConjunctions(raw, splitOpts)) {
       const parsed = parseIngredientString(piece, knownUnitTokens);
       if (parsed.name.trim().length === 0) continue;
@@ -1099,6 +1182,9 @@ export function parseIngredientLinesIntoSections(
         }
         continue;
       }
+      // Familywall opt-in: drop bare-descriptor rows — see comment in
+      // {@link parseIngredientLines} for the cascade this prevents.
+      if (useFirstWins && isStandaloneDescriptor(parsed.name)) continue;
       const currentGroup = groups[groups.length - 1];
       const leadingOr = /^(?:or|oder)\s+(.+)/i.exec(parsed.name.trim());
       if (leadingOr && currentGroup.ingredients.length > 0) {
@@ -1113,7 +1199,7 @@ export function parseIngredientLinesIntoSections(
         parsed.unitName,
         parsed.quantity,
       );
-      const resolved = resolveIngredientForRow(parsed, piece, lookups);
+      const resolved = resolveIngredientForRow(parsed, piece, lookups, threshold);
       const final = pickFinalUnit(
         initialUnit,
         parsed.unitName,
@@ -1133,7 +1219,11 @@ export function parseIngredientLinesIntoSections(
         ingredientMatch: resolved.match,
         canonicalIngredientName: resolved.canonicalIngredientName,
         notes: resolved.notes,
-        isOptional: parsed.isOptional,
+        // Mirror parseIngredientLines: equipment items (Backpapier,
+        // Einmachgläser …) auto-default to optional so the user opts in
+        // per-recipe. Without this OR, FamilyWall imports — which use this
+        // section-aware variant — silently dropped the default.
+        isOptional: parsed.isOptional || resolved.isEquipment,
         fixedAmount: parsed.quantity === null,
         rawText: piece.trim(),
         candidateMatches: resolved.candidateMatches,

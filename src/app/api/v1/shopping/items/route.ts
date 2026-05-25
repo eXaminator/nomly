@@ -13,15 +13,8 @@ const ingredientBody = z.object({
   note: optionalNote,
 });
 
-const productBody = z.object({
-  productId: z.number().int().positive(),
-  quantity: optionalQty,
-  unitId: optionalUnit,
-  note: optionalNote,
-});
-
-const newProductBody = z.object({
-  newProduct: z.object({
+const newIngredientBody = z.object({
+  newIngredient: z.object({
     name: z.string().min(1).max(120),
     defaultCategoryId: z.number().int().positive().nullable().optional(),
   }),
@@ -37,7 +30,7 @@ const byNameBody = z.object({
   note: optionalNote,
 });
 
-const schema = z.union([ingredientBody, productBody, newProductBody, byNameBody]);
+const schema = z.union([ingredientBody, newIngredientBody, byNameBody]);
 
 export async function POST(request: Request) {
   const body = await request.json().catch(() => null);

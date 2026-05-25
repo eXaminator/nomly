@@ -337,6 +337,7 @@ export function getRecipe(id: number): RecipeView | null {
     fixedAmount: boolean;
     rawLine: string | null;
     dietaryClass: IngredientDietaryClass;
+    isEquipment: boolean;
     sortOrder: number;
   };
   const ingredients: IngredientRow[] =
@@ -367,6 +368,7 @@ export function getRecipe(id: number): RecipeView | null {
             fixedAmount: recipeIngredient.fixedAmount,
             rawLine: recipeIngredient.rawLine,
             dietaryClass: ingredientTable.dietaryClass,
+            isEquipment: ingredientTable.isEquipment,
             sortOrder: recipeIngredient.sortOrder,
           })
           .from(recipeIngredient)
@@ -429,6 +431,7 @@ export function getRecipe(id: number): RecipeView | null {
           isOptional: i.isOptional,
           fixedAmount: i.fixedAmount,
           rawLine: i.rawLine,
+          isEquipment: i.isEquipment,
           sortOrder: i.sortOrder,
         })),
     })),

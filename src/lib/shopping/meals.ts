@@ -1,4 +1,4 @@
-import { eq, isNotNull, sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { db } from "../../db/index.ts";
 import {
   mealPlan,
@@ -141,26 +141,13 @@ function stripMealContributions(
 }
 
 /**
- * Delete every shopping_item that belongs to a product (i.e. has a non-null
- * `product_id`). Used by the "Liste leeren" picker's "Produkte" checkbox.
- */
-export function removeAllProductsFromShoppingList(): { deletedCount: number } {
-  const result = db
-    .delete(shoppingItem)
-    .where(isNotNull(shoppingItem.productId))
-    .run();
-  return { deletedCount: result.changes };
-}
-
-/**
  * Per-group selective clear. Pass meal plan ids whose contributions should
- * be subtracted, optionally also wipe all products. The summed effect of
- * one call is reported back so the UI can confirm what happened.
+ * be subtracted. The summed effect of one call is reported back so the UI
+ * can confirm what happened.
  */
 export function clearShoppingListSelective(input: {
   mealPlanIds: number[];
-  removeProducts: boolean;
-}): { itemsDeleted: number; itemsUpdated: number; productsDeleted: number } {
+}): { itemsDeleted: number; itemsUpdated: number } {
   return db.transaction((tx) => {
     let itemsDeleted = 0;
     let itemsUpdated = 0;
@@ -169,15 +156,7 @@ export function clearShoppingListSelective(input: {
       itemsDeleted += r.itemsDeleted;
       itemsUpdated += r.itemsUpdated;
     }
-    let productsDeleted = 0;
-    if (input.removeProducts) {
-      const res = tx
-        .delete(shoppingItem)
-        .where(isNotNull(shoppingItem.productId))
-        .run();
-      productsDeleted = res.changes;
-    }
-    return { itemsDeleted, itemsUpdated, productsDeleted };
+    return { itemsDeleted, itemsUpdated };
   });
 }
 

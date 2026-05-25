@@ -91,6 +91,14 @@ type ServerMatch = {
   canonicalName: string;
   matchedName: string;
   score: number;
+  /** Raw text of candidate tokens NOT covered by this match — moved into the
+   *  notes field when the user picks this pill. Empty when the match covers
+   *  every token of the candidate. */
+  uncoveredText: string;
+  /** True when the underlying ingredient is flagged as equipment. The pill
+   *  click and auto-select rule default `isOptional` to true on first
+   *  resolution to equipment — matching the import-time behavior. */
+  isEquipment: boolean;
 };
 
 /**
@@ -105,6 +113,55 @@ function subUnitPickerId(subUnitId: number): number {
 }
 function isSubUnitPickerId(id: number): boolean {
   return id < 0;
+}
+
+/**
+ * Remove each whitespace-separated token in `uncoveredText` from `name`
+ * (case-insensitive, first occurrence only per token). Used when the user
+ * picks a pill whose match did not cover the full name input — e.g.
+ * "Paprikaschote rote" minus "rote" → "Paprikaschote". Punctuation that
+ * surrounded the removed token (commas, dashes) is also tidied so the
+ * resulting name doesn't read as "Paprikaschote, " or "Paprikaschote -".
+ */
+function subtractTokensFromName(name: string, uncoveredText: string): string {
+  const toRemove = uncoveredText
+    .split(/\s+/)
+    .map((t) => t.toLowerCase())
+    .filter((t) => t.length > 0);
+  if (toRemove.length === 0) return name;
+  const parts = name.split(/(\s+|[,;])/u);
+  const remainingToRemove = new Map<string, number>();
+  for (const t of toRemove) {
+    remainingToRemove.set(t, (remainingToRemove.get(t) ?? 0) + 1);
+  }
+  const kept: string[] = [];
+  for (const part of parts) {
+    const lower = part.toLowerCase().replace(/[.,;]+$/, "");
+    const count = remainingToRemove.get(lower);
+    if (count && count > 0) {
+      remainingToRemove.set(lower, count - 1);
+      continue;
+    }
+    kept.push(part);
+  }
+  // Tidy stranded separators: leading/trailing whitespace/punctuation and
+  // double-separators left behind by the removals.
+  return kept
+    .join("")
+    .replace(/\s*[,;]\s*[,;]\s*/g, ", ")
+    .replace(/^[\s,;-]+|[\s,;-]+$/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** Append a string to the notes field with a comma separator when both
+ *  sides are non-empty. Trims and dedups consecutive separators. */
+function appendToNotes(existing: string, addition: string): string {
+  const a = existing.trim();
+  const b = addition.trim();
+  if (a.length === 0) return b;
+  if (b.length === 0) return a;
+  return `${a}, ${b}`;
 }
 
 type Props = {
@@ -163,6 +220,8 @@ export function IngredientRow({ value, onChange, onRemove }: Props) {
           // rather than collapsing both to the canonical.
           matchedName: c.matchedName,
           score: c.score,
+          uncoveredText: c.uncoveredText,
+          isEquipment: c.isEquipment,
         }));
       }
       // Edit flow: an existing recipe row carries `selectedIngredientId`
@@ -181,6 +240,13 @@ export function IngredientRow({ value, onChange, onRemove }: Props) {
             canonicalName: value.canonicalName ?? value.name,
             matchedName: label,
             score: 999,
+            // Edit-flow synthetic — no live matcher info, treat as fully
+            // covered so the pill click is a no-op on name/notes.
+            uncoveredText: "",
+            // Equipment status is unknown at synth time; the live matcher's
+            // first response will fill it in. Defaulting to false here
+            // avoids accidentally flipping isOptional on initial render.
+            isEquipment: false,
           },
         ];
       }
@@ -243,6 +309,15 @@ export function IngredientRow({ value, onChange, onRemove }: Props) {
                 canonicalName: v.canonicalName ?? v.name,
                 matchedName: label,
                 score: 999,
+                // Synthetic pin — name/notes are already in the user's
+                // intended state; treat as fully covered so re-picking
+                // this pill doesn't shuffle text around.
+                uncoveredText: "",
+                // Equipment flag isn't surfaced by the synthetic pin path
+                // (the live matcher dropped it). The user already has the
+                // row in their preferred state, so default to false to
+                // avoid re-flipping isOptional.
+                isEquipment: false,
               },
               ...data.matches,
             ];
@@ -256,7 +331,8 @@ export function IngredientRow({ value, onChange, onRemove }: Props) {
           const next = applyAutoSelect(v, name, data.matches);
           if (
             next.selectedIngredientId !== v.selectedIngredientId ||
-            next.canonicalName !== v.canonicalName
+            next.canonicalName !== v.canonicalName ||
+            next.isOptional !== v.isOptional
           ) {
             onChangeRef.current(next);
           }
@@ -332,17 +408,35 @@ export function IngredientRow({ value, onChange, onRemove }: Props) {
     });
   }
 
-  /** Click on a candidate pill: select that ingredient WITHOUT replacing
-   *  the typed name. The row's `display_name` keeps the user's spelling
-   *  while `ingredient_id` links to the picked canonical. */
+  /** Click on a candidate pill: select that ingredient and delegate any
+   *  tokens the match did NOT cover into the notes field. The row's
+   *  display_name keeps the user's spelling minus the uncovered tokens
+   *  ("Paprikaschote rote" + pick Paprikaschoten → name "Paprikaschote",
+   *  note "rote"); `ingredient_id` links to the picked canonical. When
+   *  uncoveredText is empty the name is preserved verbatim, matching the
+   *  prior behavior for clean covers.
+   *
+   *  Equipment-flagged ingredients (Backpapier, Backform, …) default the
+   *  row to isOptional=true on first resolution, mirroring the import-time
+   *  parser behavior. A user-toggled isOptional=true is left in place;
+   *  we never auto-unset. */
   function selectCandidate(c: ServerMatch) {
+    const nextName = c.uncoveredText
+      ? subtractTokensFromName(value.name, c.uncoveredText)
+      : value.name;
+    const nextNotes = c.uncoveredText
+      ? appendToNotes(value.notes, c.uncoveredText)
+      : value.notes;
     onChange({
       ...value,
+      name: nextName,
+      notes: nextNotes,
       selectedIngredientId: c.ingredientId,
       canonicalName:
-        value.name.toLowerCase() === c.canonicalName.toLowerCase()
+        nextName.toLowerCase() === c.canonicalName.toLowerCase()
           ? null
           : c.canonicalName,
+      isOptional: value.isOptional || c.isEquipment,
       // Clicking a regular candidate clears any force-match alias intent.
       addAsAlias: false,
       importAnnotation: clearAnnotationOn(value.importAnnotation, "ingredient"),
@@ -566,7 +660,10 @@ function applyAutoSelect(
   typedName: string,
   matches: ServerMatch[],
 ): DraftIngredient {
-  // Rule 1: sticky.
+  // Rule 1: sticky. We keep the selection but DON'T re-apply the equipment
+  // → isOptional default: the user has had a chance to toggle it manually
+  // since the original resolution, and re-asserting on every keystroke
+  // would clobber that toggle.
   if (current.selectedIngredientId != null) {
     const hit = matches.find(
       (m) => m.ingredientId === current.selectedIngredientId,
@@ -597,6 +694,7 @@ function applyAutoSelect(
         trimmedLower === exact.canonicalName.toLowerCase()
           ? null
           : exact.canonicalName,
+      isOptional: current.isOptional || exact.isEquipment,
       addAsAlias: false,
     };
   }
@@ -610,6 +708,7 @@ function applyAutoSelect(
         trimmedLower === top.canonicalName.toLowerCase()
           ? null
           : top.canonicalName,
+      isOptional: current.isOptional || top.isEquipment,
       addAsAlias: false,
     };
   }

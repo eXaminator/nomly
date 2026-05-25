@@ -35,7 +35,6 @@ async function seed(): Promise<Ctx> {
     category,
     ingredient,
     mealPlan,
-    product,
     recipe,
     recipeIngredient,
     recipeSection,
@@ -44,9 +43,6 @@ async function seed(): Promise<Ctx> {
     unit,
   } = await import("@/db/schema");
 
-  // Reset every table that this suite touches. Shopping rows must go first
-  // because the `shopping_item_xor` check would otherwise fire when an FK
-  // set-null nulls out `ingredient_id`.
   db.delete(shoppingItemSource).run();
   db.delete(shoppingItem).run();
   db.delete(recipeIngredient).run();
@@ -54,7 +50,6 @@ async function seed(): Promise<Ctx> {
   db.delete(mealPlan).run();
   db.delete(recipe).run();
   db.delete(ingredient).run();
-  db.delete(product).run();
   db.delete(unit).run();
   db.delete(category).run();
 
@@ -192,6 +187,43 @@ describe("shopping preview", () => {
     expect(salz?.isOptional).toBe(true);
     const tomate = meals[0].sections.flatMap((s) => s.ingredients).find((i) => i.ingredientName === "Tomate");
     expect(tomate?.isOptional).toBe(false);
+  });
+
+  it("collects equipment ingredients into a dedicated Ausrüstung section", async () => {
+    const { db } = await import("@/db");
+    const { ingredient } = await import("@/db/schema");
+    const { eq } = await import("drizzle-orm");
+    // Promote "Mehl" to an equipment item — synthetic, just to exercise the
+    // grouping. The fixture mixes equipment with consumables inside the
+    // recipe's single unnamed section; the preview should pull it into
+    // its own "Ausrüstung" section at the end.
+    db.update(ingredient)
+      .set({ isEquipment: true })
+      .where(eq(ingredient.id, ctx.ingredientIds.mehl))
+      .run();
+    const { previewMeals } = await import("@/lib/shopping/preview");
+    const meals = previewMeals("2026-05-23", 1);
+    expect(meals).toHaveLength(1);
+    const sections = meals[0].sections;
+    const equipmentSection = sections.find((s) => s.title === "Ausrüstung");
+    expect(equipmentSection).toBeDefined();
+    expect(equipmentSection?.sectionId).toBe(-1);
+    expect(equipmentSection?.ingredients.map((i) => i.ingredientName)).toEqual(["Mehl"]);
+    // Equipment section appended last.
+    expect(sections[sections.length - 1].title).toBe("Ausrüstung");
+    // Mehl is no longer in the consumable sections.
+    const consumableNames = sections
+      .filter((s) => s.title !== "Ausrüstung")
+      .flatMap((s) => s.ingredients)
+      .map((i) => i.ingredientName);
+    expect(consumableNames).not.toContain("Mehl");
+    expect(consumableNames).toContain("Tomate");
+  });
+
+  it("omits Ausrüstung section when no equipment items are present", async () => {
+    const { previewMeals } = await import("@/lib/shopping/preview");
+    const meals = previewMeals("2026-05-23", 1);
+    expect(meals[0].sections.some((s) => s.title === "Ausrüstung")).toBe(false);
   });
 
   it("flags alreadyOnList when a source row exists", async () => {
@@ -474,10 +506,7 @@ describe("selective clear", () => {
     ]);
     expect(listShoppingItems().length).toBeGreaterThan(0);
 
-    clearShoppingListSelective({
-      mealPlanIds: [ctx.mealPlanId],
-      removeProducts: false,
-    });
+    clearShoppingListSelective({ mealPlanIds: [ctx.mealPlanId] });
 
     expect(listShoppingItems()).toHaveLength(0);
     const stillPlanned = db
@@ -635,10 +664,10 @@ describe("byName resolution", () => {
     expect(res.mode).toBe("none");
   });
 
-  it("addManualItem with byName creates a product on miss", async () => {
+  it("addManualItem with byName creates an ingredient on miss", async () => {
     const { addManualItem } = await import("@/lib/shopping/items");
     const result = addManualItem({ byName: "Toilettenpapier" });
-    expect(result.resolved.mode).toBe("createdProduct");
+    expect(result.resolved.mode).toBe("createdIngredient");
     expect(result.action).toBe("created");
   });
 });

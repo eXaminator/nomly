@@ -72,11 +72,7 @@ export function AddItemDialog({ open, onClose, onAdded }: Props) {
     setError(null);
     const qty = parsedQuantity();
     try {
-      await addItem(
-        hit.kind === "ingredient"
-          ? { ingredientId: hit.id, quantity: qty }
-          : { productId: hit.id, quantity: qty },
-      );
+      await addItem({ ingredientId: hit.id, quantity: qty });
       onAdded();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Fehler");
@@ -106,8 +102,8 @@ export function AddItemDialog({ open, onClose, onAdded }: Props) {
         <DialogHeader>
           <DialogTitle>Artikel hinzufügen</DialogTitle>
           <DialogDescription>
-            Tipp den Namen — bestehende Zutaten und Produkte erscheinen unten.
-            Findet sich nichts, legst du einen neuen Artikel an.
+            Tipp den Namen — bestehende Artikel erscheinen unten. Findet sich
+            nichts, legst du einen neuen Artikel an.
           </DialogDescription>
         </DialogHeader>
         <DialogBody className="flex flex-col gap-3">
@@ -163,7 +159,7 @@ export function AddItemDialog({ open, onClose, onAdded }: Props) {
                       ) : null}
                     </span>
                     <span className="text-xs uppercase tracking-wider text-[var(--color-muted-fg)]">
-                      {h.kind === "ingredient" ? "Zutat" : "Produkt"}
+                      Artikel
                     </span>
                   </button>
                 </li>
@@ -171,7 +167,7 @@ export function AddItemDialog({ open, onClose, onAdded }: Props) {
             </ul>
           ) : query.trim().length > 0 ? (
             <div className="rounded-[var(--radius)] border border-dashed border-[var(--color-border)] px-3 py-2 text-sm text-[var(--color-muted-fg)]">
-              Kein Treffer — „{query.trim()}“ wird als neues Produkt angelegt.
+              Kein Treffer — „{query.trim()}“ wird als neuer Artikel angelegt.
             </div>
           ) : null}
           {error ? (

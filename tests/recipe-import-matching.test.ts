@@ -132,6 +132,99 @@ describe("parseIngredientLines — substring matcher + threshold", () => {
     expect(out[0].ingredientMatch).toBe("existing");
   });
 
+  it("auto-merges 'Paprikaschote(n), rote (fein gehackt)' to catalog Paprikaschoten via a color-variant alias", () => {
+    // Color disambiguation is handled in the seeded catalog, not via word
+    // lists in the matcher. Adding "rote Paprikaschote" as an alias of
+    // canonical Paprikaschoten gives the matcher a 2-token entry that
+    // covers BOTH the pre-comma identity ("Paprikaschote") and the
+    // comma-tail descriptor ("rote") — full coverage + close-inflection,
+    // scores well above the auto-merge gate. Parens still route "(fein
+    // gehackt)" to notes.
+    const catalog: IngredientCatalog = [
+      {
+        ingredientId: 6,
+        canonicalName: "Paprikaschoten",
+        aliasName: "Paprikaschoten",
+        tokens: ["paprikaschoten"],
+      },
+      {
+        ingredientId: 6,
+        canonicalName: "Paprikaschoten",
+        aliasName: "rote Paprikaschote",
+        tokens: ["rote", "paprikaschote"],
+      },
+    ];
+    const out = parseIngredientLines(
+      ["100 g Paprikaschote(n), rote (fein gehackt)"],
+      makeLookups(catalog),
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0].ingredientId).toBe(6);
+    expect(out[0].ingredientMatch).toBe("existing");
+    // Parenthesised prep phrase still lands in notes.
+    expect(out[0].notes).toMatch(/fein gehackt/);
+  });
+
+  it("propagates isEquipment on candidate matches so the pill UI can auto-mark equipment rows optional", () => {
+    // The matcher carries the catalog entry's equipment flag through to
+    // each candidate match. The pill click handler and the live-matcher
+    // auto-select rule key off this to default the row to isOptional=true
+    // when a row resolves to equipment — same outcome as the import-time
+    // path, just applied at edit time.
+    const catalog: IngredientCatalog = [
+      {
+        ingredientId: 42,
+        canonicalName: "Backpapier",
+        aliasName: "Backpapier",
+        tokens: ["backpapier"],
+        isEquipment: true,
+      },
+      {
+        ingredientId: 7,
+        canonicalName: "Mehl",
+        aliasName: "Mehl",
+        tokens: ["mehl"],
+      },
+    ];
+    const out = parseIngredientLines(
+      ["1 Backpapier", "200 g Mehl"],
+      makeLookups(catalog),
+    );
+    const backpapierMatch = out[0].candidateMatches.find(
+      (c) => c.ingredientId === 42,
+    );
+    const mehlMatch = out[1].candidateMatches.find((c) => c.ingredientId === 7);
+    expect(backpapierMatch?.isEquipment).toBe(true);
+    expect(mehlMatch?.isEquipment).toBe(false);
+  });
+
+  it("exposes uncoveredText on candidate matches so the pill UI can move tokens to notes", () => {
+    // A wide-text match that didn't auto-pick still surfaces as a pill. The
+    // matcher reports which raw candidate tokens the entry did NOT cover so
+    // the pill UI can move them out of the name and into the notes field
+    // when the user picks the pill manually.
+    const catalog: IngredientCatalog = [
+      {
+        ingredientId: 5,
+        canonicalName: "Knoblauch",
+        aliasName: "Knoblauch",
+        tokens: ["knoblauch"],
+      },
+    ];
+    const out = parseIngredientLines(
+      ["1 Knoblauchzehe rote"],
+      makeLookups(catalog),
+    );
+    expect(out).toHaveLength(1);
+    const knoblauchCandidate = out[0].candidateMatches.find(
+      (c) => c.ingredientId === 5,
+    );
+    expect(knoblauchCandidate).toBeDefined();
+    // "knoblauch" matches "knoblauchzehe" as a prefix-fragment, so the
+    // covered token is "Knoblauchzehe" itself; "rote" stays uncovered.
+    expect(knoblauchCandidate?.uncoveredText).toBe("rote");
+  });
+
   it("merges a German plural inflection in the reverse direction (Paprikaschote → catalog Paprikaschoten)", () => {
     // The catalog happens to hold the plural form (whichever recipe got
     // imported first); a later recipe with the singular should still merge,
@@ -460,6 +553,88 @@ describe("colon-in-name treated as undetected section header", () => {
     expect(out[1].title).toBe("Topping");
     // Zucker lands in the new section (no further header in between).
     expect(out[1].ingredients.map((i) => i.name)).toEqual(["Zucker"]);
+  });
+
+  it("equipment-flagged ingredients default the row to isOptional=true", () => {
+    const catalog: IngredientCatalog = [
+      {
+        ingredientId: 42,
+        canonicalName: "Backpapier",
+        aliasName: "Backpapier",
+        tokens: ["backpapier"],
+        isEquipment: true,
+      },
+      {
+        ingredientId: 7,
+        canonicalName: "Mehl",
+        aliasName: "Mehl",
+        tokens: ["mehl"],
+      },
+    ];
+    const out = parseIngredientLines(
+      ["1 Backpapier", "200 g Mehl"],
+      makeLookups(catalog),
+    );
+    expect(out).toHaveLength(2);
+    // Equipment item → auto-optional even though the parsed line had no
+    // explicit "optional" marker.
+    expect(out[0].ingredientId).toBe(42);
+    expect(out[0].isOptional).toBe(true);
+    // Non-equipment item → optional stays false.
+    expect(out[1].ingredientId).toBe(7);
+    expect(out[1].isOptional).toBe(false);
+  });
+
+  it("section-aware parser also defaults equipment rows to isOptional=true", () => {
+    // Familywall imports flow through parseIngredientLinesIntoSections;
+    // the flat-variant equipment override must apply here too so equipment
+    // doesn't sneak onto the recipe non-optional just because it was
+    // imported from a sectioned source.
+    const catalog: IngredientCatalog = [
+      {
+        ingredientId: 42,
+        canonicalName: "Backpapier",
+        aliasName: "Backpapier",
+        tokens: ["backpapier"],
+        isEquipment: true,
+      },
+      {
+        ingredientId: 7,
+        canonicalName: "Mehl",
+        aliasName: "Mehl",
+        tokens: ["mehl"],
+      },
+    ];
+    const groups = parseIngredientLinesIntoSections(
+      ["Für den Teig:", "1 Backpapier", "200 g Mehl"],
+      makeLookups(catalog),
+    );
+    const teig = groups.find((g) => g.title === "Für den Teig");
+    expect(teig).toBeDefined();
+    const backpapier = teig?.ingredients.find((i) => i.ingredientId === 42);
+    const mehl = teig?.ingredients.find((i) => i.ingredientId === 7);
+    expect(backpapier?.isOptional).toBe(true);
+    expect(mehl?.isOptional).toBe(false);
+  });
+
+  it("equipment override doesn't undo an explicit non-optional manual edit", () => {
+    // The equipment override is ORed in, so a parsed `isOptional=true` from
+    // explicit marker text still wins, and the override only LIFTS rows
+    // from non-optional to optional — never the reverse.
+    const catalog: IngredientCatalog = [
+      {
+        ingredientId: 42,
+        canonicalName: "Backpapier",
+        aliasName: "Backpapier",
+        tokens: ["backpapier"],
+        isEquipment: true,
+      },
+    ];
+    const out = parseIngredientLines(
+      ["1 Backpapier (optional)"],
+      makeLookups(catalog),
+    );
+    expect(out[0].isOptional).toBe(true);
   });
 
   it("colon-amount lines like 'Mehl: 500 g' are still parsed as ingredients", () => {

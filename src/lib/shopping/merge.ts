@@ -271,7 +271,6 @@ function createItem(
     .insert(shoppingItem)
     .values({
       ingredientId: input.ingredientId,
-      productId: null,
       quantity: null,
       unitId: null,
       categoryId: input.categoryId,

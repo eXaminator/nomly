@@ -55,6 +55,10 @@ export type CatalogEntry = {
    *  still influence unit / sub-unit selection downstream. */
   defaultUnit?: { id: number; name: string };
   defaultSubUnit?: { id: number; name: string; perPurchase: number };
+  /** True when the underlying ingredient is flagged as equipment (Backpapier,
+   *  Einmachgläser, …). The parser uses this to default the recipe row to
+   *  `isOptional=true` so the user decides per-recipe whether to shop it. */
+  isEquipment?: boolean;
 };
 
 export type IngredientCatalog = CatalogEntry[];
@@ -76,6 +80,13 @@ export type IngredientCandidateMatch = {
   inOrder: boolean;
   defaultUnit?: { id: number; name: string };
   defaultSubUnit?: { id: number; name: string; perPurchase: number };
+  /** Propagated from the matched {@link CatalogEntry} — see its docstring. */
+  isEquipment?: boolean;
+  /** Raw text of the candidate tokens NOT covered by this match — e.g. for
+   *  candidate "Paprikaschote rote" matched against "Paprikaschoten", this
+   *  is "rote". The pill UI uses it to move uncovered tokens into notes
+   *  when the user picks a low-confidence match manually. */
+  uncoveredText: string;
 };
 
 /** A token of the candidate text — both the normalised form (used for
@@ -164,6 +175,12 @@ function bestMatchForEntry(
       isFullCoverageFromStart: fullCoverageFromStart,
     });
     if (!best || score > best.score) {
+      const coveredSet = new Set(coveredCandidateTokens);
+      const uncoveredText = candidate
+        .filter((_, i) => !coveredSet.has(i))
+        .map((t) => t.raw)
+        .join(" ")
+        .trim();
       best = {
         ingredientId: entry.ingredientId,
         canonicalName: entry.canonicalName,
@@ -174,6 +191,8 @@ function bestMatchForEntry(
         inOrder,
         defaultUnit: entry.defaultUnit,
         defaultSubUnit: entry.defaultSubUnit,
+        isEquipment: entry.isEquipment,
+        uncoveredText,
       };
     }
   }
@@ -302,8 +321,8 @@ function perTokenBonus(et: string, wt: string): number {
 }
 
 /**
- * Minimum match score at which the parser is allowed to auto-resolve a row
- * without user confirmation. Tuned to:
+ * Default minimum match score for auto-resolving a row without user
+ * confirmation. Tuned to:
  *   - accept full-coverage single-token exact matches (`Paprika` → `Paprika`: 135)
  *   - accept full-coverage close-inflection matches
  *     (`Paprikaschote` ↔ `Paprikaschoten`: 135 — see {@link perTokenBonus})
@@ -315,6 +334,17 @@ function perTokenBonus(et: string, wt: string): number {
  *     (`Paprika` in catalog matching `Paprikapulver Rosenscharf`: 110)
  *   - reject not-anchored single-token exact matches that would mis-resolve
  *     compound nouns (`Tomate` inside `Cherry-Tomate`: 130).
+ *
+ * URL / paste imports use this strict default — they pull arbitrary text
+ * the catalog may not cover, so a strong protective gate avoids
+ * mis-merging novel ingredients into broader catalog rows.
+ *
+ * Familywall imports pass a relaxed override (`130`) via the
+ * `autoMatchScoreThreshold` option to {@link parseIngredientLines} /
+ * {@link parseIngredientLinesIntoSections}. The catalog is pre-seeded to
+ * cover every ingredient the familywall cache references, so the lower
+ * gate absorbs descriptor compounds (`rote Paprikaschote` → Paprika,
+ * "rote" → notes) instead of orphaning them.
  *
  * Pill UI still surfaces below-threshold matches so the user can opt in
  * manually — the gate is only on auto-pick.

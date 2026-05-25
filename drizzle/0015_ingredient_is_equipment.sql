@@ -1,0 +1,1 @@
+ALTER TABLE `ingredient` ADD `is_equipment` integer DEFAULT false NOT NULL;

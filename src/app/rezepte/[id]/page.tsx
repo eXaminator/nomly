@@ -113,41 +113,55 @@ export default async function RecipeViewPage({
       <div className="mt-8 space-y-12">
         {recipe.sections.map((section) => {
           const html = renderMarkdown(section.instructions);
+          const consumables = section.ingredients.filter((i) => !i.isEquipment);
+          const equipment = section.ingredients.filter((i) => i.isEquipment);
+
+          const renderIngredient = (ing: (typeof section.ingredients)[number]) => (
+            <li
+              key={ing.id}
+              className={ing.isOptional ? "flex gap-2 italic opacity-65" : "flex gap-2"}
+            >
+              <span className="inline-flex min-w-12 items-center gap-1 font-mono text-[var(--color-muted-fg)]">
+                {ing.fixedAmount ? (
+                  <Lock className="size-3 shrink-0" aria-label="Feste Menge" />
+                ) : null}
+                <span>
+                  {formatQuantity(ing.quantity)} {ing.unitName ?? ""}
+                </span>
+              </span>
+              <span className="flex-1">
+                <IngredientLine
+                  displayName={ing.ingredientName}
+                  canonicalName={ing.canonicalIngredientName}
+                />
+                {ing.notes ? (
+                  <span className="text-[var(--color-muted-fg)]"> – {ing.notes}</span>
+                ) : null}
+                {ing.isOptional ? (
+                  <span className="ml-1 text-xs text-[var(--color-muted-fg)]">
+                    (optional)
+                  </span>
+                ) : null}
+              </span>
+            </li>
+          );
+
           const ingredientList = (
-            <ul className="space-y-1 text-sm text-[var(--color-fg)]">
-              {section.ingredients.map((ing) => (
-                <li
-                  key={ing.id}
-                  className={ing.isOptional ? "flex gap-2 italic opacity-65" : "flex gap-2"}
-                >
-                  <span className="inline-flex min-w-12 items-center gap-1 font-mono text-[var(--color-muted-fg)]">
-                    {ing.fixedAmount ? (
-                      <Lock
-                        className="size-3 shrink-0"
-                        aria-label="Feste Menge"
-                      />
-                    ) : null}
-                    <span>
-                      {formatQuantity(ing.quantity)} {ing.unitName ?? ""}
-                    </span>
-                  </span>
-                  <span className="flex-1">
-                    <IngredientLine
-                      displayName={ing.ingredientName}
-                      canonicalName={ing.canonicalIngredientName}
-                    />
-                    {ing.notes ? (
-                      <span className="text-[var(--color-muted-fg)]"> – {ing.notes}</span>
-                    ) : null}
-                    {ing.isOptional ? (
-                      <span className="ml-1 text-xs text-[var(--color-muted-fg)]">
-                        (optional)
-                      </span>
-                    ) : null}
-                  </span>
-                </li>
-              ))}
-            </ul>
+            <div className="space-y-4">
+              <ul className="space-y-1 text-sm text-[var(--color-fg)]">
+                {consumables.map(renderIngredient)}
+              </ul>
+              {equipment.length > 0 ? (
+                <div className="space-y-1">
+                  <h3 className="text-xs font-medium uppercase tracking-wide text-[var(--color-muted-fg)]">
+                    Du brauchst auch
+                  </h3>
+                  <ul className="space-y-1 text-sm text-[var(--color-fg)]">
+                    {equipment.map(renderIngredient)}
+                  </ul>
+                </div>
+              ) : null}
+            </div>
           );
           // Empty-state for instructions only makes sense for a single-section
           // recipe — multi-section imports keep all steps on section[0], so

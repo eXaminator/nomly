@@ -18,15 +18,9 @@ const STAMMDATEN_LINKS: Array<{
 }> = [
   {
     href: "/einstellungen/zutaten",
-    title: "Zutaten",
+    title: "Artikel",
     description:
-      "Namen, Aliase, Kategorie, Diät-Klassifikation, Liste-Ausschluss.",
-  },
-  {
-    href: "/einstellungen/produkte",
-    title: "Produkte",
-    description:
-      "Manuell hinzufügbare Einkaufs-Artikel mit Namen, Aliasen und Kategorien.",
+      "Lebensmittel, Haushaltsartikel und Ausrüstung — Name, Aliase, Kategorie, Diät-Klassifikation, Equipment-Flag.",
   },
   {
     href: "/einstellungen/einheiten",
@@ -38,7 +32,7 @@ const STAMMDATEN_LINKS: Array<{
     href: "/einstellungen/kategorien",
     title: "Kategorien",
     description:
-      "Zuordnung von Zutaten und Produkten zu Sortier-Kategorien.",
+      "Zuordnung von Artikeln zu Sortier-Kategorien.",
   },
   {
     href: "/einstellungen/tags",

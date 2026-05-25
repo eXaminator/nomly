@@ -32,6 +32,12 @@ export type PreviewIngredient = {
    * marker and starts it unchecked so the user has to opt in.
    */
   isOptional: boolean;
+  /**
+   * The underlying ingredient is flagged as equipment (Backpapier, Backform …).
+   * These items are pulled out of their original recipe section and grouped
+   * under a synthetic "Ausrüstung" section at the bottom of the meal.
+   */
+  isEquipment: boolean;
 };
 
 export type PreviewSection = {
@@ -104,6 +110,7 @@ export function previewMeals(start: string, lengthDays: number): PreviewMeal[] {
       unitName: unit.name,
       notes: recipeIngredient.notes,
       isOptional: recipeIngredient.isOptional,
+      isEquipment: ingredient.isEquipment,
       fixedAmount: recipeIngredient.fixedAmount,
       excludeFromShoppingList: ingredient.excludeFromShoppingList,
     })
@@ -176,11 +183,37 @@ export function previewMeals(start: string, lengthDays: number): PreviewMeal[] {
         unitName: l.unitName,
         notes: l.notes,
         isOptional: !!l.isOptional,
+        isEquipment: !!l.isEquipment,
       });
+    }
+    // Peel equipment items out of their original sections and collect them
+    // into a single synthetic "Ausrüstung" section appended at the end.
+    // The shopping mental model is "all the gear in one place" — splitting
+    // it across the recipe's cooking sections (where it may appear next to
+    // unrelated dough or sauce ingredients) buries the equipment.
+    const equipmentLines: PreviewIngredient[] = [];
+    for (const id of sectionOrder) {
+      const sec = sectionsById.get(id)!;
+      const keep: PreviewIngredient[] = [];
+      for (const ing of sec.ingredients) {
+        if (ing.isEquipment) equipmentLines.push(ing);
+        else keep.push(ing);
+      }
+      sec.ingredients = keep;
     }
     const sections = sectionOrder
       .map((id) => sectionsById.get(id)!)
       .filter((s) => s.ingredients.length > 0);
+    if (equipmentLines.length > 0) {
+      // Negative sentinel id — real recipe_section ids are positive
+      // auto-increment values, so this can't collide and gives the React
+      // key a stable per-meal value.
+      sections.push({
+        sectionId: -1,
+        title: "Ausrüstung",
+        ingredients: equipmentLines,
+      });
+    }
     if (sections.length === 0) continue;
     out.push({
       mealPlanId: m.mealPlanId,

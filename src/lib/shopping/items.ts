@@ -6,9 +6,6 @@ import {
   ingredientAlias,
   ingredientSupermarketUnavailable,
   mealPlan,
-  product,
-  productAlias,
-  productSupermarketUnavailable,
   recipe,
   recipeIngredient,
   shoppingItem,
@@ -16,7 +13,11 @@ import {
   shoppingItemSource,
   unit,
 } from "../../db/schema.ts";
-import { createProductFromName, resolveByName, type NameCandidate } from "./byName.ts";
+import {
+  createIngredientFromName,
+  resolveByName,
+  type NameCandidate,
+} from "./byName.ts";
 import type { Dimension, UnitRow } from "./format.ts";
 import { loadUnitsByDimension } from "./units-db.ts";
 
@@ -60,7 +61,9 @@ export type ShoppingItemManualAmount = {
 
 export type ShoppingItemView = {
   id: number;
-  refType: "ingredient" | "product";
+  /** Retained for API compatibility — always "ingredient" after the
+   *  products-into-ingredients unification. */
+  refType: "ingredient";
   refId: number;
   name: string;
   amounts: ShoppingItemAmount[];
@@ -100,30 +103,10 @@ export function listShoppingItems(): ShoppingItemView[] {
     .leftJoin(category, eq(category.id, shoppingItem.categoryId))
     .all();
 
-  const productRows = db
-    .select({
-      id: shoppingItem.id,
-      refId: shoppingItem.productId,
-      name: product.name,
-      categoryId: shoppingItem.categoryId,
-      categoryName: category.name,
-      checked: shoppingItem.checked,
-      checkedAt: shoppingItem.checkedAt,
-      note: shoppingItem.note,
-      sortOrder: shoppingItem.sortOrder,
-      version: shoppingItem.version,
-      createdAt: shoppingItem.createdAt,
-      updatedAt: shoppingItem.updatedAt,
-    })
-    .from(shoppingItem)
-    .innerJoin(product, eq(product.id, shoppingItem.productId))
-    .leftJoin(category, eq(category.id, shoppingItem.categoryId))
-    .all();
-
-  const baseRows = [
-    ...ingredientRows.map((r) => ({ ...r, refType: "ingredient" as const })),
-    ...productRows.map((r) => ({ ...r, refType: "product" as const })),
-  ];
+  const baseRows = ingredientRows.map((r) => ({
+    ...r,
+    refType: "ingredient" as const,
+  }));
 
   const itemIds = baseRows.map((r) => r.id);
   type RawSource = ShoppingItemSourceView;
@@ -231,14 +214,8 @@ export function listShoppingItems(): ShoppingItemView[] {
         .all() as UnitRow[]);
   const unitsById = new Map(unitRows.map((u) => [u.id, u]));
 
-  const ingredientIds = baseRows
-    .filter((r) => r.refType === "ingredient")
-    .map((r) => r.refId as number);
-  const productIds = baseRows
-    .filter((r) => r.refType === "product")
-    .map((r) => r.refId as number);
+  const ingredientIds = baseRows.map((r) => r.refId as number);
   const ingredientUnavailable = new Map<number, number[]>();
-  const productUnavailable = new Map<number, number[]>();
   if (ingredientIds.length > 0) {
     const rows = db
       .select({
@@ -252,21 +229,6 @@ export function listShoppingItems(): ShoppingItemView[] {
       const arr = ingredientUnavailable.get(r.ingredientId) ?? [];
       arr.push(r.supermarketId);
       ingredientUnavailable.set(r.ingredientId, arr);
-    }
-  }
-  if (productIds.length > 0) {
-    const rows = db
-      .select({
-        productId: productSupermarketUnavailable.productId,
-        supermarketId: productSupermarketUnavailable.supermarketId,
-      })
-      .from(productSupermarketUnavailable)
-      .where(inArray(productSupermarketUnavailable.productId, productIds))
-      .all();
-    for (const r of rows) {
-      const arr = productUnavailable.get(r.productId) ?? [];
-      arr.push(r.supermarketId);
-      productUnavailable.set(r.productId, arr);
     }
   }
 
@@ -285,10 +247,7 @@ export function listShoppingItems(): ShoppingItemView[] {
         unit: s.contributedUnitId != null ? unitsById.get(s.contributedUnitId) ?? null : null,
       })),
     });
-    const unavailable =
-      r.refType === "ingredient"
-        ? ingredientUnavailable.get(r.refId as number) ?? []
-        : productUnavailable.get(r.refId as number) ?? [];
+    const unavailable = ingredientUnavailable.get(r.refId as number) ?? [];
     return {
       id: r.id,
       refType: r.refType,
@@ -474,9 +433,8 @@ function round3(n: number): number {
 
 export type AddItemInput =
   | { ingredientId: number; quantity?: number | null; unitId?: number | null; note?: string | null }
-  | { productId: number; quantity?: number | null; unitId?: number | null; note?: string | null }
   | {
-      newProduct: { name: string; defaultCategoryId?: number | null };
+      newIngredient: { name: string; defaultCategoryId?: number | null };
       quantity?: number | null;
       unitId?: number | null;
       note?: string | null;
@@ -484,7 +442,7 @@ export type AddItemInput =
   | { byName: string; quantity?: number | null; unitId?: number | null; note?: string | null };
 
 export type AddItemResolved = {
-  mode: "ingredient" | "product" | "createdProduct";
+  mode: "ingredient" | "createdIngredient";
   refId: number;
   displayName: string;
 };
@@ -522,14 +480,11 @@ export function addManualItem(input: AddItemInput): {
   if ("ingredientId" in input) {
     return addIngredientItem(input.ingredientId, input);
   }
-  if ("productId" in input) {
-    return addProductItem(input.productId, input);
-  }
-  const created = createProductFromName(
-    input.newProduct.name,
-    input.newProduct.defaultCategoryId ?? null,
+  const created = createIngredientFromName(
+    input.newIngredient.name,
+    input.newIngredient.defaultCategoryId ?? null,
   );
-  return finishCreatedProduct(created, input);
+  return finishCreatedIngredient(created, input);
 }
 
 function addByName(
@@ -542,18 +497,14 @@ function addByName(
     });
   }
   if (res.mode === "match") {
-    const { candidate } = res;
-    if (candidate.kind === "ingredient") {
-      return addIngredientItem(candidate.id, input);
-    }
-    return addProductItem(candidate.id, input);
+    return addIngredientItem(res.candidate.id, input);
   }
-  const created = createProductFromName(input.byName);
-  return finishCreatedProduct(created, input);
+  const created = createIngredientFromName(input.byName);
+  return finishCreatedIngredient(created, input);
 }
 
 function candidateView(c: NameCandidate): {
-  kind: "ingredient" | "product";
+  kind: "ingredient";
   id: number;
   name: string;
   matchedAlias?: string;
@@ -742,7 +693,6 @@ function addIngredientItem(
         .insert(shoppingItem)
         .values({
           ingredientId,
-          productId: null,
           quantity: null,
           unitId: null,
           categoryId: ing.defaultCategoryId ?? null,
@@ -817,61 +767,18 @@ function addIngredientItem(
   });
 }
 
-function addProductItem(
-  productId: number,
-  input: { quantity?: number | null; unitId?: number | null; note?: string | null },
-): ReturnType<typeof addManualItem> {
-  return db.transaction((tx) => {
-    const p = tx
-      .select({
-        name: product.name,
-        defaultCategoryId: product.defaultCategoryId,
-      })
-      .from(product)
-      .where(eq(product.id, productId))
-      .get();
-    if (!p) throw new ShoppingApiError("product not found", 404);
-    const sortOrder = nextSortOrder(tx);
-    const created = tx
-      .insert(shoppingItem)
-      .values({
-        ingredientId: null,
-        productId,
-        quantity: null,
-        unitId: null,
-        categoryId: p.defaultCategoryId ?? null,
-        note: input.note ?? null,
-        sortOrder,
-        version: 1,
-      })
-      .returning({ id: shoppingItem.id })
-      .all();
-    const itemId = created[0].id;
-    if (input.quantity != null || input.unitId != null) {
-      insertManualAmount(tx, {
-        itemId,
-        quantity: input.quantity ?? null,
-        unitId: input.unitId ?? null,
-      });
-    }
-    const view = getItemView(itemId);
-    if (!view) throw new ShoppingApiError("item missing after add", 500);
-    return {
-      item: view,
-      resolved: { mode: "product", refId: productId, displayName: p.name },
-      action: "created" as const,
-    };
-  });
-}
-
-function finishCreatedProduct(
+function finishCreatedIngredient(
   created: { id: number; name: string },
   input: { quantity?: number | null; unitId?: number | null; note?: string | null },
 ): ReturnType<typeof addManualItem> {
-  const result = addProductItem(created.id, input);
+  const result = addIngredientItem(created.id, input);
   return {
     ...result,
-    resolved: { mode: "createdProduct", refId: created.id, displayName: created.name },
+    resolved: {
+      mode: "createdIngredient",
+      refId: created.id,
+      displayName: created.name,
+    },
   };
 }
 
@@ -1190,11 +1097,10 @@ export function getItemView(id: number): ShoppingItemView | null {
 
 /**
  * Autocomplete for the "Artikel hinzufügen" form. Returns up to 20 hits
- * across `ingredient ∪ product` ordered by relevance (exact-prefix wins,
- * then substring).
+ * over `ingredient` ordered by relevance (exact-prefix wins, then substring).
  */
 export type AutocompleteHit = {
-  kind: "ingredient" | "product";
+  kind: "ingredient";
   id: number;
   name: string;
   matchedAlias?: string;
@@ -1239,30 +1145,6 @@ export function autocompleteItems(rawQuery: string): AutocompleteHit[] {
     .all();
   for (const r of ingA)
     push({ kind: "ingredient", id: r.id, name: r.name, matchedAlias: r.alias });
-
-  const prd = db
-    .select({ id: product.id, name: product.name })
-    .from(product)
-    .where(sql`unaccent(${product.name}) LIKE ${pattern}`)
-    .orderBy(asc(product.name))
-    .limit(20)
-    .all();
-  for (const r of prd) push({ kind: "product", id: r.id, name: r.name });
-
-  const prdA = db
-    .select({
-      id: product.id,
-      name: product.name,
-      alias: productAlias.name,
-    })
-    .from(productAlias)
-    .innerJoin(product, eq(product.id, productAlias.productId))
-    .where(sql`unaccent(${productAlias.name}) LIKE ${pattern}`)
-    .orderBy(asc(productAlias.name))
-    .limit(20)
-    .all();
-  for (const r of prdA)
-    push({ kind: "product", id: r.id, name: r.name, matchedAlias: r.alias });
 
   return hits.slice(0, 20);
 }

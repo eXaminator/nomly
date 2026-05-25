@@ -1306,6 +1306,18 @@ export const PREP_LEADING_TOKENS = new Set([
   "geknetet",
   "gemischt",
   "geraspelt",
+  "gedünstet",
+  "angedünstet",
+  "angeschwitzt",
+  "angeröstet",
+  "angebraten",
+  "geröstet",
+  "angestoßen",
+  "verschlagen",
+  "verquirlt",
+  "abgetropft",
+  "gekocht",
+  "blanchiert",
   // "gepresst(e/r/n)" — describes a prep action (pressing garlic, citrus, …)
   // not a product identity. "gepresste Knoblauchzehen" → name
   // "Knoblauchzehen" (matches the alias → sub-unit Zehe), notes "gepresst".
@@ -1318,6 +1330,10 @@ export const PREP_LEADING_TOKENS = new Set([
   "fein",
   "grob",
   "frisch",
+  "glasig",
+  "leicht",
+  "kurz",
+  "knapp",
   // Temperature / state-at-use adverbs — describe how you USE the ingredient,
   // not what to buy ("120 ml heißes Wasser" → boil water at use time, you
   // still buy plain Wasser). Inflections (heißes/heiße/heißer/heißen,
@@ -1396,6 +1412,150 @@ function isColorAdjective(token: string): boolean {
     }
   }
   return false;
+}
+
+/**
+ * Single-token names that should never become ingredient rows on their own —
+ * descriptors / colors / preparation states that only make sense modifying a
+ * head noun. Truncated source lines like "8 frische" or "1 cup fresh" leak
+ * these as standalone names. With the first-wins alternatives mode the
+ * importer drops such rows entirely (the user-facing recipe loses a
+ * meaningless fragment, no garbage canonical gets created).
+ *
+ * Compared case-insensitively against the cleaned parsed name.
+ */
+/**
+ * Usage-target nouns that, when they appear as standalone post-split
+ * fragments, are use-locations rather than ingredients. Familywall
+ * commonly writes "etwas Mehl für die Form und Arbeitsfläche" — the
+ * conjunction splitter then yields a bare "Arbeitsfläche" piece that has
+ * no business being a recipe ingredient. Same with "für die Pfanne",
+ * "for the bowl", etc. The familywall importer drops these post-split
+ * fragments.
+ */
+const STANDALONE_USAGE_TARGETS = new Set<string>([
+  "arbeitsfläche",
+  "form",
+  "pfanne",
+  "topf",
+  "schüssel",
+  "backblech",
+  "auflaufform",
+  "kuchenform",
+  "backform",
+  "pan",
+  "bowl",
+  "tray",
+  "sheet",
+]);
+
+const STANDALONE_DESCRIPTOR_NAMES = new Set<string>([
+  // German descriptors (with inflections)
+  "frisch", "frische", "frischer", "frisches", "frischen", "frischem",
+  "rot", "rote", "roter", "rotes", "roten", "rotem",
+  "grün", "grüne", "grüner", "grünes", "grünen", "grünem",
+  "gelb", "gelbe", "gelber", "gelbes", "gelben", "gelbem",
+  "weiß", "weiße", "weißer", "weißes", "weißen", "weißem",
+  "schwarz", "schwarze", "schwarzer", "schwarzes", "schwarzen", "schwarzem",
+  "braun", "braune", "brauner", "braunes", "braunen", "braunem",
+  "klein", "kleine", "kleiner", "kleines", "kleinen", "kleinem",
+  "groß", "große", "großer", "großes", "großen", "großem", "gross", "grosse",
+  "getrocknet", "getrocknete", "getrockneter", "getrocknetes",
+  "getrockneten", "getrocknetem",
+  "trocken", "trockene", "trockener", "trockenes", "trockenen",
+  "geschält", "geschälte", "geschälter", "geschältes", "geschälten",
+  "gehackt", "gehackte", "gehackter", "gehacktes", "gehackten",
+  "reif", "reife", "reifer", "reifes", "reifen",
+  // English descriptors
+  "fresh", "dried", "peeled", "chopped", "diced", "sliced", "minced",
+  "red", "green", "yellow", "white", "black", "blue",
+  "small", "large", "medium", "big",
+  "light", "dark", "raw", "cooked", "uncooked", "steamed",
+  "firm", "block", "crushed", "grains", "store-bought",
+  // Misc tokens that show up in truncated lines
+  "zest", "leaves", "peel",
+]);
+
+/**
+ * Returns true when every token in `name` is a descriptor / color / prep
+ * state — no head noun anchors the phrase. Catches both single-token cases
+ * ("frische", "fresh") and multi-token combinations of pure descriptors
+ * ("trockene grüne", "dried green", "package firm"). Also catches
+ * standalone usage-target nouns (Arbeitsfläche, Form, Pfanne) that get
+ * stranded by the conjunction splitter (e.g. "Mehl für die Form und
+ * Arbeitsfläche" → ["Mehl für die Form", "Arbeitsfläche"]).
+ */
+export function isStandaloneDescriptor(name: string): boolean {
+  const trimmed = name.trim();
+  if (trimmed.length === 0) return true;
+  const tokens = trimmed.toLowerCase().split(/\s+/);
+  if (tokens.length === 1 && STANDALONE_USAGE_TARGETS.has(tokens[0])) return true;
+  for (const t of tokens) {
+    if (!STANDALONE_DESCRIPTOR_NAMES.has(t)) return false;
+  }
+  return true;
+}
+
+/**
+ * Pre-process a raw line BEFORE `splitConjunctions`:
+ *
+ * 1. **Adjacent ingredients without a conjunction.** Recipes commonly write
+ *    "1 Prise Salz Pfeffer" (no `und`) when they mean salt-and-pepper.
+ *    Inject `und` between the well-known adjacent pair so the standard
+ *    conjunction splitter then yields two rows.
+ *
+ * 2. **Dash-prefix shared-suffix `X- oder Y[suffix]`.** Expand
+ *    "Weizen- oder Dinkelmehl" → "Weizenmehl" by finding the longest
+ *    tail of `Y[suffix]` such that `stem + tail` matches a known
+ *    ingredient (catalog entries via `knownIngredientKeys`). Falls back to
+ *    just the stem if no catalog hit is found.
+ *
+ * 3. **Bare `X oder Y` alternatives.** Drop everything from " oder " /
+ *    " or " through end-of-line — the user's convention is "first option
+ *    wins". Catches "Tamari oder Soja-Sauce", "Petersilie oder Koriander",
+ *    "Hafer- oder Sojamilch" (after step 2 already rewrote the dash form).
+ *
+ * The check against `knownIngredientKeys` uses {@link normalizeForMatch}
+ * so the keys (which are stored both as lowercased and as diacritic-
+ * stripped forms) align with the candidate compound's normalized form.
+ */
+export function preprocessAlternatives(
+  raw: string,
+  knownIngredientKeys: Set<string>,
+): string {
+  let line = raw;
+
+  // 1. Inject missing conjunction between adjacent well-known pairs.
+  line = line.replace(/\b(Salz)\s+(Pfeffer)\b/gi, "$1 und $2");
+  line = line.replace(/\b(salt)\s+(pepper)\b/gi, "$1 and $2");
+
+  // 2. Dash-prefix shared-suffix conjunction: "Weizen- oder Dinkelmehl"
+  //    → expand by adopting the longest catalog-known tail of `second`
+  //    onto `stem`. Then step 3 drops the trailing "oder Y..." part.
+  line = line.replace(
+    /([A-Za-zÄÖÜäöüß]+)-\s+(?:oder|or)\s+([A-Za-zÄÖÜäöüß][A-Za-zÄÖÜäöüß-]+)/g,
+    (_full, stem: string, second: string) => {
+      for (
+        let len = Math.min(second.length - 1, 14);
+        len >= 2;
+        len--
+      ) {
+        const tail = second.slice(-len);
+        const candidate = stem + tail;
+        if (knownIngredientKeys.has(normalizeForMatch(candidate))) {
+          return `${candidate} oder ${second}`;
+        }
+      }
+      // No catalog hit — drop the dash, leave the rest alone. Step 3 then
+      // drops the trailing " oder Y" so the row falls back to just `stem`.
+      return `${stem} oder ${second}`;
+    },
+  );
+
+  // 3. Drop "oder/or Y..." tail. First-option-wins convention.
+  line = line.replace(/\s+(?:oder|or)\s+.+$/i, "");
+
+  return line;
 }
 
 export function splitConjunctions(

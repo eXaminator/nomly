@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { transformFamilywallRecipe } from "@/lib/familywall/transform";
+import {
+  disambiguateFamilywallNames,
+  promoteFamilywallSectionHeaders,
+  rewriteFamilywallAppleVarieties,
+  rewriteFamilywallPersonalLabels,
+  transformFamilywallRecipe,
+} from "@/lib/familywall/transform";
 import type {
   IngredientLookup,
   ParseLookups,
@@ -186,6 +192,42 @@ describe("transformFamilywallRecipe", () => {
     expect(ing.unitId).toBe(3); // Stück
     expect(ing.quantity).toBe(3);
     expect(ing.ingredientName).toBe("Eier");
+  });
+
+  it("promotes familywall-only section keywords (Teig, Füllung, …) into headers", () => {
+    const out = transformFamilywallRecipe(
+      makeRaw({
+        ingredients: [
+          "Teig",
+          "200 g Mehl",
+          "Füllung",
+          "1 Zwiebel",
+        ],
+      }),
+      makeLookups(),
+      null,
+    );
+    expect(out.sections).toHaveLength(2);
+    expect(out.sections[0].title).toBe("Teig");
+    expect(out.sections[0].ingredients).toHaveLength(1);
+    expect(out.sections[0].ingredients[0].ingredientName).toBe("Mehl");
+    expect(out.sections[1].title).toBe("Füllung");
+    expect(out.sections[1].ingredients).toHaveLength(1);
+    expect(out.sections[1].ingredients[0].ingredientName).toBe("Zwiebel");
+  });
+
+  it("promotes lowercase 'für den X' headers without a trailing colon", () => {
+    const out = transformFamilywallRecipe(
+      makeRaw({
+        ingredients: ["für den Teig", "200 g Mehl", "Für die Füllung:", "1 Zwiebel"],
+      }),
+      makeLookups(),
+      null,
+    );
+    expect(out.sections.map((s) => s.title)).toEqual([
+      "für den Teig",
+      "Für die Füllung",
+    ]);
   });
 
   it("empty title falls back to a placeholder", () => {
@@ -395,15 +437,17 @@ describe("transformFamilywallRecipe", () => {
     expect(ing.ingredientName).toBe("caster sugar");
   });
 
-  it("keeps 'oder'-alternatives in the name", () => {
+  it("drops 'oder'-alternatives in favor of the first option", () => {
+    // First-option-wins convention applied by preprocessAlternatives —
+    // "Butter oder Margarine" → "Butter", and the alternative is dropped
+    // entirely so it doesn't interfere with matcher scoring.
     const out = transformFamilywallRecipe(
       makeRaw({ ingredients: ["100g Butter oder Margarine"] }),
       makeLookups(),
       null,
     );
     const ing = out.sections[0].ingredients[0];
-    expect(ing.ingredientName).toBe("Butter oder Margarine");
-    expect(ing.notes).toBeNull();
+    expect(ing.ingredientName).toBe("Butter");
   });
 
   it("moves 'z.B.' examples into notes", () => {
@@ -533,6 +577,135 @@ describe("transformFamilywallRecipe", () => {
     expect(out.sections[0].title).toBe("Für den Teig");
     expect(out.sections[0].instructions).toMatch(/Ofen vorheizen/);
     expect(out.sections[0].instructions).toMatch(/Mehl mischen/);
+  });
+
+  it("wraps apple-variety descriptors in parens so they become notes", () => {
+    expect(
+      rewriteFamilywallAppleVarieties([
+        "1 Apfel Gala",
+        "1 Apfel Granny Smith",
+        "1 Apfel Honeycrisp",
+        "Apfel Sorte Boskoop",
+        "apples Jonagold",
+        "2 Pink Lady apples",
+        "1 Granny Smith apple",
+      ]),
+    ).toEqual([
+      "1 Apfel (Gala)",
+      "1 Apfel (Granny Smith)",
+      "1 Apfel (Honeycrisp)",
+      "Apfel (Boskoop)",
+      "apples (Jonagold)",
+      "2 apples (Pink Lady)",
+      "1 apple (Granny Smith)",
+    ]);
+  });
+
+  it("leaves lines without apple-variety patterns alone", () => {
+    expect(
+      rewriteFamilywallAppleVarieties([
+        "1 großer Apfel",
+        "2 Äpfel",
+        "1 Pink Floyd record",
+        "1 Apfelmus",
+        "200 g Mehl",
+      ]),
+    ).toEqual([
+      "1 großer Apfel",
+      "2 Äpfel",
+      "1 Pink Floyd record",
+      "1 Apfelmus",
+      "200 g Mehl",
+    ]);
+  });
+
+  it("wraps trailing personal-name suffixes in parens so they become notes", () => {
+    expect(
+      rewriteFamilywallPersonalLabels([
+        "Beilage für Janine",
+        "Dressing Janine",
+        "Dressing Steven",
+      ]),
+    ).toEqual([
+      "Beilage (für Janine)",
+      "Dressing (Janine)",
+      "Dressing (Steven)",
+    ]);
+  });
+
+  it("doesn't touch ingredient lines that don't have a personal-label suffix", () => {
+    expect(
+      rewriteFamilywallPersonalLabels([
+        "1 EL Olivenöl",
+        "200 g Mehl",
+        "Janine",
+        "Steven Spielberg",
+      ]),
+    ).toEqual([
+      "1 EL Olivenöl",
+      "200 g Mehl",
+      "Janine",
+      "Steven Spielberg",
+    ]);
+  });
+
+  it("rewrites 'Paprika' to 'Paprikapulver' when preceded by a spoon-volume unit", () => {
+    expect(disambiguateFamilywallNames(["1 TL Paprika"])).toEqual([
+      "1 TL Paprikapulver",
+    ]);
+    expect(disambiguateFamilywallNames(["0.5 EL Paprika edelsüß"])).toEqual([
+      "0.5 EL Paprikapulver edelsüß",
+    ]);
+    expect(disambiguateFamilywallNames(["1/2 tsp paprika"])).toEqual([
+      "1/2 tsp Paprikapulver",
+    ]);
+    expect(disambiguateFamilywallNames(["1 Prise Paprika"])).toEqual([
+      "1 Prise Paprikapulver",
+    ]);
+  });
+
+  it("leaves 'Paprika' alone when the unit is mass (could be bell pepper) or absent", () => {
+    // Mass is ambiguous (200g of paprika could be peppers OR powder). Keep
+    // the user's intent — they'll either get the bell-pepper canonical (via
+    // Stück default) or land in the unmatched-pill UI.
+    expect(disambiguateFamilywallNames(["200 g Paprika"])).toEqual([
+      "200 g Paprika",
+    ]);
+    expect(disambiguateFamilywallNames(["1 Paprika"])).toEqual(["1 Paprika"]);
+    expect(disambiguateFamilywallNames(["1 rote Paprika"])).toEqual([
+      "1 rote Paprika",
+    ]);
+  });
+
+  it("doesn't double-rewrite 'Paprikapulver'", () => {
+    expect(disambiguateFamilywallNames(["1 TL Paprikapulver"])).toEqual([
+      "1 TL Paprikapulver",
+    ]);
+  });
+
+  it("does NOT promote ambiguous standalone words that can be real ingredients", () => {
+    // "Salat" appears as a real ingredient (= lettuce) in at least one
+    // cached familywall recipe; never promote it to a header even though
+    // other recipes use it as a section title. Same for "Aufstrich".
+    const promoted = promoteFamilywallSectionHeaders([
+      "Salat",
+      "Aufstrich",
+      "Topping",
+    ]);
+    expect(promoted[0]).toBe("Salat");
+    expect(promoted[1]).toBe("Aufstrich");
+    expect(promoted[2]).toBe("Topping:");
+  });
+
+  it("leaves lines the generic detector already accepts untouched", () => {
+    // Already-terminated colons / leading dashes / all-caps must not get
+    // a second colon (would produce "FOO::" / "Teig::").
+    const promoted = promoteFamilywallSectionHeaders([
+      "Teig:",
+      "-- Teig",
+      "200 g Mehl",
+    ]);
+    expect(promoted).toEqual(["Teig:", "-- Teig", "200 g Mehl"]);
   });
 
   it("instructions without matching ingredient section become own section", () => {

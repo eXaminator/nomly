@@ -7,7 +7,7 @@ import {
 } from "@/lib/shopping/unavailable";
 
 const schema = z.object({
-  kind: z.enum(["ingredient", "product"]),
+  kind: z.literal("ingredient"),
   id: z.number().int().positive(),
   supermarketId: z.number().int().positive(),
 });

@@ -1,6 +1,5 @@
 export type EntityKind =
   | "ingredient"
-  | "product"
   | "unit"
   | "category"
   | "tag"
@@ -10,8 +9,7 @@ export const ENTITY_LABELS: Record<
   EntityKind,
   { singular: string; plural: string; article: string }
 > = {
-  ingredient: { singular: "Zutat", plural: "Zutaten", article: "die" },
-  product: { singular: "Produkt", plural: "Produkte", article: "das" },
+  ingredient: { singular: "Artikel", plural: "Artikel", article: "der" },
   unit: { singular: "Einheit", plural: "Einheiten", article: "die" },
   category: { singular: "Kategorie", plural: "Kategorien", article: "die" },
   tag: { singular: "Tag", plural: "Tags", article: "der" },
@@ -51,8 +49,7 @@ export const REF_LABELS: Record<string, string> = {
   shoppingItems: "Einkaufslisten-Einträge",
   shoppingItemSources: "Mahlzeit-Beiträge",
   derivedUnits: "abgeleitete Einheiten",
-  ingredients: "Zutaten",
-  products: "Produkte",
+  ingredients: "Artikel",
   supermarketCategoryEntries: "Supermarkt-Einträge",
   categoryEntries: "geordnete Kategorien",
 };

@@ -186,6 +186,14 @@ const topUpUnits: Array<{
     factor: 1,
     aliases: ["Hand voll", "handful", "handfuls"],
   },
+  // Mais — purchased by the cob, used by the cob. Familywall catalog
+  // assigns this as the default purchaseUnit for corn.
+  {
+    name: "Kolben",
+    dimension: "count",
+    factor: 1,
+    aliases: ["Kolben", "cob", "cobs", "ear of corn", "ears of corn"],
+  },
   // Zehe and Zweig used to live here as global count units. They're now
   // modelled as ingredient-scoped sub-units (Knoblauch → Zehe, Petersilie →
   // Zweig), so the parser only recognises them in the context of an
@@ -543,6 +551,31 @@ export function runSeed(): SeedCounts {
         .returning({ id: category.id })
         .all();
       categoryIdByKey.set(key, inserted[0].id);
+      categoryIdByName.set(lower(name), inserted[0].id);
+      counts.categories.added += 1;
+    }
+
+    // Non-food categories — the Tandoor snapshot is groceries-only, but the
+    // catalog now covers household goods (Toilettenpapier, Spülmittel),
+    // pharmacy items (Pflaster, Schmerzmittel), and recipe-adjacent
+    // equipment (Backpapier, Einmachgläser). Top-up here so a fresh seed has
+    // somewhere to put them.
+    for (const name of [
+      "Hygiene",
+      "Drogerie",
+      "Haushalt",
+      "Küchenbedarf",
+      "Tiernahrung",
+    ]) {
+      if (categoryIdByName.has(lower(name))) {
+        counts.categories.skipped += 1;
+        continue;
+      }
+      const inserted = tx
+        .insert(category)
+        .values({ name })
+        .returning({ id: category.id })
+        .all();
       categoryIdByName.set(lower(name), inserted[0].id);
       counts.categories.added += 1;
     }

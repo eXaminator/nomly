@@ -278,7 +278,7 @@ function EditItemDialogBody({
         <div className="flex items-baseline gap-2">
           <DialogTitle>{item.name}</DialogTitle>
           <span className="text-xs uppercase tracking-wider text-[var(--color-muted-fg)]">
-            {item.refType === "product" ? "Produkt" : "Zutat"}
+            Artikel
           </span>
         </div>
       </DialogHeader>

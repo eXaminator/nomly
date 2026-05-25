@@ -24,7 +24,6 @@ async function load() {
   return {
     db: (await import("@/db")).db,
     schema: await import("@/db/schema"),
-    product: await import("@/lib/stammdaten/product/service"),
     unit: await import("@/lib/stammdaten/unit/service"),
     category: await import("@/lib/stammdaten/category/service"),
     tag: await import("@/lib/stammdaten/tag/service"),
@@ -40,8 +39,6 @@ async function reset() {
   db.delete(schema.recipeIngredient).run();
   db.delete(schema.recipeSection).run();
   db.delete(schema.recipe).run();
-  db.delete(schema.productAlias).run();
-  db.delete(schema.product).run();
   db.delete(schema.unitAlias).run();
   db.delete(schema.unit).run();
   db.delete(schema.supermarketCategory).run();
@@ -114,42 +111,6 @@ describe("unit stammdaten merge", () => {
     expect(aliasSet.has("piece")).toBe(true);
     expect(aliasSet.has("pcs")).toBe(true);
     expect(aliasSet.has("stk")).toBe(true);
-  });
-});
-
-describe("product stammdaten merge", () => {
-  beforeAll(async () => reset());
-
-  it("absorbs aliases and rewires shopping_item refs", async () => {
-    const { db, schema, product } = await load();
-
-    const winner = product.createProduct({
-      name: "Toilettenpapier",
-      aliases: ["Klopapier"],
-      defaultCategoryId: null,
-    });
-    const loser = product.createProduct({
-      name: "Klopapierrolle",
-      aliases: ["TP-Rolle"],
-      defaultCategoryId: null,
-    });
-    // Insert a shopping_item referring to the loser product.
-    db.insert(schema.shoppingItem)
-      .values({ productId: loser.id })
-      .run();
-
-    product.mergeProducts(winner.id, [loser.id]);
-
-    const after = product.getProductDetail(winner.id)!;
-    const aliasSet = new Set(after.aliases.map((a) => a.toLowerCase()));
-    expect(aliasSet.has("klopapierrolle")).toBe(true);
-    expect(aliasSet.has("tp-rolle")).toBe(true);
-    expect(product.getProductDetail(loser.id)).toBe(null);
-
-    const items = db.select().from(schema.shoppingItem).all();
-    for (const item of items) {
-      expect(item.productId).toBe(winner.id);
-    }
   });
 });
 

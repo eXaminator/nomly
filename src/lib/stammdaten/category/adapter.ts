@@ -4,7 +4,6 @@ import {
   category,
   categoryAlias,
   ingredient,
-  product,
   shoppingItem,
   supermarketCategory,
 } from "../../../db/schema.ts";
@@ -25,11 +24,6 @@ export const categoryAdapter: MergeAdapter<CategoryRow> = {
       table: ingredient,
       column: ingredient.defaultCategoryId,
       refLabel: "ingredients",
-    },
-    {
-      table: product,
-      column: product.defaultCategoryId,
-      refLabel: "products",
     },
     {
       table: shoppingItem,

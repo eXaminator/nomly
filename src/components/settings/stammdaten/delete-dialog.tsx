@@ -238,8 +238,6 @@ function pluralFor(kind: EntityKind): string {
   switch (kind) {
     case "ingredient":
       return "ingredients";
-    case "product":
-      return "products";
     case "unit":
       return "units";
     case "category":

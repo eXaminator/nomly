@@ -6,7 +6,6 @@ import {
   sqliteTable,
   text,
   uniqueIndex,
-  check,
   index,
   type AnySQLiteColumn,
 } from "drizzle-orm/sqlite-core";
@@ -101,6 +100,18 @@ export const ingredient = sqliteTable("ingredient", {
     .notNull()
     .default(false),
   /**
+   * Set on items the user usually owns and has stock of (Backpapier,
+   * Einmachgläser, Backform, Frischhaltefolie, …). The parser auto-marks
+   * the resulting recipe row as `is_optional=true` so the user decides
+   * per-recipe whether to actually shop the row. Equipment items still
+   * appear on the shopping list when not marked optional — the flag only
+   * shifts the *default* at recipe-create time. See the unified-items
+   * design notes in docs/familywall-ingredient-merge.md.
+   */
+  isEquipment: integer("is_equipment", { mode: "boolean" })
+    .notNull()
+    .default(false),
+  /**
    * Diet classification used to derive recipe-level vegan/vegetarian flags.
    * NULL = unknown (user hasn't tagged this ingredient yet) and disqualifies
    * the recipe from being claimed as vegan or vegetarian. "vegan" implies
@@ -162,24 +173,6 @@ export const ingredientSubUnit = sqliteTable(
   },
   (t) => [uniqueIndex("ingredient_sub_unit_unique").on(t.ingredientId, t.name)],
 );
-
-export const product = sqliteTable("product", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  name: text("name").notNull().unique(),
-  defaultCategoryId: integer("default_category_id").references(() => category.id, {
-    onDelete: "set null",
-  }),
-  createdAt: integer("created_at").notNull().default(now),
-  updatedAt: integer("updated_at").notNull().default(now),
-});
-
-export const productAlias = sqliteTable("product_alias", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  productId: integer("product_id")
-    .notNull()
-    .references(() => product.id, { onDelete: "cascade" }),
-  name: text("name").notNull().unique(),
-});
 
 export const recipeIngredient = sqliteTable(
   "recipe_ingredient",
@@ -302,12 +295,9 @@ export const shoppingItem = sqliteTable(
   "shopping_item",
   {
     id: integer("id").primaryKey({ autoIncrement: true }),
-    ingredientId: integer("ingredient_id").references(() => ingredient.id, {
-      onDelete: "set null",
-    }),
-    productId: integer("product_id").references(() => product.id, {
-      onDelete: "set null",
-    }),
+    ingredientId: integer("ingredient_id")
+      .notNull()
+      .references(() => ingredient.id, { onDelete: "cascade" }),
     quantity: real("quantity"),
     unitId: integer("unit_id").references(() => unit.id, { onDelete: "set null" }),
     categoryId: integer("category_id").references(() => category.id, {
@@ -322,10 +312,6 @@ export const shoppingItem = sqliteTable(
     updatedAt: integer("updated_at").notNull().default(now),
   },
   (t) => [
-    check(
-      "shopping_item_xor",
-      sql`(${t.ingredientId} IS NOT NULL AND ${t.productId} IS NULL) OR (${t.ingredientId} IS NULL AND ${t.productId} IS NOT NULL)`,
-    ),
     index("shopping_item_checked_idx").on(t.checked, t.checkedAt),
   ],
 );
@@ -403,19 +389,6 @@ export const ingredientSupermarketUnavailable = sqliteTable(
   (t) => [primaryKey({ columns: [t.ingredientId, t.supermarketId] })],
 );
 
-export const productSupermarketUnavailable = sqliteTable(
-  "product_supermarket_unavailable",
-  {
-    productId: integer("product_id")
-      .notNull()
-      .references(() => product.id, { onDelete: "cascade" }),
-    supermarketId: integer("supermarket_id")
-      .notNull()
-      .references(() => supermarket.id, { onDelete: "cascade" }),
-  },
-  (t) => [primaryKey({ columns: [t.productId, t.supermarketId] })],
-);
-
 export const icalFeed = sqliteTable("ical_feed", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   name: text("name").notNull(),
@@ -448,7 +421,6 @@ export type Ingredient = typeof ingredient.$inferSelect;
 export type Unit = typeof unit.$inferSelect;
 export type Category = typeof category.$inferSelect;
 export type Supermarket = typeof supermarket.$inferSelect;
-export type Product = typeof product.$inferSelect;
 export type ShoppingItem = typeof shoppingItem.$inferSelect;
 export type MealPlan = typeof mealPlan.$inferSelect;
 export type ApiToken = typeof apiToken.$inferSelect;

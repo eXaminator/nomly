@@ -6,6 +6,7 @@
 
 import {
   clearCache,
+  mergeIndex,
   writeIndex,
   writeRecipeSnapshot,
   type RecipeSnapshot,
@@ -35,13 +36,23 @@ export type DownloadSummary = {
 };
 
 /**
- * Wipe the cache, then walk every recipe in Familywall and write each
- * snapshot to disk. After the crawl completes, write the cache index.
+ * Drive the Familywall crawler and persist each captured snapshot.
+ *
+ * Two modes:
+ *   - **Full refresh** (no `--recipe-id` / `--title` filter): wipes the
+ *     cache directory up front, then walks every recipe. The post-crawl
+ *     index replaces whatever was there.
+ *   - **Targeted re-download** (filter present): leaves the cache intact,
+ *     overwrites only the matching snapshot directories, and *merges* the
+ *     captured recipes into the existing index instead of replacing it.
+ *     This lets the user refresh a single recipe (e.g. one they just
+ *     edited in Familywall) without losing the other 465 cached entries.
  */
 export async function runFamilywallDownload(
   opts: DownloadOptions,
 ): Promise<DownloadSummary> {
-  clearCache();
+  const targeted = Boolean(opts.onlyRecipeId || opts.onlyTitleSubstring);
+  if (!targeted) clearCache();
   const summary: DownloadSummary = { saved: 0, skipped: 0, failed: 0 };
 
   const sink = async (cap: CapturedSnapshot) => {
@@ -84,6 +95,10 @@ export async function runFamilywallDownload(
   // Anything not captured (yielded null) shows up as the gap between
   // `total` and the snapshots we actually saved.
   summary.skipped = result.total - summary.saved - summary.failed;
-  writeIndex(result.capturedRecipes);
+  if (targeted) {
+    mergeIndex(result.capturedRecipes);
+  } else {
+    writeIndex(result.capturedRecipes);
+  }
   return summary;
 }

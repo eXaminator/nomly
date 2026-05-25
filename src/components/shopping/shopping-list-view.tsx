@@ -225,7 +225,6 @@ export function ShoppingListView({
   async function onClear(selection: {
     removeAll: boolean;
     mealPlanIds: number[];
-    removeProducts: boolean;
   }) {
     await apiClearList(selection);
     setClearOpen(false);

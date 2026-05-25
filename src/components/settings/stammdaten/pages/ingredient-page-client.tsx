@@ -15,6 +15,24 @@ import { ListShell, type ColumnDef } from "../list-shell";
 
 type DietFilter = "all" | "vegan" | "vegetarian" | "meat" | "unknown";
 
+/**
+ * Coarse category buckets used by the top-level filter chip row. Maps
+ * raw `defaultCategoryName` strings to one of four user-facing groups.
+ *   - Lebensmittel: any food/dairy/produce category (Tandoor's 22 + Hefeflocken
+ *     / Backwaren / etc.)
+ *   - Haushalt: cleaning supplies, personal-care, OTC medicine
+ *   - Ausrüstung: items with `isEquipment=true` regardless of category
+ *   - Alle: no filter
+ */
+type KindFilter = "all" | "food" | "household" | "equipment";
+
+const HOUSEHOLD_CATEGORIES = new Set([
+  "Hygiene",
+  "Drogerie",
+  "Haushalt",
+  "Küchenbedarf",
+]);
+
 const DIET_LABEL: Record<NonNullable<IngredientItem["dietaryClass"]>, string> = {
   vegan: "Vegan",
   vegetarian: "Veg.",
@@ -80,6 +98,12 @@ const columns: ColumnDef<IngredientItem>[] = [
       ),
   },
   {
+    key: "equipment",
+    header: "Typ",
+    cell: (item) =>
+      item.isEquipment ? <Badge variant="outline">Ausrüstung</Badge> : null,
+  },
+  {
     key: "exclude",
     header: "Liste",
     cell: (item) =>
@@ -103,6 +127,7 @@ export function IngredientPageClient({
 }: {
   initialItems: IngredientItem[];
 }) {
+  const [kind, setKind] = React.useState<KindFilter>("all");
   const [diet, setDiet] = React.useState<DietFilter>("all");
   const [excludedOnly, setExcludedOnly] = React.useState(false);
   const [unusedOnly, setUnusedOnly] = React.useState(false);
@@ -113,6 +138,14 @@ export function IngredientPageClient({
 
   const applyFilters = React.useCallback(
     (item: IngredientItem) => {
+      if (kind !== "all") {
+        const isHousehold =
+          item.defaultCategoryName != null &&
+          HOUSEHOLD_CATEGORIES.has(item.defaultCategoryName);
+        if (kind === "equipment" && !item.isEquipment) return false;
+        if (kind === "household" && !isHousehold) return false;
+        if (kind === "food" && (isHousehold || item.isEquipment)) return false;
+      }
       if (diet !== "all") {
         if (diet === "unknown" && item.dietaryClass !== null) return false;
         if (diet !== "unknown" && item.dietaryClass !== diet) return false;
@@ -121,7 +154,7 @@ export function IngredientPageClient({
       if (unusedOnly && item.recipeRefCount > 0) return false;
       return true;
     },
-    [diet, excludedOnly, unusedOnly],
+    [kind, diet, excludedOnly, unusedOnly],
   );
 
   const searchMatches = React.useCallback(
@@ -138,9 +171,30 @@ export function IngredientPageClient({
   const filterControls = (
     <>
       <Chip
+        active={kind === "all"}
+        onClick={() => setKind("all")}
+        label="Alle"
+      />
+      <Chip
+        active={kind === "food"}
+        onClick={() => setKind("food")}
+        label="Lebensmittel"
+      />
+      <Chip
+        active={kind === "household"}
+        onClick={() => setKind("household")}
+        label="Haushalt"
+      />
+      <Chip
+        active={kind === "equipment"}
+        onClick={() => setKind("equipment")}
+        label="Ausrüstung"
+      />
+      <span className="mx-2 h-5 w-px bg-[var(--color-border)]" />
+      <Chip
         active={diet === "all"}
         onClick={() => setDiet("all")}
-        label="Alle"
+        label="Alle Diäten"
       />
       <Chip
         active={diet === "vegan"}
@@ -189,7 +243,7 @@ export function IngredientPageClient({
         filterControls={filterControls}
         EditForm={IngredientForm}
         hardDeleteAllowed={false}
-        hardDeleteDisabledReason="Diese Zutat wird in Rezepten oder Einkaufslisten verwendet — eine Ersatz-Zutat ist erforderlich."
+        hardDeleteDisabledReason="Dieser Artikel wird in Rezepten oder Einkaufslisten verwendet — ein Ersatz-Artikel ist erforderlich."
         enableMergeProposals
         renderBulkActions={({ selectedIds, onApplied }) => (
           <Button

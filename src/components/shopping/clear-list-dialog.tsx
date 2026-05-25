@@ -20,7 +20,6 @@ export type ClearSummary = {
     recipeTitle: string;
     itemCount: number;
   }>;
-  productCount: number;
 };
 
 type Props = {
@@ -29,7 +28,6 @@ type Props = {
   onConfirm: (selection: {
     removeAll: boolean;
     mealPlanIds: number[];
-    removeProducts: boolean;
   }) => Promise<void>;
 };
 
@@ -38,7 +36,6 @@ export function ClearListDialog({ open, onClose, onConfirm }: Props) {
   const [loading, setLoading] = React.useState(false);
   const [submitting, setSubmitting] = React.useState(false);
   const [selectedMeals, setSelectedMeals] = React.useState<Set<number>>(new Set());
-  const [removeProducts, setRemoveProducts] = React.useState(false);
   const [removeAll, setRemoveAll] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
@@ -47,7 +44,6 @@ export function ClearListDialog({ open, onClose, onConfirm }: Props) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setSummary(null);
       setSelectedMeals(new Set());
-      setRemoveProducts(false);
       setRemoveAll(false);
       setError(null);
       return;
@@ -73,11 +69,9 @@ export function ClearListDialog({ open, onClose, onConfirm }: Props) {
     };
   }, [open]);
 
-  const totalSelected = removeAll
-    ? "alle"
-    : selectedMeals.size + (removeProducts ? 1 : 0);
+  const totalSelected = removeAll ? "alle" : selectedMeals.size;
   const submitDisabled =
-    submitting || (!removeAll && selectedMeals.size === 0 && !removeProducts);
+    submitting || (!removeAll && selectedMeals.size === 0);
 
   function toggleMeal(id: number) {
     setSelectedMeals((prev) => {
@@ -102,12 +96,11 @@ export function ClearListDialog({ open, onClose, onConfirm }: Props) {
     setError(null);
     try {
       if (removeAll) {
-        await onConfirm({ removeAll: true, mealPlanIds: [], removeProducts: false });
+        await onConfirm({ removeAll: true, mealPlanIds: [] });
       } else {
         await onConfirm({
           removeAll: false,
           mealPlanIds: Array.from(selectedMeals),
-          removeProducts,
         });
       }
     } catch (e) {
@@ -146,7 +139,7 @@ export function ClearListDialog({ open, onClose, onConfirm }: Props) {
               disabled={removeAll}
               className={removeAll ? "opacity-40" : undefined}
             >
-              {summary.meals.length === 0 && summary.productCount === 0 ? (
+              {summary.meals.length === 0 ? (
                 <p className="text-sm text-[var(--color-muted-fg)]">
                   Keine Einträge auf der Liste.
                 </p>
@@ -190,28 +183,6 @@ export function ClearListDialog({ open, onClose, onConfirm }: Props) {
                       </li>
                     ))}
                   </ul>
-                </div>
-              ) : null}
-              {summary.productCount > 0 ? (
-                <div className="mt-4 flex flex-col gap-2">
-                  <h3 className="text-xs font-medium uppercase tracking-wider text-[var(--color-muted-fg)]">
-                    Produkte
-                  </h3>
-                  <label className="flex cursor-pointer items-center gap-2 rounded-[var(--radius)] border border-[var(--color-border)] px-3 py-2 text-sm">
-                    <input
-                      type="checkbox"
-                      checked={removeProducts}
-                      onChange={(e) => setRemoveProducts(e.target.checked)}
-                      className="size-4"
-                    />
-                    <span className="flex flex-1 flex-wrap items-baseline gap-2">
-                      <span className="font-medium">Produkte entfernen</span>
-                      <span className="text-xs text-[var(--color-muted-fg)]">
-                        {summary.productCount}{" "}
-                        {summary.productCount === 1 ? "Artikel" : "Artikel"}
-                      </span>
-                    </span>
-                  </label>
                 </div>
               ) : null}
             </fieldset>

@@ -122,6 +122,10 @@ export type RecipeIngredientView = {
   /** Source substring this row was originally parsed from. Null for rows
    *  added manually after the initial import. */
   rawLine: string | null;
+  /** Mirror of `ingredient.is_equipment`. The recipe view groups these into
+   *  a separate "Du brauchst auch" sub-section so cookware/consumables
+   *  don't visually compete with food ingredients. */
+  isEquipment: boolean;
   sortOrder: number;
 };
 

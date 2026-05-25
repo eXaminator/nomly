@@ -32,6 +32,7 @@ export type IngredientItem = {
   purchaseUnitId: number | null;
   purchaseUnitName: string | null;
   excludeFromShoppingList: boolean;
+  isEquipment: boolean;
   dietaryClass: "vegan" | "vegetarian" | "meat" | null;
   recipeRefCount: number;
 };
@@ -148,6 +149,9 @@ export function IngredientForm({
   const [excludeFromShoppingList, setExclude] = React.useState(
     item?.excludeFromShoppingList ?? false,
   );
+  const [isEquipment, setIsEquipment] = React.useState(
+    item?.isEquipment ?? false,
+  );
   const [dietaryClass, setDietaryClass] = React.useState<
     "vegan" | "vegetarian" | "meat" | null
   >(item?.dietaryClass ?? null);
@@ -218,6 +222,7 @@ export function IngredientForm({
         defaultCategoryId: category?.id ?? null,
         purchaseUnitId: purchaseUnit?.id ?? null,
         excludeFromShoppingList,
+        isEquipment,
         dietaryClass,
       },
       valid,
@@ -229,6 +234,7 @@ export function IngredientForm({
     category,
     purchaseUnit,
     excludeFromShoppingList,
+    isEquipment,
     dietaryClass,
     onPayloadChange,
   ]);
@@ -522,13 +528,28 @@ export function IngredientForm({
         <div>
           <Label>Von Einkaufsliste ausschließen</Label>
           <p className="text-xs text-[var(--color-muted-fg)]">
-            Bei aktivierter Option wird die Zutat nicht in die Einkaufsliste
+            Bei aktivierter Option wird der Artikel nicht in die Einkaufsliste
             übernommen.
           </p>
         </div>
         <Switch
           checked={excludeFromShoppingList}
           onCheckedChange={(v) => setExclude(Boolean(v))}
+        />
+      </div>
+
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <Label>Ausrüstung</Label>
+          <p className="text-xs text-[var(--color-muted-fg)]">
+            Hat der Nutzer in der Regel auf Vorrat (Backpapier, Einmachgläser,
+            …). Rezept-Zeilen mit diesem Artikel sind standardmäßig optional —
+            der Nutzer entscheidet pro Rezept, ob die Position einkaufen muss.
+          </p>
+        </div>
+        <Switch
+          checked={isEquipment}
+          onCheckedChange={(v) => setIsEquipment(Boolean(v))}
         />
       </div>
 

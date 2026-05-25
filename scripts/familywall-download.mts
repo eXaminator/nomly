@@ -4,9 +4,11 @@ import { parseArgs } from "node:util";
 // Familywall snapshot downloader:
 //   npm run familywall:download -- --email <e> --password <p> [flags]
 //
-// Wipes ./data/familywall-cache, drives a headless Chromium through
-// Familywall, and saves a per-recipe snapshot for offline parsing.
-// Re-running purges the prior cache.
+// Drives a headless Chromium through Familywall and saves a per-recipe
+// snapshot for offline parsing. A bare invocation (no --recipe-id /
+// --title) wipes ./data/familywall-cache first and re-downloads everything.
+// Targeted runs (with --recipe-id or --title) leave the rest of the cache
+// intact and merge the new snapshots into the existing index.
 
 const HELP = `Usage: npm run familywall:download -- --email <e> --password <p> [flags]
 
@@ -31,7 +33,9 @@ Output goes under ./data/familywall-cache/:
   recipes/<id-slug>/image.<ext>       Recipe photo bytes
   recipes/<id-slug>/meta.json         id, title, source URL, downloadedAt
 
-Rerunning purges this directory before the new crawl starts.
+A bare rerun (no filter) purges this directory before the new crawl.
+Targeted runs (--recipe-id / --title) only overwrite the matching
+snapshots and merge the new entries into the existing index.
 
 First-time setup: \`npx playwright install chromium\`.`;
 
@@ -96,11 +100,16 @@ async function main() {
     "../src/lib/familywall/download.ts"
   );
 
+  const targeted = Boolean(parsed.values["recipe-id"] || parsed.values.title);
   console.log(
     `[familywall] launching browser (${parsed.values.headed ? "headed" : "headless"})`,
   );
   console.log(`[familywall] logging in as ${email}`);
-  console.log(`[familywall] (cache will be purged before fetching)`);
+  console.log(
+    targeted
+      ? `[familywall] (targeted run — only matching snapshots will be overwritten; the rest of the cache is preserved)`
+      : `[familywall] (cache will be purged before fetching)`,
+  );
 
   let printed = 0;
   const summary = await runFamilywallDownload({

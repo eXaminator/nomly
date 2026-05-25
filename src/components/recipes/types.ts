@@ -40,6 +40,13 @@ export type DraftIngredientCandidate = {
   /** Match score from the server-side matcher. Used purely for sort
    *  stability and the auto-select rules; never rendered to the user. */
   score: number;
+  /** Raw text of the candidate tokens NOT covered by this match. When the
+   *  user clicks a pill, these tokens get moved out of the name input and
+   *  appended to the notes field. */
+  uncoveredText: string;
+  /** True when the underlying ingredient is flagged as equipment — the pill
+   *  click handler and auto-select rule default `isOptional` to true. */
+  isEquipment: boolean;
 };
 
 export type DraftIngredient = {
@@ -131,6 +138,8 @@ export type ParsedIngredientResponse = {
     canonicalName: string;
     matchedName: string;
     score: number;
+    uncoveredText: string;
+    isEquipment: boolean;
   }>;
   notes: string | null;
   /** Server marked the row as optional from an "opt." / "Optional:" /
@@ -178,6 +187,8 @@ export function parsedIngredientToDraft(
       canonicalName: c.canonicalName,
       matchedName: c.matchedName,
       score: c.score,
+      uncoveredText: c.uncoveredText ?? "",
+      isEquipment: c.isEquipment ?? false,
     })),
     addAsAlias: false,
     quantity: quantityToInputString(i.quantity),

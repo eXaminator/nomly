@@ -251,8 +251,6 @@ function pluralFor(kind: EntityKind): string {
   switch (kind) {
     case "ingredient":
       return "ingredients";
-    case "product":
-      return "products";
     case "unit":
       return "units";
     case "category":
@@ -265,5 +263,5 @@ function pluralFor(kind: EntityKind): string {
 }
 
 function hasAliasTable(kind: EntityKind): boolean {
-  return kind === "ingredient" || kind === "product" || kind === "unit" || kind === "category";
+  return kind === "ingredient" || kind === "unit" || kind === "category";
 }

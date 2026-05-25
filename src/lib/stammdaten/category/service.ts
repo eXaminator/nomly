@@ -5,7 +5,6 @@ import {
   category,
   categoryAlias,
   ingredient,
-  product,
   shoppingItem,
   supermarket,
   supermarketCategory,
@@ -80,17 +79,6 @@ function loadUsageCounts(ids: number[]): Map<number, number> {
       .from(ingredient)
       .where(inArray(ingredient.defaultCategoryId, ids))
       .groupBy(ingredient.defaultCategoryId)
-      .all(),
-  );
-  tally(
-    db
-      .select({
-        id: product.defaultCategoryId,
-        count: sql<number>`count(*)`,
-      })
-      .from(product)
-      .where(inArray(product.defaultCategoryId, ids))
-      .groupBy(product.defaultCategoryId)
       .all(),
   );
   tally(

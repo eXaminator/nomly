@@ -32,11 +32,9 @@ export async function clearAll(): Promise<{ deletedCount: number }> {
 export async function clearListSelective(input: {
   removeAll: boolean;
   mealPlanIds: number[];
-  removeProducts: boolean;
 }): Promise<{
   itemsDeleted?: number;
   itemsUpdated?: number;
-  productsDeleted?: number;
   deletedCount?: number;
 }> {
   const res = await fetch("/api/v1/shopping/clear", {
@@ -47,7 +45,6 @@ export async function clearListSelective(input: {
   return (await jsonOrThrow(res)) as {
     itemsDeleted?: number;
     itemsUpdated?: number;
-    productsDeleted?: number;
     deletedCount?: number;
   };
 }
@@ -169,8 +166,7 @@ export async function deleteItem(id: number): Promise<void> {
 export async function addItem(
   input:
     | { ingredientId: number; quantity?: number | null; unitId?: number | null; note?: string | null }
-    | { productId: number; quantity?: number | null; unitId?: number | null; note?: string | null }
-    | { newProduct: { name: string; defaultCategoryId?: number | null }; quantity?: number | null; unitId?: number | null; note?: string | null }
+    | { newIngredient: { name: string; defaultCategoryId?: number | null }; quantity?: number | null; unitId?: number | null; note?: string | null }
     | { byName: string; quantity?: number | null; unitId?: number | null; note?: string | null },
 ): Promise<{ item: ShoppingItemView; resolved: AddItemResolved; action: AddItemAction }> {
   const res = await fetch("/api/v1/shopping/items", {
@@ -232,7 +228,7 @@ export async function addMealsToList(
 }
 
 export async function setUnavailable(
-  kind: "ingredient" | "product",
+  kind: "ingredient",
   id: number,
   supermarketId: number,
   unavailable: boolean,

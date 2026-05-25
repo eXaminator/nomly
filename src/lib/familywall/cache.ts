@@ -197,6 +197,32 @@ export function writeIndex(items: Array<{ id: string; title: string }>): void {
   writeFileSync(INDEX_FILE, JSON.stringify(index, null, 2), "utf8");
 }
 
+/**
+ * Merge a fresh batch of captured recipes into the existing index. Used
+ * by targeted (single-recipe / single-title) re-downloads where the rest
+ * of the cache must be preserved. Recipes are keyed by `id`: a re-download
+ * overwrites the existing index entry (so a renamed-in-Familywall recipe
+ * picks up its new title). `downloadedAt` becomes the current timestamp —
+ * "when was the cache last touched" is the useful interpretation, and it
+ * keeps the import CLI's "downloaded Xh ago" hint honest.
+ *
+ * When no prior index exists this behaves like a fresh `writeIndex`.
+ */
+export function mergeIndex(
+  newRecipes: Array<{ id: string; title: string }>,
+): void {
+  const existing = readIndex();
+  const byId = new Map<string, { id: string; title: string }>();
+  if (existing) {
+    for (const r of existing.recipes) byId.set(r.id, r);
+  }
+  for (const r of newRecipes) byId.set(r.id, r);
+  const merged = Array.from(byId.values()).sort((a, b) =>
+    a.id.localeCompare(b.id),
+  );
+  writeIndex(merged);
+}
+
 export function readIndex(): CacheIndex | null {
   if (!existsSync(INDEX_FILE)) return null;
   try {

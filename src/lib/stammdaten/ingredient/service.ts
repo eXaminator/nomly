@@ -57,6 +57,7 @@ export type IngredientListItem = {
   /** All sub-units defined on this ingredient (Knoblauch → [Zehe]). */
   subUnits: SubUnitItem[];
   excludeFromShoppingList: boolean;
+  isEquipment: boolean;
   dietaryClass: "vegan" | "vegetarian" | "meat" | null;
   recipeRefCount: number;
 };
@@ -86,6 +87,7 @@ export type IngredientUpsertInput = {
    *  leaves it untouched (only matters on update). */
   purchaseUnitId?: number | null;
   excludeFromShoppingList: boolean;
+  isEquipment?: boolean;
   dietaryClass: "vegan" | "vegetarian" | "meat" | null;
 };
 
@@ -110,6 +112,7 @@ function selectIngredientWithJoinedData(query?: string) {
       purchaseUnitId: ingredient.purchaseUnitId,
       purchaseUnitName: unitTable.name,
       excludeFromShoppingList: ingredient.excludeFromShoppingList,
+      isEquipment: ingredient.isEquipment,
       dietaryClass: ingredient.dietaryClass,
     })
     .from(ingredient)
@@ -279,6 +282,7 @@ export function listIngredients(query?: string): IngredientListItem[] {
     purchaseUnitId: row.purchaseUnitId,
     purchaseUnitName: row.purchaseUnitName,
     excludeFromShoppingList: row.excludeFromShoppingList,
+    isEquipment: row.isEquipment,
     dietaryClass: row.dietaryClass,
     recipeRefCount: recipeCounts.get(row.id) ?? 0,
   }));
@@ -300,6 +304,7 @@ function listIngredientsByIds(ids: number[]): IngredientListItem[] {
       purchaseUnitId: ingredient.purchaseUnitId,
       purchaseUnitName: unitTable.name,
       excludeFromShoppingList: ingredient.excludeFromShoppingList,
+      isEquipment: ingredient.isEquipment,
       dietaryClass: ingredient.dietaryClass,
     })
     .from(ingredient)
@@ -322,6 +327,7 @@ function listIngredientsByIds(ids: number[]): IngredientListItem[] {
     purchaseUnitId: row.purchaseUnitId,
     purchaseUnitName: row.purchaseUnitName,
     excludeFromShoppingList: row.excludeFromShoppingList,
+    isEquipment: row.isEquipment,
     dietaryClass: row.dietaryClass,
     recipeRefCount: recipeCounts.get(row.id) ?? 0,
   }));
@@ -395,6 +401,7 @@ export function createIngredient(input: IngredientUpsertInput): IngredientDetail
         defaultCategoryId: input.defaultCategoryId ?? null,
         purchaseUnitId: input.purchaseUnitId ?? null,
         excludeFromShoppingList: input.excludeFromShoppingList,
+        isEquipment: input.isEquipment ?? false,
         dietaryClass: input.dietaryClass,
       })
       .returning({ id: ingredient.id })
@@ -521,6 +528,7 @@ export function updateIngredient(
         defaultCategoryId: input.defaultCategoryId ?? null,
         purchaseUnitId: input.purchaseUnitId ?? null,
         excludeFromShoppingList: input.excludeFromShoppingList,
+        isEquipment: input.isEquipment ?? false,
         dietaryClass: input.dietaryClass,
         updatedAt: nowSec(),
       })
@@ -639,6 +647,7 @@ export type IngredientBulkPatch = {
   /** Undefined = leave alone, null = clear, "vegan"/"vegetarian"/"meat" = set. */
   dietaryClass?: "vegan" | "vegetarian" | "meat" | null;
   excludeFromShoppingList?: boolean;
+  isEquipment?: boolean;
 };
 
 export type IngredientBulkResult = {
@@ -666,6 +675,9 @@ export function bulkUpdateIngredients(
   }
   if (Object.prototype.hasOwnProperty.call(patch, "excludeFromShoppingList")) {
     setObj.excludeFromShoppingList = patch.excludeFromShoppingList;
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, "isEquipment")) {
+    setObj.isEquipment = patch.isEquipment;
   }
   if (Object.keys(setObj).length === 0) return { updatedIds: [] };
   setObj.updatedAt = nowSec();
