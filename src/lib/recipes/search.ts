@@ -76,3 +76,73 @@ export function parseQuery(input: string): ParsedQuery {
   }
   return { tokens };
 }
+
+export type RecipeSearchIndex = {
+  titleFolded: string;
+  ingredientsFolded: string;
+};
+
+export type MatchResult = { passes: boolean; rank: number };
+
+function levenshtein(a: string, b: string, cap: number): number {
+  if (a === b) return 0;
+  if (Math.abs(a.length - b.length) > cap) return cap + 1;
+  const prev = new Array(b.length + 1);
+  const curr = new Array(b.length + 1);
+  for (let j = 0; j <= b.length; j++) prev[j] = j;
+  for (let i = 1; i <= a.length; i++) {
+    curr[0] = i;
+    let rowMin = curr[0];
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      curr[j] = Math.min(curr[j - 1] + 1, prev[j] + 1, prev[j - 1] + cost);
+      if (curr[j] < rowMin) rowMin = curr[j];
+    }
+    if (rowMin > cap) return cap + 1;
+    for (let j = 0; j <= b.length; j++) prev[j] = curr[j];
+  }
+  return prev[b.length];
+}
+
+function scoreWord(tokenText: string, word: string): number {
+  if (word === tokenText) return 100;
+  if (word.startsWith(tokenText)) return 80;
+  if (word.includes(tokenText)) return 60;
+  const cap = Math.max(1, Math.floor(tokenText.length / 5));
+  const d = levenshtein(tokenText, word, cap);
+  if (d <= cap) return 40 - 5 * d;
+  return 0;
+}
+
+export function scoreToken(token: ParsedToken, fieldFolded: string): number {
+  if (token.isPhrase) {
+    return fieldFolded.includes(token.text) ? 80 : 0;
+  }
+  let best = 0;
+  for (const word of fieldFolded.split(/\s+/)) {
+    if (word.length === 0) continue;
+    const s = scoreWord(token.text, word);
+    if (s > best) best = s;
+    if (best === 100) break;
+  }
+  return best;
+}
+
+export function matchRecipe(
+  query: ParsedQuery,
+  index: RecipeSearchIndex,
+): MatchResult {
+  let rank = 0;
+  for (const token of query.tokens) {
+    const field =
+      token.kind === "zutat" ? index.ingredientsFolded : index.titleFolded;
+    const score = scoreToken(token, field);
+    if (token.polarity === "exclude") {
+      if (score > 0) return { passes: false, rank: 0 };
+    } else {
+      if (score === 0) return { passes: false, rank: 0 };
+      rank += score;
+    }
+  }
+  return { passes: true, rank };
+}
