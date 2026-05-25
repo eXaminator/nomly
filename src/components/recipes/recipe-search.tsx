@@ -2,7 +2,8 @@
 
 import * as React from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Search } from "lucide-react";
+import * as Popover from "@radix-ui/react-popover";
+import { HelpCircle, Search } from "lucide-react";
 import { Input } from "@/components/ui/input";
 
 type Props = {
@@ -13,7 +14,10 @@ type Props = {
   onChange?: (next: string) => void;
 };
 
-export function RecipeSearch({ value: controlledValue, onChange: controlledOnChange }: Props = {}) {
+export function RecipeSearch({
+  value: controlledValue,
+  onChange: controlledOnChange,
+}: Props = {}) {
   const isControlled = controlledValue != null && controlledOnChange != null;
   const router = useRouter();
   const pathname = usePathname();
@@ -28,7 +32,6 @@ export function RecipeSearch({ value: controlledValue, onChange: controlledOnCha
         controlledOnChange(q);
         return;
       }
-      // Preserve other filters (must/not) on the URL — only mutate `q`.
       const url = new URLSearchParams(params.toString());
       if (q) url.set("q", q);
       else url.delete("q");
@@ -46,10 +49,48 @@ export function RecipeSearch({ value: controlledValue, onChange: controlledOnCha
         type="search"
         value={value}
         onChange={(e) => setValue(e.target.value)}
-        placeholder="Nach Titel oder Tag suchen…"
-        className="pl-9"
+        placeholder='Suche: tomate "rote linsen" zutat:basilikum -nudeln'
+        className="pl-9 pr-10"
         aria-label="Rezepte durchsuchen"
       />
+      <Popover.Root>
+        <Popover.Trigger
+          className="absolute right-2 top-1/2 inline-flex size-7 -translate-y-1/2 items-center justify-center rounded-full text-[var(--color-muted-fg)] hover:bg-[var(--color-muted)] hover:text-[var(--color-fg)]"
+          aria-label="Suchsyntax-Hilfe"
+        >
+          <HelpCircle className="size-4" />
+        </Popover.Trigger>
+        <Popover.Portal>
+          <Popover.Content
+            sideOffset={6}
+            align="end"
+            className="z-50 max-w-sm rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-card)] p-4 text-sm shadow-lg"
+          >
+            <p className="font-medium text-[var(--color-fg)]">Suche</p>
+            <ul className="mt-2 space-y-1.5 text-[var(--color-muted-fg)]">
+              <li>
+                <code className="text-[var(--color-fg)]">tomate basilikum</code> —
+                alle Begriffe müssen im Titel vorkommen.
+              </li>
+              <li>
+                <code className="text-[var(--color-fg)]">
+                  &quot;rote linsen&quot;
+                </code>{" "}
+                — Anführungszeichen für zusammenhängende Phrasen.
+              </li>
+              <li>
+                <code className="text-[var(--color-fg)]">-nudeln</code> —
+                Bindestrich schließt Treffer aus.
+              </li>
+              <li>
+                <code className="text-[var(--color-fg)]">zutat:basilikum</code> —
+                sucht in Zutaten (inkl. Aliase) statt im Titel.
+              </li>
+              <li>Tippfehler werden bis zu einer kleinen Distanz toleriert.</li>
+            </ul>
+          </Popover.Content>
+        </Popover.Portal>
+      </Popover.Root>
     </div>
   );
 }
