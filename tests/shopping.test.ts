@@ -765,6 +765,35 @@ describe("sweeper", () => {
     expect(deletedIds).toContain(aged.id);
     expect(deletedIds).not.toContain(fresh.id);
   });
+
+  it("listShoppingItems sweeps stale checked items on read", async () => {
+    const { previewMeals } = await import("@/lib/shopping/preview");
+    const { addMealsToList } = await import("@/lib/shopping/merge");
+    const { listShoppingItems } = await import("@/lib/shopping/items");
+    const { db } = await import("@/db");
+    const { shoppingItem } = await import("@/db/schema");
+    const { eq } = await import("drizzle-orm");
+
+    const meals = previewMeals("2026-05-23", 1);
+    addMealsToList([
+      {
+        mealPlanId: ctx.mealPlanId,
+        ingredients: meals[0].sections.flatMap((s) => s.ingredients).map((i) => ({ recipeIngredientId: i.recipeIngredientId })),
+      },
+    ]);
+
+    const before = listShoppingItems();
+    expect(before.length).toBeGreaterThan(1);
+    const aged = before[0];
+    const now = Math.floor(Date.now() / 1000);
+    db.update(shoppingItem)
+      .set({ checked: true, checkedAt: now - 25 * 3600 })
+      .where(eq(shoppingItem.id, aged.id))
+      .run();
+
+    const after = listShoppingItems();
+    expect(after.find((i) => i.id === aged.id)).toBeUndefined();
+  });
 });
 
 describe("meal-plan view reports shopping impact", () => {

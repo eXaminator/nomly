@@ -19,6 +19,7 @@ import {
   type NameCandidate,
 } from "./byName.ts";
 import type { Dimension, UnitRow } from "./format.ts";
+import { sweepCheckedItems } from "./sweeper.ts";
 import { loadUnitsByDimension } from "./units-db.ts";
 
 export type ShoppingItemSourceView = {
@@ -83,6 +84,10 @@ export type ShoppingItemView = {
 };
 
 export function listShoppingItems(): ShoppingItemView[] {
+  // Sweep on read so stale checked items never display even when the
+  // server.mts interval hasn't fired (between ticks, or in tests / one-off
+  // scripts that don't boot the custom server).
+  sweepCheckedItems();
   const ingredientRows = db
     .select({
       id: shoppingItem.id,
