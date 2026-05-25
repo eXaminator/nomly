@@ -20,6 +20,11 @@ export type ClearSummary = {
     recipeTitle: string;
     itemCount: number;
   }>;
+  stapleGroups: Array<{
+    stapleGroupId: number;
+    name: string;
+    itemCount: number;
+  }>;
 };
 
 type Props = {
@@ -28,6 +33,7 @@ type Props = {
   onConfirm: (selection: {
     removeAll: boolean;
     mealPlanIds: number[];
+    stapleGroupIds: number[];
   }) => Promise<void>;
 };
 
@@ -36,6 +42,9 @@ export function ClearListDialog({ open, onClose, onConfirm }: Props) {
   const [loading, setLoading] = React.useState(false);
   const [submitting, setSubmitting] = React.useState(false);
   const [selectedMeals, setSelectedMeals] = React.useState<Set<number>>(new Set());
+  const [selectedStaples, setSelectedStaples] = React.useState<Set<number>>(
+    new Set(),
+  );
   const [removeAll, setRemoveAll] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
@@ -44,6 +53,7 @@ export function ClearListDialog({ open, onClose, onConfirm }: Props) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setSummary(null);
       setSelectedMeals(new Set());
+      setSelectedStaples(new Set());
       setRemoveAll(false);
       setError(null);
       return;
@@ -69,9 +79,9 @@ export function ClearListDialog({ open, onClose, onConfirm }: Props) {
     };
   }, [open]);
 
-  const totalSelected = removeAll ? "alle" : selectedMeals.size;
+  const selectedCount = selectedMeals.size + selectedStaples.size;
   const submitDisabled =
-    submitting || (!removeAll && selectedMeals.size === 0);
+    submitting || (!removeAll && selectedCount === 0);
 
   function toggleMeal(id: number) {
     setSelectedMeals((prev) => {
@@ -91,16 +101,41 @@ export function ClearListDialog({ open, onClose, onConfirm }: Props) {
     }
   }
 
+  function toggleStapleGroup(id: number) {
+    setSelectedStaples((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleAllStapleGroups() {
+    if (!summary) return;
+    if (selectedStaples.size === summary.stapleGroups.length) {
+      setSelectedStaples(new Set());
+    } else {
+      setSelectedStaples(
+        new Set(summary.stapleGroups.map((g) => g.stapleGroupId)),
+      );
+    }
+  }
+
   async function submit() {
     setSubmitting(true);
     setError(null);
     try {
       if (removeAll) {
-        await onConfirm({ removeAll: true, mealPlanIds: [] });
+        await onConfirm({
+          removeAll: true,
+          mealPlanIds: [],
+          stapleGroupIds: [],
+        });
       } else {
         await onConfirm({
           removeAll: false,
           mealPlanIds: Array.from(selectedMeals),
+          stapleGroupIds: Array.from(selectedStaples),
         });
       }
     } catch (e) {
@@ -109,6 +144,10 @@ export function ClearListDialog({ open, onClose, onConfirm }: Props) {
       setSubmitting(false);
     }
   }
+
+  const hasMeals = summary != null && summary.meals.length > 0;
+  const hasStaples = summary != null && summary.stapleGroups.length > 0;
+  const empty = summary != null && !hasMeals && !hasStaples;
 
   return (
     <Dialog open={open} onOpenChange={(v) => (!v && !submitting ? onClose() : undefined)}>
@@ -139,12 +178,12 @@ export function ClearListDialog({ open, onClose, onConfirm }: Props) {
               disabled={removeAll}
               className={removeAll ? "opacity-40" : undefined}
             >
-              {summary.meals.length === 0 ? (
+              {empty ? (
                 <p className="text-sm text-[var(--color-muted-fg)]">
                   Keine Einträge auf der Liste.
                 </p>
               ) : null}
-              {summary.meals.length > 0 ? (
+              {hasMeals ? (
                 <div className="flex flex-col gap-2">
                   <div className="flex items-center justify-between">
                     <h3 className="text-xs font-medium uppercase tracking-wider text-[var(--color-muted-fg)]">
@@ -185,6 +224,47 @@ export function ClearListDialog({ open, onClose, onConfirm }: Props) {
                   </ul>
                 </div>
               ) : null}
+              {hasStaples ? (
+                <div className={`flex flex-col gap-2 ${hasMeals ? "mt-4" : ""}`}>
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-xs font-medium uppercase tracking-wider text-[var(--color-muted-fg)]">
+                      Standards
+                    </h3>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={toggleAllStapleGroups}
+                      disabled={removeAll}
+                    >
+                      {selectedStaples.size === summary.stapleGroups.length
+                        ? "Keine"
+                        : "Alle"}
+                    </Button>
+                  </div>
+                  <ul className="flex flex-col divide-y divide-[var(--color-border)] rounded-[var(--radius)] border border-[var(--color-border)]">
+                    {summary.stapleGroups.map((g) => (
+                      <li key={g.stapleGroupId}>
+                        <label className="flex cursor-pointer items-center gap-2 px-3 py-2 text-sm">
+                          <input
+                            type="checkbox"
+                            checked={selectedStaples.has(g.stapleGroupId)}
+                            onChange={() => toggleStapleGroup(g.stapleGroupId)}
+                            className="size-4"
+                          />
+                          <span className="flex flex-1 flex-wrap items-baseline gap-2">
+                            <span className="font-medium">{g.name}</span>
+                            <span className="text-xs text-[var(--color-muted-fg)]">
+                              {g.itemCount}{" "}
+                              {g.itemCount === 1 ? "Artikel" : "Artikel"}
+                            </span>
+                          </span>
+                        </label>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
             </fieldset>
           )}
           {error ? (
@@ -193,7 +273,7 @@ export function ClearListDialog({ open, onClose, onConfirm }: Props) {
         </DialogBody>
         <DialogFooter className="sm:items-center sm:justify-between">
           <span className="text-sm text-[var(--color-muted-fg)] sm:mr-auto">
-            {totalSelected === 0 ? "Nichts ausgewählt" : null}
+            {!removeAll && selectedCount === 0 ? "Nichts ausgewählt" : null}
           </span>
           <Button variant="ghost" onClick={onClose} disabled={submitting}>
             Abbrechen

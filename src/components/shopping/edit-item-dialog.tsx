@@ -35,6 +35,7 @@ type Props = {
     quantity: number | null,
   ) => Promise<void>;
   onDeleteSource: (id: number, sourceId: number) => Promise<void>;
+  onDeleteStapleSource: (id: number, sourceId: number) => Promise<void>;
   onDeleteManualAmount: (id: number, amountId: number) => Promise<void>;
   onPatchNote: (id: number, note: string | null) => Promise<void>;
 };
@@ -51,6 +52,11 @@ function formatDate(iso: string): string {
     timeZone: "UTC",
   });
   return `${weekday}, ${dm}`;
+}
+
+function formatQuantity(n: number): string {
+  if (Number.isInteger(n)) return String(n);
+  return n.toFixed(2).replace(/\.?0+$/, "");
 }
 
 function parseInput(raw: string | undefined): number | null {
@@ -100,6 +106,7 @@ function EditItemDialogBody({
   onSetSourceQuantity,
   onSetManualAmountQuantity,
   onDeleteSource,
+  onDeleteStapleSource,
   onDeleteManualAmount,
   onPatchNote,
 }: Props & { item: ShoppingItemView }) {
@@ -129,6 +136,9 @@ function EditItemDialogBody({
   const [removedManuals, setRemovedManuals] = React.useState<Set<number>>(
     () => new Set(),
   );
+  const [removedStapleSources, setRemovedStapleSources] = React.useState<
+    Set<number>
+  >(() => new Set());
   // Pending new manual rows — local-only until Speichern.
   const [pendingNew, setPendingNew] = React.useState<PendingNew[]>([]);
   const [note, setNote] = React.useState(item.note ?? "");
@@ -231,6 +241,15 @@ function EditItemDialogBody({
     });
   }
 
+  function toggleRemoveStapleSource(sourceId: number) {
+    setRemovedStapleSources((prev) => {
+      const next = new Set(prev);
+      if (next.has(sourceId)) next.delete(sourceId);
+      else next.add(sourceId);
+      return next;
+    });
+  }
+
   async function commit() {
     setSaving(true);
     try {
@@ -244,6 +263,11 @@ function EditItemDialogBody({
         const next = parseInput(sourceInputs[s.sourceId]);
         if (next !== s.contributedQuantity) {
           await onSetSourceQuantity(item.id, s.sourceId, next);
+        }
+      }
+      for (const s of item.stapleSources) {
+        if (removedStapleSources.has(s.sourceId)) {
+          await onDeleteStapleSource(item.id, s.sourceId);
         }
       }
       for (const m of item.manualAmounts) {
@@ -284,6 +308,7 @@ function EditItemDialogBody({
       </DialogHeader>
       <DialogBody className="flex flex-col gap-4">
         {item.sources.length === 0 &&
+        item.stapleSources.length === 0 &&
         item.manualAmounts.length === 0 &&
         pendingNew.length === 0 ? (
           <p className="text-sm text-[var(--color-muted-fg)]">
@@ -331,6 +356,43 @@ function EditItemDialogBody({
                     aria-label={removed ? "Entfernen rückgängig" : "Entfernen"}
                     title={removed ? "Entfernen rückgängig" : "Entfernen"}
                     onClick={() => toggleRemoveSource(s.sourceId)}
+                  >
+                    <X className="size-4" />
+                  </Button>
+                </li>
+              );
+            })}
+            {item.stapleSources.map((s) => {
+              const removed = removedStapleSources.has(s.sourceId);
+              return (
+                <li
+                  key={`stp-${s.sourceId}`}
+                  className="flex flex-wrap items-center gap-2"
+                >
+                  <span
+                    className={`min-w-0 flex-1 text-sm ${
+                      removed ? "line-through opacity-50" : ""
+                    }`}
+                  >
+                    <span className="font-medium">{s.stapleGroupName}</span>
+                    <span className="ml-1 text-xs uppercase tracking-wider text-[var(--color-muted-fg)]">
+                      Standard
+                    </span>
+                  </span>
+                  <span className="w-24 text-right text-sm text-[var(--color-muted-fg)]">
+                    {s.contributedQuantity != null
+                      ? formatQuantity(s.contributedQuantity)
+                      : "—"}
+                  </span>
+                  <span className="w-10 text-xs text-[var(--color-muted-fg)]">
+                    {s.contributedUnit ?? ""}
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    aria-label={removed ? "Entfernen rückgängig" : "Entfernen"}
+                    title={removed ? "Entfernen rückgängig" : "Entfernen"}
+                    onClick={() => toggleRemoveStapleSource(s.sourceId)}
                   >
                     <X className="size-4" />
                   </Button>

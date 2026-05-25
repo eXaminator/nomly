@@ -32,21 +32,59 @@ export async function clearAll(): Promise<{ deletedCount: number }> {
 export async function clearListSelective(input: {
   removeAll: boolean;
   mealPlanIds: number[];
+  stapleGroupIds?: number[];
 }): Promise<{
   itemsDeleted?: number;
   itemsUpdated?: number;
   deletedCount?: number;
 }> {
+  const body = input.removeAll
+    ? { removeAll: true }
+    : {
+        mealPlanIds: input.mealPlanIds,
+        stapleGroupIds: input.stapleGroupIds ?? [],
+      };
   const res = await fetch("/api/v1/shopping/clear", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify(input),
+    body: JSON.stringify(body),
   });
   return (await jsonOrThrow(res)) as {
     itemsDeleted?: number;
     itemsUpdated?: number;
     deletedCount?: number;
   };
+}
+
+export async function addStapleGroupToList(groupId: number): Promise<{
+  itemsCreated: number;
+  itemsIncremented: number;
+  itemsReactivated: number;
+  affectedItemIds: number[];
+}> {
+  const res = await fetch("/api/v1/shopping/add-staple-group", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ groupId }),
+  });
+  return (await jsonOrThrow(res)) as {
+    itemsCreated: number;
+    itemsIncremented: number;
+    itemsReactivated: number;
+    affectedItemIds: number[];
+  };
+}
+
+export async function deleteStapleSource(
+  itemId: number,
+  sourceId: number,
+): Promise<ShoppingItemView> {
+  const res = await fetch(
+    `/api/v1/shopping/items/${itemId}/staple-source/${sourceId}`,
+    { method: "DELETE" },
+  );
+  const data = (await jsonOrThrow(res)) as { item: ShoppingItemView };
+  return data.item;
 }
 
 export async function patchItem(

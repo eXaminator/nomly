@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
-import { CalendarPlus, EyeOff, Plus, RotateCcw, Trash2 } from "lucide-react";
+import { CalendarPlus, EyeOff, ListPlus, Plus, RotateCcw, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { RecipePreviewDialog } from "@/components/planner/recipe-preview-dialog";
 import { cn } from "@/lib/cn";
@@ -10,6 +10,7 @@ import type { ShoppingItemView } from "@/lib/shopping/items";
 import { ShoppingItemRow } from "./shopping-item-row";
 import { AddItemDialog } from "./add-item-dialog";
 import { AddMealsDialog } from "./add-meals-dialog";
+import { AddStapleGroupDialog } from "./add-staple-group-dialog";
 import { SupermarketFilter } from "./supermarket-filter";
 import { ClearListDialog } from "./clear-list-dialog";
 import { EditItemDialog } from "./edit-item-dialog";
@@ -19,6 +20,7 @@ import {
   deleteItem as apiDelete,
   deleteManualAmount as apiDeleteManual,
   deleteSource as apiDeleteSource,
+  deleteStapleSource as apiDeleteStapleSource,
   patchItem as apiPatch,
   setManualAmountQuantity as apiSetManualQty,
   setSourceQuantity as apiSetSourceQty,
@@ -53,6 +55,7 @@ export function ShoppingListView({
   const [supermarketId, setSupermarketId] = React.useState<number | null>(null);
   const [addItemOpen, setAddItemOpen] = React.useState(false);
   const [addMealsOpen, setAddMealsOpen] = React.useState(false);
+  const [addStaplesOpen, setAddStaplesOpen] = React.useState(false);
   const [previewRecipeId, setPreviewRecipeId] = React.useState<number | null>(null);
   const [clearOpen, setClearOpen] = React.useState(false);
   // Identify by id so the dialog body re-keys to fresh state when a
@@ -225,10 +228,20 @@ export function ShoppingListView({
   async function onClear(selection: {
     removeAll: boolean;
     mealPlanIds: number[];
+    stapleGroupIds: number[];
   }) {
     await apiClearList(selection);
     setClearOpen(false);
     router.refresh();
+  }
+
+  async function onDeleteStapleSource(id: number, sourceId: number) {
+    try {
+      const updated = await apiDeleteStapleSource(id, sourceId);
+      setItems((prev) => prev.map((i) => (i.id === updated.id ? updated : i)));
+    } catch {
+      router.refresh();
+    }
   }
 
   async function onToggleUnavailable(item: ShoppingItemView, supermarketId: number) {
@@ -315,6 +328,14 @@ export function ShoppingListView({
         <Button onClick={() => setAddMealsOpen(true)} aria-label="Mahlzeiten hinzufügen">
           <CalendarPlus className="size-4" />
           <span className="hidden sm:inline">Mahlzeiten hinzufügen</span>
+        </Button>
+        <Button
+          variant="outline"
+          onClick={() => setAddStaplesOpen(true)}
+          aria-label="Standards hinzufügen"
+        >
+          <ListPlus className="size-4" />
+          <span className="hidden sm:inline">Standards…</span>
         </Button>
         <Button
           variant="outline"
@@ -423,6 +444,14 @@ export function ShoppingListView({
           router.refresh();
         }}
       />
+      <AddStapleGroupDialog
+        open={addStaplesOpen}
+        onClose={() => setAddStaplesOpen(false)}
+        onAdded={() => {
+          setAddStaplesOpen(false);
+          router.refresh();
+        }}
+      />
       <RecipePreviewDialog
         recipeId={previewRecipeId}
         onClose={() => setPreviewRecipeId(null)}
@@ -439,6 +468,7 @@ export function ShoppingListView({
         onSetSourceQuantity={onSetSourceQuantity}
         onSetManualAmountQuantity={onSetManualAmountQuantity}
         onDeleteSource={onDeleteSource}
+        onDeleteStapleSource={onDeleteStapleSource}
         onDeleteManualAmount={onDeleteManualAmount}
         onPatchNote={onPatchNote}
       />
