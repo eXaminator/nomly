@@ -11,6 +11,8 @@ import {
   shoppingItem,
   shoppingItemAmount,
   shoppingItemSource,
+  shoppingItemStapleSource,
+  stapleGroup,
   unit,
 } from "../../db/schema.ts";
 import {
@@ -33,6 +35,15 @@ export type ShoppingItemSourceView = {
   contributedUnitId: number | null;
   contributedUnit: string | null;
   recipeNotes: string | null;
+};
+
+export type ShoppingItemStapleSourceView = {
+  sourceId: number;
+  stapleGroupId: number;
+  stapleGroupName: string;
+  contributedQuantity: number | null;
+  contributedUnitId: number | null;
+  contributedUnit: string | null;
 };
 
 /** Tag used in shopping_item_amount.dimension when the row carries no unit. */
@@ -79,6 +90,7 @@ export type ShoppingItemView = {
   updatedAt: number;
   unavailableSupermarketIds: number[];
   sources: ShoppingItemSourceView[];
+  stapleSources: ShoppingItemStapleSourceView[];
   /** Individual user-added manual amounts (additive on top of sources). */
   manualAmounts: ShoppingItemManualAmount[];
 };
@@ -160,6 +172,41 @@ export function listShoppingItems(): ShoppingItemView[] {
     }
   }
 
+  const stapleSourcesByItem = new Map<number, ShoppingItemStapleSourceView[]>();
+  if (itemIds.length > 0) {
+    const rows = db
+      .select({
+        sourceId: shoppingItemStapleSource.id,
+        itemId: shoppingItemStapleSource.itemId,
+        stapleGroupId: shoppingItemStapleSource.stapleGroupId,
+        stapleGroupName: stapleGroup.name,
+        contributedQuantity: shoppingItemStapleSource.contributedQuantity,
+        contributedUnitId: shoppingItemStapleSource.contributedUnitId,
+        contributedUnit: unit.name,
+      })
+      .from(shoppingItemStapleSource)
+      .innerJoin(
+        stapleGroup,
+        eq(stapleGroup.id, shoppingItemStapleSource.stapleGroupId),
+      )
+      .leftJoin(unit, eq(unit.id, shoppingItemStapleSource.contributedUnitId))
+      .where(inArray(shoppingItemStapleSource.itemId, itemIds))
+      .orderBy(asc(stapleGroup.sortOrder), asc(stapleGroup.name))
+      .all();
+    for (const r of rows) {
+      const arr = stapleSourcesByItem.get(r.itemId) ?? [];
+      arr.push({
+        sourceId: r.sourceId,
+        stapleGroupId: r.stapleGroupId,
+        stapleGroupName: r.stapleGroupName,
+        contributedQuantity: r.contributedQuantity,
+        contributedUnitId: r.contributedUnitId,
+        contributedUnit: r.contributedUnit,
+      });
+      stapleSourcesByItem.set(r.itemId, arr);
+    }
+  }
+
   type RawManual = {
     id: number;
     itemId: number;
@@ -202,6 +249,9 @@ export function listShoppingItems(): ShoppingItemView[] {
   for (const sources of sourcesByItem.values())
     for (const s of sources)
       if (s.contributedUnitId != null) allUnitIds.add(s.contributedUnitId);
+  for (const sources of stapleSourcesByItem.values())
+    for (const s of sources)
+      if (s.contributedUnitId != null) allUnitIds.add(s.contributedUnitId);
   for (const manuals of manualsByItem.values())
     for (const m of manuals) if (m.unitId != null) allUnitIds.add(m.unitId);
   const unitRows = allUnitIds.size === 0
@@ -239,7 +289,24 @@ export function listShoppingItems(): ShoppingItemView[] {
 
   const all: ShoppingItemView[] = baseRows.map((r) => {
     const sources = sourcesByItem.get(r.id) ?? [];
+    const stapleSources = stapleSourcesByItem.get(r.id) ?? [];
     const manuals = manualsByItem.get(r.id) ?? [];
+    const sourceContributions: Contribution[] = [
+      ...sources.map((s) => ({
+        quantity: s.contributedQuantity,
+        unit:
+          s.contributedUnitId != null
+            ? unitsById.get(s.contributedUnitId) ?? null
+            : null,
+      })),
+      ...stapleSources.map((s) => ({
+        quantity: s.contributedQuantity,
+        unit:
+          s.contributedUnitId != null
+            ? unitsById.get(s.contributedUnitId) ?? null
+            : null,
+      })),
+    ];
     const amounts = buildAggregatedAmounts({
       manuals: manuals.map((m) => ({
         id: m.id,
@@ -247,10 +314,7 @@ export function listShoppingItems(): ShoppingItemView[] {
         unit: m.unitId != null ? unitsById.get(m.unitId) ?? null : null,
         dimension: m.dimension,
       })),
-      sources: sources.map((s) => ({
-        quantity: s.contributedQuantity,
-        unit: s.contributedUnitId != null ? unitsById.get(s.contributedUnitId) ?? null : null,
-      })),
+      sources: sourceContributions,
     });
     const unavailable = ingredientUnavailable.get(r.refId as number) ?? [];
     return {
@@ -281,6 +345,7 @@ export function listShoppingItems(): ShoppingItemView[] {
         contributedUnit: s.contributedUnit,
         recipeNotes: s.recipeNotes,
       })),
+      stapleSources,
       manualAmounts: manuals.map((m) => ({
         id: m.id,
         quantity: m.quantity,
