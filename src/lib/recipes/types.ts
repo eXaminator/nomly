@@ -1,3 +1,5 @@
+import type { DietConfidence } from "./diet.ts";
+
 export type RecipeIngredientInput = {
   /** Freeform ingredient name. Surfaces as `display_name` on the persisted
    *  row. When {@link ingredientId} is null/omitted, the server uses this
@@ -92,6 +94,8 @@ export type RecipeListItem = {
   /** Derived from non-optional ingredients' dietary_class. `null` = unknown. */
   isVegan: boolean | null;
   isVegetarian: boolean | null;
+  /** "definite" vs "probable" — drives the "Wahrscheinlich …" badge tier. */
+  dietConfidence: DietConfidence;
 };
 
 export type RecipeIngredientView = {
@@ -151,6 +155,7 @@ export type RecipeView = {
   /** Derived from non-optional ingredients' dietary_class. `null` = unknown. */
   isVegan: boolean | null;
   isVegetarian: boolean | null;
+  dietConfidence: DietConfidence;
   createdAt: number;
   updatedAt: number;
 };
