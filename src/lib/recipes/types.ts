@@ -1,4 +1,4 @@
-import type { DietConfidence } from "./diet.ts";
+import type { DietConfidence, IngredientDietaryClass } from "./diet.ts";
 
 export type RecipeIngredientInput = {
   /** Freeform ingredient name. Surfaces as `display_name` on the persisted
@@ -130,6 +130,9 @@ export type RecipeIngredientView = {
    *  a separate "Du brauchst auch" sub-section so cookware/consumables
    *  don't visually compete with food ingredients. */
   isEquipment: boolean;
+  /** Mirror of `ingredient.dietary_class`. Drives the per-ingredient diet
+   *  marker on the recipe detail page. NULL = no marker (unknown). */
+  dietaryClass: IngredientDietaryClass;
   sortOrder: number;
 };
 

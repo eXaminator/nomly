@@ -434,6 +434,7 @@ export function getRecipe(id: number): RecipeView | null {
           fixedAmount: i.fixedAmount,
           rawLine: i.rawLine,
           isEquipment: i.isEquipment,
+          dietaryClass: i.dietaryClass,
           sortOrder: i.sortOrder,
         })),
     })),

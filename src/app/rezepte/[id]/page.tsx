@@ -1,11 +1,21 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Clock, ExternalLink, Lock, Pencil, Users } from "lucide-react";
+import {
+  Beef,
+  Clock,
+  ExternalLink,
+  Leaf,
+  Lock,
+  Pencil,
+  Salad,
+  Users,
+} from "lucide-react";
 import { AppShell } from "@/components/layout/app-shell";
 import { Button } from "@/components/ui/button";
 import { DietBadge } from "@/components/recipes/diet-badge";
 import { IngredientLine } from "@/components/recipes/ingredient-line";
 import { getRecipe } from "@/lib/recipes/service";
+import type { IngredientDietaryClass } from "@/lib/recipes/diet";
 import { renderMarkdown } from "@/lib/markdown";
 
 export const dynamic = "force-dynamic";
@@ -14,6 +24,32 @@ function formatQuantity(q: number | null): string {
   if (q === null) return "";
   const rounded = Math.round(q * 100) / 100;
   return new Intl.NumberFormat("de-DE", { maximumFractionDigits: 2 }).format(rounded);
+}
+
+function DietMarker({ kind }: { kind: IngredientDietaryClass }) {
+  // Fixed-width slot, height-stretch so the icon is vertically centered in
+  // the line — keeps the amount column aligned whether or not a marker shows.
+  // Color-only signal; labels are kept in `title` for screen readers.
+  return (
+    <span
+      className="inline-flex w-3 shrink-0 items-center justify-center"
+      aria-hidden={kind == null ? "true" : undefined}
+    >
+      {kind === "vegan" ? (
+        <Leaf className="size-3" style={{ color: "var(--color-success)" }}>
+          <title>vegan</title>
+        </Leaf>
+      ) : kind === "vegetarian" ? (
+        <Salad className="size-3" style={{ color: "var(--color-warning)" }}>
+          <title>vegetarisch</title>
+        </Salad>
+      ) : kind === "meat" ? (
+        <Beef className="size-3" style={{ color: "var(--color-danger)" }}>
+          <title>tierisch</title>
+        </Beef>
+      ) : null}
+    </span>
+  );
 }
 
 export default async function RecipeViewPage({
@@ -122,6 +158,7 @@ export default async function RecipeViewPage({
               key={ing.id}
               className={ing.isOptional ? "flex gap-2 italic opacity-65" : "flex gap-2"}
             >
+              <DietMarker kind={ing.isEquipment ? null : ing.dietaryClass} />
               <span className="inline-flex min-w-12 items-center gap-1 font-mono text-[var(--color-muted-fg)]">
                 {ing.fixedAmount ? (
                   <Lock className="size-3 shrink-0" aria-label="Feste Menge" />
