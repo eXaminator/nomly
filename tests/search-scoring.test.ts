@@ -30,8 +30,26 @@ describe("scoreToken", () => {
     expect(scoreToken(tok("reis"), "preiselbeere")).toBe(0);
   });
 
-  it("Levenshtein within threshold → 40 minus 5×distance", () => {
+  it("Levenshtein within threshold → 40 minus 5×distance (title only)", () => {
     expect(scoreToken(tok("tomte"), "tomate")).toBe(35);
+  });
+
+  it("zutat: tokens never fuzzy-match (pasta must not hit 'paste')", () => {
+    const zutatTok = {
+      kind: "zutat" as const,
+      text: "pasta",
+      isPhrase: false,
+      polarity: "include" as const,
+    };
+    expect(scoreToken(zutatTok, "chinese sesame paste")).toBe(0);
+    const titleTok = {
+      kind: "title" as const,
+      text: "pasta",
+      isPhrase: false,
+      polarity: "include" as const,
+    };
+    // Title fuzzy still works — distance 1 between "pasta" and "paste".
+    expect(scoreToken(titleTok, "chinese sesame paste")).toBe(35);
   });
 
   it("Levenshtein beyond threshold → 0", () => {

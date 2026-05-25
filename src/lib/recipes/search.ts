@@ -196,10 +196,15 @@ function containsAtBoundary(s: string, needle: string): boolean {
   return false;
 }
 
-function scoreWord(tokenText: string, word: string): number {
+function scoreWord(
+  tokenText: string,
+  word: string,
+  allowFuzzy: boolean,
+): number {
   if (word === tokenText) return 100;
   if (word.startsWith(tokenText)) return 80;
   if (containsAtBoundary(word, tokenText)) return 60;
+  if (!allowFuzzy) return 0;
   const cap = Math.max(1, Math.floor(tokenText.length / 5));
   const d = levenshtein(tokenText, word, cap);
   if (d <= cap) return 40 - 5 * d;
@@ -210,10 +215,15 @@ export function scoreToken(token: ParsedToken, fieldFolded: string): number {
   if (token.isPhrase) {
     return fieldFolded.includes(token.text) ? 80 : 0;
   }
+  // Fuzzy (typo-tolerant) match applies to title tokens only. Ingredient
+  // matching stays precise — you usually know what's in your recipe and
+  // edit-distance-1 between distinct ingredients (pasta/paste, reis/eis)
+  // produces more noise than help. See spec §1 update.
+  const allowFuzzy = token.kind === "title";
   let best = 0;
   for (const word of fieldFolded.split(/\s+/)) {
     if (word.length === 0) continue;
-    const s = scoreWord(token.text, word);
+    const s = scoreWord(token.text, word, allowFuzzy);
     if (s > best) best = s;
     if (best === 100) break;
   }
