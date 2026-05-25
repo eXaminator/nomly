@@ -1,3 +1,5 @@
+import type { DietConfidence } from "../recipes/diet.ts";
+
 export type MealPlanCreateInput = {
   recipeId: number;
   date: string;
@@ -65,5 +67,6 @@ export type MealPlanView = {
     baseServings: number;
     isVegan: boolean | null;
     isVegetarian: boolean | null;
+    dietConfidence: DietConfidence;
   };
 };

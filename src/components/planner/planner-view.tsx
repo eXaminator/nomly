@@ -139,6 +139,7 @@ export function PlannerView({
         baseServings: recipe.servings,
         isVegan: recipe.isVegan,
         isVegetarian: recipe.isVegetarian,
+        dietConfidence: recipe.dietConfidence,
       },
     };
   }
@@ -815,6 +816,7 @@ function DragPreview({
             <DietBadge
               isVegan={recipe.isVegan}
               isVegetarian={recipe.isVegetarian}
+              confidence={recipe.dietConfidence}
               size="sm"
             />
             <span className="truncate">{recipe.title}</span>
@@ -851,6 +853,7 @@ function DragPreview({
           <DietBadge
             isVegan={meal.recipe.isVegan}
             isVegetarian={meal.recipe.isVegetarian}
+            confidence={meal.recipe.dietConfidence}
             size="sm"
           />
           <span className="truncate text-sm font-medium">

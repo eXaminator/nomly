@@ -108,6 +108,7 @@ function RecipeBody({ recipeId }: { recipeId: number }) {
               <DietBadge
                 isVegan={recipe.isVegan}
                 isVegetarian={recipe.isVegetarian}
+                confidence={recipe.dietConfidence}
               />
               <span className="inline-flex items-center gap-1.5">
                 <Users className="size-4" />

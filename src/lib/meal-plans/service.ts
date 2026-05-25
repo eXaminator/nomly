@@ -345,7 +345,11 @@ export function listByDateRange(from: string, to: string): MealPlanView[] {
   const hasShopping = new Set(shoppingHits.map((r) => r.mealPlanId));
 
   return meals.map((m) => {
-    const diet = dietByRecipe.get(m.recipeId) ?? { isVegan: null, isVegetarian: null };
+    const diet = dietByRecipe.get(m.recipeId) ?? {
+      isVegan: null,
+      isVegetarian: null,
+      confidence: "unknown" as const,
+    };
     const servings = m.servingsOverride ?? m.recipeServings;
     return {
       id: m.id,
@@ -362,6 +366,7 @@ export function listByDateRange(from: string, to: string): MealPlanView[] {
         baseServings: m.recipeServings,
         isVegan: diet.isVegan,
         isVegetarian: diet.isVegetarian,
+        dietConfidence: diet.confidence,
       },
     };
   });

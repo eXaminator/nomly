@@ -188,6 +188,7 @@ function RecipeRow({
           <DietBadge
             isVegan={recipe.isVegan}
             isVegetarian={recipe.isVegetarian}
+            confidence={recipe.dietConfidence}
             size="sm"
           />
           <span className="truncate">{recipe.title}</span>

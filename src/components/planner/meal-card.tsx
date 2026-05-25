@@ -194,6 +194,7 @@ export function MealCard({
             <DietBadge
               isVegan={meal.recipe.isVegan}
               isVegetarian={meal.recipe.isVegetarian}
+              confidence={meal.recipe.dietConfidence}
               size="sm"
             />
             <span className="truncate text-sm font-medium text-[var(--color-fg)]">

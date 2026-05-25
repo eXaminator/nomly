@@ -153,6 +153,7 @@ function AddMealModalInner({
                         <DietBadge
                           isVegan={r.isVegan}
                           isVegetarian={r.isVegetarian}
+                          confidence={r.dietConfidence}
                           size="sm"
                         />
                         <span className="truncate">{r.title}</span>

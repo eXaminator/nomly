@@ -49,6 +49,7 @@ export function RecipeCard({ recipe }: Props) {
           <DietBadge
             isVegan={recipe.isVegan}
             isVegetarian={recipe.isVegetarian}
+            confidence={recipe.dietConfidence}
             size="sm"
           />
           <span className="inline-flex items-center gap-1">
