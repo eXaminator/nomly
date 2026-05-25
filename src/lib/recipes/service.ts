@@ -409,6 +409,7 @@ export function getRecipe(id: number): RecipeView | null {
     tags,
     isVegan: diet.isVegan,
     isVegetarian: diet.isVegetarian,
+    dietConfidence: diet.confidence,
     sections: sections.map((s) => ({
       id: s.id,
       title: s.title,
@@ -446,6 +447,10 @@ export type ListRecipesOptions = {
   mustTags?: string[];
   /** Recipe must carry none of the tags in this list. */
   notTags?: string[];
+  /** Diet filter. "vegetarian" includes definite+probable vegetarian (and
+   *  vegan). "vegan" includes definite+probable vegan. Recipes whose diet
+   *  is `unknown` are excluded for any non-empty filter. */
+  diet?: "vegetarian" | "vegan";
 };
 
 export function listRecipes(opts: ListRecipesOptions = {}): RecipeListItem[] {
@@ -525,7 +530,11 @@ export function listRecipes(opts: ListRecipesOptions = {}): RecipeListItem[] {
   return rows.flatMap((r) => {
     const recipeTags = (tagsByRecipe.get(r.id) ?? []).sort();
     if (!passesTagFilter(recipeTags)) return [];
-    const diet = dietByRecipe.get(r.id) ?? { isVegan: true, isVegetarian: true };
+    const diet = dietByRecipe.get(r.id) ?? {
+      isVegan: true,
+      isVegetarian: true,
+      confidence: "definite" as const,
+    };
     return [
       {
         id: r.id,
@@ -538,6 +547,7 @@ export function listRecipes(opts: ListRecipesOptions = {}): RecipeListItem[] {
         tags: recipeTags,
         isVegan: diet.isVegan,
         isVegetarian: diet.isVegetarian,
+        dietConfidence: diet.confidence,
       },
     ];
   });
