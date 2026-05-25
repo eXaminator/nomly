@@ -104,10 +104,31 @@ function levenshtein(a: string, b: string, cap: number): number {
   return prev[b.length];
 }
 
+/** True when `s` contains `needle` at a word boundary — either it starts at
+ *  position 0 / after a non-letter (prefix-of-word), or it ends at the end of
+ *  the word / before a non-letter (suffix-of-word). Permits `suppe`
+ *  → `tomatensuppe` (German compound suffix) and `basilikum` →
+ *  `thai-basilikum` while blocking `reis` → `preiselbeere`. */
+function containsAtBoundary(s: string, needle: string): boolean {
+  if (needle.length === 0) return true;
+  const isLetter = (c: string) => /[\p{L}\p{N}]/u.test(c);
+  let from = 0;
+  while (from <= s.length - needle.length) {
+    const idx = s.indexOf(needle, from);
+    if (idx < 0) return false;
+    const startsAtBoundary = idx === 0 || !isLetter(s[idx - 1]);
+    const endIdx = idx + needle.length;
+    const endsAtBoundary = endIdx === s.length || !isLetter(s[endIdx]);
+    if (startsAtBoundary || endsAtBoundary) return true;
+    from = idx + 1;
+  }
+  return false;
+}
+
 function scoreWord(tokenText: string, word: string): number {
   if (word === tokenText) return 100;
   if (word.startsWith(tokenText)) return 80;
-  if (word.includes(tokenText)) return 60;
+  if (containsAtBoundary(word, tokenText)) return 60;
   const cap = Math.max(1, Math.floor(tokenText.length / 5));
   const d = levenshtein(tokenText, word, cap);
   if (d <= cap) return 40 - 5 * d;

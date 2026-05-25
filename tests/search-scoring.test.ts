@@ -18,8 +18,16 @@ describe("scoreToken", () => {
     expect(scoreToken(tok("toma"), "tomatensuppe")).toBe(80);
   });
 
-  it("substring match → 60", () => {
-    expect(scoreToken(tok("aten"), "tomatensuppe")).toBe(60);
+  it("substring after a non-letter char → 60 (e.g. thai-basilikum)", () => {
+    expect(scoreToken(tok("basilikum"), "thai-basilikum")).toBe(60);
+  });
+
+  it("substring at word end → 60 (German compound: suppe ↔ tomatensuppe)", () => {
+    expect(scoreToken(tok("suppe"), "tomatensuppe")).toBe(60);
+  });
+
+  it("mid-word substring does NOT match (e.g. reis ↛ preiselbeere)", () => {
+    expect(scoreToken(tok("reis"), "preiselbeere")).toBe(0);
   });
 
   it("Levenshtein within threshold → 40 minus 5×distance", () => {
