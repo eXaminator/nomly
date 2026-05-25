@@ -30,6 +30,7 @@ const upsertSchema = z.object({
   defaultCategoryId: z.number().int().positive().nullable(),
   purchaseUnitId: z.number().int().positive().nullable().default(null),
   excludeFromShoppingList: z.boolean(),
+  isEquipment: z.boolean().default(false),
   dietaryClass: z.enum(["vegan", "vegetarian", "meat"]).nullable(),
 });
 

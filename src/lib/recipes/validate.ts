@@ -30,6 +30,7 @@ const newIngredientDefaultsSchema = z.object({
   defaultCategoryId: z.number().int().positive().nullable(),
   dietaryClass: z.enum(["vegan", "vegetarian", "meat"]).nullable(),
   excludeFromShoppingList: z.boolean(),
+  isEquipment: z.boolean().default(false),
 });
 
 export const recipeInputSchema = z.object({

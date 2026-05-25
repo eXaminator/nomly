@@ -52,6 +52,7 @@ export type NewIngredientDefaults = {
   defaultCategoryId: number | null;
   dietaryClass: "vegan" | "vegetarian" | "meat" | null;
   excludeFromShoppingList: boolean;
+  isEquipment: boolean;
 };
 
 export type RecipeInput = {

@@ -7,12 +7,18 @@ import { Check, Pencil, Plus, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  SelectSearch,
+  type SelectSearchItem,
+} from "@/components/ui/select-search";
+import {
+  CreateArticleDialog,
+  type CreatedArticle,
+} from "@/components/ingredients/create-article-dialog";
 import type {
   StapleGroupDetail,
   StapleGroupItemDetail,
 } from "@/lib/staples/groups";
-import type { AutocompleteHit } from "@/lib/shopping/items";
-import { autocomplete } from "@/components/shopping/api";
 
 type UnitOption = {
   id: number;
@@ -20,22 +26,183 @@ type UnitOption = {
   dimension: "mass" | "volume" | "count";
 };
 
+type RowState = {
+  /** Server id once the row has been saved. null for the bottom "new" row. */
+  id: number | null;
+  ingredientId: number | null;
+  ingredientName: string;
+  quantity: string;
+  unitId: number | "";
+  note: string;
+};
+
 type Props = {
   initial: StapleGroupDetail;
   units: UnitOption[];
 };
+
+async function searchIngredients(q: string): Promise<SelectSearchItem[]> {
+  const res = await fetch(
+    `/api/v1/shopping/autocomplete?q=${encodeURIComponent(q)}`,
+    { cache: "no-store" },
+  );
+  if (!res.ok) return [];
+  const data = (await res.json()) as {
+    hits: Array<{ id: number; name: string; matchedAlias?: string | null }>;
+  };
+  return data.hits.map((h) => ({
+    id: h.id,
+    name: h.name,
+    detail: h.matchedAlias && h.matchedAlias !== h.name ? `≈ ${h.matchedAlias}` : undefined,
+  }));
+}
+
+function fromDetail(item: StapleGroupItemDetail): RowState {
+  return {
+    id: item.id,
+    ingredientId: item.ingredientId,
+    ingredientName: item.ingredientName,
+    quantity: item.quantity != null ? String(item.quantity) : "",
+    unitId: item.unitId ?? "",
+    note: item.note ?? "",
+  };
+}
+
+function emptyRow(): RowState {
+  return {
+    id: null,
+    ingredientId: null,
+    ingredientName: "",
+    quantity: "",
+    unitId: "",
+    note: "",
+  };
+}
+
+function parseQty(raw: string): number | null {
+  const t = raw.trim().replace(",", ".");
+  if (t === "") return null;
+  const n = Number(t);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
 
 export function StapleGroupDetailClient({ initial, units }: Props) {
   const router = useRouter();
   const [name, setName] = React.useState(initial.name);
   const [editingName, setEditingName] = React.useState(false);
   const [renameBusy, setRenameBusy] = React.useState(false);
-  const [items, setItems] = React.useState(initial.items);
+
+  const [rows, setRows] = React.useState<RowState[]>(() =>
+    initial.items.map(fromDetail),
+  );
   // eslint-disable-next-line react-hooks/set-state-in-effect
   React.useEffect(() => setName(initial.name), [initial]);
   // eslint-disable-next-line react-hooks/set-state-in-effect
-  React.useEffect(() => setItems(initial.items), [initial]);
+  React.useEffect(() => setRows(initial.items.map(fromDetail)), [initial]);
+
   const [error, setError] = React.useState<string | null>(null);
+  // The bottom "add ingredient" row's create-article-dialog state. Stores
+  // the prefilled name and a resolver so SelectSearch's onCreate promise
+  // settles once the modal closes.
+  const [createPrompt, setCreatePrompt] = React.useState<{
+    name: string;
+    resolve: (item: SelectSearchItem | null) => void;
+  } | null>(null);
+
+  function setRow(idx: number, patch: Partial<RowState>) {
+    setRows((prev) => prev.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
+  }
+
+  async function deleteRow(idx: number) {
+    const row = rows[idx];
+    setError(null);
+    setRows((prev) => prev.filter((_, i) => i !== idx));
+    if (row.id == null) return;
+    try {
+      const res = await fetch(
+        `/api/v1/staple-groups/${initial.id}/items/${row.id}`,
+        { method: "DELETE" },
+      );
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      router.refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Fehler");
+      router.refresh();
+    }
+  }
+
+  function addEmptyRow() {
+    setRows((prev) => [...prev, emptyRow()]);
+  }
+
+  async function pickIngredientForRow(
+    idx: number,
+    item: SelectSearchItem | null,
+  ) {
+    if (!item) {
+      setRow(idx, { ingredientId: null, ingredientName: "" });
+      return;
+    }
+    setRow(idx, { ingredientId: item.id, ingredientName: item.name });
+    // Persist immediately with the freshly-picked id so we don't race with React's setState.
+    const next = { ...rows[idx], ingredientId: item.id, ingredientName: item.name };
+    await commit(idx, next);
+  }
+
+  async function commit(idx: number, row: RowState) {
+    if (row.ingredientId == null) return;
+    const quantity = parseQty(row.quantity);
+    const unitId = row.unitId === "" ? null : row.unitId;
+    if ((quantity == null) !== (unitId == null)) {
+      setError("Menge und Einheit müssen beide gesetzt oder beide leer sein.");
+      return;
+    }
+    const note = row.note.trim() === "" ? null : row.note.trim();
+    setError(null);
+    try {
+      if (row.id == null) {
+        const res = await fetch(
+          `/api/v1/staple-groups/${initial.id}/items`,
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              ingredientId: row.ingredientId,
+              quantity,
+              unitId,
+              note,
+            }),
+          },
+        );
+        if (!res.ok) {
+          const body = (await res.json().catch(() => ({}))) as { error?: string };
+          if (body.error === "duplicate_ingredient") {
+            setError("Diese Zutat ist bereits in der Gruppe.");
+            return;
+          }
+          throw new Error(`HTTP ${res.status}`);
+        }
+        const created = (await res.json()) as { id: number };
+        setRows((prev) =>
+          prev.map((r, i) => (i === idx ? { ...r, id: created.id } : r)),
+        );
+        router.refresh();
+      } else {
+        const res = await fetch(
+          `/api/v1/staple-groups/${initial.id}/items/${row.id}`,
+          {
+            method: "PATCH",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ quantity, unitId, note }),
+          },
+        );
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        router.refresh();
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Fehler");
+    }
+  }
 
   async function saveName() {
     const trimmed = name.trim();
@@ -69,84 +236,46 @@ export function StapleGroupDetailClient({ initial, units }: Props) {
     }
   }
 
-  async function deleteItem(itemId: number) {
-    setError(null);
-    setItems((prev) => prev.filter((i) => i.id !== itemId));
-    try {
-      const res = await fetch(
-        `/api/v1/staple-groups/${initial.id}/items/${itemId}`,
-        { method: "DELETE" },
-      );
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Fehler");
-      router.refresh();
-    }
+  // SelectSearch.onCreate hook: open the dialog for the typed name and wait
+  // for the modal to either return a newly-created ingredient or be cancelled.
+  function promptCreate(typedName: string): Promise<SelectSearchItem> {
+    return new Promise<SelectSearchItem>((resolve, reject) => {
+      setCreatePrompt({
+        name: typedName,
+        resolve: (item) => {
+          if (item) resolve(item);
+          else reject(new Error("cancelled"));
+        },
+      });
+    });
   }
 
-  async function patchItem(
-    itemId: number,
-    patch: { quantity: number | null; unitId: number | null; note: string | null },
-  ) {
-    setError(null);
-    try {
-      const res = await fetch(
-        `/api/v1/staple-groups/${initial.id}/items/${itemId}`,
-        {
-          method: "PATCH",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify(patch),
-        },
-      );
-      if (!res.ok) {
-        const body = (await res.json().catch(() => ({}))) as { error?: string };
-        if (body.error === "incomplete_amount") {
-          setError("Menge und Einheit müssen beide gesetzt oder beide leer sein.");
-          return;
-        }
-        throw new Error(`HTTP ${res.status}`);
-      }
-      router.refresh();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Fehler");
-    }
+  function handleCreated(article: CreatedArticle) {
+    const item: SelectSearchItem = { id: article.id, name: article.name };
+    createPrompt?.resolve(item);
+    setCreatePrompt(null);
   }
 
-  async function addItem(input: {
-    ingredientId: number;
-    quantity: number | null;
-    unitId: number | null;
-    note: string | null;
-  }): Promise<boolean> {
-    setError(null);
-    try {
-      const res = await fetch(
-        `/api/v1/staple-groups/${initial.id}/items`,
-        {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify(input),
-        },
-      );
-      if (!res.ok) {
-        const body = (await res.json().catch(() => ({}))) as { error?: string };
-        if (body.error === "duplicate_ingredient") {
-          setError("Diese Zutat ist bereits in der Gruppe.");
-          return false;
-        }
-        if (body.error === "incomplete_amount") {
-          setError("Menge und Einheit müssen beide gesetzt oder beide leer sein.");
-          return false;
-        }
-        throw new Error(`HTTP ${res.status}`);
-      }
-      router.refresh();
-      return true;
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Fehler");
-      return false;
-    }
+  function handleCreateCancel() {
+    createPrompt?.resolve(null);
+    setCreatePrompt(null);
   }
+
+  const existingIngredientIds = React.useMemo(
+    () =>
+      rows
+        .map((r) => r.ingredientId)
+        .filter((id): id is number => id != null),
+    [rows],
+  );
+
+  const filterSearch = React.useCallback(
+    async (q: string) => {
+      const all = await searchIngredients(q);
+      return all.filter((h) => !existingIngredientIds.includes(h.id));
+    },
+    [existingIngredientIds],
+  );
 
   return (
     <div className="flex flex-col gap-6">
@@ -169,12 +298,7 @@ export function StapleGroupDetailClient({ initial, units }: Props) {
               }}
               className="text-2xl font-semibold"
             />
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={saveName}
-              disabled={renameBusy}
-            >
+            <Button variant="ghost" size="sm" onClick={saveName} disabled={renameBusy}>
               <Check className="size-4" />
             </Button>
             <Button
@@ -212,335 +336,156 @@ export function StapleGroupDetailClient({ initial, units }: Props) {
         <h2 className="text-sm font-medium uppercase tracking-wider text-[var(--color-muted-fg)]">
           Artikel
         </h2>
-        {items.length === 0 ? (
+        {rows.length === 0 ? (
           <div className="rounded-[var(--radius)] border border-dashed border-[var(--color-border)] px-6 py-12 text-center text-sm text-[var(--color-muted-fg)]">
-            Noch keine Artikel. Füge unten eine Zutat hinzu — optional mit
-            Standardmenge.
+            Noch keine Artikel. Füge unten eine Zutat hinzu.
           </div>
         ) : (
-          <ul className="flex flex-col divide-y divide-[var(--color-border)] rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-card)]">
-            {items.map((item) => (
-              <ItemRow
-                key={item.id}
-                item={item}
-                units={units}
-                onDelete={() => deleteItem(item.id)}
-                onPatch={(patch) => patchItem(item.id, patch)}
-              />
+          <ul className="flex flex-col gap-2">
+            {rows.map((row, idx) => (
+              <li
+                key={row.id ?? `new-${idx}`}
+                className="rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-card)] p-3"
+              >
+                <Row
+                  row={row}
+                  units={units}
+                  onPatch={(patch) => setRow(idx, patch)}
+                  onBlur={() => commit(idx, rows[idx])}
+                  onPickIngredient={(item) => pickIngredientForRow(idx, item)}
+                  onDelete={() => deleteRow(idx)}
+                  ingredientSearch={filterSearch}
+                  onCreateIngredient={promptCreate}
+                />
+              </li>
             ))}
           </ul>
         )}
+        <Button
+          variant="outline"
+          onClick={addEmptyRow}
+          className="self-start"
+        >
+          <Plus className="size-4" />
+          Zutat hinzufügen
+        </Button>
       </section>
 
-      <AddItemForm units={units} existingIngredientIds={items.map((i) => i.ingredientId)} onAdd={addItem} />
+      <CreateArticleDialog
+        open={createPrompt != null}
+        initialName={createPrompt?.name ?? ""}
+        onClose={handleCreateCancel}
+        onCreated={handleCreated}
+      />
     </div>
   );
 }
 
-function ItemRow({
-  item,
+function Row({
+  row,
   units,
-  onDelete,
   onPatch,
+  onBlur,
+  onPickIngredient,
+  onDelete,
+  ingredientSearch,
+  onCreateIngredient,
 }: {
-  item: StapleGroupItemDetail;
+  row: RowState;
   units: UnitOption[];
+  onPatch: (patch: Partial<RowState>) => void;
+  onBlur: () => void;
+  onPickIngredient: (item: SelectSearchItem | null) => void;
   onDelete: () => void;
-  onPatch: (patch: {
-    quantity: number | null;
-    unitId: number | null;
-    note: string | null;
-  }) => Promise<void> | void;
+  ingredientSearch: (q: string) => Promise<SelectSearchItem[]>;
+  onCreateIngredient: (name: string) => Promise<SelectSearchItem>;
 }) {
-  const [editing, setEditing] = React.useState(false);
-  const [quantity, setQuantity] = React.useState(
-    item.quantity != null ? String(item.quantity) : "",
-  );
-  const [unitId, setUnitId] = React.useState<number | "">(item.unitId ?? "");
-  const [note, setNote] = React.useState(item.note ?? "");
+  const ingredientValue: SelectSearchItem | null =
+    row.ingredientId != null
+      ? { id: row.ingredientId, name: row.ingredientName }
+      : null;
+  const ingredientLocked = row.id != null; // existing rows: lock ingredient
 
-  // eslint-disable-next-line react-hooks/set-state-in-effect
-  React.useEffect(() => setQuantity(item.quantity != null ? String(item.quantity) : ""), [item]);
-  // eslint-disable-next-line react-hooks/set-state-in-effect
-  React.useEffect(() => setUnitId(item.unitId ?? ""), [item]);
-  // eslint-disable-next-line react-hooks/set-state-in-effect
-  React.useEffect(() => setNote(item.note ?? ""), [item]);
-
-  function parsedQuantity(): number | null {
-    const t = quantity.trim().replace(",", ".");
-    if (t === "") return null;
-    const n = Number(t);
-    return Number.isFinite(n) && n > 0 ? n : null;
-  }
-
-  async function save() {
-    const q = parsedQuantity();
-    const u = unitId === "" ? null : unitId;
-    await onPatch({
-      quantity: q,
-      unitId: u,
-      note: note.trim() === "" ? null : note.trim(),
-    });
-    setEditing(false);
-  }
-
-  if (!editing) {
-    return (
-      <li className="flex items-center gap-3 p-3">
-        <div className="flex flex-1 flex-col">
-          <span className="font-medium">{item.ingredientName}</span>
-          <span className="text-xs text-[var(--color-muted-fg)]">
-            {item.quantity != null && item.unitName != null
-              ? `${formatQuantity(item.quantity)} ${item.unitName}`
-              : "ohne Standardmenge"}
-            {item.note != null && item.note !== "" ? ` · ${item.note}` : ""}
-          </span>
-        </div>
-        <Button
-          variant="ghost"
-          size="sm"
-          aria-label="Bearbeiten"
-          onClick={() => setEditing(true)}
+  return (
+    <div className="flex flex-wrap items-end gap-2">
+      <div className="flex w-[260px] flex-col gap-1">
+        <Label className="text-xs uppercase tracking-wider text-[var(--color-muted-fg)]">
+          Zutat
+        </Label>
+        {ingredientLocked ? (
+          <div className="flex h-9 items-center text-sm font-medium">
+            {row.ingredientName}
+          </div>
+        ) : (
+          <SelectSearch
+            value={ingredientValue}
+            onChange={onPickIngredient}
+            search={ingredientSearch}
+            placeholder="Zutat suchen oder anlegen…"
+            onCreate={onCreateIngredient}
+            createLabelPrefix="Neuen Artikel anlegen:"
+          />
+        )}
+      </div>
+      <div className="flex w-24 flex-col gap-1">
+        <Label className="text-xs uppercase tracking-wider text-[var(--color-muted-fg)]">
+          Menge
+        </Label>
+        <Input
+          inputMode="decimal"
+          value={row.quantity}
+          onChange={(e) => onPatch({ quantity: e.target.value })}
+          onBlur={onBlur}
+          placeholder="—"
+          disabled={row.ingredientId == null}
+        />
+      </div>
+      <div className="flex w-28 flex-col gap-1">
+        <Label className="text-xs uppercase tracking-wider text-[var(--color-muted-fg)]">
+          Einheit
+        </Label>
+        <select
+          value={row.unitId}
+          onChange={(e) =>
+            onPatch({
+              unitId: e.target.value === "" ? "" : Number(e.target.value),
+            })
+          }
+          onBlur={onBlur}
+          disabled={row.ingredientId == null}
+          className="h-9 rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-bg)] px-3 text-sm disabled:opacity-50"
         >
-          <Pencil className="size-4" />
-        </Button>
+          <option value="">—</option>
+          {units.map((u) => (
+            <option key={u.id} value={u.id}>
+              {u.name}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div className="flex min-w-[160px] flex-1 flex-col gap-1">
+        <Label className="text-xs uppercase tracking-wider text-[var(--color-muted-fg)]">
+          Notiz
+        </Label>
+        <Input
+          value={row.note}
+          onChange={(e) => onPatch({ note: e.target.value })}
+          onBlur={onBlur}
+          placeholder="—"
+          disabled={row.ingredientId == null}
+        />
+      </div>
+      <div className="flex items-end">
         <Button
           variant="ghost"
-          size="sm"
+          size="icon"
           aria-label="Löschen"
           onClick={onDelete}
           className="text-[var(--color-danger)]"
         >
           <Trash2 className="size-4" />
         </Button>
-      </li>
-    );
-  }
-
-  return (
-    <li className="flex flex-col gap-2 p-3">
-      <div className="font-medium">{item.ingredientName}</div>
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-[1fr_1fr_2fr]">
-        <div className="flex flex-col gap-1">
-          <Label className="text-xs">Menge</Label>
-          <Input
-            inputMode="decimal"
-            value={quantity}
-            onChange={(e) => setQuantity(e.target.value)}
-            placeholder="optional"
-          />
-        </div>
-        <div className="flex flex-col gap-1">
-          <Label className="text-xs">Einheit</Label>
-          <select
-            value={unitId}
-            onChange={(e) =>
-              setUnitId(e.target.value === "" ? "" : Number(e.target.value))
-            }
-            className="rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-1.5 text-sm"
-          >
-            <option value="">—</option>
-            {units.map((u) => (
-              <option key={u.id} value={u.id}>
-                {u.name}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="col-span-2 flex flex-col gap-1 sm:col-span-1">
-          <Label className="text-xs">Notiz</Label>
-          <Input
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-            placeholder="z. B. Vollkorn"
-          />
-        </div>
       </div>
-      <div className="flex justify-end gap-2">
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => setEditing(false)}
-        >
-          Abbrechen
-        </Button>
-        <Button size="sm" onClick={save}>
-          Speichern
-        </Button>
-      </div>
-    </li>
+    </div>
   );
-}
-
-function AddItemForm({
-  units,
-  existingIngredientIds,
-  onAdd,
-}: {
-  units: UnitOption[];
-  existingIngredientIds: number[];
-  onAdd: (input: {
-    ingredientId: number;
-    quantity: number | null;
-    unitId: number | null;
-    note: string | null;
-  }) => Promise<boolean>;
-}) {
-  const [query, setQuery] = React.useState("");
-  const [hits, setHits] = React.useState<AutocompleteHit[]>([]);
-  const [picked, setPicked] = React.useState<AutocompleteHit | null>(null);
-  const [quantity, setQuantity] = React.useState("");
-  const [unitId, setUnitId] = React.useState<number | "">("");
-  const [note, setNote] = React.useState("");
-  const [busy, setBusy] = React.useState(false);
-  const reqCounter = React.useRef(0);
-
-  React.useEffect(() => {
-    if (picked != null) return;
-    if (query.trim().length === 0) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setHits([]);
-      return;
-    }
-    const reqId = ++reqCounter.current;
-    const handle = setTimeout(async () => {
-      try {
-        const res = await autocomplete(query.trim());
-        if (reqCounter.current !== reqId) return;
-        const filtered = res.filter(
-          (h) => !existingIngredientIds.includes(h.id),
-        );
-        setHits(filtered);
-      } catch {
-        // ignore
-      }
-    }, 150);
-    return () => clearTimeout(handle);
-  }, [query, existingIngredientIds, picked]);
-
-  function reset() {
-    setQuery("");
-    setPicked(null);
-    setHits([]);
-    setQuantity("");
-    setUnitId("");
-    setNote("");
-  }
-
-  function parsedQuantity(): number | null {
-    const t = quantity.trim().replace(",", ".");
-    if (t === "") return null;
-    const n = Number(t);
-    return Number.isFinite(n) && n > 0 ? n : null;
-  }
-
-  async function submit() {
-    if (!picked) return;
-    setBusy(true);
-    const ok = await onAdd({
-      ingredientId: picked.id,
-      quantity: parsedQuantity(),
-      unitId: unitId === "" ? null : unitId,
-      note: note.trim() === "" ? null : note.trim(),
-    });
-    setBusy(false);
-    if (ok) reset();
-  }
-
-  return (
-    <section className="flex flex-col gap-3 rounded-[var(--radius)] border border-dashed border-[var(--color-border)] p-4">
-      <h3 className="text-sm font-medium">Zutat hinzufügen</h3>
-      {picked == null ? (
-        <>
-          <Input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="z. B. Brot — bestehende Zutaten erscheinen unten"
-          />
-          {hits.length > 0 ? (
-            <ul className="flex max-h-60 flex-col divide-y divide-[var(--color-border)] overflow-y-auto rounded-[var(--radius)] border border-[var(--color-border)]">
-              {hits.map((h) => (
-                <li key={`${h.kind}:${h.id}`}>
-                  <button
-                    type="button"
-                    onClick={() => setPicked(h)}
-                    className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-[var(--color-muted)] focus-visible:outline-none focus-visible:bg-[var(--color-muted)]"
-                  >
-                    <span className="flex flex-1 flex-col">
-                      <span className="font-medium">{h.name}</span>
-                      {h.matchedAlias ? (
-                        <span className="text-xs text-[var(--color-muted-fg)]">
-                          Alias: {h.matchedAlias}
-                        </span>
-                      ) : null}
-                    </span>
-                    <Plus className="size-4 text-[var(--color-muted-fg)]" />
-                  </button>
-                </li>
-              ))}
-            </ul>
-          ) : null}
-        </>
-      ) : (
-        <div className="flex flex-col gap-2">
-          <div className="flex items-center gap-2">
-            <span className="font-medium">{picked.name}</span>
-            <Button variant="ghost" size="sm" onClick={() => setPicked(null)}>
-              <X className="size-4" />
-              Andere Zutat wählen
-            </Button>
-          </div>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-[1fr_1fr_2fr]">
-            <div className="flex flex-col gap-1">
-              <Label className="text-xs">Menge (optional)</Label>
-              <Input
-                inputMode="decimal"
-                value={quantity}
-                onChange={(e) => setQuantity(e.target.value)}
-                placeholder="—"
-              />
-            </div>
-            <div className="flex flex-col gap-1">
-              <Label className="text-xs">Einheit</Label>
-              <select
-                value={unitId}
-                onChange={(e) =>
-                  setUnitId(e.target.value === "" ? "" : Number(e.target.value))
-                }
-                className="rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-1.5 text-sm"
-              >
-                <option value="">—</option>
-                {units.map((u) => (
-                  <option key={u.id} value={u.id}>
-                    {u.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="col-span-2 flex flex-col gap-1 sm:col-span-1">
-              <Label className="text-xs">Notiz</Label>
-              <Input
-                value={note}
-                onChange={(e) => setNote(e.target.value)}
-                placeholder="z. B. Vollkorn"
-              />
-            </div>
-          </div>
-          <div className="flex justify-end gap-2">
-            <Button variant="ghost" onClick={reset} disabled={busy}>
-              Abbrechen
-            </Button>
-            <Button onClick={submit} disabled={busy}>
-              {busy ? "Speichert…" : "Hinzufügen"}
-            </Button>
-          </div>
-        </div>
-      )}
-    </section>
-  );
-}
-
-function formatQuantity(n: number): string {
-  if (Number.isInteger(n)) return String(n);
-  return n.toFixed(2).replace(/\.?0+$/, "");
 }

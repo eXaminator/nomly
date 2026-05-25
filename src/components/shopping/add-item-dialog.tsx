@@ -13,6 +13,10 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  CreateArticleDialog,
+  type CreatedArticle,
+} from "@/components/ingredients/create-article-dialog";
 import type { AutocompleteHit } from "@/lib/shopping/items";
 import { addItem, autocomplete } from "./api";
 
@@ -28,6 +32,7 @@ export function AddItemDialog({ open, onClose, onAdded }: Props) {
   const [hits, setHits] = React.useState<AutocompleteHit[]>([]);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const [createOpen, setCreateOpen] = React.useState(false);
 
   React.useEffect(() => {
     if (!open) {
@@ -36,6 +41,7 @@ export function AddItemDialog({ open, onClose, onAdded }: Props) {
       setQuantity("1");
       setHits([]);
       setError(null);
+      setCreateOpen(false);
     }
   }, [open]);
 
@@ -81,13 +87,18 @@ export function AddItemDialog({ open, onClose, onAdded }: Props) {
     }
   }
 
-  async function pickByName() {
+  function openCreateDialog() {
     const trimmed = query.trim();
     if (trimmed.length === 0) return;
+    setCreateOpen(true);
+  }
+
+  async function handleCreated(article: CreatedArticle) {
+    setCreateOpen(false);
     setBusy(true);
     setError(null);
     try {
-      await addItem({ byName: trimmed, quantity: parsedQuantity() });
+      await addItem({ ingredientId: article.id, quantity: parsedQuantity() });
       onAdded();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Fehler");
@@ -120,7 +131,7 @@ export function AddItemDialog({ open, onClose, onAdded }: Props) {
                   if (e.key === "Enter") {
                     e.preventDefault();
                     if (hits.length === 0) {
-                      void pickByName();
+                      openCreateDialog();
                     } else {
                       void pickExisting(hits[0]);
                     }
@@ -167,7 +178,7 @@ export function AddItemDialog({ open, onClose, onAdded }: Props) {
             </ul>
           ) : query.trim().length > 0 ? (
             <div className="rounded-[var(--radius)] border border-dashed border-[var(--color-border)] px-3 py-2 text-sm text-[var(--color-muted-fg)]">
-              Kein Treffer — „{query.trim()}“ wird als neuer Artikel angelegt.
+              Kein Treffer — „{query.trim()}“ als neuen Artikel anlegen.
             </div>
           ) : null}
           {error ? (
@@ -178,11 +189,26 @@ export function AddItemDialog({ open, onClose, onAdded }: Props) {
           <Button variant="ghost" onClick={onClose} disabled={busy}>
             Abbrechen
           </Button>
-          <Button onClick={pickByName} disabled={busy || query.trim().length === 0}>
-            {busy ? "Speichert…" : "Hinzufügen"}
+          <Button
+            onClick={() => {
+              if (hits.length > 0) {
+                void pickExisting(hits[0]);
+              } else {
+                openCreateDialog();
+              }
+            }}
+            disabled={busy || query.trim().length === 0}
+          >
+            {busy ? "Speichert…" : hits.length > 0 ? "Hinzufügen" : "Neu anlegen…"}
           </Button>
         </DialogFooter>
       </DialogContent>
+      <CreateArticleDialog
+        open={createOpen}
+        initialName={query.trim()}
+        onClose={() => setCreateOpen(false)}
+        onCreated={handleCreated}
+      />
     </Dialog>
   );
 }

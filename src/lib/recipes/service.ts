@@ -105,6 +105,7 @@ function resolveIngredient(
       defaultCategoryId: defaults?.defaultCategoryId ?? null,
       dietaryClass: defaults?.dietaryClass ?? null,
       excludeFromShoppingList: defaults?.excludeFromShoppingList ?? false,
+      isEquipment: defaults?.isEquipment ?? false,
     })
     .returning({ id: ingredientTable.id })
     .all();
@@ -163,6 +164,7 @@ type NewIngredientDefaultsFromInput = {
   defaultCategoryId: number | null;
   dietaryClass: "vegan" | "vegetarian" | "meat" | null;
   excludeFromShoppingList: boolean;
+  isEquipment: boolean;
 };
 
 function buildNewIngredientDefaultsMap(
@@ -175,6 +177,7 @@ function buildNewIngredientDefaultsMap(
       defaultCategoryId: d.defaultCategoryId,
       dietaryClass: d.dietaryClass,
       excludeFromShoppingList: d.excludeFromShoppingList,
+      isEquipment: d.isEquipment,
     });
   }
   return map;

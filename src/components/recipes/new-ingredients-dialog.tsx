@@ -33,6 +33,7 @@ type RowState = {
   category: SelectSearchItem | null;
   dietaryClass: DietaryClass;
   excludeFromShoppingList: boolean;
+  isEquipment: boolean;
 };
 
 async function searchCategories(q: string): Promise<SelectSearchItem[]> {
@@ -82,6 +83,7 @@ export function NewIngredientsDialog({
         category: null,
         dietaryClass: null,
         excludeFromShoppingList: false,
+        isEquipment: false,
       })),
     );
   }, [open, newNames]);
@@ -101,6 +103,7 @@ export function NewIngredientsDialog({
         defaultCategoryId: r.category?.id ?? null,
         dietaryClass: r.dietaryClass,
         excludeFromShoppingList: r.excludeFromShoppingList,
+        isEquipment: r.isEquipment,
       })),
     );
   }
@@ -174,6 +177,20 @@ export function NewIngredientsDialog({
                     </div>
                   </div>
                 </div>
+                <label className="mt-3 flex items-center justify-between gap-2 text-sm">
+                  <span>
+                    <span className="font-medium">Ausrüstung</span>
+                    <span className="block text-xs text-[var(--color-muted-fg)]">
+                      Backpapier, Backform, Frischhaltefolie — meist auf Vorrat.
+                    </span>
+                  </span>
+                  <Switch
+                    checked={row.isEquipment}
+                    onCheckedChange={(v) =>
+                      patch(idx, { isEquipment: Boolean(v) })
+                    }
+                  />
+                </label>
                 <label className="mt-3 flex items-center justify-between gap-2 text-sm">
                   <span>
                     <span className="font-medium">Von Einkaufsliste ausschließen</span>
