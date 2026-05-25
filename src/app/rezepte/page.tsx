@@ -3,6 +3,7 @@ import { asc } from "drizzle-orm";
 import { Download, Plus } from "lucide-react";
 import { AppShell } from "@/components/layout/app-shell";
 import { Button } from "@/components/ui/button";
+import { DietFilter } from "@/components/recipes/diet-filter";
 import { RecipeGrid } from "@/components/recipes/recipe-grid";
 import { RecipeSearch } from "@/components/recipes/recipe-search";
 import { TagFilterBar } from "@/components/recipes/tag-filter-bar";
@@ -12,15 +13,47 @@ import { tag } from "@/db/schema";
 
 export const dynamic = "force-dynamic";
 
+type Search = {
+  q?: string;
+  must?: string;
+  not?: string;
+  diet?: string;
+};
+
+function parseTagList(raw: string | undefined): string[] {
+  if (!raw) return [];
+  return raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}
+
+function parseDiet(raw: string | undefined): "vegetarian" | "vegan" | undefined {
+  if (raw === "vegan") return "vegan";
+  if (raw === "vegetarian") return "vegetarian";
+  return undefined;
+}
+
 export default async function RezeptePage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string }>;
+  searchParams: Promise<Search>;
 }) {
-  const { q } = await searchParams;
-  // Tag filtering happens client-side (see RecipeGrid) so chip clicks don't
-  // round-trip through the server. Only the text search narrows the SSR set.
-  const recipes = listRecipes({ query: q });
+  const { q, must, not, diet } = await searchParams;
+  const mustTags = parseTagList(must);
+  const notTags = parseTagList(not);
+  const dietFilter = parseDiet(diet);
+
+  const filteredRecipes = listRecipes({
+    query: q,
+    mustTags,
+    notTags,
+    diet: dietFilter,
+  });
+  const totalUnfiltered = listRecipes().length;
+  const filtersActive = Boolean(
+    q?.trim().length || mustTags.length || notTags.length || dietFilter,
+  );
 
   const allTags = db
     .select({ name: tag.name })
@@ -55,6 +88,10 @@ export default async function RezeptePage({
         <RecipeSearch />
       </div>
 
+      <div className="mt-4">
+        <DietFilter />
+      </div>
+
       {allTags.length > 0 ? (
         <div className="mt-4">
           <TagFilterBar allTags={allTags} />
@@ -62,8 +99,9 @@ export default async function RezeptePage({
       ) : null}
 
       <RecipeGrid
-        recipes={recipes}
-        serverQueryActive={Boolean(q?.trim().length)}
+        recipes={filteredRecipes}
+        totalUnfiltered={totalUnfiltered}
+        filtersActive={filtersActive}
       />
     </AppShell>
   );
