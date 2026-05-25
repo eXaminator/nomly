@@ -46,6 +46,12 @@ const STAMMDATEN_LINKS: Array<{
       "Supermärkte und die Reihenfolge der Kategorien für die Einkaufsliste.",
   },
   {
+    href: "/einstellungen/standards",
+    title: "Standards",
+    description:
+      "Wiederkehrende Einkäufe gruppieren — Brot, Milch, Backzutaten. Mit einem Tap auf die Einkaufsliste.",
+  },
+  {
     href: "/einstellungen/planer",
     title: "Planer",
     description:
