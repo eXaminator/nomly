@@ -154,6 +154,19 @@ export function StapleGroupDetailClient({ initial, units }: Props) {
   ): Promise<{ resolved: Map<number, number>; unresolved: string[] }> {
     const resolved = new Map<number, number>(); // rowKey -> ingredientId
     const unresolvedSet = new Set<string>();
+    // Fast path: any name that matched an initial row's known article name
+    // resolves to that article's id. Covers cases where the user retyped the
+    // same article name and autocomplete can't return the existing row (the
+    // catalog autocomplete is accent-sensitive and may miss umlaut matches).
+    const knownByLowerName = new Map<string, number>();
+    for (const r of initialRows) {
+      if (r.pickedIngredientId != null) {
+        knownByLowerName.set(
+          r.pickedIngredientName.toLowerCase(),
+          r.pickedIngredientId,
+        );
+      }
+    }
     for (const r of activeRows) {
       const trimmed = r.name.trim();
       if (trimmed === "") continue;
@@ -162,6 +175,11 @@ export function StapleGroupDetailClient({ initial, units }: Props) {
         r.pickedIngredientName.toLowerCase() === trimmed.toLowerCase()
       ) {
         resolved.set(r.key, r.pickedIngredientId);
+        continue;
+      }
+      const known = knownByLowerName.get(trimmed.toLowerCase());
+      if (known != null) {
+        resolved.set(r.key, known);
         continue;
       }
       const hits = await autocomplete(trimmed);
@@ -280,7 +298,7 @@ export function StapleGroupDetailClient({ initial, units }: Props) {
         return;
       }
       await commitSave(resolved);
-      router.refresh();
+      router.push("/einstellungen/standards");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Fehler");
     } finally {
@@ -316,10 +334,9 @@ export function StapleGroupDetailClient({ initial, units }: Props) {
           body: JSON.stringify(payload),
         });
         if (!res.ok) {
-          const data = (await res.json().catch(() => ({}))) as { error?: string };
-          if (data.error === "duplicate" || data.error === "duplicate_name") {
-            // Someone else created it in the meantime — look it up via auto-
-            // complete instead of failing the whole save.
+          if (res.status === 409) {
+            // Already exists (e.g. autocomplete missed an exact match due to
+            // ranking, or another tab created it in the meantime). Look it up.
             const hits = await autocomplete(d.name);
             const exact = hits.find(
               (h) => h.name.toLowerCase() === d.name.toLowerCase(),
@@ -366,7 +383,7 @@ export function StapleGroupDetailClient({ initial, units }: Props) {
       }
       await commitSave(resolvedByKey);
       setPendingNewNames(null);
-      router.refresh();
+      router.push("/einstellungen/standards");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Fehler");
       setPendingNewNames(null);
