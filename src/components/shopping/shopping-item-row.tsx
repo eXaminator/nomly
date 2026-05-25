@@ -50,18 +50,23 @@ export function ShoppingItemRow({
 
   return (
     <div
+      role="button"
+      tabIndex={0}
+      onClick={() => onToggle(item)}
+      onKeyDown={(e) => {
+        if (e.key === " " || e.key === "Enter") {
+          e.preventDefault();
+          onToggle(item);
+        }
+      }}
+      aria-pressed={item.checked}
+      aria-label={item.checked ? "Rückgängig" : "Abhaken"}
       className={cn(
-        "group flex items-center gap-2 px-2 py-2 sm:px-3 transition-colors",
+        "group flex cursor-pointer items-center gap-2 px-2 py-2 sm:px-3 transition-colors",
         item.checked ? "opacity-60" : "hover:bg-[var(--color-muted)]/40",
       )}
     >
-      <button
-        type="button"
-        onClick={() => onToggle(item)}
-        aria-label={item.checked ? "Rückgängig" : "Abhaken"}
-        title={item.checked ? "Rückgängig" : "Abhaken"}
-        className="flex w-7 shrink-0 items-center justify-center"
-      >
+      <span className="flex w-7 shrink-0 items-center justify-center">
         <span
           className={cn(
             "inline-flex size-5 items-center justify-center rounded-md border-2 transition-colors",
@@ -72,16 +77,9 @@ export function ShoppingItemRow({
         >
           {item.checked ? <Check className="size-3.5" strokeWidth={3} /> : null}
         </span>
-      </button>
+      </span>
 
-      <button
-        type="button"
-        onClick={(e) => {
-          e.preventDefault();
-          onToggle(item);
-        }}
-        className="min-w-0 flex-1 text-left"
-      >
+      <div className="min-w-0 flex-1 text-left">
         <div className="flex flex-col gap-1">
           <div
             className={cn(
@@ -113,7 +111,7 @@ export function ShoppingItemRow({
             </ul>
           ) : null}
         </div>
-      </button>
+      </div>
 
       <div className="flex shrink-0 items-center gap-1" onClick={(e) => e.stopPropagation()}>
         <DropdownMenu>

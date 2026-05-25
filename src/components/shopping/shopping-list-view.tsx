@@ -577,7 +577,19 @@ function groupByCategory(
   }));
 
   if (checked.length > 0) {
-    groups.push({ key: "checked", label: "Erledigt", items: checked, muted: true });
+    // Sort by checkedAt desc so the most-recently-checked item is at the top;
+    // items without a checkedAt (legacy or imported) fall to the bottom.
+    const checkedSorted = [...checked].sort((a, b) => {
+      const aAt = a.checkedAt ?? 0;
+      const bAt = b.checkedAt ?? 0;
+      return bAt - aAt;
+    });
+    groups.push({
+      key: "checked",
+      label: "Erledigt",
+      items: checkedSorted,
+      muted: true,
+    });
   }
   return { groups, hiddenByStore };
 }
