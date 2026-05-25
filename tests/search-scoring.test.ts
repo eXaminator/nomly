@@ -101,6 +101,53 @@ describe("matchRecipe", () => {
     ).toBe(false);
   });
 
+  it("OR-group passes when at least one token hits", () => {
+    expect(
+      matchRecipe(parseQuery("tomate OR pasta"), rec("tomatensuppe")).passes,
+    ).toBe(true);
+    expect(
+      matchRecipe(parseQuery("tomate OR pasta"), rec("pasta arrabbiata")).passes,
+    ).toBe(true);
+  });
+
+  it("OR-group fails when no token hits", () => {
+    expect(
+      matchRecipe(parseQuery("tomate OR pasta"), rec("apfelkuchen")).passes,
+    ).toBe(false);
+  });
+
+  it("OR-group contributes max-of-tokens to the rank", () => {
+    const better = matchRecipe(
+      parseQuery("tomate OR xyz"),
+      rec("tomate"),
+    ).rank;
+    const worse = matchRecipe(
+      parseQuery("tomate OR xyz"),
+      rec("tomatensuppe"),
+    ).rank;
+    // exact "tomate" vs prefix "tomatensuppe" → exact wins.
+    expect(better).toBeGreaterThan(worse);
+  });
+
+  it("OR + AND: 'A B OR C' requires A AND (B OR C)", () => {
+    // Title "alpha beta" → A passes, B passes → ok.
+    expect(
+      matchRecipe(parseQuery("alpha beta OR gamma"), rec("alpha beta")).passes,
+    ).toBe(true);
+    // Title "alpha gamma" → A passes, gamma passes → ok.
+    expect(
+      matchRecipe(parseQuery("alpha beta OR gamma"), rec("alpha gamma")).passes,
+    ).toBe(true);
+    // Title "alpha" alone → OR-group fails.
+    expect(
+      matchRecipe(parseQuery("alpha beta OR gamma"), rec("alpha")).passes,
+    ).toBe(false);
+    // Title "beta gamma" → A fails.
+    expect(
+      matchRecipe(parseQuery("alpha beta OR gamma"), rec("beta gamma")).passes,
+    ).toBe(false);
+  });
+
   it("ASCII folding lets mohre match mohre (input was Möhre)", () => {
     expect(matchRecipe(parseQuery("mohre"), rec("mohrensuppe")).passes).toBe(
       true,

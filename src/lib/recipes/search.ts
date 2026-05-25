@@ -21,7 +21,20 @@ export type ParsedToken = {
   polarity: "include" | "exclude";
 };
 
-export type ParsedQuery = { tokens: ParsedToken[] };
+/** A clause is one unit of match logic, ANDed together with other clauses.
+ *  An OR-group passes when any of its include tokens score > 0; its
+ *  contribution to the rank is the best score in the group. Exclude tokens
+ *  never participate in an OR-group — they always stand alone. */
+export type ParsedClause =
+  | { kind: "single"; token: ParsedToken }
+  | { kind: "or"; tokens: ParsedToken[] };
+
+export type ParsedQuery = {
+  /** Flat list of every searchable token (OR markers stripped). */
+  tokens: ParsedToken[];
+  /** Logical clauses ANDed together. OR-groups are kept intact. */
+  clauses: ParsedClause[];
+};
 
 export function fold(s: string): string {
   return s
@@ -32,14 +45,19 @@ export function fold(s: string): string {
 }
 
 const FIELD_PREFIX = "zutat:";
+const OR_KEYWORD = "OR";
+
+type Item = ParsedToken | { kind: "or-marker" };
 
 export function parseQuery(input: string): ParsedQuery {
-  const tokens: ParsedToken[] = [];
+  const items: Item[] = [];
   let i = 0;
   const n = input.length;
   while (i < n) {
     while (i < n && /\s/.test(input[i])) i++;
     if (i >= n) break;
+
+    const rawStart = i;
 
     let polarity: "include" | "exclude" = "include";
     if (input[i] === "+") {
@@ -70,11 +88,64 @@ export function parseQuery(input: string): ParsedQuery {
       raw = input.slice(start, i);
     }
 
+    // Treat a bare "OR" (any case, no polarity, no field prefix, no quotes)
+    // as the OR keyword. Inside a phrase the whole quoted span is one token,
+    // so a quoted "or" is naturally preserved as a literal word.
+    if (
+      input.slice(rawStart, i).toLowerCase() === OR_KEYWORD.toLowerCase() &&
+      !isPhrase
+    ) {
+      items.push({ kind: "or-marker" });
+      continue;
+    }
+
     const text = fold(raw.trim());
     if (text.length === 0) continue;
-    tokens.push({ kind, text, isPhrase, polarity });
+    items.push({ kind, text, isPhrase, polarity });
   }
-  return { tokens };
+
+  return buildClauses(items);
+}
+
+function buildClauses(items: Item[]): ParsedQuery {
+  const tokens: ParsedToken[] = [];
+  const clauses: ParsedClause[] = [];
+  let idx = 0;
+  while (idx < items.length) {
+    const item = items[idx];
+    if ("kind" in item && item.kind === "or-marker") {
+      idx++;
+      continue;
+    }
+    const token = item as ParsedToken;
+    tokens.push(token);
+    if (token.polarity === "exclude") {
+      clauses.push({ kind: "single", token });
+      idx++;
+      continue;
+    }
+    const group: ParsedToken[] = [token];
+    let look = idx + 1;
+    while (look + 1 < items.length) {
+      const sep = items[look];
+      const next = items[look + 1];
+      const isOrSep = "kind" in sep && sep.kind === "or-marker";
+      const isIncludeToken =
+        !("kind" in next && next.kind === "or-marker") &&
+        (next as ParsedToken).polarity === "include";
+      if (!isOrSep || !isIncludeToken) break;
+      group.push(next as ParsedToken);
+      tokens.push(next as ParsedToken);
+      look += 2;
+    }
+    if (group.length === 1) {
+      clauses.push({ kind: "single", token });
+    } else {
+      clauses.push({ kind: "or", tokens: group });
+    }
+    idx = look;
+  }
+  return { tokens, clauses };
 }
 
 export type RecipeSearchIndex = {
@@ -149,20 +220,33 @@ export function scoreToken(token: ParsedToken, fieldFolded: string): number {
   return best;
 }
 
+function fieldFor(token: ParsedToken, index: RecipeSearchIndex): string {
+  return token.kind === "zutat" ? index.ingredientsFolded : index.titleFolded;
+}
+
 export function matchRecipe(
   query: ParsedQuery,
   index: RecipeSearchIndex,
 ): MatchResult {
   let rank = 0;
-  for (const token of query.tokens) {
-    const field =
-      token.kind === "zutat" ? index.ingredientsFolded : index.titleFolded;
-    const score = scoreToken(token, field);
-    if (token.polarity === "exclude") {
-      if (score > 0) return { passes: false, rank: 0 };
+  for (const clause of query.clauses) {
+    if (clause.kind === "single") {
+      const token = clause.token;
+      const score = scoreToken(token, fieldFor(token, index));
+      if (token.polarity === "exclude") {
+        if (score > 0) return { passes: false, rank: 0 };
+      } else {
+        if (score === 0) return { passes: false, rank: 0 };
+        rank += score;
+      }
     } else {
-      if (score === 0) return { passes: false, rank: 0 };
-      rank += score;
+      let best = 0;
+      for (const token of clause.tokens) {
+        const s = scoreToken(token, fieldFor(token, index));
+        if (s > best) best = s;
+      }
+      if (best === 0) return { passes: false, rank: 0 };
+      rank += best;
     }
   }
   return { passes: true, rank };

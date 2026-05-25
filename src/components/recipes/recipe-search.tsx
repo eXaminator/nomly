@@ -83,6 +83,11 @@ export function RecipeSearch({
                 Bindestrich schließt Treffer aus.
               </li>
               <li>
+                <code className="text-[var(--color-fg)]">tomate OR pasta</code>{" "}
+                — &quot;or&quot; (auch klein geschrieben) akzeptiert eines der
+                beiden.
+              </li>
+              <li>
                 <code className="text-[var(--color-fg)]">zutat:basilikum</code> —
                 sucht in Zutaten (inkl. Aliase) statt im Titel.
               </li>
