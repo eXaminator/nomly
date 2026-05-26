@@ -26,6 +26,20 @@ import {
   setSourceQuantity as apiSetSourceQty,
   setUnavailable as apiSetUnavailable,
 } from "./api";
+import { OfflineIndicator } from "./offline-indicator";
+import { PendingMutationsDrawer } from "./pending-mutations-drawer";
+import {
+  getConnectivity,
+  startConnectivityWatcher,
+  subscribeConnectivity,
+} from "@/lib/shopping/offline/connectivity";
+import { openOfflineDb } from "@/lib/shopping/offline/db";
+import {
+  hydrateFromIDB,
+  readPendingQueue,
+  toggleItemOptimistic,
+} from "@/lib/shopping/offline/store";
+import { kickSync } from "@/lib/shopping/offline/sync";
 
 const STORAGE_KEY = "nomly.shopping.supermarketId";
 
@@ -72,6 +86,48 @@ export function ShoppingListView({
   // moments while shopping, not for time travel.
   const [recentChecks, setRecentChecks] = React.useState<number[]>([]);
 
+  const [connectivity, setConnectivityState] = React.useState(getConnectivity());
+  const [pendingCount, setPendingCount] = React.useState(0);
+  const [drawerOpen, setDrawerOpen] = React.useState(false);
+
+  React.useEffect(() => startConnectivityWatcher(), []);
+  React.useEffect(() => subscribeConnectivity(setConnectivityState), []);
+
+  // On mount, hydrate IDB from the SSR snapshot + overlay any pending toggles
+  // the user made in a previous session. Then mirror cached supermarkets +
+  // categories so the offline filter has data to drive.
+  React.useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const merged = await hydrateFromIDB(initialItems);
+      if (cancelled) return;
+      setItems(merged);
+      const db = await openOfflineDb();
+      const wtx = db.transaction(["supermarkets"], "readwrite");
+      await wtx.objectStore("supermarkets").clear();
+      for (const s of supermarkets) await wtx.objectStore("supermarkets").put(s);
+      await wtx.done;
+      const q = await readPendingQueue();
+      if (!cancelled) setPendingCount(q.length);
+      if (navigator.onLine) await kickSync();
+      const q2 = await readPendingQueue();
+      if (!cancelled) setPendingCount(q2.length);
+    })().catch((err) => console.warn("offline init failed", err));
+    return () => {
+      cancelled = true;
+    };
+  }, [initialItems, supermarkets]);
+
+  // Whenever the user comes back online, kick the queue.
+  React.useEffect(() => {
+    if (connectivity !== "online") return;
+    void (async () => {
+      await kickSync();
+      const q = await readPendingQueue();
+      setPendingCount(q.length);
+    })();
+  }, [connectivity]);
+
   React.useEffect(() => {
     const stored = window.localStorage.getItem(STORAGE_KEY);
     if (stored == null) return;
@@ -93,6 +149,7 @@ export function ShoppingListView({
 
   async function onToggleCheck(item: ShoppingItemView) {
     const nextChecked = !item.checked;
+    // Optimistic local toggle + queued mutation; the sync engine drives the network.
     setItems((prev) =>
       prev.map((i) =>
         i.id === item.id
@@ -108,11 +165,13 @@ export function ShoppingListView({
       const without = prev.filter((id) => id !== item.id);
       return nextChecked ? [...without, item.id] : without;
     });
-    try {
-      const updated = await apiPatch(item.id, { checked: nextChecked });
-      setItems((prev) => prev.map((i) => (i.id === updated.id ? updated : i)));
-    } catch {
-      router.refresh();
+    await toggleItemOptimistic(item.id, nextChecked);
+    const q = await readPendingQueue();
+    setPendingCount(q.length);
+    if (connectivity === "online") {
+      await kickSync();
+      const q2 = await readPendingQueue();
+      setPendingCount(q2.length);
     }
   }
 
@@ -149,6 +208,13 @@ export function ShoppingListView({
   const undoAvailable = React.useMemo(
     () => recentChecks.some((id) => items.find((i) => i.id === id)?.checked),
     [recentChecks, items],
+  );
+
+  const disabledOffline =
+    connectivity === "offline" || connectivity === "sessionExpired";
+  const itemNameById = React.useMemo(
+    () => Object.fromEntries(items.map((i) => [i.id, i.name])),
+    [items],
   );
 
   async function onPatchNote(id: number, note: string | null) {
@@ -286,7 +352,7 @@ export function ShoppingListView({
           variant="outline"
           size="sm"
           onClick={onUndoLastCheck}
-          disabled={!undoAvailable}
+          disabled={!undoAvailable || disabledOffline}
           aria-label="Letzten Haken zurücknehmen"
           title="Letzten Haken zurücknehmen"
           className="shrink-0"
@@ -295,6 +361,7 @@ export function ShoppingListView({
           <span className="hidden sm:inline">Rückgängig</span>
         </Button>
         <div className="flex min-w-0 items-center gap-2 md:gap-3">
+          <OfflineIndicator pendingCount={pendingCount} onOpenDrawer={() => setDrawerOpen(true)} />
           <span className="whitespace-nowrap text-sm text-[var(--color-muted-fg)]">
             {filterActive ? (
               <>
@@ -325,7 +392,11 @@ export function ShoppingListView({
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
-        <Button onClick={() => setAddMealsOpen(true)} aria-label="Mahlzeiten hinzufügen">
+        <Button
+          onClick={() => setAddMealsOpen(true)}
+          aria-label="Mahlzeiten hinzufügen"
+          disabled={disabledOffline}
+        >
           <CalendarPlus className="size-4" />
           <span className="hidden sm:inline">Mahlzeiten hinzufügen</span>
         </Button>
@@ -333,6 +404,7 @@ export function ShoppingListView({
           variant="outline"
           onClick={() => setAddStaplesOpen(true)}
           aria-label="Standards hinzufügen"
+          disabled={disabledOffline}
         >
           <ListPlus className="size-4" />
           <span className="hidden sm:inline">Standards…</span>
@@ -341,6 +413,7 @@ export function ShoppingListView({
           variant="outline"
           onClick={() => setAddItemOpen(true)}
           aria-label="Artikel hinzufügen"
+          disabled={disabledOffline}
         >
           <Plus className="size-4" />
           <span className="hidden sm:inline">Artikel hinzufügen</span>
@@ -351,6 +424,7 @@ export function ShoppingListView({
             className="text-[var(--color-danger)]"
             onClick={() => setClearOpen(true)}
             aria-label="Liste leeren"
+            disabled={disabledOffline}
           >
             <Trash2 className="size-4" />
             <span className="hidden sm:inline">Liste leeren</span>
@@ -417,6 +491,7 @@ export function ShoppingListView({
                       onEdit={(i) => setEditingItemId(i.id)}
                       onDelete={onDelete}
                       onToggleUnavailable={onToggleUnavailable}
+                      disabledOffline={disabledOffline}
                     />
                   </li>
                 ))}
@@ -471,6 +546,11 @@ export function ShoppingListView({
         onDeleteStapleSource={onDeleteStapleSource}
         onDeleteManualAmount={onDeleteManualAmount}
         onPatchNote={onPatchNote}
+      />
+      <PendingMutationsDrawer
+        open={drawerOpen}
+        onOpenChange={setDrawerOpen}
+        itemNameById={itemNameById}
       />
     </div>
   );

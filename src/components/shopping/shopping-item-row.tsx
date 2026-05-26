@@ -33,6 +33,8 @@ type Props = {
   onEdit: (item: ShoppingItemView) => void;
   onDelete: (id: number) => Promise<void>;
   onToggleUnavailable: (item: ShoppingItemView, supermarketId: number) => Promise<void>;
+  /** When true, all non-toggle actions (edit, delete, unavailable) are disabled. */
+  disabledOffline?: boolean;
 };
 
 export function ShoppingItemRow({
@@ -43,6 +45,7 @@ export function ShoppingItemRow({
   onEdit,
   onDelete,
   onToggleUnavailable,
+  disabledOffline = false,
 }: Props) {
   const isUnavailableHere =
     activeSupermarketId != null &&
@@ -121,7 +124,10 @@ export function ShoppingItemRow({
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            <DropdownMenuItem onClick={() => onEdit(item)}>
+            <DropdownMenuItem
+              onClick={() => onEdit(item)}
+              disabled={disabledOffline}
+            >
               <Pencil className="mr-2 size-4" />
               Bearbeiten
             </DropdownMenuItem>
@@ -132,7 +138,7 @@ export function ShoppingItemRow({
                   ? void onToggleUnavailable(item, activeSupermarketId)
                   : undefined
               }
-              disabled={activeSupermarketId == null}
+              disabled={activeSupermarketId == null || disabledOffline}
               className="text-[var(--color-fg)]"
             >
               <Ban className="mr-2 size-4" />
@@ -142,6 +148,7 @@ export function ShoppingItemRow({
             <DropdownMenuItem
               onClick={() => void onDelete(item.id)}
               className="text-[var(--color-danger)]"
+              disabled={disabledOffline}
             >
               <Trash2 className="mr-2 size-4" />
               Löschen
