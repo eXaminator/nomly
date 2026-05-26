@@ -55,6 +55,9 @@ export function ShoppingItemRow({
     <div
       role="button"
       tabIndex={0}
+      data-shopping-row
+      data-checked={item.checked ? "true" : "false"}
+      data-toggle
       onClick={() => onToggle(item)}
       onKeyDown={(e) => {
         if (e.key === " " || e.key === "Enter") {
@@ -90,7 +93,7 @@ export function ShoppingItemRow({
               item.checked && "line-through",
             )}
           >
-            <span className="font-medium">{item.name}</span>
+            <span className="font-medium" data-item-name>{item.name}</span>
             <AmountList amounts={item.amounts} />
             {item.note ? (
               <span className="text-xs text-[var(--color-muted-fg)]">
