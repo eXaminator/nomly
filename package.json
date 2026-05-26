@@ -10,6 +10,7 @@
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "icons": "node --experimental-transform-types --disable-warning=ExperimentalWarning scripts/render-icons.mts",
     "seed": "node --experimental-transform-types --disable-warning=ExperimentalWarning scripts/seed.ts",
     "migrate": "node --experimental-transform-types --disable-warning=ExperimentalWarning scripts/migrate.mts",
     "dev:reset": "node --experimental-transform-types --disable-warning=ExperimentalWarning scripts/dev-reset.mts",
