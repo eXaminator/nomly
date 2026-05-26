@@ -16,10 +16,17 @@ import {
 } from "@/lib/recipe-import";
 import type { IngredientCatalog } from "@/lib/recipe-import/matching";
 
-function makeLookups(catalog: IngredientCatalog): ParseLookups {
+function makeLookups(
+  catalog: IngredientCatalog,
+  extraUnits: readonly string[] = [],
+): ParseLookups {
+  const unitEntries = ["g", ...extraUnits].map((name, i) => [
+    name.toLowerCase(),
+    { id: i + 1, name, isContainer: false },
+  ] as const);
   const units: UnitLookup = {
-    byNameOrAlias: new Map([["g", { id: 1, name: "g", isContainer: false }]]),
-    byCanonicalName: new Map([["g", { id: 1, name: "g", isContainer: false }]]),
+    byNameOrAlias: new Map(unitEntries),
+    byCanonicalName: new Map(unitEntries),
     containerTokens: new Set(),
   };
   const ingredients: IngredientLookup = new Map();
@@ -564,33 +571,228 @@ describe("parseIngredientLines — substring matcher + threshold", () => {
   });
 });
 
-describe("colon-in-name treated as undetected section header", () => {
-  it("skips colon-bearing rows in parseIngredientLines (flat variant)", () => {
-    // "Topping: cheese" parses to name="Topping: cheese" (colon kept) —
-    // catalog-pollution risk if it became an ingredient. The flat
-    // variant just drops the row.
+describe("colon-in-name treated as section + listed items", () => {
+  it("fans 'Topping: cheese' out into the post-colon item in parseIngredientLines (flat variant)", () => {
+    // The pre-colon "Topping" is dropped (it's a section title, and the
+    // flat variant has no concept of sections), but the post-colon
+    // content is parsed as ingredient(s) rather than silently lost.
     const out = parseIngredientLines(
       ["1 g Mehl", "Topping: cheese", "2 g Zucker"],
       makeLookups([]),
     );
-    expect(out).toHaveLength(2);
-    expect(out.map((i) => i.name)).toEqual(["Mehl", "Zucker"]);
+    expect(out).toHaveLength(3);
+    expect(out.map((i) => i.name)).toEqual(["Mehl", "cheese", "Zucker"]);
   });
 
-  it("promotes colon-bearing rows to a new section in parseIngredientLinesIntoSections", () => {
+  it("promotes 'Topping: cheese' to section 'Topping' + ingredient 'cheese' in parseIngredientLinesIntoSections", () => {
     const out = parseIngredientLinesIntoSections(
       ["1 g Mehl", "Topping: cheese", "2 g Zucker"],
       makeLookups([]),
     );
-    // First group: leading ingredients before any header.
     expect(out[0]).toMatchObject({
       title: null,
       ingredients: expect.arrayContaining([expect.objectContaining({ name: "Mehl" })]),
     });
-    // Second group: section "Topping" picked up from the colon line.
     expect(out[1].title).toBe("Topping");
-    // Zucker lands in the new section (no further header in between).
-    expect(out[1].ingredients.map((i) => i.name)).toEqual(["Zucker"]);
+    // 'cheese' is the post-colon item; 'Zucker' is the next line, still
+    // in the Topping section (no further header in between).
+    expect(out[1].ingredients.map((i) => i.name)).toEqual(["cheese", "Zucker"]);
+  });
+
+  it("splits 'Garnish: Cilantro, crushed peanuts, red pepper flakes' into a section + 3 ingredients", () => {
+    const original = "Garnish: Cilantro, crushed peanuts, red pepper flakes";
+    const out = parseIngredientLinesIntoSections([original], makeLookups([]));
+    expect(out).toHaveLength(1);
+    expect(out[0].title).toBe("Garnish");
+    // "crushed" is a leading prep token → strips to notes (see
+    // PREP_LEADING_TOKENS / feedback_prep_vs_identity_tokens.md). The
+    // ingredient name is the noun, the prep word survives in notes.
+    expect(out[0].ingredients.map((i) => i.name)).toEqual([
+      "Cilantro",
+      "peanuts",
+      "red pepper flakes",
+    ]);
+    expect(out[0].ingredients[1].notes).toMatch(/crushed/i);
+    // Each ingredient keeps the FULL original line in rawText so the
+    // import-review UI can show where the row came from.
+    for (const ing of out[0].ingredients) {
+      expect(ing.rawText).toBe(original);
+    }
+  });
+
+  it("flat-variant emits the list items but drops the section title for 'Garnish: A, B, C'", () => {
+    const out = parseIngredientLines(
+      ["Garnish: Cilantro, crushed peanuts, red pepper flakes"],
+      makeLookups([]),
+    );
+    // Same prep-strip rule applies — "crushed" lands in notes.
+    expect(out.map((i) => i.name)).toEqual([
+      "Cilantro",
+      "peanuts",
+      "red pepper flakes",
+    ]);
+  });
+
+  it("handles German purpose prefixes 'zum Garnieren:' / 'Dazu:' the same way as 'Garnish:'", () => {
+    const out = parseIngredientLinesIntoSections(
+      ["zum Garnieren: etwas Petersilie"],
+      makeLookups([]),
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0].title).toBe("zum Garnieren");
+    expect(out[0].ingredients.map((i) => i.name)).toEqual(["Petersilie"]);
+  });
+
+  it("strips a pure 'Optional:' / 'optional:' prefix and marks the ingredient(s) optional, with NO section", () => {
+    const out = parseIngredientLinesIntoSections(
+      ["Optional: 2 g Sesamsaat", "optional: 1 g Chili"],
+      makeLookups([]),
+    );
+    // Both lines fold into the leading null section — no "Optional" section
+    // is created since "optional" is a status word, not a section title.
+    expect(out).toHaveLength(1);
+    expect(out[0].title).toBeNull();
+    expect(out[0].ingredients).toHaveLength(2);
+    expect(out[0].ingredients[0].name).toBe("Sesamsaat");
+    expect(out[0].ingredients[0].isOptional).toBe(true);
+    expect(out[0].ingredients[1].name).toBe("Chili");
+    expect(out[0].ingredients[1].isOptional).toBe(true);
+  });
+
+  it("tolerates the 'opional:' typo as the Optional: prefix", () => {
+    const out = parseIngredientLines(
+      ["opional: 1 g Dip"],
+      makeLookups([]),
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0].name).toBe("Dip");
+    expect(out[0].isOptional).toBe(true);
+  });
+
+  it("'alternativ:' splits into the primary (status preserved) + alternative(s) forced optional + flagged isAlternative", () => {
+    const out = parseIngredientLines(
+      ["1 g Tahin alternativ: 1 g Mandelmus"],
+      makeLookups([]),
+    );
+    expect(out).toHaveLength(2);
+    expect(out[0].name).toBe("Tahin");
+    expect(out[0].isOptional).toBe(false);
+    expect(out[0].isAlternative).toBe(false);
+    expect(out[1].name).toBe("Mandelmus");
+    expect(out[1].isOptional).toBe(true);
+    expect(out[1].isAlternative).toBe(true);
+  });
+
+  it("'(Alternativ: X)' in parens after a primary ingredient adds X as an optional alternative", () => {
+    const out = parseIngredientLines(
+      ["300 g Reis (Alternativ: Naan-Brot)"],
+      makeLookups([]),
+    );
+    expect(out).toHaveLength(2);
+    expect(out[0].name).toBe("Reis");
+    expect(out[0].isOptional).toBe(false);
+    expect(out[0].isAlternative).toBe(false);
+    expect(out[1].name).toBe("Naan-Brot");
+    expect(out[1].isOptional).toBe(true);
+    expect(out[1].isAlternative).toBe(true);
+  });
+
+  it("English 'alternatively:' behaves the same as German 'alternativ:'", () => {
+    const out = parseIngredientLines(
+      ["1 g Tahini alternatively: 1 g almond butter"],
+      makeLookups([]),
+    );
+    expect(out).toHaveLength(2);
+    expect(out[0].name).toBe("Tahini");
+    expect(out[0].isAlternative).toBe(false);
+    expect(out[1].name).toBe("almond butter");
+    expect(out[1].isOptional).toBe(true);
+    expect(out[1].isAlternative).toBe(true);
+  });
+
+  it("non-alternative expansions (Optional:, Garnish:, each:) leave isAlternative false", () => {
+    const out = parseIngredientLines(
+      [
+        "Optional: 1 g Sesamsaat",
+        "Garnish: cilantro, peanuts",
+      ],
+      makeLookups([]),
+    );
+    for (const row of out) {
+      expect(row.isAlternative).toBe(false);
+    }
+  });
+
+  it("'oder' / 'or' / ' / ' between two ingredient names splits into primary + optional alternative", () => {
+    const cases: [string, string, string][] = [
+      ["1 g Zucker oder Honig", "Zucker", "Honig"],
+      ["100 g Butter / Margarine", "Butter", "Margarine"],
+      ["1 g Zucker o. Honig", "Zucker", "Honig"],
+      ["1 g Tahini or almond butter", "Tahini", "almond butter"],
+    ];
+    for (const [raw, primary, alt] of cases) {
+      const out = parseIngredientLines([raw], makeLookups([]));
+      expect(out, raw).toHaveLength(2);
+      expect(out[0].name, raw).toBe(primary);
+      expect(out[0].isAlternative, raw).toBe(false);
+      expect(out[0].isOptional, raw).toBe(false);
+      expect(out[1].name, raw).toBe(alt);
+      expect(out[1].isAlternative, raw).toBe(true);
+      expect(out[1].isOptional, raw).toBe(true);
+    }
+  });
+
+  it("'or'/'oder' does NOT split when post-separator starts with a descriptor (modifier, not alternative)", () => {
+    const out = parseIngredientLines(
+      ["6 dried or fresh shiitake mushrooms"],
+      makeLookups([]),
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0].name).toContain("shiitake mushrooms");
+  });
+
+  it("'oder' does NOT split when pre-separator ends with a dash (compound stem like 'Weizen- oder Dinkelmehl')", () => {
+    const out = parseIngredientLines(
+      ["200 g Weizen- oder Dinkelmehl"],
+      makeLookups([]),
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0].name.toLowerCase()).toMatch(/weizen.*dinkelmehl|weizenmehl/);
+  });
+
+  it("'alternative' / 'alternativly' word (with or without colon) splits into primary + optional alternative", () => {
+    const cases: [string, string, string][] = [
+      ["1 g Tahini alternative 1 g almond butter", "Tahini", "almond butter"],
+      ["1 g Tahini alternativly: 1 g almond butter", "Tahini", "almond butter"],
+    ];
+    for (const [raw, primary, alt] of cases) {
+      const out = parseIngredientLines([raw], makeLookups([]));
+      expect(out, raw).toHaveLength(2);
+      expect(out[0].name, raw).toBe(primary);
+      expect(out[0].isAlternative, raw).toBe(false);
+      expect(out[1].name, raw).toBe(alt);
+      expect(out[1].isAlternative, raw).toBe(true);
+    }
+  });
+
+it("'<qty> <unit> each: A, B, C' fans out into one row per item sharing qty + unit", () => {
+    const out = parseIngredientLines(
+      ["1 teaspoon each: ground cumin, chili powder, garlic powder"],
+      makeLookups([], ["teaspoon"]),
+    );
+    expect(out).toHaveLength(3);
+    for (const row of out) {
+      expect(row.quantity).toBe(1);
+      expect(row.unit?.name).toBe("teaspoon");
+    }
+    // "ground" is in PREP_LEADING_TOKENS → strips to notes; the bare noun
+    // stays in the name field.
+    expect(out.map((i) => i.name)).toEqual([
+      "cumin",
+      "chili powder",
+      "garlic powder",
+    ]);
+    expect(out[0].notes).toMatch(/ground/i);
   });
 
   it("equipment-flagged ingredients default the row to isOptional=true", () => {

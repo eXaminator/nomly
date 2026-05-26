@@ -1,0 +1,2 @@
+ALTER TABLE `recipe_ingredient` ADD `alternative_for_id` integer REFERENCES recipe_ingredient(id) ON DELETE CASCADE;--> statement-breakpoint
+CREATE INDEX `recipe_ingredient_alternative_for_idx` ON `recipe_ingredient` (`alternative_for_id`);

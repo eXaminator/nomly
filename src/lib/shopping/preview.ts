@@ -29,9 +29,17 @@ export type PreviewIngredient = {
   notes: string | null;
   /**
    * The recipe tagged this line as optional. The dialog surfaces it with a
-   * marker and starts it unchecked so the user has to opt in.
+   * marker and starts it unchecked so the user has to opt in. Combined
+   * with {@link alternativeForId} via {@link isOptionalIngredient} when
+   * deciding whether to dim / unselect a row.
    */
   isOptional: boolean;
+  /**
+   * Non-null when this row is an alternative for another recipe_ingredient.
+   * Alternatives are always treated as optional in the shopping default —
+   * consumers should pass the row through {@link isOptionalIngredient}.
+   */
+  alternativeForId: number | null;
   /**
    * The underlying ingredient is flagged as equipment (Backpapier, Backform …).
    * These items are pulled out of their original recipe section and grouped
@@ -110,6 +118,7 @@ export function previewMeals(start: string, lengthDays: number): PreviewMeal[] {
       unitName: unit.name,
       notes: recipeIngredient.notes,
       isOptional: recipeIngredient.isOptional,
+      alternativeForId: recipeIngredient.alternativeForId,
       isEquipment: ingredient.isEquipment,
       fixedAmount: recipeIngredient.fixedAmount,
       excludeFromShoppingList: ingredient.excludeFromShoppingList,
@@ -183,6 +192,7 @@ export function previewMeals(start: string, lengthDays: number): PreviewMeal[] {
         unitName: l.unitName,
         notes: l.notes,
         isOptional: !!l.isOptional,
+        alternativeForId: l.alternativeForId,
         isEquipment: !!l.isEquipment,
       });
     }

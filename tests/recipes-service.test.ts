@@ -203,3 +203,213 @@ describe("listRecipes", () => {
     expect(byId.get(ids.unknownRecipe)?.dietConfidence).toBe("unknown");
   });
 });
+
+describe("createRecipe + getRecipe with alternatives", () => {
+  beforeAll(async () => {
+    await seed();
+  });
+
+  async function createWithAlternatives() {
+    const { createRecipe } = await import("@/lib/recipes/service");
+    return createRecipe({
+      title: "Bohnen-Brownies",
+      description: null,
+      servings: 4,
+      prepTimeMin: null,
+      cookTimeMin: null,
+      sourceUrl: null,
+      photoPath: null,
+      tags: [],
+      sections: [
+        {
+          title: null,
+          instructions: "",
+          ingredients: [
+            {
+              ingredientName: "Tahin",
+              ingredientId: null,
+              quantity: 1,
+              unitId: null,
+              subUnitId: null,
+              displayUnit: null,
+              notes: null,
+              isOptional: false,
+              fixedAmount: false,
+              isAlternative: false,
+            },
+            {
+              ingredientName: "Mandelmus",
+              ingredientId: null,
+              quantity: 1,
+              unitId: null,
+              subUnitId: null,
+              displayUnit: null,
+              notes: null,
+              isOptional: true,
+              fixedAmount: false,
+              isAlternative: true,
+            },
+            {
+              ingredientName: "Sesammus",
+              ingredientId: null,
+              quantity: 1,
+              unitId: null,
+              subUnitId: null,
+              displayUnit: null,
+              notes: null,
+              isOptional: true,
+              fixedAmount: false,
+              isAlternative: true,
+            },
+          ],
+        },
+      ],
+    });
+  }
+
+  it("links each alternative row to the most recent primary in the same section", async () => {
+    const id = await createWithAlternatives();
+    const { getRecipe } = await import("@/lib/recipes/service");
+    const r = getRecipe(id);
+    expect(r).not.toBeNull();
+    const ingredients = r!.sections[0].ingredients;
+    expect(ingredients.map((i) => i.ingredientName)).toEqual([
+      "Tahin",
+      "Mandelmus",
+      "Sesammus",
+    ]);
+    // Primary has no alternativeForId.
+    expect(ingredients[0].alternativeForId).toBeNull();
+    // Both alternatives point at the same primary id.
+    expect(ingredients[1].alternativeForId).toBe(ingredients[0].id);
+    expect(ingredients[2].alternativeForId).toBe(ingredients[0].id);
+  });
+
+  it("force-marks alternative rows isOptional=true even when the input claims otherwise", async () => {
+    const { createRecipe, getRecipe } = await import("@/lib/recipes/service");
+    const id = createRecipe({
+      title: "Forced-optional alternative",
+      description: null,
+      servings: 1,
+      prepTimeMin: null,
+      cookTimeMin: null,
+      sourceUrl: null,
+      photoPath: null,
+      tags: [],
+      sections: [
+        {
+          title: null,
+          instructions: "",
+          ingredients: [
+            {
+              ingredientName: "Reis",
+              ingredientId: null,
+              quantity: 300,
+              unitId: null,
+              subUnitId: null,
+              displayUnit: null,
+              notes: null,
+              isOptional: false,
+              fixedAmount: false,
+              isAlternative: false,
+            },
+            {
+              ingredientName: "Naan-Brot",
+              ingredientId: null,
+              quantity: 1,
+              unitId: null,
+              subUnitId: null,
+              displayUnit: null,
+              notes: null,
+              isOptional: false, // input lies
+              fixedAmount: false,
+              isAlternative: true,
+            },
+          ],
+        },
+      ],
+    });
+    const r = getRecipe(id);
+    const alt = r!.sections[0].ingredients[1];
+    expect(alt.ingredientName).toBe("Naan-Brot");
+    expect(alt.isOptional).toBe(true);
+  });
+
+  it("survives an updateRecipe round-trip without losing the alternative linkage", async () => {
+    const id = await createWithAlternatives();
+    const { getRecipe, updateRecipe } = await import("@/lib/recipes/service");
+    const before = getRecipe(id)!;
+    updateRecipe(id, {
+      title: before.title,
+      description: before.description,
+      servings: before.servings,
+      prepTimeMin: before.prepTimeMin,
+      cookTimeMin: before.cookTimeMin,
+      sourceUrl: before.sourceUrl,
+      photoPath: before.photoPath,
+      tags: before.tags,
+      sections: before.sections.map((s) => ({
+        title: s.title,
+        instructions: s.instructions,
+        ingredients: s.ingredients.map((i) => ({
+          ingredientName: i.ingredientName,
+          ingredientId: i.ingredientId,
+          quantity: i.quantity,
+          unitId: i.unitId,
+          subUnitId: i.subUnitId,
+          displayUnit: null,
+          notes: i.notes,
+          isOptional: i.isOptional,
+          fixedAmount: i.fixedAmount,
+          isAlternative: i.alternativeForId != null,
+        })),
+      })),
+    });
+    const after = getRecipe(id)!;
+    const ings = after.sections[0].ingredients;
+    expect(ings.map((i) => i.ingredientName)).toEqual([
+      "Tahin",
+      "Mandelmus",
+      "Sesammus",
+    ]);
+    expect(ings[0].alternativeForId).toBeNull();
+    expect(ings[1].alternativeForId).toBe(ings[0].id);
+    expect(ings[2].alternativeForId).toBe(ings[0].id);
+  });
+
+  it("an alternative with no preceding primary in the section is promoted to primary instead", async () => {
+    const { createRecipe, getRecipe } = await import("@/lib/recipes/service");
+    const id = createRecipe({
+      title: "Orphan alternative",
+      description: null,
+      servings: 1,
+      prepTimeMin: null,
+      cookTimeMin: null,
+      sourceUrl: null,
+      photoPath: null,
+      tags: [],
+      sections: [
+        {
+          title: null,
+          instructions: "",
+          ingredients: [
+            {
+              ingredientName: "Orphan",
+              ingredientId: null,
+              quantity: 1,
+              unitId: null,
+              subUnitId: null,
+              displayUnit: null,
+              notes: null,
+              isOptional: true,
+              fixedAmount: false,
+              isAlternative: true,
+            },
+          ],
+        },
+      ],
+    });
+    const r = getRecipe(id);
+    expect(r!.sections[0].ingredients[0].alternativeForId).toBeNull();
+  });
+});

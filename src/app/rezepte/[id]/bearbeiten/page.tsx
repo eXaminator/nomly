@@ -1,3 +1,5 @@
+import Link from "next/link";
+import { ChevronLeft } from "lucide-react";
 import { notFound } from "next/navigation";
 import { asc } from "drizzle-orm";
 import { AppShell } from "@/components/layout/app-shell";
@@ -72,6 +74,11 @@ export default async function EditRecipePage({
         notes: i.notes ?? "",
         isOptional: i.isOptional,
         fixedAmount: i.fixedAmount,
+        // The server returns the primary's row id when this row is an
+        // alternative. The form only needs the boolean — alternatives sit
+        // immediately after their primary in the sorted ingredient array,
+        // so the structural relationship is reconstructible client-side.
+        isAlternative: i.alternativeForId != null,
         // Reuse the import-flow `rawText` slot — the existing
         // IngredientRow already surfaces it as the "Original" hint.
         rawText: i.rawLine ?? undefined,
@@ -82,8 +89,14 @@ export default async function EditRecipePage({
   return (
     <AppShell>
       <div className="flex flex-col gap-2">
+        <Link
+          href={`/rezepte/${id}`}
+          className="inline-flex w-fit items-center gap-1 text-sm text-[var(--color-muted-fg)] hover:text-[var(--color-fg)]"
+        >
+          <ChevronLeft className="size-4" />
+          {recipe.title}
+        </Link>
         <h1 className="text-2xl font-semibold tracking-tight">Rezept bearbeiten</h1>
-        <p className="text-sm text-[var(--color-muted-fg)]">{recipe.title}</p>
       </div>
       <div className="mt-6">
         <RecipeForm initial={draft} recipeId={id} tagSuggestions={tagSuggestions} />

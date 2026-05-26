@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { DietBadge } from "@/components/recipes/diet-badge";
 import { IngredientLine } from "@/components/recipes/ingredient-line";
 import { renderMarkdown } from "@/lib/markdown";
+import { isOptionalIngredient } from "@/lib/recipes/optional";
 import type { RecipeView } from "@/lib/recipes/types";
 
 type Props = {
@@ -187,7 +188,7 @@ function RecipeBody({ recipeId }: { recipeId: number }) {
                       <li
                         key={ing.id}
                         className={
-                          ing.isOptional ? "flex gap-2 italic opacity-65" : "flex gap-2"
+                          isOptionalIngredient(ing) ? "flex gap-2 italic opacity-65" : "flex gap-2"
                         }
                       >
                         <span className="inline-flex min-w-12 items-center gap-1 font-mono text-[var(--color-muted-fg)]">
@@ -209,7 +210,7 @@ function RecipeBody({ recipeId }: { recipeId: number }) {
                           {ing.notes ? (
                             <span className="text-[var(--color-muted-fg)]"> – {ing.notes}</span>
                           ) : null}
-                          {ing.isOptional ? (
+                          {isOptionalIngredient(ing) ? (
                             <span className="ml-1 text-xs text-[var(--color-muted-fg)]">
                               (optional)
                             </span>

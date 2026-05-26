@@ -439,6 +439,11 @@ export function transformFamilywallRecipe(
         isOptional: p.isOptional,
         fixedAmount: p.fixedAmount,
         rawLine: p.rawText || null,
+        // Carry the parser's first-class alternative flag through to the
+        // service layer, which resolves it to a real
+        // recipe_ingredient.alternative_for_id linking back to the most
+        // recent primary in the same section.
+        isAlternative: p.isAlternative,
       };
     }),
   }));

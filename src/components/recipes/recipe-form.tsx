@@ -3,6 +3,18 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { Loader2, Plus, Save, Trash2 } from "lucide-react";
+import {
+  DndContext,
+  DragOverlay,
+  KeyboardSensor,
+  PointerSensor,
+  closestCorners,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+  type DragStartEvent,
+} from "@dnd-kit/core";
+import { sortableKeyboardCoordinates } from "@dnd-kit/sortable";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -18,6 +30,7 @@ import {
   type DraftRecipe,
   type DraftSection,
 } from "./types";
+import { GripVertical } from "lucide-react";
 import type { NewIngredientDefaults } from "@/lib/recipes/types";
 
 type Props = {
@@ -62,6 +75,11 @@ function ingredientToPayload(ing: DraftIngredient) {
     // Round-trip the source line: populated by the importer / clipboard
     // parser, sticks through edit, surfaces in the row's "Original" hint.
     rawLine: ing.rawText ?? null,
+    // The server resolves this to a real recipe_ingredient.alternative_for_id
+    // by linking to the most recent primary inserted in the same section.
+    // Service code also re-asserts `isOptional: true` for alternatives — the
+    // client-side toggle on alt rows is locked, so the values agree.
+    isAlternative: ing.isAlternative,
   };
 }
 
@@ -120,8 +138,28 @@ export function RecipeForm({ initial, recipeId, tagSuggestions }: Props) {
     setDraft({ ...draft, sections });
   }
 
+  // Pending uid of a freshly-added section to scroll into view once the
+  // SectionEditor for it has mounted. Cleared by the effect below.
+  const [scrollToSectionUid, setScrollToSectionUid] = React.useState<string | null>(
+    null,
+  );
+  React.useEffect(() => {
+    if (!scrollToSectionUid) return;
+    const node = document.getElementById(`section-title-${scrollToSectionUid}`);
+    if (node) {
+      node.scrollIntoView({ behavior: "smooth", block: "center" });
+      const input = node as HTMLInputElement;
+      if (typeof input.focus === "function") input.focus();
+    }
+    // Consume the trigger so a re-render doesn't scroll again.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setScrollToSectionUid(null);
+  }, [scrollToSectionUid]);
+
   function addSection() {
-    setDraft({ ...draft, sections: [...draft.sections, emptySection()] });
+    const fresh = emptySection();
+    setDraft({ ...draft, sections: [...draft.sections, fresh] });
+    setScrollToSectionUid(fresh.uid);
   }
 
   function appendSectionsAfter(i: number, extras: DraftSection[]) {
@@ -129,6 +167,132 @@ export function RecipeForm({ initial, recipeId, tagSuggestions }: Props) {
     const sections = draft.sections.slice();
     sections.splice(i + 1, 0, ...extras);
     setDraft({ ...draft, sections });
+  }
+
+  const sensors = useSensors(
+    // Small activation distance keeps a tap on the grip's neighbouring inputs
+    // from being interpreted as the start of a drag.
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    }),
+  );
+
+  function findIngredient(
+    uid: string,
+  ): { sectionIdx: number; ingredientIdx: number } | null {
+    for (let s = 0; s < draft.sections.length; s++) {
+      const i = draft.sections[s].ingredients.findIndex((ing) => ing.uid === uid);
+      if (i >= 0) return { sectionIdx: s, ingredientIdx: i };
+    }
+    return null;
+  }
+
+  /**
+   * Return the [start, end] inclusive bounds of the alternative group
+   * containing `idx`. Walks up to the row's primary then down through any
+   * trailing alternatives. A row with no alternatives returns [idx, idx].
+   */
+  function groupBounds(
+    ingredients: DraftIngredient[],
+    idx: number,
+  ): [number, number] {
+    let start = idx;
+    while (start > 0 && ingredients[start].isAlternative) start -= 1;
+    let end = start;
+    while (
+      end + 1 < ingredients.length &&
+      ingredients[end + 1].isAlternative
+    )
+      end += 1;
+    return [start, end];
+  }
+
+  // Currently-dragged ingredient, rendered in the DragOverlay so the user
+  // always sees what's being dragged — including when the cursor crosses
+  // into a different section's SortableContext where the source list's
+  // in-place placeholder isn't visible.
+  const [activeIngredient, setActiveIngredient] = React.useState<DraftIngredient | null>(
+    null,
+  );
+
+  function onIngredientDragStart(event: DragStartEvent) {
+    const source = findIngredient(String(event.active.id));
+    if (!source) return;
+    setActiveIngredient(draft.sections[source.sectionIdx].ingredients[source.ingredientIdx]);
+  }
+
+  function onIngredientDragCancel() {
+    setActiveIngredient(null);
+  }
+
+  function onIngredientDragEnd(event: DragEndEvent) {
+    setActiveIngredient(null);
+    const { active, over } = event;
+    if (!over) return;
+    const activeId = String(active.id);
+    const overId = String(over.id);
+    if (activeId === overId) return;
+
+    const source = findIngredient(activeId);
+    if (!source) return;
+    // Only primaries carry a drag handle, but defensively snap to the
+    // primary if a stray alternative ever initiates a drag.
+    const sourceIngredients = draft.sections[source.sectionIdx].ingredients;
+    const [sourceGroupStart, sourceGroupEnd] = groupBounds(
+      sourceIngredients,
+      source.ingredientIdx,
+    );
+
+    // The drop target is either a section (empty/end-of-list drop) or an
+    // ingredient. If it's an alternative, snap to its primary's index so
+    // the drop lands at the group boundary, never INSIDE another group.
+    const sectionAsTarget = draft.sections.findIndex((s) => s.uid === overId);
+    let targetSectionIdx: number;
+    let insertionIdx: number;
+    if (sectionAsTarget >= 0) {
+      targetSectionIdx = sectionAsTarget;
+      insertionIdx = draft.sections[sectionAsTarget].ingredients.length;
+    } else {
+      const target = findIngredient(overId);
+      if (!target) return;
+      targetSectionIdx = target.sectionIdx;
+      const [targetGroupStart] = groupBounds(
+        draft.sections[targetSectionIdx].ingredients,
+        target.ingredientIdx,
+      );
+      insertionIdx = targetGroupStart;
+    }
+
+    // No-op when the group is already at the target position.
+    if (
+      source.sectionIdx === targetSectionIdx &&
+      insertionIdx >= sourceGroupStart &&
+      insertionIdx <= sourceGroupEnd + 1
+    ) {
+      return;
+    }
+
+    const next = draft.sections.map((s) => ({
+      ...s,
+      ingredients: s.ingredients.slice(),
+    }));
+    const groupSize = sourceGroupEnd - sourceGroupStart + 1;
+    const movingGroup = next[source.sectionIdx].ingredients.splice(
+      sourceGroupStart,
+      groupSize,
+    );
+    // After splicing OUT of the source, shift the insertion index when the
+    // target is in the same section and lies AFTER the removed slice.
+    if (
+      source.sectionIdx === targetSectionIdx &&
+      insertionIdx > sourceGroupStart
+    ) {
+      insertionIdx -= groupSize;
+    }
+    next[targetSectionIdx].ingredients.splice(insertionIdx, 0, ...movingGroup);
+
+    setDraft({ ...draft, sections: next });
   }
 
   async function onSubmit(e: React.FormEvent) {
@@ -355,18 +519,36 @@ export function RecipeForm({ initial, recipeId, tagSuggestions }: Props) {
             Abschnitt hinzufügen
           </Button>
         </div>
-        {draft.sections.map((section, i) => (
-          <SectionEditor
-            key={section.uid}
-            section={section}
-            index={i}
-            total={draft.sections.length}
-            onChange={(next) => setSection(i, next)}
-            onRemove={() => removeSection(i)}
-            onMove={(dir) => moveSection(i, dir)}
-            onAppendSections={(extras) => appendSectionsAfter(i, extras)}
-          />
-        ))}
+        <DndContext
+          // Stable `id` keeps @dnd-kit's internal `DndDescribedBy-{n}` ARIA
+          // id deterministic across SSR/CSR. Without it the module-level
+          // counter advances differently in dev (StrictMode double-mount)
+          // and triggers a hydration mismatch on every draggable handle.
+          id="recipe-ingredients-dnd"
+          sensors={sensors}
+          collisionDetection={closestCorners}
+          onDragStart={onIngredientDragStart}
+          onDragEnd={onIngredientDragEnd}
+          onDragCancel={onIngredientDragCancel}
+        >
+          {draft.sections.map((section, i) => (
+            <SectionEditor
+              key={section.uid}
+              section={section}
+              index={i}
+              total={draft.sections.length}
+              onChange={(next) => setSection(i, next)}
+              onRemove={() => removeSection(i)}
+              onMove={(dir) => moveSection(i, dir)}
+              onAppendSections={(extras) => appendSectionsAfter(i, extras)}
+            />
+          ))}
+          <DragOverlay dropAnimation={null}>
+            {activeIngredient ? (
+              <IngredientDragPreview ingredient={activeIngredient} />
+            ) : null}
+          </DragOverlay>
+        </DndContext>
       </div>
 
       {error ? (
@@ -407,5 +589,26 @@ export function RecipeForm({ initial, recipeId, tagSuggestions }: Props) {
         </Button>
       </div>
     </form>
+  );
+}
+
+/**
+ * Compact preview rendered inside the DragOverlay so the dragged ingredient
+ * stays visible while the cursor is over a different section's SortableContext
+ * (which doesn't surface an in-place placeholder for items it doesn't own).
+ */
+function IngredientDragPreview({ ingredient }: { ingredient: DraftIngredient }) {
+  const unit = ingredient.subUnit?.name ?? ingredient.unit?.name ?? "";
+  const quantity = ingredient.quantity.trim();
+  const lead = [quantity, unit].filter(Boolean).join(" ");
+  const name = ingredient.name.trim() || ingredient.canonicalName || "Zutat";
+  return (
+    <div className="flex cursor-grabbing items-center gap-2 rounded-md border border-[var(--color-accent)] bg-[var(--color-card)] px-2 py-1.5 text-sm shadow-xl">
+      <GripVertical className="size-4 text-[var(--color-muted-fg)]" />
+      {lead ? (
+        <span className="text-[var(--color-muted-fg)] tabular-nums">{lead}</span>
+      ) : null}
+      <span className="truncate font-medium">{name}</span>
+    </div>
   );
 }

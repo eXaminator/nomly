@@ -19,6 +19,7 @@ import {
 import { parseIsoDurationToMinutes } from "./duration.ts";
 import {
   detectSectionHeader,
+  expandIngredientLine,
   isPrepLeadingToken,
   normalizeForMatch,
   parseIngredientString,
@@ -78,6 +79,12 @@ export type ImportedIngredient = {
   /** True when the source line carried an "optional" marker ("opt.",
    *  "Optional:", "evtl.", "nach Belieben", "(optional)" inline, …). */
   isOptional: boolean;
+  /** True when this row was the non-first piece of an `alternativ:` or
+   *  `(Alternativ: X)` expansion. Always paired with `isOptional: true`.
+   *  Downstream service inserts these with a non-null
+   *  `recipe_ingredient.alternative_for_id` linking back to the most
+   *  recent primary in the same section. */
+  isAlternative: boolean;
   /** Auto-set when the parser found no quantity — these lines describe an
    *  ingredient whose amount is portion-independent ("Salz nach Geschmack",
    *  "etwas Öl"). The recipe view can still override via the per-row toggle. */
@@ -1043,85 +1050,90 @@ export function parseIngredientLines(
     if (detectSectionHeader(rawLine)) continue;
     // Skip pure-noise lines (no letters at all, e.g. "—–", "***").
     if (!/\p{L}/u.test(rawLine)) continue;
-    // Familywall opt-in: pre-resolve "X oder Y" alternatives + adjacent-pair
-    // conjunctions (Salz Pfeffer) before the conjunction splitter runs.
-    const raw = useFirstWins
-      ? preprocessAlternatives(rawLine, knownIngredientKeys)
-      : rawLine;
-    for (const piece of splitConjunctions(raw, splitOpts)) {
-      const parsed = parseIngredientString(piece, knownUnitTokens);
-      // Skip the row when the parser couldn't pull a real ingredient name
-      // out of the line. Familywall data legitimately has entries like
-      // "2 Prise" / "200 g" / "5-7 EL" with no ingredient — there's nothing
-      // useful to import, and falling back to the raw piece would create
-      // a garbage row in the global ingredient catalog ("2 Prise" as an
-      // ingredient). Same for fragments produced by conjunction splitting
-      // that turn out to be empty.
-      if (parsed.name.trim().length === 0) continue;
-      // Colon in the parsed name almost always means the line was actually
-      // an undetected section header ("Topping: Cheese", "Soße: 2 EL Sahne")
-      // — the parser couldn't strip the colon because the post-colon part
-      // doesn't fit the "amount at end" shape. Skip rather than polluting
-      // the catalog with a colon-bearing ingredient name. The section-aware
-      // variant {@link parseIngredientLinesIntoSections} surfaces the
-      // pre-colon part as a section title; this flat variant just drops
-      // the row.
-      if (parsed.name.includes(":")) continue;
-      // Familywall opt-in: drop rows whose name is a bare descriptor token
-      // ("frische", "fresh", "red") with no head noun — usually truncated
-      // source lines like "8 frische" or "1 cup fresh". Without this, the
-      // first such row creates a "frische" canonical and subsequent
-      // "frische X" lines tie at score 130 between the orphan and the real
-      // head-noun canonical, cascading more orphan matches.
-      if (useFirstWins && isStandaloneDescriptor(parsed.name)) continue;
-      // A leading "or X" / "oder X" almost always means we just split a
-      // conjunction that connected alternatives. Attach as a note on the
-      // previous row instead of creating a separate ingredient.
-      const leadingOr = /^(?:or|oder)\s+(.+)/i.exec(parsed.name.trim());
-      if (leadingOr && out.length > 0) {
-        const alt = leadingOr[1];
-        const prev = out[out.length - 1];
-        prev.notes = prev.notes ? `${prev.notes}, oder ${alt}` : `oder ${alt}`;
-        if (parsed.isOptional) prev.isOptional = true;
-        continue;
+
+    for (const row of expandIngredientLine(rawLine)) {
+      if (row.kind === "header") continue;
+      // Familywall opt-in: pre-resolve "X oder Y" alternatives + adjacent-pair
+      // conjunctions (Salz Pfeffer) before the conjunction splitter runs.
+      const raw = useFirstWins
+        ? preprocessAlternatives(row.text, knownIngredientKeys)
+        : row.text;
+      for (const piece of splitConjunctions(raw, splitOpts)) {
+        const parsed = parseIngredientString(piece, knownUnitTokens);
+        // Skip the row when the parser couldn't pull a real ingredient name
+        // out of the line. Familywall data legitimately has entries like
+        // "2 Prise" / "200 g" / "5-7 EL" with no ingredient — there's nothing
+        // useful to import, and falling back to the raw piece would create
+        // a garbage row in the global ingredient catalog ("2 Prise" as an
+        // ingredient). Same for fragments produced by conjunction splitting
+        // that turn out to be empty.
+        if (parsed.name.trim().length === 0) continue;
+        // Defensive: a colon still in the parsed name means none of the
+        // expansion rules caught the line. Drop rather than pollute the
+        // catalog with a colon-bearing ingredient name.
+        if (parsed.name.includes(":")) continue;
+        // Familywall opt-in: drop rows whose name is a bare descriptor token
+        // ("frische", "fresh", "red") with no head noun — usually truncated
+        // source lines like "8 frische" or "1 cup fresh". Without this, the
+        // first such row creates a "frische" canonical and subsequent
+        // "frische X" lines tie at score 130 between the orphan and the real
+        // head-noun canonical, cascading more orphan matches.
+        if (useFirstWins && isStandaloneDescriptor(parsed.name)) continue;
+        // A leading "or X" / "oder X" almost always means we just split a
+        // conjunction that connected alternatives. Attach as a note on the
+        // previous row instead of creating a separate ingredient.
+        const leadingOr = /^(?:or|oder)\s+(.+)/i.exec(parsed.name.trim());
+        if (leadingOr && out.length > 0) {
+          const alt = leadingOr[1];
+          const prev = out[out.length - 1];
+          prev.notes = prev.notes ? `${prev.notes}, oder ${alt}` : `oder ${alt}`;
+          if (parsed.isOptional || row.forceOptional) prev.isOptional = true;
+          continue;
+        }
+        const initialUnit = resolveUnit(
+          lookups.units,
+          parsed.unitName,
+          parsed.quantity,
+        );
+        const resolved = resolveIngredientForRow(parsed, piece, lookups, threshold);
+        const final = pickFinalUnit(
+          initialUnit,
+          parsed.unitName,
+          resolved.ingredientId,
+          lookups.subUnits,
+          resolved.defaultSubUnit,
+          resolved.defaultUnit,
+        );
+        out.push({
+          quantity: parsed.quantity,
+          unit: final.resolved,
+          subUnit: final.subUnit,
+          unitMatch: final.match,
+          rawUnit: final.rawUnit,
+          name: resolved.name,
+          ingredientId: resolved.ingredientId,
+          ingredientMatch: resolved.match,
+          canonicalIngredientName: resolved.canonicalIngredientName,
+          notes: resolved.notes,
+          // Equipment-flagged ingredients (Backpapier, Einmachgläser …)
+          // default to optional so the user decides per-recipe whether they
+          // actually need to shop them. `forceOptional` carries through
+          // Optional:/alternativ: wrappers from the expansion pass.
+          isOptional: parsed.isOptional || resolved.isEquipment || row.forceOptional,
+          isAlternative: row.isAlternative,
+          // No parsed quantity → treat the amount as constant. Catches
+          // "Salz nach Geschmack" / "etwas Olivenöl" so changing the meal's
+          // portion size doesn't multiply a non-existent number.
+          fixedAmount: parsed.quantity === null,
+          // For expanded rows (Optional:, alternativ:, list-after-colon,
+          // each:), surface the user's ORIGINAL full line in rawText —
+          // makes it clear in the import-review UI which source line each
+          // resulting ingredient came from.
+          rawText: row.rawText !== row.text ? row.rawText : piece.trim(),
+          candidateMatches: resolved.candidateMatches,
+          newNameProposals: resolved.newNameProposals,
+        });
       }
-      const initialUnit = resolveUnit(
-        lookups.units,
-        parsed.unitName,
-        parsed.quantity,
-      );
-      const resolved = resolveIngredientForRow(parsed, piece, lookups, threshold);
-      const final = pickFinalUnit(
-        initialUnit,
-        parsed.unitName,
-        resolved.ingredientId,
-        lookups.subUnits,
-        resolved.defaultSubUnit,
-        resolved.defaultUnit,
-      );
-      out.push({
-        quantity: parsed.quantity,
-        unit: final.resolved,
-        subUnit: final.subUnit,
-        unitMatch: final.match,
-        rawUnit: final.rawUnit,
-        name: resolved.name,
-        ingredientId: resolved.ingredientId,
-        ingredientMatch: resolved.match,
-        canonicalIngredientName: resolved.canonicalIngredientName,
-        notes: resolved.notes,
-        // Equipment-flagged ingredients (Backpapier, Einmachgläser …)
-        // default to optional so the user decides per-recipe whether they
-        // actually need to shop them.
-        isOptional: parsed.isOptional || resolved.isEquipment,
-        // No parsed quantity → treat the amount as constant. Catches
-        // "Salz nach Geschmack" / "etwas Olivenöl" so changing the meal's
-        // portion size doesn't multiply a non-existent number.
-        fixedAmount: parsed.quantity === null,
-        rawText: piece.trim(),
-        candidateMatches: resolved.candidateMatches,
-        newNameProposals: resolved.newNameProposals,
-      });
     }
   }
   return out;
@@ -1165,70 +1177,77 @@ export function parseIngredientLinesIntoSections(
       continue;
     }
     if (!/\p{L}/u.test(rawLine)) continue;
-    const raw = useFirstWins
-      ? preprocessAlternatives(rawLine, knownIngredientKeys)
-      : rawLine;
-    for (const piece of splitConjunctions(raw, splitOpts)) {
-      const parsed = parseIngredientString(piece, knownUnitTokens);
-      if (parsed.name.trim().length === 0) continue;
-      // Colon in name → undetected section header. The pre-colon portion
-      // becomes the new section title; the post-colon content is dropped
-      // (it usually isn't well-formed enough to parse as an ingredient).
-      // Mirrors the same heuristic in {@link parseIngredientLines}.
-      if (parsed.name.includes(":")) {
-        const title = parsed.name.split(":")[0].trim();
-        if (title.length > 0) {
-          groups.push({ title, ingredients: [] });
+
+    for (const row of expandIngredientLine(rawLine)) {
+      if (row.kind === "header") {
+        groups.push({ title: row.title, ingredients: [] });
+        continue;
+      }
+      const raw = useFirstWins
+        ? preprocessAlternatives(row.text, knownIngredientKeys)
+        : row.text;
+      for (const piece of splitConjunctions(raw, splitOpts)) {
+        const parsed = parseIngredientString(piece, knownUnitTokens);
+        if (parsed.name.trim().length === 0) continue;
+        // Defensive fallback: a colon still in the parsed name means none
+        // of the expansion rules above caught this line. Use the WHOLE
+        // original input as the new section title so no information is
+        // silently dropped on its way through the parser.
+        if (parsed.name.includes(":")) {
+          groups.push({ title: row.rawText, ingredients: [] });
+          continue;
         }
-        continue;
+        // Familywall opt-in: drop bare-descriptor rows — see comment in
+        // {@link parseIngredientLines} for the cascade this prevents.
+        if (useFirstWins && isStandaloneDescriptor(parsed.name)) continue;
+        const currentGroup = groups[groups.length - 1];
+        const leadingOr = /^(?:or|oder)\s+(.+)/i.exec(parsed.name.trim());
+        if (leadingOr && currentGroup.ingredients.length > 0) {
+          const alt = leadingOr[1];
+          const prev = currentGroup.ingredients[currentGroup.ingredients.length - 1];
+          prev.notes = prev.notes ? `${prev.notes}, oder ${alt}` : `oder ${alt}`;
+          if (parsed.isOptional || row.forceOptional) prev.isOptional = true;
+          continue;
+        }
+        const initialUnit = resolveUnit(
+          lookups.units,
+          parsed.unitName,
+          parsed.quantity,
+        );
+        const resolved = resolveIngredientForRow(parsed, piece, lookups, threshold);
+        const final = pickFinalUnit(
+          initialUnit,
+          parsed.unitName,
+          resolved.ingredientId,
+          lookups.subUnits,
+          resolved.defaultSubUnit,
+          resolved.defaultUnit,
+        );
+        currentGroup.ingredients.push({
+          quantity: parsed.quantity,
+          unit: final.resolved,
+          subUnit: final.subUnit,
+          unitMatch: final.match,
+          rawUnit: final.rawUnit,
+          name: resolved.name,
+          ingredientId: resolved.ingredientId,
+          ingredientMatch: resolved.match,
+          canonicalIngredientName: resolved.canonicalIngredientName,
+          notes: resolved.notes,
+          // Mirror parseIngredientLines: equipment items (Backpapier,
+          // Einmachgläser …) auto-default to optional. `forceOptional`
+          // carries through Optional:/alternativ:/optional-garnish-title
+          // wrappers from the expansion pass.
+          isOptional: parsed.isOptional || resolved.isEquipment || row.forceOptional,
+          isAlternative: row.isAlternative,
+          fixedAmount: parsed.quantity === null,
+          // Expanded rows surface the user's ORIGINAL full line so the
+          // import-review UI can show where each row came from.
+          rawText: row.rawText !== row.text ? row.rawText : piece.trim(),
+          candidateMatches: resolved.candidateMatches,
+          newNameProposals: resolved.newNameProposals,
+        });
       }
-      // Familywall opt-in: drop bare-descriptor rows — see comment in
-      // {@link parseIngredientLines} for the cascade this prevents.
-      if (useFirstWins && isStandaloneDescriptor(parsed.name)) continue;
-      const currentGroup = groups[groups.length - 1];
-      const leadingOr = /^(?:or|oder)\s+(.+)/i.exec(parsed.name.trim());
-      if (leadingOr && currentGroup.ingredients.length > 0) {
-        const alt = leadingOr[1];
-        const prev = currentGroup.ingredients[currentGroup.ingredients.length - 1];
-        prev.notes = prev.notes ? `${prev.notes}, oder ${alt}` : `oder ${alt}`;
-        if (parsed.isOptional) prev.isOptional = true;
-        continue;
-      }
-      const initialUnit = resolveUnit(
-        lookups.units,
-        parsed.unitName,
-        parsed.quantity,
-      );
-      const resolved = resolveIngredientForRow(parsed, piece, lookups, threshold);
-      const final = pickFinalUnit(
-        initialUnit,
-        parsed.unitName,
-        resolved.ingredientId,
-        lookups.subUnits,
-        resolved.defaultSubUnit,
-        resolved.defaultUnit,
-      );
-      currentGroup.ingredients.push({
-        quantity: parsed.quantity,
-        unit: final.resolved,
-        subUnit: final.subUnit,
-        unitMatch: final.match,
-        rawUnit: final.rawUnit,
-        name: resolved.name,
-        ingredientId: resolved.ingredientId,
-        ingredientMatch: resolved.match,
-        canonicalIngredientName: resolved.canonicalIngredientName,
-        notes: resolved.notes,
-        // Mirror parseIngredientLines: equipment items (Backpapier,
-        // Einmachgläser …) auto-default to optional so the user opts in
-        // per-recipe. Without this OR, FamilyWall imports — which use this
-        // section-aware variant — silently dropped the default.
-        isOptional: parsed.isOptional || resolved.isEquipment,
-        fixedAmount: parsed.quantity === null,
-        rawText: piece.trim(),
-        candidateMatches: resolved.candidateMatches,
-        newNameProposals: resolved.newNameProposals,
-      });
     }
   }
 

@@ -13,6 +13,7 @@ const ingredientSchema = z
     isOptional: z.boolean().default(false),
     fixedAmount: z.boolean().default(false),
     rawLine: z.string().nullable().default(null),
+    isAlternative: z.boolean().default(false),
   })
   .refine((v) => !(v.unitId != null && v.subUnitId != null), {
     message: "unitId und subUnitId schließen sich gegenseitig aus.",

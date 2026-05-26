@@ -81,6 +81,7 @@ describe("transformFamilywallRecipe", () => {
       isOptional: false,
       fixedAmount: false,
       rawLine: "500 g Hackfleisch",
+      isAlternative: false,
     });
   });
 
@@ -437,17 +438,23 @@ describe("transformFamilywallRecipe", () => {
     expect(ing.ingredientName).toBe("caster sugar");
   });
 
-  it("drops 'oder'-alternatives in favor of the first option", () => {
-    // First-option-wins convention applied by preprocessAlternatives —
-    // "Butter oder Margarine" → "Butter", and the alternative is dropped
-    // entirely so it doesn't interfere with matcher scoring.
+  it("'oder'-alternatives split into primary + optional alternative row", () => {
+    // "Butter oder Margarine" now becomes Butter (primary) + Margarine
+    // (alternative, isOptional + isAlternative both true). The downstream
+    // service layer links the alternative to the primary via
+    // recipe_ingredient.alternative_for_id at insert time.
     const out = transformFamilywallRecipe(
       makeRaw({ ingredients: ["100g Butter oder Margarine"] }),
       makeLookups(),
       null,
     );
-    const ing = out.sections[0].ingredients[0];
-    expect(ing.ingredientName).toBe("Butter");
+    const rows = out.sections[0].ingredients;
+    expect(rows).toHaveLength(2);
+    expect(rows[0].ingredientName).toBe("Butter");
+    expect(rows[0].isOptional).toBe(false);
+    expect(rows[1].ingredientName).toBe("Margarine");
+    expect(rows[1].isOptional).toBe(true);
+    expect(rows[1].isAlternative).toBe(true);
   });
 
   it("moves 'z.B.' examples into notes", () => {

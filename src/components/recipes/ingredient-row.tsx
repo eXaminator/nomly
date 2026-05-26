@@ -3,13 +3,22 @@
 import * as React from "react";
 import {
   AlertTriangle,
+  ArrowUp,
   CircleCheck,
   CircleHelp,
+  CornerDownRight,
+  GripVertical,
+  Indent,
   Lock,
+  Outdent,
   RotateCw,
   Trash2,
   Unlock,
 } from "lucide-react";
+import type {
+  DraggableAttributes,
+  DraggableSyntheticListeners,
+} from "@dnd-kit/core";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -168,9 +177,40 @@ type Props = {
   value: DraftIngredient;
   onChange: (next: DraftIngredient) => void;
   onRemove: () => void;
+  /** Insert a new empty alternative attached to this row's primary group.
+   *  Only callable on primary rows — alternatives can't have their own
+   *  alternatives. */
+  onAddAlternative?: () => void;
+  /** Make this primary row an alternative of the row immediately above
+   *  it. Undefined (button hidden) when not applicable — see
+   *  {@link IngredientGroup} for the rules. */
+  onDemote?: () => void;
+  /** Swap this alternative with its primary: the alt takes over leadership,
+   *  the old primary joins as an alternative. The group stays intact.
+   *  Only rendered when `value.isAlternative`. */
+  onPromote?: () => void;
+  /** Detach an alternative to become its own standalone primary, placed
+   *  right after the old group's last sibling. Only rendered when
+   *  `value.isAlternative`. */
+  onDetach?: () => void;
+  /** Drag handle props from the parent {@link IngredientGroup}'s
+   *  `useSortable`. Only passed to primary rows — alternatives ride along
+   *  inside the same draggable container and don't have their own grip. */
+  dragAttributes?: DraggableAttributes;
+  dragListeners?: DraggableSyntheticListeners;
 };
 
-export function IngredientRow({ value, onChange, onRemove }: Props) {
+export function IngredientRow({
+  value,
+  onChange,
+  onRemove,
+  onAddAlternative,
+  onDemote,
+  onPromote,
+  onDetach,
+  dragAttributes,
+  dragListeners,
+}: Props) {
   const [defaultUnits, setDefaultUnits] = React.useState<SelectSearchItem[]>([]);
   React.useEffect(() => {
     void loadDefaultUnits().then(setDefaultUnits);
@@ -516,7 +556,53 @@ export function IngredientRow({ value, onChange, onRemove }: Props) {
   }
 
   return (
-    <div className="flex flex-col gap-1">
+    <div
+      className={cn(
+        // Each row carries its own vertical breathing room; the divider
+        // line is drawn by the parent's `divide-y`. Symmetric `py-3` on
+        // EVERY row (no first/last collapse) so the "Original:" hint and
+        // the row's content always sit ≥12px clear of the divider above
+        // and below — collapsing the padding made the hint touch the
+        // border between rows.
+        "flex items-start gap-2 py-3",
+      )}
+    >
+      {value.isAlternative ? (
+        // Alternatives ride inside the primary's draggable container, so
+        // no grip on this row. The grip slot is preserved as empty space
+        // so the alt's content starts at the same x as the primary's, and
+        // the trailing arrow sits at the start-of-Qty column for visual
+        // indent ("the arrow IS the indentation").
+        <>
+          <span
+            aria-hidden="true"
+            className="mt-1.5 inline-flex h-8 w-6 shrink-0"
+          />
+          <span
+            aria-hidden="true"
+            className="mt-1.5 inline-flex h-8 w-6 shrink-0 items-center justify-center text-[var(--color-muted-fg)]"
+          >
+            <CornerDownRight className="size-4" />
+          </span>
+        </>
+      ) : (
+        <button
+          type="button"
+          {...(dragAttributes ?? {})}
+          {...(dragListeners ?? {})}
+          aria-label="Zutat per Drag-and-Drop verschieben"
+          title="Ziehen, um die Zutatgruppe umzuordnen oder in einen anderen Abschnitt zu verschieben"
+          className="mt-1.5 inline-flex h-8 w-6 shrink-0 cursor-grab touch-none items-center justify-center rounded-md text-[var(--color-muted-fg)] hover:bg-[var(--color-muted)] active:cursor-grabbing"
+        >
+          <GripVertical className="size-4" />
+        </button>
+      )}
+      <div className="flex flex-1 min-w-0 flex-col gap-1">
+    {value.isAlternative ? (
+      <p className="text-xs italic text-[var(--color-muted-fg)]">
+        Alternative
+      </p>
+    ) : null}
     {value.rawText ? (
       <p
         className="truncate text-xs text-[var(--color-muted-fg)]"
@@ -526,8 +612,13 @@ export function IngredientRow({ value, onChange, onRemove }: Props) {
       </p>
     ) : null}
     <div
-      className="grid grid-cols-[5rem_8rem_1fr_auto_auto_auto] gap-2 md:grid-cols-[5rem_8rem_1fr_1fr_auto_auto_auto]"
+      className="grid gap-2 grid-cols-[4rem_minmax(0,1fr)_auto_auto_auto_auto_auto] md:grid-cols-[5rem_8rem_minmax(0,1fr)_minmax(0,1fr)_auto_auto_auto_auto_auto]"
     >
+      {/* Mobile flow (3 rows): [Qty | Unit cs-4]  ·  [Name cs-5]  ·
+          [Notes cs-2 | Opt | Fix | Trash]. Giving Unit the leftover row-1
+          width keeps "Stück"/"Esslöffel" readable; before, a 1fr unit cell
+          was getting squeezed to ~70px next to the icon buttons.
+          Desktop (md+) stays a single-row 7-col grid. */}
       <Input
         inputMode="decimal"
         placeholder="Menge"
@@ -535,7 +626,7 @@ export function IngredientRow({ value, onChange, onRemove }: Props) {
         onChange={(e) => onChange({ ...value, quantity: e.target.value })}
         aria-label="Menge"
       />
-      <div className="flex flex-col gap-1">
+      <div className="col-span-4 flex flex-col gap-1 md:col-span-1 md:col-start-2 md:row-start-1">
         <SelectSearch
           value={pickerValue}
           onChange={onPickUnit}
@@ -547,24 +638,37 @@ export function IngredientRow({ value, onChange, onRemove }: Props) {
         />
         <UnitBadge annotation={value.importAnnotation} />
       </div>
-      <div className="col-span-2 flex flex-col gap-1 md:col-span-1">
-        <IngredientNameInput
-          value={value.name}
-          onChange={(name, canonical) =>
-            onChange({
-              ...value,
-              name,
-              // When `canonical` is undefined, leave the existing value
-              // alone (the user is still typing in-place); when it's an
-              // explicit `null` the input is telling us to clear it; when
-              // it's a string, an alias was picked.
-              canonicalName:
-                canonical === undefined ? value.canonicalName : canonical,
-              importAnnotation: clearAnnotationOn(value.importAnnotation, "ingredient"),
-            })
-          }
-          placeholder="Zutat"
-        />
+      <IngredientNameInput
+        value={value.name}
+        onChange={(name, canonical) =>
+          onChange({
+            ...value,
+            name,
+            // When `canonical` is undefined, leave the existing value
+            // alone (the user is still typing in-place); when it's an
+            // explicit `null` the input is telling us to clear it; when
+            // it's a string, an alias was picked.
+            canonicalName:
+              canonical === undefined ? value.canonicalName : canonical,
+            importAnnotation: clearAnnotationOn(value.importAnnotation, "ingredient"),
+          })
+        }
+        placeholder="Zutat"
+        className="col-span-5 md:col-span-1 md:col-start-3 md:row-start-1"
+      />
+      <Input
+        placeholder="Notiz (z. B. fein gehackt)"
+        value={value.notes}
+        onChange={(e) => onChange({ ...value, notes: e.target.value })}
+        aria-label="Notiz"
+        className="col-span-2 md:col-span-1 md:col-start-4 md:row-start-1"
+      />
+      {/* CandidatePills live in their own grid row that spans the Name +
+          Notes columns on desktop (and the full mobile width). Used to
+          sit inside the Name column's flex-col which constrained the
+          pill row to the Name input's width and forced long suggestion
+          lists to wrap awkwardly. */}
+      <div className="col-span-7 md:col-span-2 md:col-start-3 md:row-start-2">
         <CandidatePills
           name={value.name}
           candidates={serverMatches}
@@ -577,36 +681,39 @@ export function IngredientRow({ value, onChange, onRemove }: Props) {
           onForceMatch={forceMatch}
         />
       </div>
-      <Input
-        placeholder="Notiz (z. B. fein gehackt)"
-        value={value.notes}
-        onChange={(e) => onChange({ ...value, notes: e.target.value })}
-        aria-label="Notiz"
-        className="col-span-3 md:col-span-1"
-      />
-      <Button
-        variant={value.isOptional ? "secondary" : "ghost"}
-        size="icon"
-        onClick={() => onChange({ ...value, isOptional: !value.isOptional })}
-        aria-pressed={value.isOptional}
-        aria-label={
-          value.isOptional
-            ? "Optional-Markierung entfernen"
-            : "Als optional markieren"
-        }
-        title={
-          value.isOptional
-            ? "Optional – wird im Rezept gedimmt angezeigt und beim Einkaufslisten-Aufbau übersprungen."
-            : "Als optional markieren"
-        }
-        className="col-start-4 md:col-start-5"
-      >
-        {value.isOptional ? (
-          <CircleHelp className="size-4" />
-        ) : (
-          <CircleCheck className="size-4" />
-        )}
-      </Button>
+      {value.isAlternative ? (
+        // Alternatives are inherently optional — they never get the
+        // toggle. Reserved empty slot keeps the grid columns aligned with
+        // primary rows.
+        <span
+          aria-hidden="true"
+          className="col-start-3 h-9 w-9 md:col-start-5 md:row-start-1 md:h-11 md:w-11"
+        />
+      ) : (
+        <Button
+          variant={value.isOptional ? "secondary" : "ghost"}
+          size="icon"
+          onClick={() => onChange({ ...value, isOptional: !value.isOptional })}
+          aria-pressed={value.isOptional}
+          aria-label={
+            value.isOptional
+              ? "Optional-Markierung entfernen"
+              : "Als optional markieren"
+          }
+          title={
+            value.isOptional
+              ? "Optional – wird im Rezept gedimmt angezeigt und beim Einkaufslisten-Aufbau übersprungen."
+              : "Als optional markieren"
+          }
+          className="col-start-3 h-9 w-9 md:col-start-5 md:row-start-1 md:h-11 md:w-11"
+        >
+          {value.isOptional ? (
+            <CircleHelp className="size-4" />
+          ) : (
+            <CircleCheck className="size-4" />
+          )}
+        </Button>
+      )}
       <Button
         variant={value.fixedAmount ? "secondary" : "ghost"}
         size="icon"
@@ -622,7 +729,7 @@ export function IngredientRow({ value, onChange, onRemove }: Props) {
             ? "Feste Menge – wird bei geänderter Portionsanzahl nicht skaliert."
             : "Menge unabhängig von Portionen markieren (z. B. eine Prise Salz)."
         }
-        className="col-start-5 md:col-start-6"
+        className="col-start-4 h-9 w-9 md:col-start-6 md:row-start-1 md:h-11 md:w-11"
       >
         {value.fixedAmount ? (
           <Lock className="size-4" />
@@ -630,16 +737,87 @@ export function IngredientRow({ value, onChange, onRemove }: Props) {
           <Unlock className="size-4" />
         )}
       </Button>
+      {/* Indent/Outdent pair at col 5/7:
+            - Primary with onDemote → Indent (become alt of prior)
+            - Alt with onDetach → Outdent (leave the group as standalone) */}
+      {value.isAlternative ? (
+        onDetach ? (
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={onDetach}
+            aria-label="Zur eigenständigen Zutat machen"
+            title="Macht diese Alternative zu einer eigenen Zutat. Sie verlässt die Gruppe und steht direkt darunter."
+            className="col-start-5 h-9 w-9 md:col-start-7 md:row-start-1 md:h-11 md:w-11"
+          >
+            <Outdent className="size-4" />
+          </Button>
+        ) : (
+          <span
+            aria-hidden="true"
+            className="col-start-5 h-9 w-9 md:col-start-7 md:row-start-1 md:h-11 md:w-11"
+          />
+        )
+      ) : onDemote ? (
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={onDemote}
+          aria-label="Als Alternative der vorherigen Zutat einordnen"
+          title="Macht diese Zutat zu einer Alternative der Zutat darüber."
+          className="col-start-5 h-9 w-9 md:col-start-7 md:row-start-1 md:h-11 md:w-11"
+        >
+          <Indent className="size-4" />
+        </Button>
+      ) : (
+        <span
+          aria-hidden="true"
+          className="col-start-5 h-9 w-9 md:col-start-7 md:row-start-1 md:h-11 md:w-11"
+        />
+      )}
+      {/* Col 6/8: row-type-specific verb.
+            - Primary with onAddAlternative → CornerDownRight (add child)
+            - Alt with onPromote → ArrowUp (swap with current primary;
+              keeps the group, just changes who leads) */}
+      {!value.isAlternative && onAddAlternative ? (
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={onAddAlternative}
+          aria-label="Alternative hinzufügen"
+          title="Eine alternative Zutat unter dieser Zutat hinzufügen. Alternativen sind immer optional."
+          className="col-start-6 h-9 w-9 md:col-start-8 md:row-start-1 md:h-11 md:w-11"
+        >
+          <CornerDownRight className="size-4" />
+        </Button>
+      ) : value.isAlternative && onPromote ? (
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={onPromote}
+          aria-label="Mit Hauptzutat tauschen"
+          title="Tauscht diese Alternative mit der Hauptzutat: die Alternative wird die neue Hauptzutat, die alte Hauptzutat wird zur Alternative."
+          className="col-start-6 h-9 w-9 md:col-start-8 md:row-start-1 md:h-11 md:w-11"
+        >
+          <ArrowUp className="size-4" />
+        </Button>
+      ) : (
+        <span
+          aria-hidden="true"
+          className="col-start-6 h-9 w-9 md:col-start-8 md:row-start-1 md:h-11 md:w-11"
+        />
+      )}
       <Button
         variant="ghost"
         size="icon"
         onClick={onRemove}
         aria-label="Zutat entfernen"
-        className="col-start-6 md:col-start-7"
+        className="col-start-7 h-9 w-9 md:col-start-9 md:row-start-1 md:h-11 md:w-11"
       >
         <Trash2 className="size-4" />
       </Button>
     </div>
+      </div>
     </div>
   );
 }

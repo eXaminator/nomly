@@ -46,6 +46,7 @@ export function linkedRecipesForIngredients(
       displayName: recipeIngredient.displayName,
       notes: recipeIngredient.notes,
       isOptional: recipeIngredient.isOptional,
+      alternativeForId: recipeIngredient.alternativeForId,
       fixedAmount: recipeIngredient.fixedAmount,
     })
     .from(recipeIngredient)
@@ -77,6 +78,7 @@ export function linkedRecipesForIngredients(
       displayName: r.displayName,
       notes: r.notes,
       isOptional: r.isOptional,
+      alternativeForId: r.alternativeForId,
       fixedAmount: r.fixedAmount,
     };
 

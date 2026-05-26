@@ -231,8 +231,23 @@ export const recipeIngredient = sqliteTable(
      */
     rawLine: text("raw_line"),
     sortOrder: integer("sort_order").notNull().default(0),
+    /**
+     * Self-referencing FK: when non-null, this row is an ALTERNATIVE for
+     * the recipe_ingredient row with the given id. Alternatives are always
+     * `isOptional = true`, sort immediately after their primary, and are
+     * grouped under it in both the editor and the read-only view. Depth is
+     * always exactly 1 — an alternative cannot itself have alternatives
+     * (enforced in the service layer, not the DB).
+     */
+    alternativeForId: integer("alternative_for_id").references(
+      (): AnySQLiteColumn => recipeIngredient.id,
+      { onDelete: "cascade" },
+    ),
   },
-  (t) => [index("recipe_ingredient_section_idx").on(t.sectionId)],
+  (t) => [
+    index("recipe_ingredient_section_idx").on(t.sectionId),
+    index("recipe_ingredient_alternative_for_idx").on(t.alternativeForId),
+  ],
 );
 
 export const tag = sqliteTable("tag", {

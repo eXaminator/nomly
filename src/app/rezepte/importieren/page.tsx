@@ -1,3 +1,5 @@
+import Link from "next/link";
+import { ChevronLeft } from "lucide-react";
 import { asc } from "drizzle-orm";
 import { AppShell } from "@/components/layout/app-shell";
 import { ImportFlow } from "@/components/recipes/import-flow";
@@ -17,6 +19,13 @@ export default function ImportRecipePage() {
   return (
     <AppShell>
       <div className="flex flex-col gap-2">
+        <Link
+          href="/rezepte"
+          className="inline-flex w-fit items-center gap-1 text-sm text-[var(--color-muted-fg)] hover:text-[var(--color-fg)]"
+        >
+          <ChevronLeft className="size-4" />
+          Rezepte
+        </Link>
         <h1 className="text-2xl font-semibold tracking-tight">
           Rezept importieren
         </h1>

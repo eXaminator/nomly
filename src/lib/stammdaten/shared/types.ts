@@ -32,6 +32,10 @@ export type RecipeIngredientUsage = {
   displayName: string | null;
   notes: string | null;
   isOptional: boolean;
+  /** Non-null when this row is an alternative for another recipe_ingredient.
+   * The impact-section dims alternative rows the same way it dims explicit
+   * optionals — both go through {@link isOptionalIngredient}. */
+  alternativeForId: number | null;
   /** True for "Salz nach Geschmack" / "etwas Öl" rows — same flag the
    *  recipe view uses to render the lock icon. */
   fixedAmount: boolean;

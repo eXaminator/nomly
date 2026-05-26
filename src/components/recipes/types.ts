@@ -88,6 +88,13 @@ export type DraftIngredient = {
    *  rows loaded from an existing recipe. */
   rawText?: string;
   importAnnotation?: ImportAnnotation;
+  /** When true, this row is an alternative for the most recent
+   *  non-alternative row above it in the same section. Rendered indented
+   *  under its primary; always optional. Sent to the server as
+   *  `isAlternative: true` so the service layer resolves it to a real
+   *  `recipe_ingredient.alternative_for_id` linking to the primary's
+   *  inserted id. */
+  isAlternative: boolean;
 };
 
 export type DraftSection = {
@@ -151,6 +158,10 @@ export type ParsedIngredientResponse = {
   /** Source substring the parser worked from (after table pairing /
    *  conjunction splitting). Surfaced under the row in the import-review UI. */
   rawText?: string;
+  /** Server marked the row as an alternative of its preceding primary
+   *  (parsed from `alternativ:` / `(Alternativ: X)`). Pairs with
+   *  `isOptional: true`. */
+  isAlternative?: boolean;
 };
 
 export function parsedIngredientToDraft(
@@ -200,6 +211,7 @@ export function parsedIngredientToDraft(
     notes: i.notes ?? "",
     isOptional: i.isOptional ?? false,
     fixedAmount: i.fixedAmount ?? false,
+    isAlternative: i.isAlternative ?? false,
     rawText: i.rawText,
     importAnnotation: annotation,
   };
@@ -236,6 +248,20 @@ export function emptyIngredient(): DraftIngredient {
     notes: "",
     isOptional: false,
     fixedAmount: false,
+    isAlternative: false,
+  };
+}
+
+/**
+ * Empty draft for a new alternative row. Always starts isOptional+isAlternative
+ * true so the row is born linked to its primary and excluded from the
+ * shopping-list default.
+ */
+export function emptyAlternative(): DraftIngredient {
+  return {
+    ...emptyIngredient(),
+    isOptional: true,
+    isAlternative: true,
   };
 }
 
@@ -287,6 +313,7 @@ export function emptyRecipe(): DraftRecipe {
             notes: "",
             isOptional: false,
             fixedAmount: false,
+            isAlternative: false,
           },
         ],
       },

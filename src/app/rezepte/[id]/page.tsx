@@ -1,8 +1,10 @@
+import { Fragment } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import {
   Beef,
   Clock,
+  CornerDownRight,
   ExternalLink,
   Leaf,
   Lock,
@@ -14,7 +16,9 @@ import { AppShell } from "@/components/layout/app-shell";
 import { Button } from "@/components/ui/button";
 import { DietBadge } from "@/components/recipes/diet-badge";
 import { IngredientLine } from "@/components/recipes/ingredient-line";
+import { cn } from "@/lib/cn";
 import { getRecipe } from "@/lib/recipes/service";
+import { isOptionalIngredient } from "@/lib/recipes/optional";
 import type { IngredientDietaryClass } from "@/lib/recipes/diet";
 import { renderMarkdown } from "@/lib/markdown";
 
@@ -153,11 +157,30 @@ export default async function RecipeViewPage({
           const consumables = section.ingredients.filter((i) => !i.isEquipment);
           const equipment = section.ingredients.filter((i) => i.isEquipment);
 
-          const renderIngredient = (ing: (typeof section.ingredients)[number]) => (
+          type IngredientRow = (typeof section.ingredients)[number];
+
+          const renderIngredient = (
+            ing: IngredientRow,
+            asAlternative = false,
+          ) => (
             <li
               key={ing.id}
-              className={ing.isOptional ? "flex gap-2 italic opacity-65" : "flex gap-2"}
+              // `items-start` keeps the qty/unit column anchored to the
+              // top when a long ingredient name + notes wraps onto a
+              // second line. Alternatives go through `isOptionalIngredient`
+              // so they share the same dimmed treatment as explicit
+              // optionals (italic + 65% opacity).
+              className={cn(
+                "flex items-start gap-2",
+                isOptionalIngredient(ing) && "italic opacity-65",
+              )}
             >
+              {asAlternative ? (
+                <CornerDownRight
+                  className="size-4 shrink-0 text-[var(--color-muted-fg)]"
+                  aria-hidden="true"
+                />
+              ) : null}
               <DietMarker kind={ing.isEquipment ? null : ing.dietaryClass} />
               <span className="inline-flex min-w-12 items-center gap-1 font-mono text-[var(--color-muted-fg)]">
                 {ing.fixedAmount ? (
@@ -168,6 +191,7 @@ export default async function RecipeViewPage({
                 </span>
               </span>
               <span className="flex-1">
+                {asAlternative ? <span>oder </span> : null}
                 <IngredientLine
                   displayName={ing.ingredientName}
                   canonicalName={ing.canonicalIngredientName}
@@ -175,7 +199,7 @@ export default async function RecipeViewPage({
                 {ing.notes ? (
                   <span className="text-[var(--color-muted-fg)]"> – {ing.notes}</span>
                 ) : null}
-                {ing.isOptional ? (
+                {!asAlternative && isOptionalIngredient(ing) ? (
                   <span className="ml-1 text-xs text-[var(--color-muted-fg)]">
                     (optional)
                   </span>
@@ -184,19 +208,47 @@ export default async function RecipeViewPage({
             </li>
           );
 
+          // Group consecutive alternative rows under their preceding
+          // non-alternative primary. The service layer already returns
+          // ingredients in sortOrder, so alternatives sit directly after
+          // their primary in the array.
+          const groupByPrimary = (
+            rows: IngredientRow[],
+          ): { primary: IngredientRow; alternatives: IngredientRow[] }[] => {
+            const out: {
+              primary: IngredientRow;
+              alternatives: IngredientRow[];
+            }[] = [];
+            for (const row of rows) {
+              if (row.alternativeForId != null && out.length > 0) {
+                out[out.length - 1].alternatives.push(row);
+              } else {
+                out.push({ primary: row, alternatives: [] });
+              }
+            }
+            return out;
+          };
+
+          const renderList = (rows: IngredientRow[]) => (
+            <ul className="space-y-1 text-sm text-[var(--color-fg)]">
+              {groupByPrimary(rows).map(({ primary, alternatives }) => (
+                <Fragment key={primary.id}>
+                  {renderIngredient(primary)}
+                  {alternatives.map((alt) => renderIngredient(alt, true))}
+                </Fragment>
+              ))}
+            </ul>
+          );
+
           const ingredientList = (
             <div className="space-y-4">
-              <ul className="space-y-1 text-sm text-[var(--color-fg)]">
-                {consumables.map(renderIngredient)}
-              </ul>
+              {renderList(consumables)}
               {equipment.length > 0 ? (
                 <div className="space-y-1">
                   <h3 className="text-xs font-medium uppercase tracking-wide text-[var(--color-muted-fg)]">
                     Du brauchst auch
                   </h3>
-                  <ul className="space-y-1 text-sm text-[var(--color-fg)]">
-                    {equipment.map(renderIngredient)}
-                  </ul>
+                  {renderList(equipment)}
                 </div>
               ) : null}
             </div>

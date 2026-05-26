@@ -34,6 +34,12 @@ export type RecipeIngredientInput = {
    *  the user the line the parser was working from. Null/omitted for
    *  manually-added rows. */
   rawLine?: string | null;
+  /** When true, this row is an ALTERNATIVE to the most recent
+   *  non-alternative row in the same section. The server resolves this
+   *  flag to a non-null `recipe_ingredient.alternative_for_id` at insert
+   *  time. Alternatives are always persisted as optional, regardless of
+   *  what {@link isOptional} carries. Defaults to false. */
+  isAlternative?: boolean;
 };
 
 export type RecipeSectionInput = {
@@ -135,6 +141,11 @@ export type RecipeIngredientView = {
    *  marker on the recipe detail page. NULL = no marker (unknown). */
   dietaryClass: IngredientDietaryClass;
   sortOrder: number;
+  /** Non-null when this row is an alternative for another ingredient in the
+   *  same section — points at that primary's {@link id}. Null on primary
+   *  rows. Alternatives sort immediately after their primary and are
+   *  always {@link isOptional}. */
+  alternativeForId: number | null;
 };
 
 export type RecipeSectionView = {

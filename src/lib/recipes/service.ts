@@ -1,4 +1,4 @@
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { db } from "../../db/index.ts";
 import {
   recipe,
@@ -18,6 +18,7 @@ import type {
   RecipeView,
 } from "./types.ts";
 import { deriveDiet, type IngredientDietaryClass } from "./diet.ts";
+import { isOptionalIngredient } from "./optional.ts";
 import { fold, matchRecipe, parseQuery } from "./search.ts";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -205,6 +206,14 @@ function writeSections(
       .all();
     const sectionId = sectionRow[0].id;
 
+    // Tracks the most recent primary insertion in this section. An
+    // alternative (`ing.isAlternative === true`) links back to this id via
+    // `alternative_for_id`. If an alternative appears with no preceding
+    // primary in the same section it's defensively demoted to a primary —
+    // we never reach into a previous section because the relationship is
+    // section-scoped.
+    let lastPrimaryRowId: number | null = null;
+
     section.ingredients.forEach((ing, iIdx) => {
       const trimmedName = ing.ingredientName.trim();
       // Explicit ingredient id from the pill picker wins over name-based
@@ -221,7 +230,12 @@ function writeSections(
       if (ing.ingredientId != null && ing.addAsAlias) {
         addIngredientAlias(tx, ing.ingredientId, trimmedName);
       }
-      tx.insert(recipeIngredient)
+      // Resolve the alternative linkage. Orphan alternatives (no preceding
+      // primary) silently become primaries — easier than rejecting the
+      // whole save when the form / importer is in a transient state.
+      const isAlternative = ing.isAlternative === true && lastPrimaryRowId !== null;
+      const inserted = tx
+        .insert(recipeIngredient)
         .values({
           sectionId,
           ingredientId,
@@ -241,12 +255,19 @@ function writeSections(
               ? null
               : resolveDisplayUnit(tx, ing.unitId, ing.displayUnit),
           notes: ing.notes,
-          isOptional: ing.isOptional,
+          // Alternatives are always optional, regardless of what the
+          // caller sent. Mirrors the parser's `forceOptional` invariant.
+          isOptional: isAlternative ? true : ing.isOptional,
           fixedAmount: ing.fixedAmount,
           rawLine: ing.rawLine ?? null,
           sortOrder: iIdx,
+          alternativeForId: isAlternative ? lastPrimaryRowId : null,
         })
-        .run();
+        .returning({ id: recipeIngredient.id })
+        .all();
+      if (!isAlternative) {
+        lastPrimaryRowId = inserted[0].id;
+      }
     });
   });
 }
@@ -343,6 +364,7 @@ export function getRecipe(id: number): RecipeView | null {
     dietaryClass: IngredientDietaryClass;
     isEquipment: boolean;
     sortOrder: number;
+    alternativeForId: number | null;
   };
   const ingredients: IngredientRow[] =
     sectionIds.length === 0
@@ -374,6 +396,7 @@ export function getRecipe(id: number): RecipeView | null {
             dietaryClass: ingredientTable.dietaryClass,
             isEquipment: ingredientTable.isEquipment,
             sortOrder: recipeIngredient.sortOrder,
+            alternativeForId: recipeIngredient.alternativeForId,
           })
           .from(recipeIngredient)
           .leftJoin(unitTable, eq(unitTable.id, recipeIngredient.unitId))
@@ -398,7 +421,9 @@ export function getRecipe(id: number): RecipeView | null {
     .sort();
 
   const diet = deriveDiet(
-    ingredients.filter((i) => !i.isOptional).map((i) => i.dietaryClass),
+    ingredients
+      .filter((i) => !isOptionalIngredient(i))
+      .map((i) => i.dietaryClass),
   );
 
   return {
@@ -439,6 +464,7 @@ export function getRecipe(id: number): RecipeView | null {
           isEquipment: i.isEquipment,
           dietaryClass: i.dietaryClass,
           sortOrder: i.sortOrder,
+          alternativeForId: i.alternativeForId,
         })),
     })),
     createdAt: head.createdAt,
@@ -484,7 +510,10 @@ function loadIngredientIndex(recipeIds: number[]): Map<number, string> {
     .where(
       and(
         inArray(recipeSection.recipeId, recipeIds),
+        // "Counted" rows for the search-index: non-optional AND not an
+        // alternative. Mirrors {@link isOptionalIngredient} on the SQL side.
         eq(recipeIngredient.isOptional, false),
+        isNull(recipeIngredient.alternativeForId),
       ),
     )
     .all();
@@ -620,7 +649,9 @@ function computeDietForRecipes(recipeIds: number[]): Map<number, RecipeDiet> {
     .where(
       and(
         inArray(recipeSection.recipeId, recipeIds),
+        // Diet calc counts non-optional, non-alternative rows only.
         eq(recipeIngredient.isOptional, false),
+        isNull(recipeIngredient.alternativeForId),
       ),
     )
     .all();

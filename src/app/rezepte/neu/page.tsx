@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { asc } from "drizzle-orm";
-import { Download } from "lucide-react";
+import { ChevronLeft, Download } from "lucide-react";
 import { AppShell } from "@/components/layout/app-shell";
 import { Button } from "@/components/ui/button";
 import { NewRecipeForm } from "@/components/recipes/new-recipe-form";
@@ -19,7 +19,14 @@ export default function NewRecipePage() {
 
   return (
     <AppShell>
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+      <Link
+        href="/rezepte"
+        className="inline-flex w-fit items-center gap-1 text-sm text-[var(--color-muted-fg)] hover:text-[var(--color-fg)]"
+      >
+        <ChevronLeft className="size-4" />
+        Rezepte
+      </Link>
+      <div className="mt-2 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="space-y-2">
           <h1 className="text-2xl font-semibold tracking-tight">Neues Rezept</h1>
           <p className="text-sm text-[var(--color-muted-fg)]">

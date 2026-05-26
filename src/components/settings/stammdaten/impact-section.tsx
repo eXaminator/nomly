@@ -4,6 +4,7 @@ import * as React from "react";
 import Link from "next/link";
 import { ChevronDown, ExternalLink, Loader2, Lock } from "lucide-react";
 import { cn } from "@/lib/cn";
+import { isOptionalIngredient } from "@/lib/recipes/optional";
 
 import {
   type EntityKind,
@@ -180,7 +181,7 @@ function UsageLine({ usage: u }: { usage: RecipeIngredientUsage }) {
     <li
       className={cn(
         "flex gap-2",
-        u.isOptional && "italic opacity-65",
+        isOptionalIngredient(u) && "italic opacity-65",
       )}
     >
       <span className="inline-flex min-w-10 items-center gap-1 font-mono text-[var(--color-muted-fg)]">
@@ -197,7 +198,7 @@ function UsageLine({ usage: u }: { usage: RecipeIngredientUsage }) {
         {u.notes ? (
           <span className="text-[var(--color-muted-fg)]"> – {u.notes}</span>
         ) : null}
-        {u.isOptional ? (
+        {isOptionalIngredient(u) ? (
           <span className="ml-1 text-[var(--color-muted-fg)]">(optional)</span>
         ) : null}
       </span>

@@ -16,6 +16,7 @@ import { NumberInput } from "@/components/ui/number-input";
 import { Label } from "@/components/ui/label";
 import { addDays } from "@/lib/meal-plans/dates";
 import type { PreviewMeal, PreviewIngredient } from "@/lib/shopping/preview";
+import { isOptionalIngredient } from "@/lib/recipes/optional";
 
 /** Iterates a meal's ingredients across all its sections. Used for the
  *  selection/quantity bookkeeping that doesn't care about section
@@ -29,7 +30,9 @@ function flattenIngredients(meal: PreviewMeal): PreviewIngredient[] {
  *  checkbox). Optional ingredients are skipped — the user opts in to
  *  those individually. */
 function defaultSelectableIds(items: PreviewIngredient[]): number[] {
-  return items.filter((i) => !i.isOptional).map((i) => i.recipeIngredientId);
+  return items
+    .filter((i) => !isOptionalIngredient(i))
+    .map((i) => i.recipeIngredientId);
 }
 import { previewMeals as apiPreview, addMealsToList } from "./api";
 
@@ -493,7 +496,7 @@ function mealSelectionState(
   selected: Set<number>,
 ): "none" | "some" | "all" {
   if (items.length === 0) return "none";
-  const required = items.filter((i) => !i.isOptional);
+  const required = items.filter((i) => !isOptionalIngredient(i));
   const anySelected = items.some((i) => selected.has(i.recipeIngredientId));
   if (!anySelected) return "none";
   if (required.length === 0) return "some";
@@ -520,7 +523,7 @@ function IngredientCheckbox({
     <li>
       <label
         className={`flex cursor-pointer items-start gap-2 text-sm ${
-          ing.isOptional ? "text-[var(--color-muted-fg)] italic" : ""
+          isOptionalIngredient(ing) ? "text-[var(--color-muted-fg)] italic" : ""
         }`}
       >
         {/* mt-1 keeps the checkbox visually centered on the FIRST text line
@@ -534,7 +537,7 @@ function IngredientCheckbox({
         />
         <span className="flex flex-1 flex-wrap items-center gap-2">
           <span>{ing.ingredientName}</span>
-          {ing.isOptional ? (
+          {isOptionalIngredient(ing) ? (
             <span className="rounded-full bg-[var(--color-muted)] px-1.5 py-0.5 text-[10px] font-medium uppercase not-italic tracking-wider text-[var(--color-muted-fg)]">
               optional
             </span>

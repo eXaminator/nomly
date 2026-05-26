@@ -1505,15 +1505,12 @@ export function isStandaloneDescriptor(name: string): boolean {
  *    conjunction splitter then yields two rows.
  *
  * 2. **Dash-prefix shared-suffix `X- oder Y[suffix]`.** Expand
- *    "Weizen- oder Dinkelmehl" → "Weizenmehl" by finding the longest
- *    tail of `Y[suffix]` such that `stem + tail` matches a known
- *    ingredient (catalog entries via `knownIngredientKeys`). Falls back to
- *    just the stem if no catalog hit is found.
- *
- * 3. **Bare `X oder Y` alternatives.** Drop everything from " oder " /
- *    " or " through end-of-line — the user's convention is "first option
- *    wins". Catches "Tamari oder Soja-Sauce", "Petersilie oder Koriander",
- *    "Hafer- oder Sojamilch" (after step 2 already rewrote the dash form).
+ *    "Weizen- oder Dinkelmehl" → "Weizenmehl oder Dinkelmehl" by finding
+ *    the longest tail of `Y[suffix]` such that `stem + tail` matches a
+ *    known ingredient (catalog entries via `knownIngredientKeys`). Falls
+ *    back to just stitching the dash off. The downstream " oder " rule in
+ *    {@link expandIngredientLine} then emits Weizenmehl (primary) +
+ *    Dinkelmehl (alternative).
  *
  * The check against `knownIngredientKeys` uses {@link normalizeForMatch}
  * so the keys (which are stored both as lowercased and as diacritic-
@@ -1530,8 +1527,9 @@ export function preprocessAlternatives(
   line = line.replace(/\b(salt)\s+(pepper)\b/gi, "$1 and $2");
 
   // 2. Dash-prefix shared-suffix conjunction: "Weizen- oder Dinkelmehl"
-  //    → expand by adopting the longest catalog-known tail of `second`
-  //    onto `stem`. Then step 3 drops the trailing "oder Y..." part.
+  //    → "Weizenmehl oder Dinkelmehl" by adopting the longest catalog-known
+  //    tail of `second` onto `stem`. The expansion's " oder " rule then
+  //    emits Weizenmehl as primary + Dinkelmehl as alternative.
   line = line.replace(
     /([A-Za-zÄÖÜäöüß]+)-\s+(?:oder|or)\s+([A-Za-zÄÖÜäöüß][A-Za-zÄÖÜäöüß-]+)/g,
     (_full, stem: string, second: string) => {
@@ -1546,14 +1544,11 @@ export function preprocessAlternatives(
           return `${candidate} oder ${second}`;
         }
       }
-      // No catalog hit — drop the dash, leave the rest alone. Step 3 then
-      // drops the trailing " oder Y" so the row falls back to just `stem`.
+      // No catalog hit — drop the dash, keep both parts. The expansion's
+      // " oder " rule then treats them as primary + alternative.
       return `${stem} oder ${second}`;
     },
   );
-
-  // 3. Drop "oder/or Y..." tail. First-option-wins convention.
-  line = line.replace(/\s+(?:oder|or)\s+.+$/i, "");
 
   return line;
 }
@@ -1666,4 +1661,320 @@ export function splitConjunctions(
 
   const cleaned = parts.filter((p) => p.length > 0);
   return cleaned.length === 0 ? [trimmed] : cleaned;
+}
+
+/**
+ * One unit of work after pre-expansion. Each input ingredient line can
+ * produce zero or more of these — a single header, multiple ingredients,
+ * or a mix (e.g. "Garnish: A, B, C" expands to one header + three
+ * ingredients).
+ */
+export type ExpandedIngredientRow =
+  | { kind: "header"; title: string; rawText: string }
+  | {
+      kind: "ingredient";
+      /** What the downstream parser sees. May differ from {@link rawText}
+       *  when a wrapper (Optional:, alternativ:, list-after-colon, each:)
+       *  was stripped or rewrote the text. */
+      text: string;
+      /** The user's original input line (verbatim, trimmed). Used as
+       *  `rawText` on the resulting `ImportedIngredient` so the import-
+       *  review UI can show where the row came from. */
+      rawText: string;
+      /** Force the row to optional regardless of what the parser infers. */
+      forceOptional: boolean;
+      /** True for the non-first rows produced by `alternativ:` / `(Alternativ: X)`
+       *  expansion. The downstream service layer turns this into an actual
+       *  `recipe_ingredient.alternative_for_id` linking back to the most
+       *  recent primary in the same section. */
+      isAlternative: boolean;
+    };
+
+const OPTIONAL_PREFIX_RE =
+  /^\s*(?:optional|optionally|opt\.?|opional|optionale)\s*:\s*(.+)$/i;
+/**
+ * "alternativ" / "alternative" / "alternatively" / "alternativly" — colon
+ * optional. Matches as a SEPARATOR token: surrounded by whitespace so
+ * "vegetable alternative" or "no alternatives" prose doesn't accidentally
+ * split. The trailing `\s+` requires at least one character after the
+ * marker, which also rules out an end-of-line "X alternative".
+ */
+const ALTERNATIV_SEP_RE =
+  /\s+(?:alternativ|alternative|alternatively|alternativly)\s*:?\s+/i;
+const PARENS_ALTERNATIV_RE =
+  /\s*\((?:alternativ|alternative|alternatively|alternativly)\s*:\s*([^)]+)\)\s*$/i;
+const EACH_DIST_RE = /^(\S[^:]*?)\s+each\s*:\s*(.+)$/i;
+
+/**
+ * Split a comma- and "or"/"oder"-separated post-colon list into pieces.
+ * Skips separators inside parens or brackets so "(28 oz., crushed)"
+ * survives intact.
+ */
+function splitColonListItems(text: string): string[] {
+  const trimmed = text.trim();
+  if (trimmed.length === 0) return [];
+  const out: string[] = [];
+  let depth = 0;
+  let current = "";
+  let i = 0;
+  while (i < trimmed.length) {
+    const ch = trimmed[i];
+    if (ch === "(" || ch === "[") depth += 1;
+    else if (ch === ")" || ch === "]") depth = Math.max(0, depth - 1);
+
+    if (depth === 0 && ch === ",") {
+      out.push(current.trim());
+      current = "";
+      i += 1;
+      continue;
+    }
+    if (depth === 0 && /\s/.test(ch)) {
+      const rest = trimmed.slice(i);
+      const m = /^\s+(?:or|oder)\s+/i.exec(rest);
+      if (m) {
+        out.push(current.trim());
+        current = "";
+        i += m[0].length;
+        continue;
+      }
+    }
+    current += ch;
+    i += 1;
+  }
+  if (current.trim().length > 0) out.push(current.trim());
+  return out.filter((s) => s.length > 0);
+}
+
+/**
+ * Find the FIRST top-level " oder " / " or " / " / " separator in the
+ * line, ignoring matches inside parens or brackets. Returns the match
+ * range or null when none qualifies.
+ */
+function findOrSeparator(
+  text: string,
+): { index: number; length: number } | null {
+  // " oder " / " or " / " / " — plus " o. " as German short form for
+  // "oder". The negative lookahead skips "o. ä." / "o. Ä."
+  // ("oder Ähnliches" = "or similar") which is a fixed phrase that belongs
+  // in notes, not a separator.
+  const sepRe = /\s+(?:oder|or)\s+|\s+o\.\s+(?!ä\.)|\s+\/\s+/gi;
+  let depth = 0;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === "(" || ch === "[") depth += 1;
+    else if (ch === ")" || ch === "]") depth = Math.max(0, depth - 1);
+    if (depth !== 0) continue;
+    sepRe.lastIndex = i;
+    const m = sepRe.exec(text);
+    if (m && m.index === i) {
+      return { index: m.index, length: m[0].length };
+    }
+  }
+  return null;
+}
+
+/**
+ * Returns true when the first word of `text` is a known descriptor /
+ * prep-leading token. Used to gate the "or/oder splits into alternatives"
+ * rule so e.g. "dried or fresh shiitake mushrooms" stays as one row
+ * (the post-or "fresh" is a modifier, not an alternative ingredient).
+ */
+function postOrIsDescriptorModifier(text: string): boolean {
+  const firstWord = text.trim().split(/\s+/)[0]?.toLowerCase() ?? "";
+  if (firstWord.length === 0) return true;
+  if (PREP_LEADING_TOKENS.has(firstWord)) return true;
+  if (STANDALONE_DESCRIPTOR_NAMES.has(firstWord)) return true;
+  return false;
+}
+
+/**
+ * Pre-expansion pass over a single ingredient line. Catches patterns
+ * where one input row should yield a different shape than "one ingredient":
+ *
+ *   - **Optional:/optionally:/opt.: prefix** — strip, mark forceOptional.
+ *   - **`<qty> <unit> each: A, B, C`** — fan out into one row per item
+ *     with shared qty+unit.
+ *   - **Inline parens alternative `X (Alternativ: Y)`** — emit primary +
+ *     alternative (alternative forced optional).
+ *   - **`alternativ:` / `alternatively:` separator** — emit all parts
+ *     with everything after the first marker forced optional.
+ *   - **List-after-colon `Title: A, B, C`** — emit section header + one
+ *     ingredient per comma-separated item.
+ *
+ * Anything that doesn't match a special pattern passes through as a
+ * single ingredient with `rawText = text = rawLine`.
+ *
+ * The rules apply in order so e.g. `Optional: 1 EL Tahin alternativ: 1 EL Mandelmus`
+ * first strips the Optional: prefix and then splits on alternativ:.
+ */
+export function expandIngredientLine(rawLine: string): ExpandedIngredientRow[] {
+  const original = rawLine.trim();
+  let body = original;
+  let baseOptional = false;
+
+  // 1. Status prefix.
+  const statusMatch = OPTIONAL_PREFIX_RE.exec(body);
+  if (statusMatch) {
+    body = statusMatch[1].trim();
+    baseOptional = true;
+  }
+
+  // 2. Each-distribution. Must run before list-after-colon since both
+  //    have a colon-in-middle but each: needs a quantity-bearing prefix.
+  const eachMatch = EACH_DIST_RE.exec(body);
+  if (eachMatch && /[\d¼½¾⅓⅔⅛⅜⅝⅞]/.test(eachMatch[1])) {
+    const qtyUnit = eachMatch[1].trim();
+    const items = splitColonListItems(eachMatch[2]);
+    if (items.length > 0) {
+      return items.map((item) => ({
+        kind: "ingredient" as const,
+        text: `${qtyUnit} ${item}`,
+        rawText: original,
+        forceOptional: baseOptional,
+        isAlternative: false,
+      }));
+    }
+  }
+
+  // 3. Inline parens alternative. Matches a trailing "(Alternativ: …)".
+  const parensAlt = PARENS_ALTERNATIV_RE.exec(body);
+  if (parensAlt) {
+    const primary = body.slice(0, parensAlt.index).trim();
+    const altText = parensAlt[1].trim();
+    const rows: ExpandedIngredientRow[] = [];
+    if (primary.length > 0) {
+      rows.push({
+        kind: "ingredient",
+        text: primary,
+        rawText: original,
+        forceOptional: baseOptional,
+        isAlternative: false,
+      });
+    }
+    if (altText.length > 0) {
+      rows.push({
+        kind: "ingredient",
+        text: altText,
+        rawText: original,
+        forceOptional: true,
+        // Only flag as alternative when there IS a primary; a bare
+        // "(Alternativ: X)" with no preceding text emits a single
+        // standalone optional row.
+        isAlternative: primary.length > 0,
+      });
+    }
+    return rows;
+  }
+
+  // 4. "alternativ:" / "alternative" / "alternatively" inline separator
+  //    (colon optional).
+  if (ALTERNATIV_SEP_RE.test(body)) {
+    const parts = body
+      .split(ALTERNATIV_SEP_RE)
+      .map((p) => p.trim())
+      .filter((p) => p.length > 0);
+    if (parts.length >= 2) {
+      return parts.map((part, idx) => ({
+        kind: "ingredient" as const,
+        text: part,
+        rawText: original,
+        // Primary keeps the baseOptional status from any outer Optional:
+        // wrapper. Alternatives are always optional.
+        forceOptional: baseOptional || idx > 0,
+        isAlternative: idx > 0,
+      }));
+    }
+  }
+
+  // 5. List-after-colon. Runs BEFORE the bare or/oder rule so a line
+  //    like "optional garnishes: croutons, fresh herbs, or any leftover X"
+  //    splits at the colon into a section + items rather than being eaten
+  //    by the or-split rule. Skip when the post-colon part starts with a
+  //    digit — that's the inverted "Name: qty unit" form already handled
+  //    inside parseIngredientString.
+  const colonMatch = /^([^:]+?)\s*:\s*(.+)$/.exec(body);
+  if (colonMatch) {
+    const titlePart = colonMatch[1].trim();
+    const itemsPart = colonMatch[2].trim();
+    const looksInverted = /^[\d¼½¾⅓⅔⅛⅜⅝⅞]/.test(itemsPart);
+    if (!looksInverted && titlePart.length > 0 && itemsPart.length > 0) {
+      const items = splitColonListItems(itemsPart);
+      if (items.length > 0) {
+        // A title that mentions "optional" / "nach Belieben" propagates
+        // the optional flag onto every item it introduces ("optional
+        // garnishes: croutons, herbs, …").
+        const titleHasOptional =
+          /\b(?:optional|optionally|nach\s+belieben)\b/i.test(titlePart);
+        const forceOptional = baseOptional || titleHasOptional;
+        const rows: ExpandedIngredientRow[] = [
+          { kind: "header", title: titlePart, rawText: original },
+        ];
+        for (const item of items) {
+          rows.push({
+            kind: "ingredient",
+            text: item,
+            rawText: original,
+            forceOptional,
+            isAlternative: false,
+          });
+        }
+        return rows;
+      }
+    }
+  }
+
+  // 6. " oder " / " or " / " / " / " o. " inline alternative separator.
+  //    Splits into primary + optional alternative when the post-separator
+  //    part looks like an ingredient (not just a modifier).
+  //
+  //    Guards:
+  //      - pre-sep must not end with "-" (preserves compound stems like
+  //        "Weizen- oder Dinkelmehl" — those are first stitched together
+  //        by preprocessAlternatives in the Familywall opt-in).
+  //      - post-sep first word must NOT be a descriptor / prep-leading
+  //        token (preserves "6 dried or fresh shiitake mushrooms" —
+  //        "fresh" is a modifier, not an alternative).
+  //
+  //    Only the FIRST separator is consumed. Chains like
+  //    "A oder B oder C" emit A primary + B alt; the trailing "oder C"
+  //    stays in B's text and is parsed normally.
+  const orSep = findOrSeparator(body);
+  if (orSep) {
+    const pre = body.slice(0, orSep.index).trim();
+    const post = body.slice(orSep.index + orSep.length).trim();
+    if (
+      pre.length > 0 &&
+      post.length > 0 &&
+      !pre.endsWith("-") &&
+      !postOrIsDescriptorModifier(post)
+    ) {
+      return [
+        {
+          kind: "ingredient" as const,
+          text: pre,
+          rawText: original,
+          forceOptional: baseOptional,
+          isAlternative: false,
+        },
+        {
+          kind: "ingredient" as const,
+          text: post,
+          rawText: original,
+          forceOptional: true,
+          isAlternative: true,
+        },
+      ];
+    }
+  }
+
+  // Pass through.
+  return [
+    {
+      kind: "ingredient",
+      text: body,
+      rawText: original,
+      forceOptional: baseOptional,
+      isAlternative: false,
+    },
+  ];
 }

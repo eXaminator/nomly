@@ -1,4 +1,4 @@
-import { and, asc, between, desc, eq, gt, inArray, lt, sql } from "drizzle-orm";
+import { and, asc, between, desc, eq, gt, inArray, isNull, lt, sql } from "drizzle-orm";
 import { db } from "../../db/index.ts";
 import {
   mealPlan,
@@ -422,7 +422,10 @@ function computeDietForRecipes(recipeIds: number[]): Map<number, RecipeDiet> {
     .where(
       and(
         inArray(recipeSection.recipeId, recipeIds),
+        // Diet calc counts non-optional, non-alternative rows only —
+        // mirrors {@link isOptionalIngredient} on the SQL side.
         eq(recipeIngredient.isOptional, false),
+        isNull(recipeIngredient.alternativeForId),
       ),
     )
     .all();
