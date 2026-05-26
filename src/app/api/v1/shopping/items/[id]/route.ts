@@ -1,11 +1,16 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { deleteItem, patchItem, ShoppingApiError } from "@/lib/shopping/items";
+import {
+  recallMutation,
+  recordMutation,
+} from "@/lib/shopping/offline/mutation-dedup";
 
 const patchSchema = z
   .object({
     checked: z.boolean().optional(),
     note: z.string().nullable().optional(),
+    mutationId: z.string().uuid().optional(),
   })
   .strict();
 
@@ -29,9 +34,16 @@ export async function PATCH(
       { status: 400 },
     );
   }
+  const { mutationId, ...patch } = parsed.data;
+  if (mutationId) {
+    const cached = recallMutation<{ item: unknown }>(mutationId);
+    if (cached) return NextResponse.json(cached);
+  }
   try {
-    const item = patchItem(id, parsed.data);
-    return NextResponse.json({ item });
+    const item = patchItem(id, patch);
+    const payload = { item };
+    if (mutationId) recordMutation(mutationId, payload);
+    return NextResponse.json(payload);
   } catch (err) {
     if (err instanceof ShoppingApiError) {
       return NextResponse.json({ error: err.message }, { status: err.status });
