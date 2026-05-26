@@ -110,15 +110,23 @@ The existing auth proxy already bypasses `/manifest.webmanifest` (`src/proxy.ts:
 
 ### 5.1 Mascot brief
 
-The icon is a hand-authored mascot — a round, friendly creature in the brand orange (`#ed7826`), original artwork inspired by the *Cut the Rope* "Om Nom" silhouette but not a copy. Key constraints:
+The icon is a hand-authored mascot — a round, friendly creature in the brand orange (`#E1721F`, the RGB form of the brand HSL `28 78% 50%`). Direction was locked during the brainstorming session on 2026-05-26: the "content eater" variant — arched ^_^ eyes, soft cheek blush, contented closed-mouth smile, ground shadow tucked behind the body. Original artwork inspired by the *Cut the Rope* "Om Nom" silhouette but not a copy.
 
-- Two oversized eyes, one big mouth (wide grin or mid-nom). No other facial features.
-- Silhouette must read at 32 × 32 px.
-- Non-maskable variants sit on a soft cream background (`#fff8ef`) with adequate inset.
-- The maskable variant paints the brand orange to the edges; the mascot is centered inside the platform safe area (40 % of canvas edge to edge per spec).
-- Single source of truth: `public/icons/icon.svg`. PNG variants are rendered from this SVG by a build-time script — never hand-rasterized.
+Locked constraints:
 
-Final pixel art is iterated during the implementation PR, not in this spec.
+- Two arched ^_^ eyes (curved strokes, no pupils), small cream cheek blush, single curved smile. No nose, no extra features.
+- Body fills roughly 88 % of the icon canvas, centered both axes. Shadow is a small, low-opacity ellipse beneath the feet, **drawn first** so the body silhouette overlaps it.
+- Silhouette must read at 32 × 32 px (the ^_^ eyes + smile collapse to three confident strokes at that size).
+- Non-maskable variants sit on a soft cream background (`#FFF8EF`) with the body slightly inset from the canvas edges.
+- The maskable variant paints the brand orange edge-to-edge; face features are traced in cream (`#FFF8EF`) so they remain legible against the orange-on-orange ground. The mascot is inset so it fits inside the Android adaptive-icon safe area (inner 80 % of the canvas).
+- Single source of truth: `public/icons/icon.svg` (non-maskable) and `public/icons/icon-maskable.svg` (maskable). PNG variants are rendered from these SVGs by a build-time script — never hand-rasterized.
+
+**Reference sketches** committed alongside this spec for the implementer to start from:
+
+- `docs/superpowers/specs/2026-05-26-epic-8-assets/mascot-reference.svg`
+- `docs/superpowers/specs/2026-05-26-epic-8-assets/mascot-maskable-reference.svg`
+
+These reference SVGs are starting points, not the shipped assets. Final production artwork is iterated and polished during the implementation PR — line weights, shadow softness, optional micro-details — but the personality direction is fixed.
 
 ### 5.2 Pipeline
 

@@ -57,3 +57,4 @@ next-env.d.ts
 !public/**/*.png
 
 .claude/
+.superpowers/
