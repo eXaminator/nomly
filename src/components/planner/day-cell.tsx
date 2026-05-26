@@ -8,13 +8,16 @@ import {
   formatWeekdayShortDe,
 } from "@/lib/meal-plans/dates";
 import type { MealPlanView } from "@/lib/meal-plans/types";
+import type { CalendarEvent } from "@/lib/ical/events";
 import { MealCard } from "./meal-card";
+import { EventList } from "./event-list";
 import { cn } from "@/lib/cn";
 
 type Props = {
   date: string;
   isToday: boolean;
   meals: MealPlanView[];
+  events: CalendarEvent[];
   onEditMeal: (meal: MealPlanView) => void;
   onReorderUp: (mealId: number) => void;
   onReorderDown: (mealId: number) => void;
@@ -34,6 +37,7 @@ export function DayCell({
   date,
   isToday,
   meals,
+  events,
   onEditMeal,
   onReorderUp,
   onReorderDown,
@@ -76,11 +80,7 @@ export function DayCell({
       </header>
 
       <div className="grid flex-1 grid-cols-1 gap-2 md:grid-cols-[1fr_2fr]">
-        {/* Events column placeholder — Epic 13 will fill this. The slot is
-            reserved so we don't have to relayout when iCal lands. */}
-        <div className="hidden md:flex min-h-[60px] flex-col gap-1 rounded-md border border-dashed border-[var(--color-border)]/60 p-2 text-[10px] uppercase tracking-wider text-[var(--color-muted-fg)]/60">
-          <span>Termine</span>
-        </div>
+        <EventList events={events} />
 
         {/* Meals column (DnD target) */}
         <div

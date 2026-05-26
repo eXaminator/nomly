@@ -15,6 +15,8 @@ import {
   isIsoDate,
   todayIso,
 } from "@/lib/meal-plans/dates";
+import { getEventsForRange } from "@/lib/ical/events";
+import { refreshStaleEnabledFeeds } from "@/lib/ical/fetch";
 
 export const dynamic = "force-dynamic";
 
@@ -31,6 +33,10 @@ export default async function PlanPage({
       ? fromParam
       : alignToStartWeekday(today, settings.startWeekday);
   const range = buildRange(from, settings.daysVisible);
+  // Kick off background refresh of stale iCal feeds before reading events;
+  // the call returns immediately and the next render picks up any new bodies.
+  refreshStaleEnabledFeeds();
+  const calendarEvents = getEventsForRange(range.from, range.to);
   const mealPlans = listByDateRange(range.from, range.to);
   // Recipe-list filter state lives client-side in RecipePanel (it intentionally
   // doesn't persist to the URL so the planner's own `?from=` stays unique),
@@ -57,6 +63,7 @@ export default async function PlanPage({
         recipes={recipes}
         recipeUsage={recipeUsage}
         allTags={allTags}
+        calendarEvents={calendarEvents}
       />
     </AppShell>
   );

@@ -53,6 +53,7 @@
     "lucide-react": "^1.16.0",
     "marked": "^18.0.3",
     "next": "16.2.6",
+    "node-ical": "^0.26.1",
     "openid-client": "^6.8.4",
     "react": "19.2.4",
     "react-dom": "19.2.4",

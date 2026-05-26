@@ -485,9 +485,12 @@ export const icalFeed = sqliteTable("ical_feed", {
   url: text("url").notNull(),
   color: text("color").notNull().default("#3b82f6"),
   enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+  rawIcs: text("raw_ics"),
+  rawIcsFetchedAt: integer("raw_ics_fetched_at"),
   lastFetchedAt: integer("last_fetched_at"),
   lastErrorAt: integer("last_error_at"),
   lastErrorMessage: text("last_error_message"),
+  sortOrder: integer("sort_order").notNull().default(0),
   createdAt: integer("created_at").notNull().default(now),
 });
 
@@ -517,3 +520,5 @@ export type ApiToken = typeof apiToken.$inferSelect;
 export type StapleGroup = typeof stapleGroup.$inferSelect;
 export type StapleGroupItem = typeof stapleGroupItem.$inferSelect;
 export type ShoppingItemStapleSource = typeof shoppingItemStapleSource.$inferSelect;
+export type IcalFeed = typeof icalFeed.$inferSelect;
+export type NewIcalFeed = typeof icalFeed.$inferInsert;

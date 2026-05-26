@@ -57,13 +57,15 @@ const STAMMDATEN_LINKS: Array<{
     description:
       "Sichtbare Tage und Beginn der Woche für den Mahlzeitenplaner.",
   },
+  {
+    href: "/einstellungen/kalender",
+    title: "Kalender (iCal)",
+    description:
+      "Externe iCal-Feeds abonnieren und Termine im Planer anzeigen.",
+  },
 ];
 
 const PLACEHOLDERS = [
-  {
-    title: "Kalender (iCal)",
-    description: "Externe Feeds in den Planer einbinden – kommt in Epic 13.",
-  },
   {
     title: "API-Tokens",
     description: "Bearer-Tokens für Home Assistant – kommt in Epic 12.",

@@ -33,6 +33,7 @@ import {
 } from "@/lib/meal-plans/types";
 import type { RecipeListItem } from "@/lib/recipes/types";
 import type { PlannerSettings } from "@/lib/settings/planner";
+import type { EventsByDate } from "@/lib/ical/events";
 import { DayCell } from "./day-cell";
 import { RecipePanel } from "./recipe-panel";
 import { MealEditor } from "./meal-editor";
@@ -60,6 +61,7 @@ type Props = {
    *  row don't appear here — RecipePanel falls back to "noch nie geplant". */
   recipeUsage: Array<{ recipeId: number } & RecipeUsageStats>;
   allTags: string[];
+  calendarEvents: EventsByDate;
 };
 
 export function PlannerView({
@@ -71,6 +73,7 @@ export function PlannerView({
   recipes,
   recipeUsage,
   allTags,
+  calendarEvents,
 }: Props) {
   const router = useRouter();
   // Local copy lets us run optimistic mutations against the server data.
@@ -673,6 +676,7 @@ export function PlannerView({
                 date={d}
                 isToday={d === today}
                 meals={mealsByDate.get(d) ?? []}
+                events={calendarEvents[d] ?? []}
                 onEditMeal={(meal) => setEditing(meal)}
                 onReorderUp={(id) => handleReorder(id, "up")}
                 onReorderDown={(id) => handleReorder(id, "down")}
