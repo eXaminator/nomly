@@ -1,4 +1,3 @@
-/* eslint-disable */
 // nomly service worker — Epic 8.
 // Caches the /einkauf shell + static chunks (cache-first) and the shopping
 // + supermarket + category GET endpoints (network-first with cache fallback).

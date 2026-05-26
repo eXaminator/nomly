@@ -24,7 +24,8 @@ export function PendingMutationsDrawer({ open, onOpenChange, itemNameById }: Pro
 
   React.useEffect(() => {
     if (!open) return;
-    void refresh();
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    refresh().catch(() => undefined);
   }, [open, refresh]);
 
   const handleSyncNow = async () => {
