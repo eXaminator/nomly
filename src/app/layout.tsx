@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { ThemeInitScript, ThemeProvider } from "@/components/theme-provider";
@@ -16,6 +16,13 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "nomly",
   description: "Kochbuch, Mahlzeitenplaner und Einkaufsliste",
+};
+
+export const viewport: Viewport = {
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#E1721F" },
+    { media: "(prefers-color-scheme: dark)",  color: "#E1721F" },
+  ],
 };
 
 export default function RootLayout({

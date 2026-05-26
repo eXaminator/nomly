@@ -55,6 +55,7 @@ next-env.d.ts
 # Ad-hoc debug screenshots written by the Playwright MCP tools.
 *.png
 !public/**/*.png
+!src/app/apple-icon.png
 
 .claude/
 .superpowers/
