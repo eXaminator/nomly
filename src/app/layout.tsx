@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { ThemeInitScript, ThemeProvider } from "@/components/theme-provider";
+import { RegisterSW } from "@/components/pwa/register-sw";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -40,7 +41,10 @@ export default function RootLayout({
         <ThemeInitScript />
       </head>
       <body className="min-h-full">
-        <ThemeProvider>{children}</ThemeProvider>
+        <ThemeProvider>
+          <RegisterSW />
+          {children}
+        </ThemeProvider>
       </body>
     </html>
   );
