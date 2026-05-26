@@ -1,9 +1,7 @@
 **/node_modules
 .next
-# Runtime data is mounted at /app/data — never copy it in. The seed snapshot
-# is the one exception (vendored alongside the source).
-data/*
-!data/seed
+# Runtime data is mounted at /app/data — never copy it in.
+data
 .git
 .github
 .env

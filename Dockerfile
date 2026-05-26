@@ -20,7 +20,6 @@ COPY src ./src
 COPY drizzle ./drizzle
 COPY scripts ./scripts
 COPY server.mts ./
-COPY data/seed ./data/seed
 
 RUN npm run build
 
@@ -54,7 +53,6 @@ COPY --from=builder --chown=node:node /app/server.mts ./server.mts
 COPY --from=builder --chown=node:node /app/next.config.ts ./next.config.ts
 COPY --from=builder --chown=node:node /app/tsconfig.json ./tsconfig.json
 COPY --from=builder --chown=node:node /app/package.json ./package.json
-COPY --from=builder --chown=node:node /app/data/seed ./data/seed
 
 # The data directory is the SQLite + photos mount point — created at build
 # time with the right ownership so a bind mount inherits it on platforms
