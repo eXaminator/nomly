@@ -5,12 +5,30 @@ import { useRouter } from "next/navigation";
 import {
   AlertTriangle,
   Check,
+  GripVertical,
   Loader2,
   Pencil,
   Plus,
   RefreshCw,
   Trash2,
 } from "lucide-react";
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  arrayMove,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -110,6 +128,41 @@ export function CalendarFeedsPageClient({ initial }: Props) {
     }
   }
 
+  const sensors = useSensors(
+    // Small activation distance so a tap on a row button isn't read as a drag.
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    }),
+  );
+
+  function onDragEnd(e: DragEndEvent) {
+    const { active, over } = e;
+    if (!over || active.id === over.id) return;
+    const from = feeds.findIndex((f) => f.id === active.id);
+    const to = feeds.findIndex((f) => f.id === over.id);
+    if (from === -1 || to === -1) return;
+    const next = arrayMove(feeds, from, to);
+    setFeeds(next); // optimistic
+    void persistOrder(next.map((f) => f.id));
+  }
+
+  async function persistOrder(orderedIds: number[]) {
+    setError(null);
+    try {
+      const res = await fetch("/api/v1/ical-feeds", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ reorder: orderedIds }),
+      });
+      if (!res.ok) throw new Error(await readError(res));
+      router.refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Fehler");
+      router.refresh(); // resync from server on failure
+    }
+  }
+
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between">
@@ -135,65 +188,31 @@ export function CalendarFeedsPageClient({ initial }: Props) {
           Mahlzeitenplaner zu sehen.
         </div>
       ) : (
-        <ul className="flex flex-col divide-y divide-[var(--color-border)] rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-card)]">
-          {feeds.map((feed) => (
-            <li key={feed.id} className="flex flex-col gap-2 p-3 sm:flex-row sm:items-center">
-              <div className="flex flex-1 items-center gap-3">
-                <span
-                  aria-hidden
-                  className="size-4 shrink-0 rounded-full border border-black/10 dark:border-white/10"
-                  style={{ backgroundColor: feed.color }}
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          onDragEnd={onDragEnd}
+        >
+          <SortableContext
+            items={feeds.map((f) => f.id)}
+            strategy={verticalListSortingStrategy}
+          >
+            <ul className="flex flex-col divide-y divide-[var(--color-border)] overflow-hidden rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-card)]">
+              {feeds.map((feed) => (
+                <SortableFeedRow
+                  key={feed.id}
+                  feed={feed}
+                  busy={busyId === feed.id}
+                  draggable={feeds.length > 1}
+                  onToggle={(next) => toggleEnabled(feed, next)}
+                  onRefresh={() => refresh(feed)}
+                  onEdit={() => setEditing(feed)}
+                  onDelete={() => setDeleteCandidate(feed)}
                 />
-                <div className="flex min-w-0 flex-1 flex-col">
-                  <span className="truncate font-medium">{feed.name}</span>
-                  <span className="truncate text-xs text-[var(--color-muted-fg)]">
-                    {feed.url}
-                  </span>
-                  <SyncStatus feed={feed} />
-                </div>
-              </div>
-              <div className="flex items-center gap-1">
-                <label className="flex items-center gap-2 px-2 text-xs text-[var(--color-muted-fg)]">
-                  <Switch
-                    checked={feed.enabled}
-                    onCheckedChange={(v) => toggleEnabled(feed, Boolean(v))}
-                    aria-label={`„${feed.name}“ aktiv`}
-                  />
-                </label>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  aria-label="Aktualisieren"
-                  disabled={busyId === feed.id}
-                  onClick={() => refresh(feed)}
-                >
-                  {busyId === feed.id ? (
-                    <Loader2 className="size-4 animate-spin" />
-                  ) : (
-                    <RefreshCw className="size-4" />
-                  )}
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  aria-label="Bearbeiten"
-                  onClick={() => setEditing(feed)}
-                >
-                  <Pencil className="size-4" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  aria-label="Löschen"
-                  className="text-[var(--color-danger)]"
-                  onClick={() => setDeleteCandidate(feed)}
-                >
-                  <Trash2 className="size-4" />
-                </Button>
-              </div>
-            </li>
-          ))}
-        </ul>
+              ))}
+            </ul>
+          </SortableContext>
+        </DndContext>
       )}
 
       {creating ? (
@@ -228,6 +247,111 @@ export function CalendarFeedsPageClient({ initial }: Props) {
         />
       ) : null}
     </div>
+  );
+}
+
+function SortableFeedRow({
+  feed,
+  busy,
+  draggable,
+  onToggle,
+  onRefresh,
+  onEdit,
+  onDelete,
+}: {
+  feed: FeedSummary;
+  busy: boolean;
+  draggable: boolean;
+  onToggle: (next: boolean) => void;
+  onRefresh: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: feed.id, disabled: !draggable });
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    // Lift the dragged row above its siblings so it isn't clipped by the
+    // list's `overflow-hidden`.
+    zIndex: isDragging ? 1 : undefined,
+    position: isDragging ? "relative" : undefined,
+  };
+  return (
+    <li
+      ref={setNodeRef}
+      style={style}
+      className={cn(
+        "flex flex-col gap-2 bg-[var(--color-card)] p-3 sm:flex-row sm:items-center",
+        isDragging && "shadow-lg",
+      )}
+    >
+      <div className="flex flex-1 items-center gap-2">
+        {draggable ? (
+          <button
+            type="button"
+            aria-label="Zum Sortieren ziehen"
+            className="-ml-1 flex size-7 shrink-0 cursor-grab touch-none items-center justify-center rounded-md text-[var(--color-muted-fg)] hover:bg-[var(--color-muted)] active:cursor-grabbing focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+            {...attributes}
+            {...listeners}
+          >
+            <GripVertical className="size-4" />
+          </button>
+        ) : null}
+        <span
+          aria-hidden
+          className="size-4 shrink-0 rounded-full border border-black/10 dark:border-white/10"
+          style={{ backgroundColor: feed.color }}
+        />
+        <div className="flex min-w-0 flex-1 flex-col">
+          <span className="truncate font-medium">{feed.name}</span>
+          <span className="truncate text-xs text-[var(--color-muted-fg)]">
+            {feed.url}
+          </span>
+          <SyncStatus feed={feed} />
+        </div>
+      </div>
+      <div className="flex items-center gap-1">
+        <label className="flex items-center gap-2 px-2 text-xs text-[var(--color-muted-fg)]">
+          <Switch
+            checked={feed.enabled}
+            onCheckedChange={(v) => onToggle(Boolean(v))}
+            aria-label={`„${feed.name}“ aktiv`}
+          />
+        </label>
+        <Button
+          variant="ghost"
+          size="sm"
+          aria-label="Aktualisieren"
+          disabled={busy}
+          onClick={onRefresh}
+        >
+          {busy ? (
+            <Loader2 className="size-4 animate-spin" />
+          ) : (
+            <RefreshCw className="size-4" />
+          )}
+        </Button>
+        <Button variant="ghost" size="sm" aria-label="Bearbeiten" onClick={onEdit}>
+          <Pencil className="size-4" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          aria-label="Löschen"
+          className="text-[var(--color-danger)]"
+          onClick={onDelete}
+        >
+          <Trash2 className="size-4" />
+        </Button>
+      </div>
+    </li>
   );
 }
 

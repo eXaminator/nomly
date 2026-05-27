@@ -194,3 +194,81 @@ END:VCALENDAR
     expect(buckets["2026-05-26"][0].feedColor).toBe("#abcdef");
   });
 });
+
+describe("event ordering by calendar (feed) sort order", () => {
+  const allDayIcs = (uid: string, title: string) => `BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//test//
+BEGIN:VEVENT
+UID:${uid}
+DTSTAMP:20260520T120000Z
+DTSTART;VALUE=DATE:20260526
+DTEND;VALUE=DATE:20260527
+SUMMARY:${title}
+END:VEVENT
+END:VCALENDAR
+`;
+
+  async function seedFeed(name: string, sortOrder: number, ics: string) {
+    const { db } = await import("@/db");
+    const { icalFeed } = await import("@/db/schema");
+    return db
+      .insert(icalFeed)
+      .values({
+        name,
+        url: `https://example.com/${name}.ics`,
+        sortOrder,
+        rawIcs: ics,
+        rawIcsFetchedAt: Math.floor(Date.now() / 1000),
+      })
+      .returning()
+      .all()[0].id;
+  }
+
+  it("breaks all-day ties using the feed sort order", async () => {
+    await seedFeed("B-feed", 1, allDayIcs("b@t", "From B"));
+    await seedFeed("A-feed", 0, allDayIcs("a@t", "From A"));
+    const { getEventsForRange } = await import("@/lib/ical/events");
+    const day = getEventsForRange("2026-05-26", "2026-05-26")["2026-05-26"];
+    // Both are all-day on the same date → order follows feed sortOrder (0 before 1),
+    // NOT insertion order or title.
+    expect(day.map((e) => e.title)).toEqual(["From A", "From B"]);
+  });
+
+  it("reflects a reorder: lower sortOrder wins after reorderFeeds", async () => {
+    const idB = await seedFeed("B-feed", 0, allDayIcs("b@t", "From B"));
+    const idA = await seedFeed("A-feed", 1, allDayIcs("a@t", "From A"));
+    const { reorderFeeds } = await import("@/lib/ical/feeds");
+    const { getEventsForRange } = await import("@/lib/ical/events");
+
+    // Initially B (sortOrder 0) comes first.
+    let day = getEventsForRange("2026-05-26", "2026-05-26")["2026-05-26"];
+    expect(day.map((e) => e.title)).toEqual(["From B", "From A"]);
+
+    // Put A ahead of B; events should flip.
+    reorderFeeds([idA, idB]);
+    day = getEventsForRange("2026-05-26", "2026-05-26")["2026-05-26"];
+    expect(day.map((e) => e.title)).toEqual(["From A", "From B"]);
+  });
+
+  it("still orders all-day before timed regardless of feed order", async () => {
+    // Feed with the timed event sorts BEFORE the all-day feed, but all-day
+    // must still come first.
+    await seedFeed("timed", 0, `BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//test//
+BEGIN:VEVENT
+UID:timed@t
+DTSTAMP:20260520T120000Z
+DTSTART:20260526T090000Z
+DTEND:20260526T100000Z
+SUMMARY:Timed
+END:VEVENT
+END:VCALENDAR
+`);
+    await seedFeed("allday", 1, allDayIcs("ad@t", "AllDay"));
+    const { getEventsForRange } = await import("@/lib/ical/events");
+    const day = getEventsForRange("2026-05-26", "2026-05-26")["2026-05-26"];
+    expect(day.map((e) => e.title)).toEqual(["AllDay", "Timed"]);
+  });
+});

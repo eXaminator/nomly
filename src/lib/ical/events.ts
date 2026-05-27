@@ -7,6 +7,9 @@ export type CalendarEvent = {
   feedId: number;
   feedName: string;
   feedColor: string;
+  /** The owning feed's sort position — used to break ties between events
+   *  that share a timeslot (e.g. all-day events on the same day). */
+  feedSortOrder: number;
   uid: string;
   title: string;
   /** Start instant as ISO 8601 string. */
@@ -31,6 +34,7 @@ export function getEventsForRange(fromIso: string, toIso: string): EventsByDate 
       id: icalFeed.id,
       name: icalFeed.name,
       color: icalFeed.color,
+      sortOrder: icalFeed.sortOrder,
       rawIcs: icalFeed.rawIcs,
     })
     .from(icalFeed)
@@ -88,7 +92,7 @@ function expandEvent(
 function bucketEvent(
   buckets: EventsByDate,
   instance: ical.EventInstance,
-  feed: { id: number; name: string; color: string },
+  feed: { id: number; name: string; color: string; sortOrder: number },
   fromIso: string,
   toIso: string,
 ): void {
@@ -111,6 +115,7 @@ function bucketEvent(
       feedId: feed.id,
       feedName: feed.name,
       feedColor: feed.color,
+      feedSortOrder: feed.sortOrder,
       uid: instanceKey,
       title,
       start: start.toISOString(),
@@ -122,8 +127,14 @@ function bucketEvent(
 }
 
 function sortEvents(a: CalendarEvent, b: CalendarEvent): number {
+  // All-day events first, then by start time. Events sharing a timeslot
+  // (all-day events on the same day, or timed events at the same instant)
+  // fall back to the calendar's sort order, then title.
   if (a.allDay !== b.allDay) return a.allDay ? -1 : 1;
   if (a.start !== b.start) return a.start.localeCompare(b.start);
+  if (a.feedSortOrder !== b.feedSortOrder) {
+    return a.feedSortOrder - b.feedSortOrder;
+  }
   return a.title.localeCompare(b.title);
 }
 
