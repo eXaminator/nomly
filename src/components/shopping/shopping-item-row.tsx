@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Ban, BookOpen, Check, MoreVertical, Pencil, Trash2 } from "lucide-react";
+import { Ban, BookOpen, Check, MoreVertical, Pencil, Tags, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -31,6 +31,8 @@ type Props = {
   onToggle: (item: ShoppingItemView) => void;
   /** Opens the edit dialog for this row's item. */
   onEdit: (item: ShoppingItemView) => void;
+  /** Opens the article (ingredient) editor for this row's linked article. */
+  onEditArticle: (ingredientId: number) => void;
   onDelete: (id: number) => Promise<void>;
   onToggleUnavailable: (item: ShoppingItemView, supermarketId: number) => Promise<void>;
   /** When true, all non-toggle actions (edit, delete, unavailable) are disabled. */
@@ -43,6 +45,7 @@ export function ShoppingItemRow({
   onPreviewRecipe,
   onToggle,
   onEdit,
+  onEditArticle,
   onDelete,
   onToggleUnavailable,
   disabledOffline = false,
@@ -132,7 +135,14 @@ export function ShoppingItemRow({
               disabled={disabledOffline}
             >
               <Pencil className="mr-2 size-4" />
-              Bearbeiten
+              Eintrag bearbeiten
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={() => onEditArticle(item.refId)}
+              disabled={disabledOffline}
+            >
+              <Tags className="mr-2 size-4" />
+              Artikel bearbeiten
             </DropdownMenuItem>
             <RecipeMenuEntry sources={item.sources} onPreview={onPreviewRecipe} />
             <DropdownMenuItem

@@ -36,9 +36,12 @@ export type StapleGroupItemDetail = {
   id: number;
   ingredientId: number;
   ingredientName: string;
+  ingredientCategoryName: string | null;
   quantity: number | null;
   unitId: number | null;
   unitName: string | null;
+  subUnitId: number | null;
+  subUnitName: string | null;
   note: string | null;
   sortOrder: number;
 };
@@ -141,9 +144,12 @@ export function getGroup(id: number): StapleGroupDetail | null {
       id: stapleGroupItem.id,
       ingredientId: stapleGroupItem.ingredientId,
       ingredientName: ingredient.name,
+      ingredientCategoryName: sql<string | null>`(SELECT name FROM category WHERE category.id = ${ingredient.defaultCategoryId})`,
       quantity: stapleGroupItem.quantity,
       unitId: stapleGroupItem.unitId,
       unitName: sql<string | null>`(SELECT name FROM unit WHERE unit.id = ${stapleGroupItem.unitId})`,
+      subUnitId: stapleGroupItem.subUnitId,
+      subUnitName: sql<string | null>`(SELECT name FROM ingredient_sub_unit WHERE ingredient_sub_unit.id = ${stapleGroupItem.subUnitId})`,
       note: stapleGroupItem.note,
       sortOrder: stapleGroupItem.sortOrder,
     })
@@ -202,6 +208,7 @@ export type AddGroupItemInput = {
   ingredientId: number;
   quantity?: number | null;
   unitId?: number | null;
+  subUnitId?: number | null;
   note?: string | null;
 };
 
@@ -213,7 +220,11 @@ export function addGroupItem(
   groupId: number,
   input: AddGroupItemInput,
 ): AddGroupItemResult {
-  validateAmount(input.quantity ?? null, input.unitId ?? null);
+  validateAmount(
+    input.quantity ?? null,
+    input.unitId ?? null,
+    input.subUnitId ?? null,
+  );
   const existing = db
     .select({ id: stapleGroupItem.id })
     .from(stapleGroupItem)
@@ -243,6 +254,7 @@ export function addGroupItem(
       ingredientId: input.ingredientId,
       quantity: input.quantity ?? null,
       unitId: input.unitId ?? null,
+      subUnitId: input.subUnitId ?? null,
       note: input.note ?? null,
       sortOrder: maxSort + 1,
     })
@@ -255,6 +267,7 @@ export type UpdateGroupItemInput = {
   ingredientId?: number;
   quantity?: number | null;
   unitId?: number | null;
+  subUnitId?: number | null;
   note?: string | null;
   sortOrder?: number;
 };
@@ -294,11 +307,14 @@ export function updateGroupItem(
     input.quantity === undefined ? current.quantity : input.quantity;
   const nextUnitId =
     input.unitId === undefined ? current.unitId : input.unitId;
-  validateAmount(nextQuantity, nextUnitId);
+  const nextSubUnitId =
+    input.subUnitId === undefined ? current.subUnitId : input.subUnitId;
+  validateAmount(nextQuantity, nextUnitId, nextSubUnitId);
   const patch: Partial<typeof stapleGroupItem.$inferInsert> = {};
   if (input.ingredientId !== undefined) patch.ingredientId = input.ingredientId;
   if (input.quantity !== undefined) patch.quantity = input.quantity;
   if (input.unitId !== undefined) patch.unitId = input.unitId;
+  if (input.subUnitId !== undefined) patch.subUnitId = input.subUnitId;
   if (input.note !== undefined) patch.note = input.note;
   if (input.sortOrder !== undefined) patch.sortOrder = input.sortOrder;
   if (Object.keys(patch).length === 0) return;
@@ -321,9 +337,16 @@ export function deleteGroupItem(itemId: number): void {
 function validateAmount(
   quantity: number | null,
   unitId: number | null,
+  subUnitId: number | null = null,
 ): void {
+  if (unitId != null && subUnitId != null) {
+    throw new StapleGroupError(
+      "incomplete_amount",
+      "Einheit und Sub-Einheit schließen sich gegenseitig aus",
+    );
+  }
   const hasQ = quantity != null;
-  const hasU = unitId != null;
+  const hasU = unitId != null || subUnitId != null;
   if (hasQ !== hasU) {
     throw new StapleGroupError(
       "incomplete_amount",

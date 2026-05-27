@@ -1212,6 +1212,8 @@ export type AutocompleteHit = {
   id: number;
   name: string;
   matchedAlias?: string;
+  /** The article's default category name, for display in pickers/pills. */
+  categoryName?: string | null;
 };
 
 const ESCAPE_LIKE = (s: string) => s.replace(/[%_]/g, "\\$&");
@@ -1234,28 +1236,42 @@ export function autocompleteItems(rawQuery: string): AutocompleteHit[] {
   };
 
   const ing = db
-    .select({ id: ingredient.id, name: ingredient.name })
+    .select({
+      id: ingredient.id,
+      name: ingredient.name,
+      categoryName: category.name,
+    })
     .from(ingredient)
+    .leftJoin(category, eq(category.id, ingredient.defaultCategoryId))
     .where(sql`unaccent(${ingredient.name}) LIKE ${pattern}`)
     .orderBy(asc(ingredient.name))
     .limit(20)
     .all();
-  for (const r of ing) push({ kind: "ingredient", id: r.id, name: r.name });
+  for (const r of ing)
+    push({ kind: "ingredient", id: r.id, name: r.name, categoryName: r.categoryName });
 
   const ingA = db
     .select({
       id: ingredient.id,
       name: ingredient.name,
       alias: ingredientAlias.name,
+      categoryName: category.name,
     })
     .from(ingredientAlias)
     .innerJoin(ingredient, eq(ingredient.id, ingredientAlias.ingredientId))
+    .leftJoin(category, eq(category.id, ingredient.defaultCategoryId))
     .where(sql`unaccent(${ingredientAlias.name}) LIKE ${pattern}`)
     .orderBy(asc(ingredientAlias.name))
     .limit(20)
     .all();
   for (const r of ingA)
-    push({ kind: "ingredient", id: r.id, name: r.name, matchedAlias: r.alias });
+    push({
+      kind: "ingredient",
+      id: r.id,
+      name: r.name,
+      matchedAlias: r.alias,
+      categoryName: r.categoryName,
+    });
 
   return hits.slice(0, 20);
 }

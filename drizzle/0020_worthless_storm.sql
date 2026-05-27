@@ -1,0 +1,1 @@
+ALTER TABLE `staple_group_item` ADD `sub_unit_id` integer REFERENCES ingredient_sub_unit(id);

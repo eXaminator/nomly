@@ -11,6 +11,7 @@ const patchSchema = z
     ingredientId: z.number().int().positive().optional(),
     quantity: z.number().positive().nullable().optional(),
     unitId: z.number().int().positive().nullable().optional(),
+    subUnitId: z.number().int().positive().nullable().optional(),
     note: z.string().max(500).nullable().optional(),
     sortOrder: z.number().int().nonnegative().optional(),
   })

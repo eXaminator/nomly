@@ -29,6 +29,8 @@ import {
   setUnavailable as apiSetUnavailable,
 } from "./api";
 import { OfflineIndicator } from "./offline-indicator";
+import { PullToRefresh } from "./pull-to-refresh";
+import { EditArticleDrawer } from "@/components/articles/edit-article-drawer";
 import { useShoppingRealtime } from "./use-shopping-realtime";
 import { PendingMutationsDrawer } from "./pending-mutations-drawer";
 import {
@@ -78,6 +80,9 @@ export function ShoppingListView({
   // different item is opened. The actual item passed in comes from the
   // live `items` array so quick updates from other paths flow through.
   const [editingItemId, setEditingItemId] = React.useState<number | null>(null);
+  const [editingArticleId, setEditingArticleId] = React.useState<number | null>(
+    null,
+  );
   const editingItem = React.useMemo(
     () => (editingItemId != null ? items.find((i) => i.id === editingItemId) ?? null : null),
     [editingItemId, items],
@@ -367,6 +372,7 @@ export function ShoppingListView({
 
   return (
     <div className="flex flex-col gap-4">
+      <PullToRefresh />
       <h1 className="text-2xl font-semibold tracking-tight">Einkaufsliste</h1>
 
       {/* Sticky shelf: undo on the left; counter + supermarket select on the
@@ -519,6 +525,7 @@ export function ShoppingListView({
                       onPreviewRecipe={(id) => setPreviewRecipeId(id)}
                       onToggle={onToggleCheck}
                       onEdit={(i) => setEditingItemId(i.id)}
+                      onEditArticle={setEditingArticleId}
                       onDelete={onDelete}
                       onToggleUnavailable={onToggleUnavailable}
                       disabledOffline={disabledOffline}
@@ -577,6 +584,21 @@ export function ShoppingListView({
         onDeleteManualAmount={onDeleteManualAmount}
         onPatchNote={onPatchNote}
       />
+      {editingArticleId != null ? (
+        <EditArticleDrawer
+          ingredientId={editingArticleId}
+          onClose={() => setEditingArticleId(null)}
+          onSaved={async () => {
+            // The edited article's name/category may show on the row — refetch.
+            try {
+              const { items: fresh } = await fetchItems();
+              setItems(fresh);
+            } catch {
+              // ignore; realtime/refresh will reconcile
+            }
+          }}
+        />
+      ) : null}
       <PendingMutationsDrawer
         open={drawerOpen}
         onOpenChange={setDrawerOpen}

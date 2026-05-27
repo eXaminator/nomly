@@ -11,6 +11,7 @@ import {
   Indent,
   Lock,
   Outdent,
+  Pencil,
   RotateCw,
   Trash2,
   Unlock,
@@ -20,6 +21,7 @@ import type {
   DraggableSyntheticListeners,
 } from "@dnd-kit/core";
 import { Button } from "@/components/ui/button";
+import { EditArticleDrawer } from "@/components/articles/edit-article-drawer";
 import { Input } from "@/components/ui/input";
 import {
   SelectSearch,
@@ -198,6 +200,10 @@ type Props = {
    *  inside the same draggable container and don't have their own grip. */
   dragAttributes?: DraggableAttributes;
   dragListeners?: DraggableSyntheticListeners;
+  /** "staple" drops the recipe-only chrome (drag handle, optional toggle,
+   *  amount lock, alternatives) but keeps the full ingredient-matching flow.
+   *  Defaults to the recipe layout. */
+  variant?: "recipe" | "staple";
 };
 
 export function IngredientRow({
@@ -210,11 +216,15 @@ export function IngredientRow({
   onDetach,
   dragAttributes,
   dragListeners,
+  variant = "recipe",
 }: Props) {
   const [defaultUnits, setDefaultUnits] = React.useState<SelectSearchItem[]>([]);
   React.useEffect(() => {
     void loadDefaultUnits().then(setDefaultUnits);
   }, []);
+  const [editingArticleId, setEditingArticleId] = React.useState<number | null>(
+    null,
+  );
 
   // Whenever the ingredient name settles (canonicalName is set OR the typed
   // name matches an existing row), fetch that ingredient's sub-units. They
@@ -555,6 +565,82 @@ export function IngredientRow({
     return annotation;
   }
 
+  if (variant === "staple") {
+    return (
+      <div className="grid items-start gap-2 grid-cols-[4rem_minmax(0,1fr)_auto] md:grid-cols-[5rem_8rem_minmax(0,1fr)_minmax(0,1fr)_auto]">
+        <Input
+          inputMode="decimal"
+          placeholder="Menge"
+          value={value.quantity}
+          onChange={(e) => onChange({ ...value, quantity: e.target.value })}
+          aria-label="Menge"
+          className="col-start-1 row-start-1"
+        />
+        <div className="col-start-2 col-span-2 row-start-1 md:col-span-1">
+          <SelectSearch
+            value={pickerValue}
+            onChange={onPickUnit}
+            search={searchUnitsAndSubUnits}
+            defaultItems={defaultItemsCombined}
+            placeholder="Einheit"
+            onCreate={createUnit}
+            createLabelPrefix="als Einheit anlegen"
+          />
+        </div>
+        <IngredientNameInput
+          value={value.name}
+          onChange={(name, canonical) =>
+            onChange({
+              ...value,
+              name,
+              canonicalName:
+                canonical === undefined ? value.canonicalName : canonical,
+            })
+          }
+          placeholder="Zutat"
+          className="col-start-1 col-span-3 row-start-2 md:col-start-3 md:col-span-1 md:row-start-1"
+        />
+        <Input
+          placeholder="Notiz"
+          value={value.notes}
+          onChange={(e) => onChange({ ...value, notes: e.target.value })}
+          aria-label="Notiz"
+          className="col-start-1 col-span-2 row-start-3 md:col-start-4 md:col-span-1 md:row-start-1"
+        />
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          onClick={onRemove}
+          aria-label="Zutat entfernen"
+          className="col-start-3 row-start-3 self-center text-[var(--color-danger)] md:col-start-5 md:row-start-1"
+        >
+          <Trash2 className="size-4" />
+        </Button>
+        <div className="col-start-1 col-span-3 row-start-4 md:col-start-3 md:col-span-2 md:row-start-2">
+          <CandidatePills
+            name={value.name}
+            candidates={serverMatches}
+            selectedIngredientId={value.selectedIngredientId}
+            selectedCanonicalName={value.canonicalName}
+            addAsAlias={value.addAsAlias}
+            onSelectCandidate={selectCandidate}
+            onSelectNew={selectNew}
+            onUseCanonical={useCanonicalInName}
+            onForceMatch={forceMatch}
+            onEditArticle={setEditingArticleId}
+          />
+        </div>
+        {editingArticleId != null ? (
+          <EditArticleDrawer
+            ingredientId={editingArticleId}
+            onClose={() => setEditingArticleId(null)}
+          />
+        ) : null}
+      </div>
+    );
+  }
+
   return (
     <div
       className={cn(
@@ -612,7 +698,7 @@ export function IngredientRow({
       </p>
     ) : null}
     <div
-      className="grid gap-2 grid-cols-[4rem_minmax(0,1fr)_auto_auto_auto_auto_auto] md:grid-cols-[5rem_8rem_minmax(0,1fr)_minmax(0,1fr)_auto_auto_auto_auto_auto]"
+      className="grid items-start gap-2 grid-cols-[4rem_minmax(0,1fr)_auto_auto_auto_auto_auto] md:grid-cols-[5rem_8rem_minmax(0,1fr)_minmax(0,1fr)_auto_auto_auto_auto_auto]"
     >
       {/* Mobile flow (3 rows): [Qty | Unit cs-4]  ·  [Name cs-5]  ·
           [Notes cs-2 | Opt | Fix | Trash]. Giving Unit the leftover row-1
@@ -679,8 +765,15 @@ export function IngredientRow({
           onSelectNew={selectNew}
           onUseCanonical={useCanonicalInName}
           onForceMatch={forceMatch}
+          onEditArticle={setEditingArticleId}
         />
       </div>
+      {editingArticleId != null ? (
+        <EditArticleDrawer
+          ingredientId={editingArticleId}
+          onClose={() => setEditingArticleId(null)}
+        />
+      ) : null}
       {value.isAlternative ? (
         // Alternatives are inherently optional — they never get the
         // toggle. Reserved empty slot keeps the grid columns aligned with
@@ -924,6 +1017,7 @@ function CandidatePills({
   onSelectNew,
   onUseCanonical,
   onForceMatch,
+  onEditArticle,
 }: {
   name: string;
   candidates: ServerMatch[];
@@ -941,6 +1035,7 @@ function CandidatePills({
     canonical: string,
     addAsAlias: boolean,
   ) => void;
+  onEditArticle: (ingredientId: number) => void;
 }) {
   const trimmed = name.trim();
   // Hide the whole pill row when there's nothing to interact with — no
@@ -975,31 +1070,41 @@ function CandidatePills({
         return (
           <CandidatePill
             key={c.ingredientId}
+            ingredientId={c.ingredientId}
             canonicalName={c.canonicalName}
             aliasName={aliasDiffers ? c.matchedName : null}
             isSelected={isCurrent}
             onSelect={() => onSelectCandidate(c)}
             onUseCanonical={() => onUseCanonical(c)}
+            onEditArticle={onEditArticle}
           />
         );
       })}
-      {selectedOutOfList ? (
-        <button
-          type="button"
-          disabled
-          className={cn(
-            "inline-flex max-w-full items-center gap-1 truncate rounded-full px-2 py-0.5 text-xs",
-            "bg-[var(--color-accent)] text-[var(--color-accent-fg)] cursor-default",
-          )}
-          title={
-            addAsAlias
-              ? `Diese Zeile ist fest mit einer Zutat verknüpft — "${trimmed}" wird beim Speichern als Alias hinzugefügt.`
-              : "Diese Zeile ist fest mit einer Zutat verknüpft."
-          }
-        >
-          <span>{selectedCanonicalName ?? trimmed}</span>
-          {addAsAlias ? <span className="text-[0.65rem]">+ Alias</span> : null}
-        </button>
+      {selectedOutOfList && selectedIngredientId != null ? (
+        <span className="inline-flex max-w-full items-center gap-0.5 rounded-full bg-[var(--color-accent)] text-xs text-[var(--color-accent-fg)]">
+          <span
+            className="max-w-full truncate py-0.5 pl-2 pr-1"
+            title={
+              addAsAlias
+                ? `Diese Zeile ist fest mit einer Zutat verknüpft — "${trimmed}" wird beim Speichern als Alias hinzugefügt.`
+                : "Diese Zeile ist fest mit einer Zutat verknüpft."
+            }
+          >
+            {selectedCanonicalName ?? trimmed}
+            {addAsAlias ? (
+              <span className="ml-1 text-[0.65rem]">+ Alias</span>
+            ) : null}
+          </span>
+          <button
+            type="button"
+            onClick={() => onEditArticle(selectedIngredientId)}
+            className="shrink-0 rounded-full px-1.5 py-1 hover:bg-[color-mix(in_srgb,var(--color-accent-fg),var(--color-accent)_75%)]"
+            title="Artikel bearbeiten"
+            aria-label="Artikel bearbeiten"
+          >
+            <Pencil className="size-3" />
+          </button>
+        </span>
       ) : null}
       <NewPill
         label={trimmed.length > 0 ? `Neu: ${trimmed}` : "Neu"}
@@ -1013,12 +1118,15 @@ function CandidatePills({
 }
 
 function CandidatePill({
+  ingredientId,
   canonicalName,
   aliasName,
   isSelected,
   onSelect,
   onUseCanonical,
+  onEditArticle,
 }: {
+  ingredientId: number;
   canonicalName: string;
   /** Alias the matcher hit on, when it differs from the canonical. Rendered
    *  in parens after the canonical so the user sees both WHAT the row
@@ -1028,6 +1136,7 @@ function CandidatePill({
   isSelected: boolean;
   onSelect: () => void;
   onUseCanonical: () => void;
+  onEditArticle: (ingredientId: number) => void;
 }) {
   // The pill's primary action (select) keys off the canonical identity, so
   // tooltips lead with the canonical. The "↻" action copies the alias name
@@ -1075,6 +1184,20 @@ function CandidatePill({
         aria-label={`„${copyTarget}" in das Namensfeld übernehmen`}
       >
         <RotateCw className="size-3" />
+      </button>
+      <button
+        type="button"
+        onClick={() => onEditArticle(ingredientId)}
+        className={cn(
+          "shrink-0 rounded-full px-1.5 py-1",
+          isSelected
+            ? "hover:bg-[color-mix(in_srgb,var(--color-accent-fg),var(--color-accent)_75%)]"
+            : "hover:bg-[color-mix(in_srgb,var(--color-accent),var(--color-bg)_75%)]",
+        )}
+        title={`„${canonicalName}" bearbeiten.`}
+        aria-label={`„${canonicalName}" bearbeiten`}
+      >
+        <Pencil className="size-3" />
       </button>
     </span>
   );

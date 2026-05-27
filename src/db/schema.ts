@@ -413,6 +413,16 @@ export const stapleGroupItem = sqliteTable(
     unitId: integer("unit_id").references(() => unit.id, {
       onDelete: "set null",
     }),
+    /**
+     * Mutually-exclusive alternative to `unit_id` (mirrors
+     * `recipe_ingredient.sub_unit_id`): an ingredient-specific sub-unit
+     * ("1 Dose", "2 Packungen"). Stored for the editor's round-trip; the
+     * staples→shopping conversion contributes by `unit_id` only, so a
+     * sub-unit row lands unit-less on the list exactly like recipes.
+     */
+    subUnitId: integer("sub_unit_id").references(() => ingredientSubUnit.id, {
+      onDelete: "set null",
+    }),
     note: text("note"),
     sortOrder: integer("sort_order").notNull().default(0),
   },

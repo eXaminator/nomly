@@ -2,16 +2,18 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
-import { Check, Pencil, Plus, Trash2, X } from "lucide-react";
+import { Check, Pencil, Plus, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { NewIngredientsDialog } from "@/components/recipes/new-ingredients-dialog";
+import { IngredientRow } from "@/components/recipes/ingredient-row";
+import type { DraftIngredient } from "@/components/recipes/types";
+import type { NewIngredientDefaults } from "@/lib/recipes/types";
 import type {
   StapleGroupDetail,
   StapleGroupItemDetail,
 } from "@/lib/staples/groups";
-import type { NewIngredientDefaults } from "@/lib/recipes/types";
 
 type UnitOption = {
   id: number;
@@ -24,15 +26,16 @@ type RowState = {
   key: number;
   /** Server id; null for new rows that haven't been saved yet. */
   id: number | null;
-  /** Server-known ingredient id; cleared when the user types a name that no
-   *  longer matches the picked ingredient. Resolved at save time by exact
-   *  name match against the autocomplete; unresolved rows go through the
-   *  new-ingredients dialog. */
+  /** Resolved ingredient id from the matcher pills; null = "new ingredient",
+   *  handled via the new-ingredients dialog at save time. */
   pickedIngredientId: number | null;
+  /** Canonical name of the picked ingredient (for the pinned pill / resolve). */
   pickedIngredientName: string;
   name: string;
   quantity: string;
   unitId: number | "";
+  subUnitId: number | null;
+  subUnitName: string | null;
   note: string;
 };
 
@@ -63,6 +66,8 @@ function fromDetail(item: StapleGroupItemDetail): RowState {
     name: item.ingredientName,
     quantity: item.quantity != null ? String(item.quantity) : "",
     unitId: item.unitId ?? "",
+    subUnitId: item.subUnitId,
+    subUnitName: item.subUnitName,
     note: item.note ?? "",
   };
 }
@@ -81,6 +86,7 @@ function rowFingerprint(r: RowState): string {
     pickedIngredientId: r.pickedIngredientId,
     quantity: r.quantity.trim(),
     unitId: r.unitId,
+    subUnitId: r.subUnitId,
     note: r.note.trim(),
   });
 }
@@ -128,6 +134,8 @@ export function StapleGroupDetailClient({ initial, units }: Props) {
         name: "",
         quantity: "",
         unitId: "",
+        subUnitId: null,
+        subUnitName: null,
         note: "",
       },
     ]);
@@ -144,50 +152,22 @@ export function StapleGroupDetailClient({ initial, units }: Props) {
     return false;
   }, [rows, initialRows]);
 
-  // Step 1 of save: resolve every row's name against the catalog. If user
-  // already picked the matching ingredient (pickedIngredientName === current
-  // name, case-insensitive) we use that id. Otherwise we hit autocomplete
-  // and look for an exact name match. Names that don't resolve land in the
-  // new-ingredients dialog.
-  async function resolveRowNames(
-    activeRows: RowState[],
-  ): Promise<{ resolved: Map<number, number>; unresolved: string[] }> {
-    const resolved = new Map<number, number>(); // rowKey -> ingredientId
+  /**
+   * Resolve every row to an ingredient id. The matcher pills set
+   * `pickedIngredientId` (existing article); rows still without one are new
+   * and go to the new-ingredients dialog.
+   */
+  function resolveRowNames(activeRows: RowState[]): {
+    resolved: Map<number, number>;
+    unresolved: string[];
+  } {
+    const resolved = new Map<number, number>();
     const unresolvedSet = new Set<string>();
-    // Fast path: any name that matched an initial row's known article name
-    // resolves to that article's id. Covers cases where the user retyped the
-    // same article name and autocomplete can't return the existing row (the
-    // catalog autocomplete is accent-sensitive and may miss umlaut matches).
-    const knownByLowerName = new Map<string, number>();
-    for (const r of initialRows) {
-      if (r.pickedIngredientId != null) {
-        knownByLowerName.set(
-          r.pickedIngredientName.toLowerCase(),
-          r.pickedIngredientId,
-        );
-      }
-    }
     for (const r of activeRows) {
       const trimmed = r.name.trim();
       if (trimmed === "") continue;
-      if (
-        r.pickedIngredientId != null &&
-        r.pickedIngredientName.toLowerCase() === trimmed.toLowerCase()
-      ) {
+      if (r.pickedIngredientId != null) {
         resolved.set(r.key, r.pickedIngredientId);
-        continue;
-      }
-      const known = knownByLowerName.get(trimmed.toLowerCase());
-      if (known != null) {
-        resolved.set(r.key, known);
-        continue;
-      }
-      const hits = await autocomplete(trimmed);
-      const exact = hits.find(
-        (h) => h.name.toLowerCase() === trimmed.toLowerCase(),
-      );
-      if (exact) {
-        resolved.set(r.key, exact.id);
       } else {
         unresolvedSet.add(trimmed);
       }
@@ -195,18 +175,15 @@ export function StapleGroupDetailClient({ initial, units }: Props) {
     return { resolved, unresolved: [...unresolvedSet] };
   }
 
-  // Step 2 of save: actually run the diff against initialRows and fire the
-  // DELETE / PATCH / POST sequence. `resolvedByKey` must already cover every
-  // active row whose name was unmatched-at-resolve-time but has since been
-  // created via the new-ingredients dialog.
+  // Run the diff against initialRows and fire DELETE / PATCH / POST.
   async function commitSave(resolvedByKey: Map<number, number>): Promise<void> {
     setError(null);
-    // Validate: amount must be both-or-neither.
+    // Validate: amount must be both-or-neither (a sub-unit counts as a unit).
     for (const r of rows) {
       if (!resolvedByKey.has(r.key)) continue;
       const q = parseQty(r.quantity);
-      const u = r.unitId === "" ? null : r.unitId;
-      if ((q == null) !== (u == null)) {
+      const hasUnit = (r.unitId !== "" && r.unitId != null) || r.subUnitId != null;
+      if ((q == null) === hasUnit) {
         throw new Error(
           "Menge und Einheit müssen beide gesetzt oder beide leer sein.",
         );
@@ -222,10 +199,9 @@ export function StapleGroupDetailClient({ initial, units }: Props) {
     const removed = [...initialIds].filter((id) => !currentIds.has(id));
 
     for (const id of removed) {
-      const res = await fetch(
-        `/api/v1/staple-groups/${initial.id}/items/${id}`,
-        { method: "DELETE" },
-      );
+      const res = await fetch(`/api/v1/staple-groups/${initial.id}/items/${id}`, {
+        method: "DELETE",
+      });
       if (!res.ok) throw new Error(`DELETE ${id}: HTTP ${res.status}`);
     }
 
@@ -236,6 +212,7 @@ export function StapleGroupDetailClient({ initial, units }: Props) {
         ingredientId: newIngredientId,
         quantity: parseQty(r.quantity),
         unitId: r.unitId === "" ? null : r.unitId,
+        subUnitId: r.subUnitId,
         note: r.note.trim() === "" ? null : r.note.trim(),
       };
       if (r.id == null) {
@@ -252,8 +229,6 @@ export function StapleGroupDetailClient({ initial, units }: Props) {
           throw new Error(`POST: HTTP ${res.status}`);
         }
       } else {
-        // For existing rows, only PATCH when anything changed. (The diff is
-        // already done by isDirty, but we re-check here to avoid empty PATCHes.)
         const orig = initialRows.find((x) => x.id === r.id);
         if (
           orig != null &&
@@ -291,9 +266,9 @@ export function StapleGroupDetailClient({ initial, units }: Props) {
     setSaving(true);
     setError(null);
     try {
-      const { resolved, unresolved } = await resolveRowNames(rows);
+      const { resolved, unresolved } = resolveRowNames(rows);
       if (unresolved.length > 0) {
-        // Hand off to the dialog; the dialog's onConfirm will finish the save.
+        // Hand off to the dialog; its onConfirm finishes the save.
         setPendingNewNames(unresolved);
         return;
       }
@@ -306,15 +281,12 @@ export function StapleGroupDetailClient({ initial, units }: Props) {
     }
   }
 
-  async function handleNewIngredientsConfirm(
-    defaults: NewIngredientDefaults[],
-  ) {
+  async function handleNewIngredientsConfirm(defaults: NewIngredientDefaults[]) {
     if (pendingNewNames == null) return;
     setSaving(true);
     setError(null);
     try {
-      // Create each unresolved ingredient via the manage endpoint and build
-      // a name→id map.
+      // Create each unresolved ingredient via the manage endpoint → name→id.
       const nameToId = new Map<string, number>();
       for (const d of defaults) {
         const payload = {
@@ -335,8 +307,6 @@ export function StapleGroupDetailClient({ initial, units }: Props) {
         });
         if (!res.ok) {
           if (res.status === 409) {
-            // Already exists (e.g. autocomplete missed an exact match due to
-            // ranking, or another tab created it in the meantime). Look it up.
             const hits = await autocomplete(d.name);
             const exact = hits.find(
               (h) => h.name.toLowerCase() === d.name.toLowerCase(),
@@ -351,35 +321,16 @@ export function StapleGroupDetailClient({ initial, units }: Props) {
         nameToId.set(d.name.toLowerCase(), created.id);
       }
 
-      // Re-resolve names for current rows, now that the new ingredients
-      // exist. (We can't call resolveRowNames again because autocomplete
-      // probably doesn't reflect the just-created ingredients yet; use the
-      // local map for the rows whose names were unresolved.)
       const resolvedByKey = new Map<number, number>();
       for (const r of rows) {
         const trimmed = r.name.trim();
         if (trimmed === "") continue;
-        if (
-          r.pickedIngredientId != null &&
-          r.pickedIngredientName.toLowerCase() === trimmed.toLowerCase()
-        ) {
+        if (r.pickedIngredientId != null) {
           resolvedByKey.set(r.key, r.pickedIngredientId);
           continue;
         }
         const lookup = nameToId.get(trimmed.toLowerCase());
-        if (lookup != null) {
-          resolvedByKey.set(r.key, lookup);
-          continue;
-        }
-        // Wasn't in the unresolved set — must have matched a real ingredient
-        // earlier. Re-look-up.
-        const hits = await autocomplete(trimmed);
-        const exact = hits.find(
-          (h) => h.name.toLowerCase() === trimmed.toLowerCase(),
-        );
-        if (exact) {
-          resolvedByKey.set(r.key, exact.id);
-        }
+        if (lookup != null) resolvedByKey.set(r.key, lookup);
       }
       await commitSave(resolvedByKey);
       setPendingNewNames(null);
@@ -493,14 +444,14 @@ export function StapleGroupDetailClient({ initial, units }: Props) {
             Noch keine Artikel. Füge unten einen hinzu.
           </div>
         ) : (
-          <ul className="flex flex-col gap-2">
+          <ul className="flex flex-col divide-y divide-[var(--color-border)]">
             {rows.map((row) => (
-              <li key={row.key}>
-                <ItemRow
+              <li key={row.key} className="py-1">
+                <StapleIngredientRow
                   row={row}
                   units={units}
                   onPatch={(patch) => setRow(row.key, patch)}
-                  onDelete={() => deleteRow(row.key)}
+                  onRemove={() => deleteRow(row.key)}
                 />
               </li>
             ))}
@@ -542,177 +493,73 @@ export function StapleGroupDetailClient({ initial, units }: Props) {
   );
 }
 
-function ItemRow({
+/**
+ * Bridges a staple {@link RowState} to the recipe {@link IngredientRow} (the
+ * shared ingredient-matching editor). Builds a controlled `DraftIngredient`
+ * from the row and maps every change back, so standards get the exact same
+ * matcher / candidate-pills / force-match / edit-article / new-ingredient flow
+ * as recipes — minus the recipe-only chrome (`variant="staple"`).
+ */
+function StapleIngredientRow({
   row,
   units,
   onPatch,
-  onDelete,
+  onRemove,
 }: {
   row: RowState;
   units: UnitOption[];
   onPatch: (patch: Partial<RowState>) => void;
-  onDelete: () => void;
+  onRemove: () => void;
 }) {
+  const draft: DraftIngredient = React.useMemo(() => {
+    const unitName =
+      row.unitId !== "" && row.unitId != null
+        ? units.find((u) => u.id === row.unitId)?.name ?? ""
+        : "";
+    return {
+      uid: `staple-${row.key}`,
+      name: row.name,
+      canonicalName:
+        row.pickedIngredientId != null &&
+        row.pickedIngredientName.toLowerCase() !== row.name.toLowerCase()
+          ? row.pickedIngredientName
+          : null,
+      selectedIngredientId: row.pickedIngredientId,
+      candidates: [],
+      addAsAlias: false,
+      quantity: row.quantity,
+      unit:
+        row.unitId !== "" && row.unitId != null
+          ? { id: row.unitId, name: unitName }
+          : null,
+      subUnit:
+        row.subUnitId != null
+          ? { id: row.subUnitId, name: row.subUnitName ?? "" }
+          : null,
+      notes: row.note,
+      isOptional: false,
+      fixedAmount: false,
+      isAlternative: false,
+    };
+  }, [row, units]);
+
   return (
-    <div
-      className="grid items-center gap-2"
-      style={{ gridTemplateColumns: "5rem 8rem 1fr 1fr auto" }}
-    >
-      <Input
-        inputMode="decimal"
-        placeholder="Menge"
-        value={row.quantity}
-        onChange={(e) => onPatch({ quantity: e.target.value })}
-        aria-label="Menge"
-      />
-      <select
-        value={row.unitId}
-        onChange={(e) =>
-          onPatch({
-            unitId: e.target.value === "" ? "" : Number(e.target.value),
-          })
-        }
-        aria-label="Einheit"
-        className="flex h-11 w-full rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-bg)] px-3 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
-      >
-        <option value="">Einheit</option>
-        {units.map((u) => (
-          <option key={u.id} value={u.id}>
-            {u.name}
-          </option>
-        ))}
-      </select>
-      <ArticleNameInput
-        value={row.name}
-        pickedName={row.pickedIngredientName}
-        onTextChange={(next) => {
-          // Typing breaks the picked-id association unless the new text
-          // still matches the picked name exactly (case-insensitive).
-          const stillPicked =
-            row.pickedIngredientName.length > 0 &&
-            next.toLowerCase() === row.pickedIngredientName.toLowerCase();
-          if (stillPicked) {
-            onPatch({ name: next });
-          } else {
-            onPatch({
-              name: next,
-              pickedIngredientId: null,
-              pickedIngredientName: "",
-            });
-          }
-        }}
-        onPick={(hit) =>
-          onPatch({
-            name: hit.name,
-            pickedIngredientId: hit.id,
-            pickedIngredientName: hit.name,
-          })
-        }
-      />
-      <Input
-        placeholder="Notiz"
-        value={row.note}
-        onChange={(e) => onPatch({ note: e.target.value })}
-        aria-label="Notiz"
-      />
-      <Button
-        variant="ghost"
-        size="icon"
-        aria-label="Artikel entfernen"
-        onClick={onDelete}
-        className="text-[var(--color-danger)]"
-      >
-        <Trash2 className="size-4" />
-      </Button>
-    </div>
-  );
-}
-
-function ArticleNameInput({
-  value,
-  pickedName,
-  onTextChange,
-  onPick,
-}: {
-  value: string;
-  pickedName: string;
-  onTextChange: (text: string) => void;
-  onPick: (hit: AutocompleteHit) => void;
-}) {
-  const [open, setOpen] = React.useState(false);
-  const [hits, setHits] = React.useState<AutocompleteHit[]>([]);
-  const reqId = React.useRef(0);
-  const containerRef = React.useRef<HTMLDivElement>(null);
-
-  React.useEffect(() => {
-    const trimmed = value.trim();
-    if (trimmed.length === 0) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setHits([]);
-      return;
-    }
-    // Suppress the popover when the typed value matches the currently picked
-    // ingredient — no point asking the user to re-pick what's already set.
-    if (trimmed.toLowerCase() === pickedName.toLowerCase()) {
-      setHits([]);
-      return;
-    }
-    const id = ++reqId.current;
-    const handle = setTimeout(async () => {
-      const result = await autocomplete(trimmed);
-      if (reqId.current === id) setHits(result);
-    }, 150);
-    return () => clearTimeout(handle);
-  }, [value, pickedName]);
-
-  React.useEffect(() => {
-    if (!open) return;
-    function onDown(e: MouseEvent) {
-      if (
-        containerRef.current &&
-        !containerRef.current.contains(e.target as Node)
-      ) {
-        setOpen(false);
+    <IngredientRow
+      variant="staple"
+      value={draft}
+      onChange={(next) =>
+        onPatch({
+          name: next.name,
+          pickedIngredientId: next.selectedIngredientId,
+          pickedIngredientName: next.canonicalName ?? next.name,
+          quantity: next.quantity,
+          unitId: next.subUnit ? "" : (next.unit?.id ?? ""),
+          subUnitId: next.subUnit?.id ?? null,
+          subUnitName: next.subUnit?.name ?? null,
+          note: next.notes,
+        })
       }
-    }
-    document.addEventListener("mousedown", onDown);
-    return () => document.removeEventListener("mousedown", onDown);
-  }, [open]);
-
-  const showPopover = open && hits.length > 0;
-
-  return (
-    <div ref={containerRef} className="relative">
-      <Input
-        value={value}
-        onChange={(e) => onTextChange(e.target.value)}
-        onFocus={() => setOpen(true)}
-        onBlur={() => {
-          // Delay close so a click on a suggestion still registers.
-          setTimeout(() => setOpen(false), 120);
-        }}
-        placeholder="Artikel"
-        aria-label="Artikel"
-      />
-      {showPopover ? (
-        <ul className="absolute left-0 right-0 top-full z-30 mt-1 max-h-60 overflow-y-auto rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-card)] shadow-lg">
-          {hits.map((h) => (
-            <li key={h.id}>
-              <button
-                type="button"
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => {
-                  onPick(h);
-                  setOpen(false);
-                }}
-                className="block w-full px-3 py-2 text-left text-sm hover:bg-[var(--color-muted)] focus-visible:bg-[var(--color-muted)]"
-              >
-                {h.name}
-              </button>
-            </li>
-          ))}
-        </ul>
-      ) : null}
-    </div>
+      onRemove={onRemove}
+    />
   );
 }
