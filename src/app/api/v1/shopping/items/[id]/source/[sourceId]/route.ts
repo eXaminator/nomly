@@ -5,6 +5,7 @@ import {
   setSourceQuantity,
   ShoppingApiError,
 } from "@/lib/shopping/items";
+import { publishShoppingChanged } from "@/lib/shopping/realtime";
 
 const schema = z
   .object({
@@ -42,6 +43,7 @@ export async function PATCH(
   }
   try {
     const item = setSourceQuantity(itemId, sourceId, parsed.data.quantity);
+    publishShoppingChanged();
     return NextResponse.json({ item });
   } catch (err) {
     if (err instanceof ShoppingApiError) {
@@ -64,6 +66,7 @@ export async function DELETE(
   }
   try {
     const item = deleteSource(itemId, sourceId);
+    publishShoppingChanged();
     return NextResponse.json({ item });
   } catch (err) {
     if (err instanceof ShoppingApiError) {

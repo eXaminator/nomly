@@ -5,6 +5,7 @@ import {
   unmarkUnavailable,
   type UnavailableTarget,
 } from "@/lib/shopping/unavailable";
+import { publishShoppingChanged } from "@/lib/shopping/realtime";
 
 const schema = z.object({
   kind: z.literal("ingredient"),
@@ -23,6 +24,7 @@ export async function POST(request: Request) {
   }
   const target: UnavailableTarget = { kind: parsed.data.kind, id: parsed.data.id };
   markUnavailable(target, parsed.data.supermarketId);
+  publishShoppingChanged();
   return NextResponse.json({ ok: true });
 }
 
@@ -42,5 +44,6 @@ export async function DELETE(request: Request) {
   }
   const target: UnavailableTarget = { kind: parsed.data.kind, id: parsed.data.id };
   unmarkUnavailable(target, parsed.data.supermarketId);
+  publishShoppingChanged();
   return NextResponse.json({ ok: true });
 }

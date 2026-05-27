@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { clearAllItems } from "@/lib/shopping/items";
 import { clearShoppingListSelective } from "@/lib/shopping/meals";
+import { publishShoppingChanged } from "@/lib/shopping/realtime";
 
 const schema = z.union([
   z.object({ removeAll: z.literal(true) }),
@@ -29,6 +30,7 @@ export async function POST(request: Request) {
   }
   if ("removeAll" in parsed.data && parsed.data.removeAll === true) {
     const result = clearAllItems();
+    publishShoppingChanged();
     return NextResponse.json({ deletedCount: result.deletedCount });
   }
   const data = parsed.data as {
@@ -39,5 +41,6 @@ export async function POST(request: Request) {
     mealPlanIds: data.mealPlanIds,
     stapleGroupIds: data.stapleGroupIds,
   });
+  publishShoppingChanged();
   return NextResponse.json(result);
 }

@@ -6,6 +6,7 @@ import {
   setItemAmount,
   ShoppingApiError,
 } from "@/lib/shopping/items";
+import { publishShoppingChanged } from "@/lib/shopping/realtime";
 
 const setSchema = z
   .object({
@@ -42,6 +43,7 @@ export async function PATCH(
   }
   try {
     const item = setItemAmount(id, parsed.data);
+    publishShoppingChanged();
     return NextResponse.json({ item });
   } catch (err) {
     if (err instanceof ShoppingApiError) {
@@ -73,6 +75,7 @@ export async function POST(
   }
   try {
     const item = addItemAmount(id, parsed.data);
+    publishShoppingChanged();
     return NextResponse.json({ item }, { status: 201 });
   } catch (err) {
     if (err instanceof ShoppingApiError) {
@@ -100,6 +103,7 @@ export async function DELETE(
   }
   try {
     const item = deleteItemAmount(id, amountId);
+    publishShoppingChanged();
     return NextResponse.json({ item });
   } catch (err) {
     if (err instanceof ShoppingApiError) {

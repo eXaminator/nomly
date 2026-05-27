@@ -22,12 +22,14 @@ import {
   deleteManualAmount as apiDeleteManual,
   deleteSource as apiDeleteSource,
   deleteStapleSource as apiDeleteStapleSource,
+  fetchItems,
   patchItem as apiPatch,
   setManualAmountQuantity as apiSetManualQty,
   setSourceQuantity as apiSetSourceQty,
   setUnavailable as apiSetUnavailable,
 } from "./api";
 import { OfflineIndicator } from "./offline-indicator";
+import { useShoppingRealtime } from "./use-shopping-realtime";
 import { PendingMutationsDrawer } from "./pending-mutations-drawer";
 import {
   getConnectivity,
@@ -93,6 +95,20 @@ export function ShoppingListView({
   // The connectivity watcher is owned app-wide by the header
   // (ConnectivityStatus); here we just subscribe to read the state.
   React.useEffect(() => subscribeConnectivity(setConnectivityState), []);
+
+  // Realtime sync: when another device changes the list, refetch and replace.
+  // Only active while online (the WS hook handles connect/reconnect).
+  useShoppingRealtime(
+    React.useCallback(async () => {
+      try {
+        const { items: fresh } = await fetchItems();
+        setItems(fresh);
+      } catch {
+        // Transient fetch failure — the connectivity watcher will flip us
+        // offline if it's real; nothing else to do here.
+      }
+    }, []),
+  );
 
   // On mount, hydrate IDB from the SSR snapshot + overlay any pending toggles
   // the user made in a previous session. Then mirror cached supermarkets +

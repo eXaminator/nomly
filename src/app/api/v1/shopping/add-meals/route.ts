@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { addMealsToList } from "@/lib/shopping/merge";
+import { publishShoppingChanged } from "@/lib/shopping/realtime";
 
 const schema = z.object({
   selection: z
@@ -34,5 +35,6 @@ export async function POST(request: Request) {
     );
   }
   const result = addMealsToList(parsed.data.selection);
+  publishShoppingChanged();
   return NextResponse.json(result);
 }

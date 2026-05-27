@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { addStapleGroupToList } from "@/lib/staples/apply";
 import { StapleGroupError } from "@/lib/staples/groups";
+import { publishShoppingChanged } from "@/lib/shopping/realtime";
 
 const schema = z.object({
   groupId: z.number().int().positive(),
@@ -15,6 +16,7 @@ export async function POST(request: Request) {
   }
   try {
     const result = addStapleGroupToList(parsed.data.groupId);
+    publishShoppingChanged();
     return NextResponse.json(result, { status: 201 });
   } catch (e) {
     if (e instanceof StapleGroupError) {

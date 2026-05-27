@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { addManualItem, ShoppingApiError } from "@/lib/shopping/items";
+import { publishShoppingChanged } from "@/lib/shopping/realtime";
 
 const optionalQty = z.number().nullable().optional();
 const optionalUnit = z.number().int().positive().nullable().optional();
@@ -43,6 +44,7 @@ export async function POST(request: Request) {
   }
   try {
     const result = addManualItem(parsed.data);
+    publishShoppingChanged();
     return NextResponse.json(result, { status: 201 });
   } catch (err) {
     if (err instanceof ShoppingApiError) {

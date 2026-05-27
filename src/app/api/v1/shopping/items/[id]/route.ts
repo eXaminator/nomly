@@ -5,6 +5,7 @@ import {
   recallMutation,
   recordMutation,
 } from "@/lib/shopping/offline/mutation-dedup";
+import { publishShoppingChanged } from "@/lib/shopping/realtime";
 
 const patchSchema = z
   .object({
@@ -43,6 +44,7 @@ export async function PATCH(
     const item = patchItem(id, patch);
     const payload = { item };
     if (mutationId) recordMutation(mutationId, payload);
+    publishShoppingChanged();
     return NextResponse.json(payload);
   } catch (err) {
     if (err instanceof ShoppingApiError) {
@@ -61,6 +63,7 @@ export async function DELETE(
   if (!id) return NextResponse.json({ error: "not found" }, { status: 404 });
   try {
     deleteItem(id);
+    publishShoppingChanged();
     return NextResponse.json({ ok: true });
   } catch (err) {
     if (err instanceof ShoppingApiError) {

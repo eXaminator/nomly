@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { deleteStapleSource, ShoppingApiError } from "@/lib/shopping/items";
+import { publishShoppingChanged } from "@/lib/shopping/realtime";
 
 function parseId(raw: string): number | null {
   const n = Number(raw);
@@ -19,6 +20,7 @@ export async function DELETE(
   }
   try {
     const item = deleteStapleSource(itemId, sourceId);
+    publishShoppingChanged();
     return NextResponse.json({ item });
   } catch (err) {
     if (err instanceof ShoppingApiError) {

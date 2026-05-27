@@ -22,6 +22,9 @@ async function main() {
   type SessionData = import("./src/lib/session.ts").SessionData;
   const { extractBearer, verifyBearer } = await import("./src/lib/bearer.ts");
   const { sweepCheckedItems } = await import("./src/lib/shopping/sweeper.ts");
+  const { onShoppingChanged, publishShoppingChanged } = await import(
+    "./src/lib/shopping/realtime.ts"
+  );
 
   const port = parseInt(process.env.PORT ?? "3000", 10);
   const hostname = process.env.HOSTNAME ?? "0.0.0.0";
@@ -75,10 +78,19 @@ async function main() {
     }
   });
 
-  // WebSocket hub on /ws — Epic 1 wires the upgrade + auth gate; mutation
-  // consumers arrive with Epic 9. Connections that pass the gate may subscribe
-  // to known topics; mutate frames are not yet handled.
+  // WebSocket hub on /ws. Connections that pass the auth gate subscribe to
+  // known topics; on a shopping mutation we fan a lightweight "changed" event
+  // out to subscribers, who then refetch the list (Epic 9 realtime sync).
   const wss = new WebSocketServer({ noServer: true });
+
+  // Sockets currently subscribed to the "shopping" topic.
+  const shoppingSubscribers = new Set<WebSocket>();
+  onShoppingChanged(() => {
+    const frame = JSON.stringify({ op: "event", topic: "shopping" });
+    for (const ws of shoppingSubscribers) {
+      if (ws.readyState === ws.OPEN) ws.send(frame);
+    }
+  });
 
   server.on("upgrade", async (req, socket, head) => {
     const url = req.url ?? "";
@@ -108,9 +120,11 @@ async function main() {
       }
       if (msg.op === "subscribe" && msg.topic && NOMLY_TOPICS.has(msg.topic)) {
         subscriptions.add(msg.topic);
+        if (msg.topic === "shopping") shoppingSubscribers.add(ws);
         ws.send(JSON.stringify({ op: "subscribed", topic: msg.topic }));
       }
     });
+    ws.on("close", () => shoppingSubscribers.delete(ws));
     ws.send(JSON.stringify({ op: "hello", version: 1 }));
   });
 
@@ -131,6 +145,8 @@ async function main() {
           `> shopping sweeper removed ${deletedIds.length} item(s):`,
           deletedIds,
         );
+        // Push the removal to any connected clients so swept items vanish live.
+        publishShoppingChanged();
       }
     } catch (err) {
       console.error("shopping sweeper failed", err);
