@@ -165,6 +165,9 @@ function RecipeRow({
     // clip it. Keeping `opacity: 0` preserves the row's slot.
     opacity: isDragging ? 0 : undefined,
   };
+  // DietBadge renders nothing unless one of these is true; mirror that here
+  // so the tags row isn't created just to hold an empty badge.
+  const hasDiet = recipe.isVegan === true || recipe.isVegetarian === true;
   return (
     <div
       ref={setNodeRef}
@@ -184,19 +187,29 @@ function RecipeRow({
         <div className="size-9 shrink-0 rounded bg-[var(--color-muted)]" />
       )}
       <div className="flex min-w-0 flex-1 flex-col">
-        <span className="flex items-center gap-1.5 truncate font-medium">
-          <DietBadge
-            isVegan={recipe.isVegan}
-            isVegetarian={recipe.isVegetarian}
-            confidence={recipe.dietConfidence}
-            size="sm"
-          />
-          <span className="truncate">{recipe.title}</span>
-        </span>
-        {recipe.tags.length > 0 ? (
-          <span className="truncate text-xs text-[var(--color-muted-fg)]">
-            {recipe.tags.slice(0, 3).join(" · ")}
-          </span>
+        <span className="truncate font-medium">{recipe.title}</span>
+        {hasDiet || recipe.tags.length > 0 ? (
+          <div className="mt-0.5 flex flex-wrap items-center gap-1">
+            <DietBadge
+              isVegan={recipe.isVegan}
+              isVegetarian={recipe.isVegetarian}
+              confidence={recipe.dietConfidence}
+              size="sm"
+            />
+            {recipe.tags.slice(0, 3).map((tag) => (
+              <span
+                key={tag}
+                className="rounded-full bg-[var(--color-muted)] px-1.5 py-0.5 text-[10px] text-[var(--color-muted-fg)]"
+              >
+                {tag}
+              </span>
+            ))}
+            {recipe.tags.length > 3 ? (
+              <span className="text-[10px] text-[var(--color-muted-fg)]">
+                +{recipe.tags.length - 3}
+              </span>
+            ) : null}
+          </div>
         ) : null}
         <RecipeUsageLine stats={stats} today={today} />
       </div>
