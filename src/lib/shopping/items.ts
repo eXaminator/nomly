@@ -1,5 +1,6 @@
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "../../db/index.ts";
+import { unaccent } from "../autocomplete.ts";
 import {
   category,
   ingredient,
@@ -1218,7 +1219,10 @@ const ESCAPE_LIKE = (s: string) => s.replace(/[%_]/g, "\\$&");
 export function autocompleteItems(rawQuery: string): AutocompleteHit[] {
   const q = rawQuery.trim();
   if (q.length === 0) return [];
-  const pattern = `%${ESCAPE_LIKE(q)}%`;
+  // Match against `unaccent(name)` below, so the pattern must be unaccented
+  // too — otherwise typing an accented character (e.g. "Brö") can never match
+  // the accent-stripped column ("brotchen").
+  const pattern = `%${ESCAPE_LIKE(unaccent(q))}%`;
 
   const hits: AutocompleteHit[] = [];
   const seen = new Set<string>();

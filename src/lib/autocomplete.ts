@@ -50,7 +50,13 @@ function buildLikePattern(query: string): string {
   return `%${query.replace(/[%_]/g, "\\$&")}%`;
 }
 
-function unaccent(s: string): string {
+/**
+ * JS twin of the `unaccent` SQLite function (src/db/index.ts): NFD-decompose,
+ * strip combining marks, fold ß→ss, lowercase. Apply this to a search query
+ * before building a LIKE pattern that runs against `unaccent(column)` — both
+ * sides must use the same transform or accented queries silently miss.
+ */
+export function unaccent(s: string): string {
   return s
     .normalize("NFD")
     .replace(/[̀-ͯ]/g, "")

@@ -1,6 +1,7 @@
 import { eq, sql } from "drizzle-orm";
 import { db } from "../../db/index.ts";
 import { ingredient, ingredientAlias } from "../../db/schema.ts";
+import { unaccent } from "../autocomplete.ts";
 
 export type NameCandidate = {
   kind: "ingredient";
@@ -54,7 +55,9 @@ function collect(
       ? (col: ReturnType<typeof sqlCol>) =>
           sql`unaccent(${col}) = unaccent(${name})`
       : (col: ReturnType<typeof sqlCol>) =>
-          sql`unaccent(${col}) LIKE ${"%" + sqlEscape(name) + "%"}`;
+          // Unaccent the query too — the column side is `unaccent(col)`, so a
+          // raw pattern with an umlaut (e.g. "Brö") would never match.
+          sql`unaccent(${col}) LIKE ${"%" + sqlEscape(unaccent(name)) + "%"}`;
 
   const ingredientHits = db
     .select({ id: ingredient.id, name: ingredient.name })
