@@ -7,10 +7,21 @@ export function RegisterSW(): null {
     if (process.env.NODE_ENV !== "production") return;
     if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) return;
     let cancelled = false;
+    let registration: ServiceWorkerRegistration | null = null;
+
+    // Re-check for a deployed update when the app regains focus — a long-open
+    // standalone PWA otherwise rarely asks the server for a new sw.js.
+    const checkForUpdate = () => {
+      if (document.visibilityState === "visible") {
+        registration?.update().catch(() => undefined);
+      }
+    };
+
     navigator.serviceWorker
       .register("/sw.js", { scope: "/" })
       .then((reg) => {
         if (cancelled) return;
+        registration = reg;
         reg.addEventListener("updatefound", () => {
           const installing = reg.installing;
           if (!installing) return;
@@ -20,10 +31,13 @@ export function RegisterSW(): null {
             }
           });
         });
+        reg.update().catch(() => undefined);
+        document.addEventListener("visibilitychange", checkForUpdate);
       })
       .catch((err) => console.warn("[sw] registration failed", err));
     return () => {
       cancelled = true;
+      document.removeEventListener("visibilitychange", checkForUpdate);
     };
   }, []);
   return null;

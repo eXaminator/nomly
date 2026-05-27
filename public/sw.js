@@ -76,18 +76,17 @@ self.addEventListener("fetch", (event) => {
 });
 
 async function shellNavigationStrategy(req) {
+  // Network-first: while online a reload always returns the freshest shell
+  // (so a deploy is picked up on the next load / pull-to-refresh), updating
+  // the cache as it goes. Offline falls back to the cached shell.
   const cache = await caches.open(SHELL_CACHE);
-  const cached = await cache.match("/einkauf");
-  // Kick the refresh in the background so the cache stays current.
-  fetch(req).then((res) => {
-    if (res.ok) cache.put("/einkauf", res.clone());
-  }).catch(() => undefined);
-  if (cached) return cached;
   try {
     const fresh = await fetch(req);
     if (fresh.ok) cache.put("/einkauf", fresh.clone());
     return fresh;
   } catch {
+    const cached = await cache.match("/einkauf");
+    if (cached) return cached;
     return new Response(
       "<!doctype html><meta charset=utf-8><title>nomly offline</title><p>Offline — Einkaufsliste konnte nicht geladen werden. Öffne die Seite einmal online, dann steht sie auch offline bereit.</p>",
       { headers: { "content-type": "text/html;charset=utf-8" }, status: 503 },
