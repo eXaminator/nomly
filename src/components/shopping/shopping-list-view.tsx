@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { RecipePreviewDialog } from "@/components/planner/recipe-preview-dialog";
 import { cn } from "@/lib/cn";
 import type { ShoppingItemView } from "@/lib/shopping/items";
+import { countNeededItemsPerSupermarket } from "@/lib/shopping/supermarket-availability";
 import { ShoppingItemRow } from "./shopping-item-row";
 import { AddItemDialog } from "./add-item-dialog";
 import { AddMealsDialog } from "./add-meals-dialog";
@@ -335,6 +336,14 @@ export function ShoppingListView({
     [items, supermarketId, supermarkets],
   );
 
+  // How many still-needed items each supermarket carries — drives the count
+  // shown next to each store in the filter so it's easy to see which stores
+  // still have something to buy.
+  const neededCounts = React.useMemo(
+    () => countNeededItemsPerSupermarket(items, supermarkets),
+    [items, supermarkets],
+  );
+
   const openTotal = items.filter((i) => !i.checked).length;
   const checkedTotal = items.filter((i) => i.checked).length;
   const visibleOpen = openTotal - grouped.hiddenByStore;
@@ -386,6 +395,7 @@ export function ShoppingListView({
           <SupermarketFilter
             value={supermarketId}
             supermarkets={supermarkets}
+            neededCounts={neededCounts}
             onChange={persistSupermarket}
           />
         </div>

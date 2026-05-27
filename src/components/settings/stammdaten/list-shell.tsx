@@ -30,7 +30,7 @@ export type ColumnDef<TItem> = {
   sortValue?: (item: TItem) => string | number | boolean | null;
 };
 
-type SortState = { key: string; dir: "asc" | "desc" } | null;
+export type SortState = { key: string; dir: "asc" | "desc" } | null;
 
 function compareSortValues(
   a: string | number | boolean | null,
@@ -88,6 +88,10 @@ export type ListShellProps<TItem> = {
     selectedIds: number[];
     onApplied: () => void;
   }) => React.ReactNode;
+  /** Default sort applied on mount. Keeps the list ordered by this column even
+   *  as rows are added client-side (a new row sorts into place instead of
+   *  landing at the bottom). The column's `sortValue` must be set. */
+  initialSort?: SortState;
 };
 
 export function ListShell<TItem>({
@@ -105,6 +109,7 @@ export function ListShell<TItem>({
   searchMatches,
   enableMergeProposals,
   renderBulkActions,
+  initialSort,
 }: ListShellProps<TItem>) {
   const router = useRouter();
   const labels = ENTITY_LABELS[entityKind];
@@ -147,7 +152,7 @@ export function ListShell<TItem>({
     [],
   );
 
-  const [sort, setSort] = React.useState<SortState>(null);
+  const [sort, setSort] = React.useState<SortState>(initialSort ?? null);
 
   const filtered = React.useMemo(() => {
     // Split on "|" so the user can OR-connect multiple terms

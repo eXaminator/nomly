@@ -16,6 +16,7 @@ const columns: ColumnDef<SupermarketItem>[] = [
     key: "name",
     header: "Name",
     cell: (item) => <span className="font-medium">{item.name}</span>,
+    sortValue: (item) => item.name,
   },
   {
     key: "ordered",
@@ -78,6 +79,7 @@ export function SupermarketPageClient({
         entityKind="supermarket"
         initialItems={initialItems}
         columns={columns}
+        initialSort={{ key: "name", dir: "asc" }}
         idOf={(i) => i.id}
         nameOf={(i) => i.name}
         searchMatches={searchMatches}
