@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { ChevronLeft } from "lucide-react";
 
-import { AppShell } from "@/components/layout/app-shell";
 import { IngredientPageClient } from "@/components/settings/stammdaten/pages/ingredient-page-client";
 import { listIngredients } from "@/lib/stammdaten/ingredient/service";
 
@@ -10,7 +9,7 @@ export const dynamic = "force-dynamic";
 export default function IngredientStammdatenPage() {
   const initial = listIngredients();
   return (
-    <AppShell>
+    <>
       <div className="flex flex-col gap-2">
         <Link
           href="/einstellungen"
@@ -23,6 +22,6 @@ export default function IngredientStammdatenPage() {
       <div className="mt-4">
         <IngredientPageClient initialItems={initial} />
       </div>
-    </AppShell>
+    </>
   );
 }

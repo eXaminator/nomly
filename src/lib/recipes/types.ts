@@ -105,6 +105,23 @@ export type RecipeListItem = {
   dietConfidence: DietConfidence;
 };
 
+/** Subset of {@link RecipeListItem} the meal planner ships to the browser.
+ *  The planner's recipe panel and drag preview only render the title, photo,
+ *  tags and diet badge, and `servings` seeds default portions; the recipe
+ *  preview dialog re-fetches full details by id. Dropping `description` and
+ *  the prep/cook times keeps the planner's per-navigation payload small. */
+export type PlannerRecipe = Pick<
+  RecipeListItem,
+  | "id"
+  | "title"
+  | "photoPath"
+  | "servings"
+  | "tags"
+  | "isVegan"
+  | "isVegetarian"
+  | "dietConfidence"
+>;
+
 export type RecipeIngredientView = {
   id: number;
   ingredientId: number;

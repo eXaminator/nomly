@@ -4,7 +4,6 @@ import { notFound } from "next/navigation";
 
 import { asc } from "drizzle-orm";
 
-import { AppShell } from "@/components/layout/app-shell";
 import { StapleGroupDetailClient } from "@/components/settings/staples/staple-group-detail-client";
 import { db } from "@/db";
 import { unit } from "@/db/schema";
@@ -28,7 +27,7 @@ export default async function StandardsDetailPage({
     .orderBy(asc(unit.name))
     .all();
   return (
-    <AppShell>
+    <>
       <div className="flex flex-col gap-2">
         <Link
           href="/einstellungen/standards"
@@ -41,6 +40,6 @@ export default async function StandardsDetailPage({
       <div className="mt-4">
         <StapleGroupDetailClient initial={group} units={units} />
       </div>
-    </AppShell>
+    </>
   );
 }

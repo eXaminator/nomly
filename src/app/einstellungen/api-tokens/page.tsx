@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { ChevronLeft } from "lucide-react";
 
-import { AppShell } from "@/components/layout/app-shell";
 import { ApiTokensPageClient } from "@/components/settings/api-tokens/api-tokens-page-client";
 import { listApiTokens } from "@/lib/bearer";
 
@@ -10,7 +9,7 @@ export const dynamic = "force-dynamic";
 export default function ApiTokensPage() {
   const initial = listApiTokens();
   return (
-    <AppShell>
+    <>
       <div className="flex flex-col gap-2">
         <Link
           href="/einstellungen"
@@ -32,6 +31,6 @@ export default function ApiTokensPage() {
       <div className="mt-6">
         <ApiTokensPageClient initial={initial} />
       </div>
-    </AppShell>
+    </>
   );
 }

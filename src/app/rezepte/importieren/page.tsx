@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { ChevronLeft } from "lucide-react";
 import { asc } from "drizzle-orm";
-import { AppShell } from "@/components/layout/app-shell";
 import { ImportFlow } from "@/components/recipes/import-flow";
 import { db } from "@/db";
 import { tag } from "@/db/schema";
@@ -17,7 +16,7 @@ export default function ImportRecipePage() {
     .map((t) => t.name);
 
   return (
-    <AppShell>
+    <>
       <div className="flex flex-col gap-2">
         <Link
           href="/rezepte"
@@ -38,6 +37,6 @@ export default function ImportRecipePage() {
       <div className="mt-6">
         <ImportFlow tagSuggestions={tagSuggestions} />
       </div>
-    </AppShell>
+    </>
   );
 }

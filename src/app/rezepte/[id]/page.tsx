@@ -12,7 +12,6 @@ import {
   Salad,
   Users,
 } from "lucide-react";
-import { AppShell } from "@/components/layout/app-shell";
 import { Button } from "@/components/ui/button";
 import { DietBadge } from "@/components/recipes/diet-badge";
 import { IngredientLine } from "@/components/recipes/ingredient-line";
@@ -70,8 +69,7 @@ export default async function RecipeViewPage({
   const descriptionHtml = renderMarkdown(recipe.description);
 
   return (
-    <AppShell>
-      <div className="mx-auto max-w-4xl">
+    <div className="mx-auto max-w-4xl">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex-1">
           <h1 className="text-3xl font-semibold tracking-tight">{recipe.title}</h1>
@@ -288,7 +286,6 @@ export default async function RecipeViewPage({
           );
         })}
       </div>
-      </div>
-    </AppShell>
+    </div>
   );
 }

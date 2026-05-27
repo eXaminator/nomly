@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { ChevronLeft } from "lucide-react";
 
-import { AppShell } from "@/components/layout/app-shell";
 import { CalendarFeedsPageClient } from "@/components/settings/calendar/calendar-feeds-page-client";
 import { listFeeds } from "@/lib/ical/feeds";
 
@@ -10,7 +9,7 @@ export const dynamic = "force-dynamic";
 export default function CalendarFeedsPage() {
   const initial = listFeeds();
   return (
-    <AppShell>
+    <>
       <div className="flex flex-col gap-2">
         <Link
           href="/einstellungen"
@@ -27,6 +26,6 @@ export default function CalendarFeedsPage() {
       <div className="mt-6">
         <CalendarFeedsPageClient initial={initial} />
       </div>
-    </AppShell>
+    </>
   );
 }

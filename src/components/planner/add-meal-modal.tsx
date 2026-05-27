@@ -18,7 +18,7 @@ import {
   TagFilterBar,
   type TagFilterValue,
 } from "@/components/recipes/tag-filter-bar";
-import type { RecipeListItem } from "@/lib/recipes/types";
+import type { PlannerRecipe } from "@/lib/recipes/types";
 import { defaultMealPortions } from "@/lib/meal-plans/types";
 import {
   formatDayMonthDe,
@@ -28,7 +28,7 @@ import { cn } from "@/lib/cn";
 
 type Props = {
   date: string | null;
-  recipes: RecipeListItem[];
+  recipes: PlannerRecipe[];
   allTags: string[];
   onClose: () => void;
   onSelect: (input: {
@@ -56,7 +56,7 @@ function AddMealModalInner({
 }: Props) {
   const [query, setQuery] = React.useState("");
   const [tagFilter, setTagFilter] = React.useState<TagFilterValue>(EMPTY_TAG_VALUE);
-  const [selected, setSelected] = React.useState<RecipeListItem | null>(null);
+  const [selected, setSelected] = React.useState<PlannerRecipe | null>(null);
   const [servings, setServings] = React.useState<number>(1);
   const [note, setNote] = React.useState("");
   const [saving, setSaving] = React.useState(false);

@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, count, eq, inArray, isNull, sql } from "drizzle-orm";
 import { db } from "../../db/index.ts";
 import {
   recipe,
@@ -470,6 +470,13 @@ export function getRecipe(id: number): RecipeView | null {
     createdAt: head.createdAt,
     updatedAt: head.updatedAt,
   };
+}
+
+/** Total number of recipes, ignoring all filters. Cheap `count(*)` — used
+ *  for the "no recipes match" vs "no recipes yet" empty-state distinction
+ *  without materializing the whole catalog. */
+export function countRecipes(): number {
+  return db.select({ n: count() }).from(recipe).get()?.n ?? 0;
 }
 
 export type ListRecipesOptions = {

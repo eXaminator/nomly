@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { AppShell } from "@/components/layout/app-shell";
 
 export const dynamic = "force-dynamic";
 import {
@@ -20,7 +19,7 @@ const DESCRIPTIONS: Record<string, string> = {
 
 export default function Home() {
   return (
-    <AppShell>
+    <>
       <div className="flex flex-col gap-2">
         <h1 className="text-2xl font-semibold tracking-tight text-[var(--color-fg)]">
           Willkommen
@@ -43,6 +42,6 @@ export default function Home() {
           </Link>
         ))}
       </div>
-    </AppShell>
+    </>
   );
 }

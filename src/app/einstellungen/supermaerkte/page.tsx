@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { ChevronLeft } from "lucide-react";
 
-import { AppShell } from "@/components/layout/app-shell";
 import { SupermarketPageClient } from "@/components/settings/stammdaten/pages/supermarket-page-client";
 import { listSupermarkets } from "@/lib/stammdaten/supermarket/service";
 
@@ -10,7 +9,7 @@ export const dynamic = "force-dynamic";
 export default function SupermarketStammdatenPage() {
   const initial = listSupermarkets();
   return (
-    <AppShell>
+    <>
       <div className="flex flex-col gap-2">
         <Link
           href="/einstellungen"
@@ -23,6 +22,6 @@ export default function SupermarketStammdatenPage() {
       <div className="mt-4">
         <SupermarketPageClient initialItems={initial} />
       </div>
-    </AppShell>
+    </>
   );
 }

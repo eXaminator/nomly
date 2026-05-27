@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { asc } from "drizzle-orm";
 import { ChevronLeft, Download } from "lucide-react";
-import { AppShell } from "@/components/layout/app-shell";
 import { Button } from "@/components/ui/button";
 import { NewRecipeForm } from "@/components/recipes/new-recipe-form";
 import { db } from "@/db";
@@ -18,7 +17,7 @@ export default function NewRecipePage() {
     .map((t) => t.name);
 
   return (
-    <AppShell>
+    <>
       <Link
         href="/rezepte"
         className="inline-flex w-fit items-center gap-1 text-sm text-[var(--color-muted-fg)] hover:text-[var(--color-fg)]"
@@ -43,6 +42,6 @@ export default function NewRecipePage() {
       <div className="mt-6">
         <NewRecipeForm tagSuggestions={tagSuggestions} />
       </div>
-    </AppShell>
+    </>
   );
 }

@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { ChevronRight } from "lucide-react";
 
-import { AppShell } from "@/components/layout/app-shell";
 import {
   Card,
   CardDescription,
@@ -73,7 +72,7 @@ const STAMMDATEN_LINKS: Array<{
 
 export default async function EinstellungenPage() {
   return (
-    <AppShell>
+    <>
       <div className="flex flex-col gap-2">
         <h1 className="text-2xl font-semibold tracking-tight">Einstellungen</h1>
         <p className="text-[var(--color-muted-fg)]">
@@ -106,6 +105,6 @@ export default async function EinstellungenPage() {
           </div>
         </div>
       </div>
-    </AppShell>
+    </>
   );
 }

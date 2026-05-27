@@ -31,11 +31,12 @@ import {
   type MealPlanView,
   type RecipeUsageStats,
 } from "@/lib/meal-plans/types";
-import type { RecipeListItem } from "@/lib/recipes/types";
+import type { PlannerRecipe } from "@/lib/recipes/types";
 import type { PlannerSettings } from "@/lib/settings/planner";
 import type { EventsByDate } from "@/lib/ical/events";
 import { DayCell } from "./day-cell";
 import { RecipePanel } from "./recipe-panel";
+import { useRecipeCatalog } from "./use-recipe-catalog";
 import { MealEditor } from "./meal-editor";
 import { AddMealModal } from "./add-meal-modal";
 import { RecipePreviewDialog } from "./recipe-preview-dialog";
@@ -56,7 +57,6 @@ type Props = {
   from: string;
   dates: string[];
   initialMealPlans: MealPlanView[];
-  recipes: RecipeListItem[];
   /** Per-recipe usage stats keyed by recipeId. Recipes without a meal_plan
    *  row don't appear here — RecipePanel falls back to "noch nie geplant". */
   recipeUsage: Array<{ recipeId: number } & RecipeUsageStats>;
@@ -70,12 +70,14 @@ export function PlannerView({
   from,
   dates,
   initialMealPlans,
-  recipes,
   recipeUsage,
   allTags,
   calendarEvents,
 }: Props) {
   const router = useRouter();
+  // The recipe catalog (for the panel, drag previews and optimistic meal
+  // creation) is fetched client-side so /plan's initial payload stays light.
+  const { recipes, loading: recipesLoading } = useRecipeCatalog();
   // Local copy lets us run optimistic mutations against the server data.
   const [mealPlans, setMealPlans] = React.useState(initialMealPlans);
   // Sync the server snapshot back into local state whenever the SSR prop
@@ -120,7 +122,7 @@ export function PlannerView({
   }
 
   function makeOptimisticMeal(
-    recipe: RecipeListItem,
+    recipe: PlannerRecipe,
     date: string,
     servings: number,
     note: string | null,
@@ -700,6 +702,7 @@ export function PlannerView({
           </div>
           <RecipePanel
             recipes={recipes}
+            loading={recipesLoading}
             allTags={allTags}
             recipeUsage={recipeUsage}
             today={today}
@@ -787,7 +790,7 @@ function DragPreview({
   mealPlans,
 }: {
   drag: DragData;
-  recipes: RecipeListItem[];
+  recipes: PlannerRecipe[];
   mealPlans: MealPlanView[];
 }) {
   // Match the source element's measured width so the ghost reads as the

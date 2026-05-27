@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { ChevronLeft } from "lucide-react";
 
-import { AppShell } from "@/components/layout/app-shell";
 import { StapleGroupsPageClient } from "@/components/settings/staples/staple-groups-page-client";
 import { listGroups } from "@/lib/staples/groups";
 
@@ -10,7 +9,7 @@ export const dynamic = "force-dynamic";
 export default function StandardsListPage() {
   const initial = listGroups();
   return (
-    <AppShell>
+    <>
       <div className="flex flex-col gap-2">
         <Link
           href="/einstellungen"
@@ -28,6 +27,6 @@ export default function StandardsListPage() {
       <div className="mt-6">
         <StapleGroupsPageClient initial={initial} />
       </div>
-    </AppShell>
+    </>
   );
 }

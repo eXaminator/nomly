@@ -3,6 +3,7 @@
 import * as React from "react";
 import { useDraggable } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { Eye } from "lucide-react";
 import { DietBadge } from "@/components/recipes/diet-badge";
 import { RecipeSearch } from "@/components/recipes/recipe-search";
@@ -10,13 +11,16 @@ import {
   TagFilterBar,
   type TagFilterValue,
 } from "@/components/recipes/tag-filter-bar";
-import type { RecipeListItem } from "@/lib/recipes/types";
+import { Skeleton } from "@/components/ui/skeleton";
+import type { PlannerRecipe } from "@/lib/recipes/types";
 import type { RecipeUsageStats } from "@/lib/meal-plans/types";
 import { formatDayMonthDe } from "@/lib/meal-plans/dates";
 import { cn } from "@/lib/cn";
 
 type Props = {
-  recipes: RecipeListItem[];
+  recipes: PlannerRecipe[];
+  /** True while the catalog is still being fetched client-side. */
+  loading: boolean;
   allTags: string[];
   recipeUsage: Array<{ recipeId: number } & RecipeUsageStats>;
   today: string;
@@ -59,6 +63,7 @@ function formatNextPlanned(iso: string, today: string): string {
  */
 export function RecipePanel({
   recipes,
+  loading,
   allTags,
   recipeUsage,
   today,
@@ -66,6 +71,7 @@ export function RecipePanel({
 }: Props) {
   const [query, setQuery] = React.useState("");
   const [tagFilter, setTagFilter] = React.useState<TagFilterValue>(EMPTY_TAG_VALUE);
+  const scrollRef = React.useRef<HTMLDivElement>(null);
 
   const usageByRecipe = React.useMemo(() => {
     const map = new Map<number, RecipeUsageStats>();
@@ -95,6 +101,13 @@ export function RecipePanel({
     });
   }, [recipes, query, tagFilter]);
 
+  const rowVirtualizer = useVirtualizer({
+    count: filtered.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => 60,
+    overscan: 8,
+  });
+
   return (
     <aside
       className={cn(
@@ -122,20 +135,45 @@ export function RecipePanel({
         />
       ) : null}
       {/* `pb-4` lives inside the scroll container so the last recipe has
-          a bit of breathing room at the bottom when scrolled all the way. */}
-      <div className="flex-1 space-y-1.5 overflow-y-auto pr-1 pb-4">
-        {filtered.length === 0 ? (
+          a bit of breathing room at the bottom when scrolled all the way.
+          Rows are virtualized: only the on-screen slice is in the DOM, which
+          keeps a large catalog cheap to render (and to keep draggable). */}
+      <div ref={scrollRef} className="flex-1 overflow-y-auto pr-1 pb-4">
+        {loading ? (
+          <div className="space-y-1.5">
+            {Array.from({ length: 8 }).map((_, i) => (
+              <Skeleton key={i} className="h-[52px] w-full" />
+            ))}
+          </div>
+        ) : filtered.length === 0 ? (
           <p className="text-sm text-[var(--color-muted-fg)]">Keine Treffer.</p>
         ) : (
-          filtered.map((recipe) => (
-            <RecipeRow
-              key={recipe.id}
-              recipe={recipe}
-              stats={usageByRecipe.get(recipe.id) ?? null}
-              today={today}
-              onPreview={onPreview}
-            />
-          ))
+          <div
+            className="relative"
+            style={{ height: rowVirtualizer.getTotalSize() }}
+          >
+            {rowVirtualizer.getVirtualItems().map((virtualRow) => {
+              const recipe = filtered[virtualRow.index];
+              return (
+                <div
+                  key={recipe.id}
+                  data-index={virtualRow.index}
+                  ref={rowVirtualizer.measureElement}
+                  className="absolute left-0 top-0 w-full"
+                  style={{ transform: `translateY(${virtualRow.start}px)` }}
+                >
+                  <div className="pb-1.5">
+                    <RecipeRow
+                      recipe={recipe}
+                      stats={usageByRecipe.get(recipe.id) ?? null}
+                      today={today}
+                      onPreview={onPreview}
+                    />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         )}
       </div>
     </aside>
@@ -148,7 +186,7 @@ function RecipeRow({
   today,
   onPreview,
 }: {
-  recipe: RecipeListItem;
+  recipe: PlannerRecipe;
   stats: RecipeUsageStats | null;
   today: string;
   onPreview: (id: number) => void;

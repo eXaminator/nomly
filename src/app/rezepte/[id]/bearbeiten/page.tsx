@@ -2,7 +2,6 @@ import Link from "next/link";
 import { ChevronLeft } from "lucide-react";
 import { notFound } from "next/navigation";
 import { asc } from "drizzle-orm";
-import { AppShell } from "@/components/layout/app-shell";
 import { RecipeForm } from "@/components/recipes/recipe-form";
 import { getRecipe } from "@/lib/recipes/service";
 import { quantityToInputString, type DraftRecipe } from "@/components/recipes/types";
@@ -87,7 +86,7 @@ export default async function EditRecipePage({
   };
 
   return (
-    <AppShell>
+    <>
       <div className="flex flex-col gap-2">
         <Link
           href={`/rezepte/${id}`}
@@ -101,6 +100,6 @@ export default async function EditRecipePage({
       <div className="mt-6">
         <RecipeForm initial={draft} recipeId={id} tagSuggestions={tagSuggestions} />
       </div>
-    </AppShell>
+    </>
   );
 }

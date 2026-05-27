@@ -1,5 +1,4 @@
 import { asc } from "drizzle-orm";
-import { AppShell } from "@/components/layout/app-shell";
 import { PlannerView } from "@/components/planner/planner-view";
 import { db } from "@/db";
 import { tag } from "@/db/schema";
@@ -7,7 +6,6 @@ import {
   getRecipeUsageStats,
   listByDateRange,
 } from "@/lib/meal-plans/service";
-import { listRecipes } from "@/lib/recipes/service";
 import { getPlannerSettings } from "@/lib/settings/planner";
 import {
   alignToStartWeekday,
@@ -38,10 +36,9 @@ export default async function PlanPage({
   refreshStaleEnabledFeeds();
   const calendarEvents = getEventsForRange(range.from, range.to);
   const mealPlans = listByDateRange(range.from, range.to);
-  // Recipe-list filter state lives client-side in RecipePanel (it intentionally
-  // doesn't persist to the URL so the planner's own `?from=` stays unique),
-  // so we ship the whole catalog and the panel filters in the browser.
-  const recipes = listRecipes();
+  // The recipe catalog is no longer shipped here — RecipePanel fetches it
+  // client-side (see use-recipe-catalog) so /plan's initial payload stays
+  // light and the panel can virtualize a large list.
   const recipeUsage = Array.from(getRecipeUsageStats(today).entries()).map(
     ([recipeId, stats]) => ({ recipeId, ...stats }),
   );
@@ -53,18 +50,15 @@ export default async function PlanPage({
     .map((t) => t.name);
 
   return (
-    <AppShell>
-      <PlannerView
-        today={today}
-        settings={settings}
-        from={range.from}
-        dates={range.dates}
-        initialMealPlans={mealPlans}
-        recipes={recipes}
-        recipeUsage={recipeUsage}
-        allTags={allTags}
-        calendarEvents={calendarEvents}
-      />
-    </AppShell>
+    <PlannerView
+      today={today}
+      settings={settings}
+      from={range.from}
+      dates={range.dates}
+      initialMealPlans={mealPlans}
+      recipeUsage={recipeUsage}
+      allTags={allTags}
+      calendarEvents={calendarEvents}
+    />
   );
 }

@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { createRecipe, listRecipes } from "@/lib/recipes/service";
+import { toListOptions } from "@/lib/recipes/list-query";
+import type { PlannerRecipe } from "@/lib/recipes/types";
 import { recipeInputSchema } from "@/lib/recipes/validate";
 import {
   PhotoUrlError,
@@ -7,9 +9,32 @@ import {
 } from "@/lib/recipes/photo-from-url";
 
 export async function GET(request: Request) {
-  const url = new URL(request.url);
-  const q = url.searchParams.get("q") ?? "";
-  return NextResponse.json({ recipes: listRecipes({ query: q }) });
+  const sp = new URL(request.url).searchParams;
+  const recipes = listRecipes(
+    toListOptions({
+      q: sp.get("q"),
+      must: sp.get("must"),
+      not: sp.get("not"),
+      diet: sp.get("diet"),
+    }),
+  );
+  // `fields=light` returns the PlannerRecipe subset — the meal planner only
+  // renders title/photo/tags/diet and seeds portions from `servings`, so it
+  // never needs the description or prep/cook times.
+  if (sp.get("fields") === "light") {
+    const light: PlannerRecipe[] = recipes.map((r) => ({
+      id: r.id,
+      title: r.title,
+      photoPath: r.photoPath,
+      servings: r.servings,
+      tags: r.tags,
+      isVegan: r.isVegan,
+      isVegetarian: r.isVegetarian,
+      dietConfidence: r.dietConfidence,
+    }));
+    return NextResponse.json({ recipes: light });
+  }
+  return NextResponse.json({ recipes });
 }
 
 export async function POST(request: Request) {

@@ -1,4 +1,3 @@
-import { AppShell } from "@/components/layout/app-shell";
 import { ShoppingListView } from "@/components/shopping/shopping-list-view";
 import { listShoppingItems } from "@/lib/shopping/items";
 import {
@@ -31,13 +30,11 @@ export default async function ShoppingPage() {
   const today = todayIso();
   const defaultStart = nextStartWeekdayOnOrAfter(today, planner.startWeekday);
   return (
-    <AppShell>
-      <ShoppingListView
-        initialItems={items}
-        supermarkets={supermarkets}
-        defaultLengthDays={planner.daysVisible}
-        defaultStart={defaultStart}
-      />
-    </AppShell>
+    <ShoppingListView
+      initialItems={items}
+      supermarkets={supermarkets}
+      defaultLengthDays={planner.daysVisible}
+      defaultStart={defaultStart}
+    />
   );
 }

@@ -1,17 +1,21 @@
 import Link from "next/link";
 import { asc } from "drizzle-orm";
 import { Download, Plus } from "lucide-react";
-import { AppShell } from "@/components/layout/app-shell";
 import { Button } from "@/components/ui/button";
 import { DietFilter } from "@/components/recipes/diet-filter";
-import { RecipeGrid } from "@/components/recipes/recipe-grid";
+import { RecipeGridVirtual } from "@/components/recipes/recipe-grid-virtual";
 import { RecipeSearch } from "@/components/recipes/recipe-search";
 import { TagFilterBar } from "@/components/recipes/tag-filter-bar";
-import { listRecipes } from "@/lib/recipes/service";
+import { countRecipes, listRecipes } from "@/lib/recipes/service";
+import { toListOptions } from "@/lib/recipes/list-query";
 import { db } from "@/db";
 import { tag } from "@/db/schema";
 
 export const dynamic = "force-dynamic";
+
+// Server-rendered first page: enough to fill the initial viewport with real
+// content. The client then fetches the full filtered list and virtualizes it.
+const SSR_RECIPE_COUNT = 30;
 
 type Search = {
   q?: string;
@@ -20,40 +24,15 @@ type Search = {
   diet?: string;
 };
 
-function parseTagList(raw: string | undefined): string[] {
-  if (!raw) return [];
-  return raw
-    .split(",")
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
-}
-
-function parseDiet(raw: string | undefined): "vegetarian" | "vegan" | undefined {
-  if (raw === "vegan") return "vegan";
-  if (raw === "vegetarian") return "vegetarian";
-  return undefined;
-}
-
 export default async function RezeptePage({
   searchParams,
 }: {
   searchParams: Promise<Search>;
 }) {
   const { q, must, not, diet } = await searchParams;
-  const mustTags = parseTagList(must);
-  const notTags = parseTagList(not);
-  const dietFilter = parseDiet(diet);
-
-  const filteredRecipes = listRecipes({
-    query: q,
-    mustTags,
-    notTags,
-    diet: dietFilter,
-  });
-  const totalUnfiltered = listRecipes().length;
-  const filtersActive = Boolean(
-    q?.trim().length || mustTags.length || notTags.length || dietFilter,
-  );
+  const matched = listRecipes(toListOptions({ q, must, not, diet }));
+  const initialRecipes = matched.slice(0, SSR_RECIPE_COUNT);
+  const totalUnfiltered = countRecipes();
 
   const allTags = db
     .select({ name: tag.name })
@@ -63,7 +42,7 @@ export default async function RezeptePage({
     .map((t) => t.name);
 
   return (
-    <AppShell>
+    <>
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Rezepte</h1>
@@ -98,11 +77,12 @@ export default async function RezeptePage({
         </div>
       ) : null}
 
-      <RecipeGrid
-        recipes={filteredRecipes}
+      <RecipeGridVirtual
+        initialRecipes={initialRecipes}
+        initialMatchedCount={matched.length}
         totalUnfiltered={totalUnfiltered}
-        filtersActive={filtersActive}
+        filters={{ q, must, not, diet }}
       />
-    </AppShell>
+    </>
   );
 }
