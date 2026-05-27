@@ -31,8 +31,8 @@ Optional:
                        all — so ingredient matching runs against the live
                        catalog. The local HTML cache is kept as your backup.
   --token <token>      Bearer token for --api (mint with
-                       \`npm run token:create\`). Falls back to the
-                       NOMLY_API_TOKEN env var.
+                       \`npm run token:create\`). If omitted, you'll be
+                       prompted for it (input hidden).
   --help               Print this help
 
 Run \`npm run familywall:download\` first if the cache doesn't exist
@@ -47,6 +47,39 @@ async function confirm(prompt: string, defaultYes = true): Promise<boolean> {
   rl.close();
   if (answer === "") return defaultYes;
   return answer === "y" || answer === "yes" || answer === "j" || answer === "ja";
+}
+
+/**
+ * Read a bearer token interactively, masking keystrokes so the secret doesn't
+ * linger in the terminal scrollback. Returns "" when stdin isn't a TTY so the
+ * caller can fail with a helpful message instead of hanging.
+ */
+async function promptToken(): Promise<string> {
+  if (!process.stdin.isTTY) return "";
+  const rl = createInterface({
+    input: process.stdin,
+    output: process.stdout,
+    terminal: true,
+  });
+  // `_writeToOutput` is what readline uses to echo the prompt and each typed
+  // character. We let the prompt through, then suppress everything else so the
+  // token isn't echoed.
+  const iface = rl as unknown as { _writeToOutput?: (s: string) => void };
+  const realWrite = iface._writeToOutput?.bind(rl);
+  let mask = false;
+  if (realWrite) {
+    iface._writeToOutput = (s: string) => {
+      if (!mask) realWrite(s);
+    };
+  }
+  try {
+    const pending = rl.question("API-Token (Eingabe verborgen): ");
+    mask = true;
+    return (await pending).trim();
+  } finally {
+    rl.close();
+    process.stdout.write("\n");
+  }
 }
 
 function formatRelative(date: Date): string {
@@ -191,10 +224,14 @@ async function main() {
       console.error("[familywall] --api must be a full URL, e.g. https://nomly.example.tld");
       process.exit(2);
     }
-    const token = (parsed.values.token ?? process.env.NOMLY_API_TOKEN ?? "").trim();
+    let token = (parsed.values.token ?? "").trim();
+    if (!token) {
+      // Not passed via --token: ask for it (hidden input on a TTY).
+      token = await promptToken();
+    }
     if (!token) {
       console.error(
-        "[familywall] --api needs a bearer token: pass --token <token> or set NOMLY_API_TOKEN.",
+        "[familywall] --api needs a bearer token. Pass --token <token> or enter it when prompted.",
       );
       console.error("[familywall] Mint one with `npm run token:create -- --name import-cli`.");
       process.exit(2);
