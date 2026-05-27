@@ -3,6 +3,7 @@ import { getSession } from "@/lib/server-session";
 import { TopNav } from "./top-nav";
 import { BottomNav } from "./bottom-nav";
 import { UserMenu, UserMenuFallback } from "./user-menu";
+import { ConnectivityStatus } from "./connectivity-status";
 
 export async function AppShell({ children }: { children: React.ReactNode }) {
   const session = await getSession();
@@ -22,7 +23,10 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
             </Link>
             <TopNav />
           </div>
-          {name ? <UserMenu name={name} email={email} /> : <UserMenuFallback />}
+          <div className="flex items-center gap-2 sm:gap-3">
+            <ConnectivityStatus />
+            {name ? <UserMenu name={name} email={email} /> : <UserMenuFallback />}
+          </div>
         </div>
       </header>
       <main className="flex-1 pb-24 md:pb-12">

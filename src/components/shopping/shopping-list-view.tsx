@@ -31,7 +31,6 @@ import { OfflineIndicator } from "./offline-indicator";
 import { PendingMutationsDrawer } from "./pending-mutations-drawer";
 import {
   getConnectivity,
-  startConnectivityWatcher,
   subscribeConnectivity,
 } from "@/lib/shopping/offline/connectivity";
 import { openOfflineDb } from "@/lib/shopping/offline/db";
@@ -91,7 +90,8 @@ export function ShoppingListView({
   const [pendingCount, setPendingCount] = React.useState(0);
   const [drawerOpen, setDrawerOpen] = React.useState(false);
 
-  React.useEffect(() => startConnectivityWatcher(), []);
+  // The connectivity watcher is owned app-wide by the header
+  // (ConnectivityStatus); here we just subscribe to read the state.
   React.useEffect(() => subscribeConnectivity(setConnectivityState), []);
 
   // On mount, hydrate IDB from the SSR snapshot + overlay any pending toggles
@@ -370,7 +370,11 @@ export function ShoppingListView({
           <span className="hidden sm:inline">Rückgängig</span>
         </Button>
         <div className="flex min-w-0 items-center gap-2 md:gap-3">
-          <OfflineIndicator pendingCount={pendingCount} onOpenDrawer={() => setDrawerOpen(true)} />
+          <OfflineIndicator
+            pendingCount={pendingCount}
+            onOpenDrawer={() => setDrawerOpen(true)}
+            hideWhenIdle
+          />
           <span className="whitespace-nowrap text-sm text-[var(--color-muted-fg)]">
             {filterActive ? (
               <>

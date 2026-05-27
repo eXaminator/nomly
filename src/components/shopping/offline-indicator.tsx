@@ -13,16 +13,26 @@ type Props = {
   pendingCount: number;
   onOpenDrawer?: () => void;
   className?: string;
+  /** Render nothing while everything is calm (online + nothing pending). Used
+   *  on the shopping shelf so the chip only appears when there's something to
+   *  surface — the always-on status lives in the app header. */
+  hideWhenIdle?: boolean;
 };
 
-function useConnectivity(): ConnectivityState {
+export function useConnectivity(): ConnectivityState {
   const [state, setState] = React.useState<ConnectivityState>(() => getConnectivity());
   React.useEffect(() => subscribeConnectivity(setState), []);
   return state;
 }
 
-export function OfflineIndicator({ pendingCount, onOpenDrawer, className }: Props) {
+export function OfflineIndicator({
+  pendingCount,
+  onOpenDrawer,
+  className,
+  hideWhenIdle,
+}: Props) {
   const state = useConnectivity();
+  if (hideWhenIdle && state === "online" && pendingCount === 0) return null;
   const { dot, icon: Icon, label } = chipPresentation(state, pendingCount);
   const isClickable = onOpenDrawer != null && (state !== "online" || pendingCount > 0);
   const Tag = isClickable ? "button" : "span";
@@ -46,7 +56,7 @@ export function OfflineIndicator({ pendingCount, onOpenDrawer, className }: Prop
   );
 }
 
-function chipPresentation(state: ConnectivityState, pending: number) {
+export function chipPresentation(state: ConnectivityState, pending: number) {
   if (state === "sessionExpired") {
     return { dot: "bg-[var(--color-danger)]", icon: AlertTriangle, label: "Anmeldung abgelaufen" };
   }
