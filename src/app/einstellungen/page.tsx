@@ -63,12 +63,11 @@ const STAMMDATEN_LINKS: Array<{
     description:
       "Externe iCal-Feeds abonnieren und Termine im Planer anzeigen.",
   },
-];
-
-const PLACEHOLDERS = [
   {
+    href: "/einstellungen/api-tokens",
     title: "API-Tokens",
-    description: "Bearer-Tokens für Home Assistant – kommt in Epic 12.",
+    description:
+      "Bearer-Tokens für Maschinen-Zugriff auf die API — Home Assistant, Familywall-Import.",
   },
 ];
 
@@ -103,21 +102,6 @@ export default async function EinstellungenPage() {
                   </CardHeader>
                 </Card>
               </Link>
-            ))}
-          </div>
-        </div>
-        <div>
-          <h2 className="mb-3 text-sm font-medium uppercase tracking-wider text-[var(--color-muted-fg)]">
-            Kommt noch
-          </h2>
-          <div className="grid gap-4 sm:grid-cols-2">
-            {PLACEHOLDERS.map((p) => (
-              <Card key={p.title} className="opacity-70">
-                <CardHeader>
-                  <CardTitle>{p.title}</CardTitle>
-                  <CardDescription>{p.description}</CardDescription>
-                </CardHeader>
-              </Card>
             ))}
           </div>
         </div>

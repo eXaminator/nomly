@@ -254,6 +254,40 @@ export function loadSnapshot(id: string): LoadedSnapshot | null {
   return { id, meta, detailHtml, imagePath };
 }
 
+export type CacheQueueFilter = {
+  /** Accepts "recipe/8084800_2230040" or just the suffix. */
+  onlyRecipeId?: string;
+  /** Case-insensitive title substring. Ignored when onlyRecipeId is set. */
+  onlyTitleSubstring?: string;
+};
+
+/**
+ * The cached recipe IDs to process, after applying the `--recipe-id` /
+ * `--title` filters. Prefers index.json order; falls back to listCachedIds().
+ */
+export function resolveCacheQueue(filter: CacheQueueFilter = {}): string[] {
+  const index = readIndex();
+  const ids = index ? index.recipes.map((r) => r.id) : listCachedIds();
+  const titlesById = new Map(
+    (index?.recipes ?? []).map((r) => [r.id, r.title]),
+  );
+
+  if (filter.onlyRecipeId) {
+    const target = filter.onlyRecipeId.startsWith("recipe/")
+      ? filter.onlyRecipeId
+      : `recipe/${filter.onlyRecipeId}`;
+    const hit = ids.find((id) => id === target);
+    return hit ? [hit] : [];
+  }
+  if (filter.onlyTitleSubstring) {
+    const needle = filter.onlyTitleSubstring.toLowerCase();
+    return ids.filter((id) =>
+      (titlesById.get(id) ?? "").toLowerCase().includes(needle),
+    );
+  }
+  return ids;
+}
+
 /** All cached recipe IDs in alphabetical order. Useful when no index.json exists. */
 export function listCachedIds(): string[] {
   if (!existsSync(RECIPES_DIR)) return [];

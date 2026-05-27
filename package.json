@@ -16,6 +16,7 @@
     "dev:reset": "node --experimental-transform-types --disable-warning=ExperimentalWarning scripts/dev-reset.mts",
     "familywall:download": "node --experimental-transform-types --disable-warning=ExperimentalWarning scripts/familywall-download.mts",
     "familywall:import": "node --experimental-transform-types --disable-warning=ExperimentalWarning scripts/familywall-import.mts",
+    "token:create": "node --experimental-transform-types --disable-warning=ExperimentalWarning scripts/create-api-token.mts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",

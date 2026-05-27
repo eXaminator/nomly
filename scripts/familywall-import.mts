@@ -25,6 +25,14 @@ Optional:
                        place — dedup key: title + source URL)
   --yes                Skip the "use existing cache?" prompt
   --debug              Emit parsing diagnostics for each snapshot
+  --api <baseUrl>      Import into a remote nomly over its HTTP API instead
+                       of the local DB (e.g. https://nomly.example.tld).
+                       Recipes are parsed locally and POSTed — photos and
+                       all — so ingredient matching runs against the live
+                       catalog. The local HTML cache is kept as your backup.
+  --token <token>      Bearer token for --api (mint with
+                       \`npm run token:create\`). Falls back to the
+                       NOMLY_API_TOKEN env var.
   --help               Print this help
 
 Run \`npm run familywall:download\` first if the cache doesn't exist
@@ -63,6 +71,8 @@ async function main() {
         overwrite: { type: "boolean", default: false },
         yes: { type: "boolean", default: false },
         debug: { type: "boolean", default: false },
+        api: { type: "string" },
+        token: { type: "string" },
         help: { type: "boolean", default: false },
       },
       allowPositionals: false,
@@ -123,51 +133,89 @@ async function main() {
     }
   }
 
-  const { runFamilywallImport } = await import("../src/lib/familywall/index.ts");
-
+  // Shared per-recipe progress printer (both the local-DB and API runners
+  // emit the same outcome shape).
   let printed = 0;
-  const summary = await runFamilywallImport({
+  const onRecipe = ({
+    title,
+    outcome,
+    recipeId,
+    error,
+  }: {
+    title: string;
+    outcome: string;
+    recipeId?: number;
+    error?: string;
+  }) => {
+    printed += 1;
+    const label = `[${printed}]`;
+    const titleStr = `"${title}"`;
+    let suffix = "";
+    switch (outcome) {
+      case "imported":
+        suffix = ` → imported${recipeId ? ` (id ${recipeId})` : ""}`;
+        break;
+      case "updated":
+        suffix = ` → updated${recipeId ? ` (id ${recipeId})` : ""}`;
+        break;
+      case "would-import":
+        suffix = " → would import";
+        break;
+      case "would-update":
+        suffix = ` → would update${recipeId ? ` (id ${recipeId})` : ""}`;
+        break;
+      case "skipped":
+        suffix = " → skipped (already imported)";
+        break;
+      case "failed":
+        suffix = ` → failed (${error ?? "unknown error"})`;
+        break;
+    }
+    console.log(`${label.padEnd(6)} ${titleStr}${suffix}`);
+  };
+
+  const shared = {
     limit,
     dryRun: parsed.values["dry-run"],
     overwrite: parsed.values.overwrite,
     debug: parsed.values.debug,
     onlyRecipeId: parsed.values["recipe-id"],
     onlyTitleSubstring: parsed.values.title,
-    onRecipe: ({ title, outcome, recipeId, error }) => {
-      printed += 1;
-      const label = `[${printed}]`;
-      const titleStr = `"${title}"`;
-      let suffix = "";
-      switch (outcome) {
-        case "imported":
-          suffix = ` → imported${recipeId ? ` (id ${recipeId})` : ""}`;
-          break;
-        case "updated":
-          suffix = ` → updated${recipeId ? ` (id ${recipeId})` : ""}`;
-          break;
-        case "would-import":
-          suffix = " → would import";
-          break;
-        case "would-update":
-          suffix = ` → would update${recipeId ? ` (id ${recipeId})` : ""}`;
-          break;
-        case "skipped":
-          suffix = " → skipped (already imported)";
-          break;
-        case "failed":
-          suffix = ` → failed (${error ?? "unknown error"})`;
-          break;
-      }
-      console.log(`${label.padEnd(6)} ${titleStr}${suffix}`);
-    },
-  });
+    onRecipe,
+  };
+
+  let summary;
+  if (parsed.values.api) {
+    const baseUrl = parsed.values.api.trim();
+    if (!/^https?:\/\//i.test(baseUrl)) {
+      console.error("[familywall] --api must be a full URL, e.g. https://nomly.example.tld");
+      process.exit(2);
+    }
+    const token = (parsed.values.token ?? process.env.NOMLY_API_TOKEN ?? "").trim();
+    if (!token) {
+      console.error(
+        "[familywall] --api needs a bearer token: pass --token <token> or set NOMLY_API_TOKEN.",
+      );
+      console.error("[familywall] Mint one with `npm run token:create -- --name import-cli`.");
+      process.exit(2);
+    }
+    console.log(`[familywall] importing into ${baseUrl} over the API (local cache kept as backup)`);
+    const { runFamilywallImportViaApi } = await import(
+      "../src/lib/familywall/api-client.ts"
+    );
+    summary = await runFamilywallImportViaApi({ ...shared, baseUrl, token });
+  } else {
+    const { runFamilywallImport } = await import("../src/lib/familywall/index.ts");
+    summary = await runFamilywallImport(shared);
+  }
 
   console.log("---");
   console.log(
     `done: ${summary.imported} imported, ${summary.updated} updated, ${summary.skipped} skipped, ${summary.failed} failed`,
   );
   if (parsed.values["dry-run"]) {
-    console.log("(dry run — nothing written to the DB)");
+    const where = parsed.values.api ? "the remote DB" : "the DB";
+    console.log(`(dry run — nothing written to ${where})`);
   }
 }
 
