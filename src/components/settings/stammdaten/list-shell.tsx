@@ -116,6 +116,11 @@ export function ListShell<TItem>({
   const plural = pluralFor(entityKind);
 
   const [items, setItems] = React.useState<TItem[]>(initialItems);
+  // Re-sync when the server sends fresh data — e.g. after a bulk edit calls
+  // router.refresh(). Single edits/merge/delete patch `items` locally and
+  // don't change `initialItems`, so this won't clobber their optimistic state.
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  React.useEffect(() => setItems(initialItems), [initialItems]);
   // `inputValue` reflects the input field; `query` is the debounced value
   // actually used for filtering. Typing on a 400-row list is noticeably
   // smoother when the filter run waits for the user to pause briefly.

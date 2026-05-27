@@ -21,6 +21,7 @@ import {
   type ImpactRow,
   refsSum,
 } from "./types";
+import { initialDeleteMode } from "./delete-mode";
 
 export type DeleteDialogProps<TItem> = {
   open: boolean;
@@ -89,9 +90,11 @@ export function DeleteDialog<TItem>({
         const map = new Map<number, ImpactRow>();
         for (const it of body.items) map.set(it.id, it);
         setImpact(map);
-        // If nothing references these rows AND hard delete allowed, default to hard.
+        // No refs → safe plain delete; refs → replace unless force-delete is
+        // allowed. Without the "no refs → hard" case, unused rows (whose
+        // replace picker is hidden) leave the delete button stuck disabled.
         const anyRefs = body.items.some((it) => refsSum(it.refs) > 0);
-        setMode(anyRefs && !hardDeleteAllowed ? "replace" : hardDeleteAllowed ? "hard" : "replace");
+        setMode(initialDeleteMode(anyRefs, hardDeleteAllowed));
       })
       .catch(() => setError("Konnte Verwendungs-Daten nicht laden."))
       .finally(() => setLoadingImpact(false));
