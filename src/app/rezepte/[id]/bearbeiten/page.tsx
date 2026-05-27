@@ -45,19 +45,21 @@ export default async function EditRecipePage({
       ingredients: s.ingredients.map((i) => ({
         uid: crypto.randomUUID(),
         name: i.ingredientName,
-        // Only carry the canonical when it differs from the displayed name —
-        // matches the import path's behaviour.
+        // "Nicht zugeordnet" line (no article): start with the unassigned
+        // pill selected and no canonical/ingredient link.
         canonicalName:
+          i.canonicalIngredientName == null ||
           i.canonicalIngredientName.toLowerCase() ===
-          i.ingredientName.toLowerCase()
+            i.ingredientName.toLowerCase()
             ? null
             : i.canonicalIngredientName,
-        // The row already links to an ingredient; the pill UI starts with
-        // that pill selected. Candidates are populated lazily when the
-        // user edits the name (the matcher endpoint runs then).
+        // The row already links to an ingredient (or is unassigned); the pill
+        // UI starts with that pill selected. Candidates are populated lazily
+        // when the user edits the name (the matcher endpoint runs then).
         selectedIngredientId: i.ingredientId,
         candidates: [],
         addAsAlias: false,
+        unassigned: i.ingredientId == null,
         quantity: quantityToInputString(i.quantity),
         // sub_unit_id wins over unit_id (the writer keeps them mutually
         // exclusive). The displayed name comes from the same `unitName`

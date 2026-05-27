@@ -191,7 +191,15 @@ function loadRecipeIngredients(
       fixedAmount: recipeIngredient.fixedAmount,
     })
     .from(recipeIngredient)
-    .where(sql`${recipeIngredient.id} IN (${sql.join(ids, sql`, `)})`)
+    // Skip "Nicht zugeordnet" lines (ingredient_id NULL): they have no
+    // article to aggregate against and must never reach a shopping item.
+    .where(
+      sql`${recipeIngredient.id} IN (${sql.join(ids, sql`, `)}) AND ${recipeIngredient.ingredientId} IS NOT NULL`,
+    )
     .all();
-  return new Map(rows.map((r) => [r.id, r]));
+  return new Map(
+    rows
+      .filter((r): r is typeof r & { ingredientId: number } => r.ingredientId != null)
+      .map((r) => [r.id, r]),
+  );
 }

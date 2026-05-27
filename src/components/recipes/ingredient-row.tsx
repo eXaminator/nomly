@@ -487,8 +487,10 @@ export function IngredientRow({
           ? null
           : c.canonicalName,
       isOptional: value.isOptional || c.isEquipment,
-      // Clicking a regular candidate clears any force-match alias intent.
+      // Clicking a regular candidate clears any force-match alias intent and
+      // any "Nicht zugeordnet" state.
       addAsAlias: false,
+      unassigned: false,
       importAnnotation: clearAnnotationOn(value.importAnnotation, "ingredient"),
     });
   }
@@ -500,6 +502,22 @@ export function IngredientRow({
       selectedIngredientId: null,
       canonicalName: null,
       addAsAlias: false,
+      unassigned: false,
+    });
+  }
+
+  /** Click on the synthetic "Nicht zugeordnet" pill: row becomes free text
+   *  not linked to any article. Clears the ingredient link, the canonical
+   *  badge, any sub-unit (article-scoped) and force-match alias intent. */
+  function selectUnassigned() {
+    onChange({
+      ...value,
+      selectedIngredientId: null,
+      canonicalName: null,
+      subUnit: null,
+      addAsAlias: false,
+      unassigned: true,
+      importAnnotation: clearAnnotationOn(value.importAnnotation, "ingredient"),
     });
   }
 
@@ -520,6 +538,7 @@ export function IngredientRow({
           : c.canonicalName,
       selectedIngredientId: c.ingredientId,
       addAsAlias: false,
+      unassigned: false,
     });
   }
 
@@ -536,6 +555,7 @@ export function IngredientRow({
       canonicalName:
         value.name.toLowerCase() === canonical.toLowerCase() ? null : canonical,
       addAsAlias,
+      unassigned: false,
       importAnnotation: clearAnnotationOn(value.importAnnotation, "ingredient"),
     });
   }
@@ -624,8 +644,12 @@ export function IngredientRow({
             selectedIngredientId={value.selectedIngredientId}
             selectedCanonicalName={value.canonicalName}
             addAsAlias={value.addAsAlias}
+            unassigned={value.unassigned}
+            // Staples must resolve to a buyable article.
+            allowUnassigned={false}
             onSelectCandidate={selectCandidate}
             onSelectNew={selectNew}
+            onSelectUnassigned={selectUnassigned}
             onUseCanonical={useCanonicalInName}
             onForceMatch={forceMatch}
             onEditArticle={setEditingArticleId}
@@ -761,8 +785,11 @@ export function IngredientRow({
           selectedIngredientId={value.selectedIngredientId}
           selectedCanonicalName={value.canonicalName}
           addAsAlias={value.addAsAlias}
+          unassigned={value.unassigned}
+          allowUnassigned={true}
           onSelectCandidate={selectCandidate}
           onSelectNew={selectNew}
+          onSelectUnassigned={selectUnassigned}
           onUseCanonical={useCanonicalInName}
           onForceMatch={forceMatch}
           onEditArticle={setEditingArticleId}
@@ -931,6 +958,10 @@ function applyAutoSelect(
   typedName: string,
   matches: ServerMatch[],
 ): DraftIngredient {
+  // Rule 0: an explicitly "Nicht zugeordnet" row is sticky. The user opted
+  // out of article matching, so typing must not silently re-link it — they
+  // re-link by clicking a candidate or the "Neu" pill.
+  if (current.unassigned) return current;
   // Rule 1: sticky. We keep the selection but DON'T re-apply the equipment
   // → isOptional default: the user has had a chance to toggle it manually
   // since the original resolution, and re-asserting on every keystroke
@@ -1013,8 +1044,11 @@ function CandidatePills({
   selectedIngredientId,
   selectedCanonicalName,
   addAsAlias,
+  unassigned,
+  allowUnassigned,
   onSelectCandidate,
   onSelectNew,
+  onSelectUnassigned,
   onUseCanonical,
   onForceMatch,
   onEditArticle,
@@ -1027,8 +1061,14 @@ function CandidatePills({
    *  matched row shows WHICH ingredient it's pinned to. */
   selectedCanonicalName: string | null;
   addAsAlias: boolean;
+  /** The "Nicht zugeordnet" pill is the active selection (free-text row). */
+  unassigned: boolean;
+  /** Whether to offer the "Nicht zugeordnet" pill at all. False in the
+   *  staple editor, where every row must resolve to a buyable article. */
+  allowUnassigned: boolean;
   onSelectCandidate: (c: ServerMatch) => void;
   onSelectNew: () => void;
+  onSelectUnassigned: () => void;
   onUseCanonical: (c: ServerMatch) => void;
   onForceMatch: (
     ingredientId: number,
@@ -1039,15 +1079,19 @@ function CandidatePills({
 }) {
   const trimmed = name.trim();
   // Hide the whole pill row when there's nothing to interact with — no
-  // typed text + no candidates + no selection yet.
+  // typed text + no candidates + no selection yet (including a sticky
+  // "Nicht zugeordnet" selection, which should keep its pill visible).
   if (
     trimmed.length === 0 &&
     candidates.length === 0 &&
-    selectedIngredientId == null
+    selectedIngredientId == null &&
+    !unassigned
   ) {
     return null;
   }
-  const isNewSelected = selectedIngredientId == null;
+  // Three mutually-exclusive synthetic states: a real candidate, "Neu"
+  // (create article), or "Nicht zugeordnet" (free text, no article).
+  const isNewSelected = selectedIngredientId == null && !unassigned;
   // The pill the force-match popover sits next to a forced ingredient that
   // isn't in the candidate list. Surface it as its own pill so the user can
   // see which ingredient the row is pinned to.
@@ -1112,6 +1156,13 @@ function CandidatePills({
         disabled={trimmed.length === 0}
         onSelect={onSelectNew}
       />
+      {allowUnassigned ? (
+        <UnassignedPill
+          isSelected={unassigned}
+          disabled={trimmed.length === 0}
+          onSelect={onSelectUnassigned}
+        />
+      ) : null}
       <ForceMatchPopover onPick={onForceMatch} typedName={trimmed} />
     </div>
   );
@@ -1235,6 +1286,47 @@ function NewPill({
       }
     >
       + {label}
+    </button>
+  );
+}
+
+/**
+ * "Nicht zugeordnet": marks the row as free text that isn't linked to any
+ * article and never reaches a shopping list (leftovers, garnish, things kept
+ * at home). Always offered in the recipe editor like the "Neu" pill, and
+ * disabled until the row has a name (its text becomes the line's display).
+ */
+function UnassignedPill({
+  isSelected,
+  disabled,
+  onSelect,
+}: {
+  isSelected: boolean;
+  disabled: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      disabled={disabled}
+      aria-pressed={isSelected}
+      className={cn(
+        "inline-flex max-w-full items-center gap-1 truncate rounded-full border border-dashed px-2 py-0.5 text-xs transition-colors",
+        isSelected
+          ? "border-[var(--color-accent)] bg-[color-mix(in_srgb,var(--color-accent),var(--color-bg)_75%)] text-[var(--color-fg)]"
+          : "border-[var(--color-border)] text-[var(--color-muted-fg)] hover:bg-[var(--color-muted)]",
+        disabled && "cursor-not-allowed opacity-50",
+      )}
+      title={
+        disabled
+          ? "Erst einen Namen eingeben."
+          : isSelected
+            ? "Nicht zugeordnet: freie Angabe ohne Artikel — kommt nie auf die Einkaufsliste."
+            : "Als freie Angabe ohne Artikel speichern (nicht einkaufbar)."
+      }
+    >
+      Nicht zugeordnet
     </button>
   );
 }

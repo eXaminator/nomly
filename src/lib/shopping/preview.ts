@@ -1,4 +1,4 @@
-import { asc, between, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, between, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { db } from "../../db/index.ts";
 import {
   ingredient,
@@ -127,7 +127,14 @@ export function previewMeals(start: string, lengthDays: number): PreviewMeal[] {
     .innerJoin(recipeSection, eq(recipeSection.id, recipeIngredient.sectionId))
     .innerJoin(ingredient, eq(ingredient.id, recipeIngredient.ingredientId))
     .leftJoin(unit, eq(unit.id, recipeIngredient.unitId))
-    .where(inArray(recipeSection.recipeId, recipeIds))
+    // The inner join on `ingredient` already drops "Nicht zugeordnet" lines
+    // (ingredient_id NULL); the explicit guard documents that intent.
+    .where(
+      and(
+        inArray(recipeSection.recipeId, recipeIds),
+        isNotNull(recipeIngredient.ingredientId),
+      ),
+    )
     .orderBy(asc(recipeSection.sortOrder), asc(recipeIngredient.sortOrder))
     .all();
 
@@ -171,6 +178,9 @@ export function previewMeals(start: string, lengthDays: number): PreviewMeal[] {
     const sectionsById = new Map<number, PreviewSection>();
     const sectionOrder: number[] = [];
     for (const l of recipeLines) {
+      // Unassigned lines are already filtered out by the query's
+      // isNotNull guard; this also narrows the type for the push below.
+      if (l.ingredientId == null) continue;
       let sec = sectionsById.get(l.sectionId);
       if (!sec) {
         sec = {

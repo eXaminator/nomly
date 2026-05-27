@@ -9,7 +9,9 @@ import {
 
 type Props = {
   displayName: string;
-  canonicalName: string;
+  /** Canonical article name, or null for "Nicht zugeordnet" lines that aren't
+   *  linked to any article — those render as plain text with no tooltip. */
+  canonicalName: string | null;
 };
 
 /**
@@ -19,6 +21,7 @@ type Props = {
  */
 export function IngredientLine({ displayName, canonicalName }: Props) {
   const showTooltip =
+    canonicalName != null &&
     canonicalName.trim().length > 0 &&
     canonicalName.toLowerCase() !== displayName.toLowerCase();
 

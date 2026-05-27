@@ -15,6 +15,12 @@ export type RecipeIngredientInput = {
    *  of {@link ingredientId} (force-match flow). Ignored when
    *  `ingredientId` is null. */
   addAsAlias?: boolean;
+  /** "Nicht zugeordnet": the row is free text that doesn't map to any
+   *  article. The server persists `ingredient_id` NULL (no article looked up
+   *  or created) with the text in `display_name`, and the line never reaches
+   *  a shopping list. Forces `ingredientId` and `subUnitId` to null.
+   *  Defaults to false. */
+  unassigned?: boolean;
   quantity: number | null;
   unitId: number | null;
   /** Ingredient-scoped sub-unit reference. Mutually exclusive with
@@ -124,13 +130,17 @@ export type PlannerRecipe = Pick<
 
 export type RecipeIngredientView = {
   id: number;
-  ingredientId: number;
+  /** NULL for "Nicht zugeordnet" lines — free text not linked to any
+   *  article (see {@link RecipeIngredientInput.unassigned}). */
+  ingredientId: number | null;
   /** Whatever the user picked or typed at save time (recipe_ingredient.
-   *  display_name OR ingredient.name fallback). */
+   *  display_name OR ingredient.name fallback). For unassigned lines this is
+   *  the row's only text. */
   ingredientName: string;
   /** ingredient.name — the canonical row. May be the same string as
-   *  ingredientName; the UI hides the badge in that case. */
-  canonicalIngredientName: string;
+   *  ingredientName; the UI hides the badge in that case. NULL for
+   *  unassigned lines (no canonical article). */
+  canonicalIngredientName: string | null;
   quantity: number | null;
   unitId: number | null;
   /** display_unit OR unit.name fallback OR sub-unit name (coalesced

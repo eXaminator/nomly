@@ -49,17 +49,21 @@ function toNumberOrNull(raw: string): number | null {
 function ingredientToPayload(ing: DraftIngredient) {
   const name = ing.name.trim();
   if (name.length === 0) return null;
-  const hasSubUnit = ing.subUnit !== null;
+  // "Nicht zugeordnet": free-text line with no article. Drop the ingredient
+  // link, alias intent and any sub-unit (sub-units are article-scoped); the
+  // server persists ingredient_id NULL with `name` as display_name.
+  const hasSubUnit = ing.subUnit !== null && !ing.unassigned;
   return {
     ingredientName: name,
     // The pill UI determines ingredient identity. When the user explicitly
     // picked a pill (or the matcher auto-selected one above threshold),
     // `selectedIngredientId` is set and the server links the row directly,
     // bypassing name-based resolution.
-    ingredientId: ing.selectedIngredientId,
+    ingredientId: ing.unassigned ? null : ing.selectedIngredientId,
+    unassigned: ing.unassigned,
     // Only honoured when ingredientId is set; turns the row's display name
     // into an alias of that ingredient on save (force-match opt-in).
-    addAsAlias: ing.addAsAlias,
+    addAsAlias: ing.unassigned ? false : ing.addAsAlias,
     quantity: toNumberOrNull(ing.quantity),
     // Sub-unit and unit are mutually exclusive; the server enforces it too.
     unitId: hasSubUnit ? null : ing.unit?.id ?? null,
@@ -325,7 +329,9 @@ export function RecipeForm({ initial, recipeId, tagSuggestions }: Props) {
         new Set(
           payload.sections.flatMap((s) =>
             s.ingredients
-              .filter((i) => i.ingredientId == null)
+              // Unassigned rows never become articles, so they don't need the
+              // "neue Zutaten" metadata dialog either.
+              .filter((i) => i.ingredientId == null && !i.unassigned)
               .map((i) => i.ingredientName.trim()),
           ),
         ),

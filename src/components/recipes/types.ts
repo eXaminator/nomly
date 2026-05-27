@@ -68,6 +68,12 @@ export type DraftIngredient = {
   /** When true, force-match was used AND the user opted to persist the
    *  current `name` as an alias of `selectedIngredientId` on save. */
   addAsAlias: boolean;
+  /** "Nicht zugeordnet" pill: the row is free text not linked to any article.
+   *  Mutually exclusive with a selected/new ingredient — picking this pill
+   *  clears `selectedIngredientId`, `canonicalName` and `subUnit`. Saved as
+   *  `unassigned: true` (server persists `ingredient_id` NULL) and the line
+   *  never reaches a shopping list. */
+  unassigned: boolean;
   quantity: string;
   unit: ComboboxItem | null;
   /** Set when the parser or the user picked an ingredient-scoped sub-unit
@@ -202,6 +208,8 @@ export function parsedIngredientToDraft(
       isEquipment: c.isEquipment ?? false,
     })),
     addAsAlias: false,
+    // Import never auto-produces unassigned rows — it always tries to match.
+    unassigned: false,
     quantity: quantityToInputString(i.quantity),
     unit:
       i.unit && unitDisplayName !== null
@@ -242,6 +250,7 @@ export function emptyIngredient(): DraftIngredient {
     selectedIngredientId: null,
     candidates: [],
     addAsAlias: false,
+    unassigned: false,
     quantity: "",
     unit: null,
     subUnit: null,
@@ -307,6 +316,7 @@ export function emptyRecipe(): DraftRecipe {
             selectedIngredientId: null,
             candidates: [],
             addAsAlias: false,
+            unassigned: false,
             quantity: "",
             unit: null,
             subUnit: null,

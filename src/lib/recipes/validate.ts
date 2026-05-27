@@ -5,6 +5,8 @@ const ingredientSchema = z
     ingredientName: z.string().min(1, "Zutat ist erforderlich"),
     ingredientId: z.number().int().positive().nullable().default(null),
     addAsAlias: z.boolean().default(false),
+    /** "Nicht zugeordnet": free-text line not linked to any article. */
+    unassigned: z.boolean().default(false),
     quantity: z.number().nullable(),
     unitId: z.number().int().positive().nullable(),
     subUnitId: z.number().int().positive().nullable().default(null),
@@ -18,6 +20,13 @@ const ingredientSchema = z
   .refine((v) => !(v.unitId != null && v.subUnitId != null), {
     message: "unitId und subUnitId schließen sich gegenseitig aus.",
     path: ["subUnitId"],
+  })
+  // An unassigned line has no article, so it can carry neither an ingredient
+  // link nor an article-scoped sub-unit.
+  .refine((v) => !(v.unassigned && (v.ingredientId != null || v.subUnitId != null)), {
+    message:
+      "Eine nicht zugeordnete Zutat darf weder ingredientId noch subUnitId tragen.",
+    path: ["unassigned"],
   });
 
 const sectionSchema = z.object({

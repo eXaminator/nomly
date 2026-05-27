@@ -216,18 +216,22 @@ function writeSections(
 
     section.ingredients.forEach((ing, iIdx) => {
       const trimmedName = ing.ingredientName.trim();
-      // Explicit ingredient id from the pill picker wins over name-based
-      // resolution. This is the path the new pill UI uses to keep a row's
-      // `display_name` decoupled from canonical lookup ("tomatoes" linked
-      // to canonical Tomate without name-equality games).
-      const ingredientId =
-        ing.ingredientId != null
+      // "Nicht zugeordnet": free-text line not linked to any article. Persist
+      // ingredient_id NULL (no lookup, no article created, no alias) — the
+      // text lives in display_name and the line never reaches a shopping list.
+      // Explicit ingredient id from the pill picker otherwise wins over
+      // name-based resolution. This is the path the pill UI uses to keep a
+      // row's `display_name` decoupled from canonical lookup ("tomatoes"
+      // linked to canonical Tomate without name-equality games).
+      const ingredientId = ing.unassigned
+        ? null
+        : ing.ingredientId != null
           ? ing.ingredientId
           : resolveIngredient(tx, trimmedName, defaultsByLowerName);
       // Force-match alias add: when the user pinned the row to a specific
       // ingredient and asked to remember the spelling, insert it as an
       // alias too (idempotent — duplicates are guarded by the lookup).
-      if (ing.ingredientId != null && ing.addAsAlias) {
+      if (!ing.unassigned && ing.ingredientId != null && ing.addAsAlias) {
         addIngredientAlias(tx, ing.ingredientId, trimmedName);
       }
       // Resolve the alternative linkage. Orphan alternatives (no preceding
@@ -349,9 +353,10 @@ export function getRecipe(id: number): RecipeView | null {
   type IngredientRow = {
     id: number;
     sectionId: number;
-    ingredientId: number;
+    // NULL for "Nicht zugeordnet" lines (free text, no article).
+    ingredientId: number | null;
     ingredientName: string;
-    canonicalIngredientName: string;
+    canonicalIngredientName: string | null;
     quantity: number | null;
     unitId: number | null;
     unitName: string | null;
@@ -362,7 +367,9 @@ export function getRecipe(id: number): RecipeView | null {
     fixedAmount: boolean;
     rawLine: string | null;
     dietaryClass: IngredientDietaryClass;
-    isEquipment: boolean;
+    // NULL when the row has no article (unassigned) — coalesced to false in
+    // the view mapping below.
+    isEquipment: boolean | null;
     sortOrder: number;
     alternativeForId: number | null;
   };
@@ -404,7 +411,10 @@ export function getRecipe(id: number): RecipeView | null {
             ingredientSubUnitTable,
             eq(ingredientSubUnitTable.id, recipeIngredient.subUnitId),
           )
-          .innerJoin(
+          // LEFT join so "Nicht zugeordnet" lines (ingredient_id NULL) survive;
+          // their canonical name / dietary class / equipment flag come back
+          // NULL and are handled in the mapping below.
+          .leftJoin(
             ingredientTable,
             eq(ingredientTable.id, recipeIngredient.ingredientId),
           )
@@ -422,7 +432,10 @@ export function getRecipe(id: number): RecipeView | null {
 
   const diet = deriveDiet(
     ingredients
-      .filter((i) => !isOptionalIngredient(i))
+      // Unassigned lines (no article) carry no dietary class — they must not
+      // drag a "definite" recipe down to "probable". Matches the list page,
+      // which inner-joins ingredient and so already ignores them.
+      .filter((i) => i.ingredientId !== null && !isOptionalIngredient(i))
       .map((i) => i.dietaryClass),
   );
 
@@ -461,7 +474,7 @@ export function getRecipe(id: number): RecipeView | null {
           isOptional: i.isOptional,
           fixedAmount: i.fixedAmount,
           rawLine: i.rawLine,
-          isEquipment: i.isEquipment,
+          isEquipment: i.isEquipment ?? false,
           dietaryClass: i.dietaryClass,
           sortOrder: i.sortOrder,
           alternativeForId: i.alternativeForId,

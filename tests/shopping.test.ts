@@ -172,6 +172,26 @@ describe("shopping preview", () => {
     expect(names).not.toContain("Salz");
   });
 
+  it("never surfaces an unassigned (ingredient_id NULL) line in the preview", async () => {
+    const { db } = await import("@/db");
+    const { recipeIngredient } = await import("@/db/schema");
+    db.insert(recipeIngredient)
+      .values({
+        sectionId: ctx.sectionId,
+        ingredientId: null,
+        displayName: "übrige Reste",
+        quantity: 1,
+        unitId: null,
+      })
+      .run();
+    const { previewMeals } = await import("@/lib/shopping/preview");
+    const meals = previewMeals("2026-05-23", 1);
+    const names = meals[0].sections
+      .flatMap((s) => s.ingredients)
+      .map((i) => i.ingredientName);
+    expect(names).not.toContain("übrige Reste");
+  });
+
   it("keeps optional ingredients but flags them with isOptional", async () => {
     const { db } = await import("@/db");
     const { recipeIngredient } = await import("@/db/schema");
@@ -246,6 +266,32 @@ describe("shopping merge-on-add", () => {
 
   beforeEach(async () => {
     ctx = await seed();
+  });
+
+  it("never adds an unassigned line to the list, even if passed directly", async () => {
+    const { db } = await import("@/db");
+    const { recipeIngredient } = await import("@/db/schema");
+    const freeTextId = db
+      .insert(recipeIngredient)
+      .values({
+        sectionId: ctx.sectionId,
+        ingredientId: null,
+        displayName: "übrige Reste",
+        quantity: 2,
+        unitId: null,
+      })
+      .returning({ id: recipeIngredient.id })
+      .all()[0].id;
+    const { addMealsToList } = await import("@/lib/shopping/merge");
+    const { listShoppingItems } = await import("@/lib/shopping/items");
+    const result = addMealsToList([
+      {
+        mealPlanId: ctx.mealPlanId,
+        ingredients: [{ recipeIngredientId: freeTextId }],
+      },
+    ]);
+    expect(result.itemsCreated).toBe(0);
+    expect(listShoppingItems()).toHaveLength(0);
   });
 
   it("creates one shopping_item per (ingredient, dimension) bucket and sums quantities in base units", async () => {

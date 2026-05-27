@@ -181,15 +181,23 @@ export const recipeIngredient = sqliteTable(
     sectionId: integer("section_id")
       .notNull()
       .references(() => recipeSection.id, { onDelete: "cascade" }),
-    ingredientId: integer("ingredient_id")
-      .notNull()
-      .references(() => ingredient.id, { onDelete: "restrict" }),
+    /**
+     * Canonical article this line points at. NULL marks an "unassigned" line
+     * (the "Nicht zugeordnet" pill): free text that isn't a reusable article
+     * and never reaches a shopping list (leftovers, garnish, things kept at
+     * home). For these rows `display_name` carries the text and `sub_unit_id`
+     * stays NULL. RESTRICT only bites when non-null.
+     */
+    ingredientId: integer("ingredient_id").references(() => ingredient.id, {
+      onDelete: "restrict",
+    }),
     /**
      * The name the user picked or typed for this row — e.g. "Tomaten" even
      * though `ingredient_id` points at the canonical "Tomate". The recipe
      * view uses this for display; the shopping-list merge logic uses
      * `ingredient_id` so aliased rows still merge with their canonical
-     * counterparts.
+     * counterparts. For unassigned lines (`ingredient_id` NULL) this is the
+     * line's only text and is always set.
      */
     displayName: text("display_name"),
     quantity: real("quantity"),

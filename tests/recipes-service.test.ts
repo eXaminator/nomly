@@ -377,6 +377,182 @@ describe("createRecipe + getRecipe with alternatives", () => {
     expect(ings[2].alternativeForId).toBe(ings[0].id);
   });
 
+  it("persists an unassigned line as ingredient_id NULL without creating an article", async () => {
+    const { db } = await import("@/db");
+    const { ingredient } = await import("@/db/schema");
+    const { createRecipe, getRecipe } = await import("@/lib/recipes/service");
+    const before = db.select().from(ingredient).all().length;
+    const id = createRecipe({
+      title: "Gazpacho mit Resten",
+      description: null,
+      servings: 4,
+      prepTimeMin: null,
+      cookTimeMin: null,
+      sourceUrl: null,
+      photoPath: null,
+      tags: [],
+      sections: [
+        {
+          title: null,
+          instructions: "",
+          ingredients: [
+            {
+              ingredientName: "übrige gehackte Gazpacho-Zutaten",
+              ingredientId: null,
+              unassigned: true,
+              quantity: 2,
+              unitId: null,
+              subUnitId: null,
+              displayUnit: null,
+              notes: "zum Garnieren",
+              isOptional: false,
+              fixedAmount: false,
+              isAlternative: false,
+            },
+          ],
+        },
+      ],
+    });
+    // No new article row was created for the free-text line.
+    expect(db.select().from(ingredient).all().length).toBe(before);
+    const r = getRecipe(id)!;
+    const line = r.sections[0].ingredients[0];
+    expect(line.ingredientId).toBeNull();
+    expect(line.canonicalIngredientName).toBeNull();
+    expect(line.ingredientName).toBe("übrige gehackte Gazpacho-Zutaten");
+    expect(line.quantity).toBe(2);
+    expect(line.notes).toBe("zum Garnieren");
+  });
+
+  it("preserves an unassigned line across an updateRecipe round-trip", async () => {
+    const { createRecipe, getRecipe, updateRecipe } = await import(
+      "@/lib/recipes/service"
+    );
+    const id = createRecipe({
+      title: "Round-trip Reste",
+      description: null,
+      servings: 2,
+      prepTimeMin: null,
+      cookTimeMin: null,
+      sourceUrl: null,
+      photoPath: null,
+      tags: [],
+      sections: [
+        {
+          title: null,
+          instructions: "",
+          ingredients: [
+            {
+              ingredientName: "Reste vom Vortag",
+              ingredientId: null,
+              unassigned: true,
+              quantity: null,
+              unitId: null,
+              subUnitId: null,
+              displayUnit: null,
+              notes: null,
+              isOptional: false,
+              fixedAmount: false,
+              isAlternative: false,
+            },
+          ],
+        },
+      ],
+    });
+    const before = getRecipe(id)!;
+    updateRecipe(id, {
+      title: before.title,
+      description: before.description,
+      servings: before.servings,
+      prepTimeMin: before.prepTimeMin,
+      cookTimeMin: before.cookTimeMin,
+      sourceUrl: before.sourceUrl,
+      photoPath: before.photoPath,
+      tags: before.tags,
+      sections: before.sections.map((s) => ({
+        title: s.title,
+        instructions: s.instructions,
+        ingredients: s.ingredients.map((i) => ({
+          ingredientName: i.ingredientName,
+          ingredientId: i.ingredientId,
+          unassigned: i.ingredientId == null,
+          quantity: i.quantity,
+          unitId: i.unitId,
+          subUnitId: i.subUnitId,
+          displayUnit: null,
+          notes: i.notes,
+          isOptional: i.isOptional,
+          fixedAmount: i.fixedAmount,
+          isAlternative: i.alternativeForId != null,
+        })),
+      })),
+    });
+    const after = getRecipe(id)!;
+    expect(after.sections[0].ingredients[0].ingredientId).toBeNull();
+    expect(after.sections[0].ingredients[0].ingredientName).toBe(
+      "Reste vom Vortag",
+    );
+  });
+
+  it("ignores unassigned lines when deriving the recipe diet", async () => {
+    const { db } = await import("@/db");
+    const { ingredient } = await import("@/db/schema");
+    const { createRecipe, getRecipe } = await import("@/lib/recipes/service");
+    const veganId = db
+      .insert(ingredient)
+      .values({ name: "Gurke", dietaryClass: "vegan" })
+      .returning({ id: ingredient.id })
+      .all()[0].id;
+    const id = createRecipe({
+      title: "Diet mit Reste",
+      description: null,
+      servings: 2,
+      prepTimeMin: null,
+      cookTimeMin: null,
+      sourceUrl: null,
+      photoPath: null,
+      tags: [],
+      sections: [
+        {
+          title: null,
+          instructions: "",
+          ingredients: [
+            {
+              ingredientName: "Gurke",
+              ingredientId: veganId,
+              quantity: 1,
+              unitId: null,
+              subUnitId: null,
+              displayUnit: null,
+              notes: null,
+              isOptional: false,
+              fixedAmount: false,
+              isAlternative: false,
+            },
+            {
+              ingredientName: "übrige Reste",
+              ingredientId: null,
+              unassigned: true,
+              quantity: null,
+              unitId: null,
+              subUnitId: null,
+              displayUnit: null,
+              notes: null,
+              isOptional: false,
+              fixedAmount: false,
+              isAlternative: false,
+            },
+          ],
+        },
+      ],
+    });
+    const r = getRecipe(id)!;
+    // The unassigned line (unknown dietary class) must not drag the recipe
+    // down to "probably vegan" — only the real vegan ingredient counts.
+    expect(r.isVegan).toBe(true);
+    expect(r.dietConfidence).toBe("definite");
+  });
+
   it("an alternative with no preceding primary in the section is promoted to primary instead", async () => {
     const { createRecipe, getRecipe } = await import("@/lib/recipes/service");
     const id = createRecipe({

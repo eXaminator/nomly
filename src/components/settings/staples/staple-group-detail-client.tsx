@@ -527,6 +527,9 @@ function StapleIngredientRow({
       selectedIngredientId: row.pickedIngredientId,
       candidates: [],
       addAsAlias: false,
+      // Staples must resolve to a buyable article — the "Nicht zugeordnet"
+      // pill is hidden in this variant (allowUnassigned={false}).
+      unassigned: false,
       quantity: row.quantity,
       unit:
         row.unitId !== "" && row.unitId != null

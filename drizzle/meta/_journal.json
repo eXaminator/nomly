@@ -148,6 +148,13 @@
       "when": 1779901986888,
       "tag": "0020_worthless_storm",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "6",
+      "when": 1779915690361,
+      "tag": "0021_bright_photon",
+      "breakpoints": true
     }
   ]
 }

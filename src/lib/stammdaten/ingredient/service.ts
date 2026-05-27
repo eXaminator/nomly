@@ -260,7 +260,12 @@ function loadRecipeRefCounts(ids: number[]): Map<number, number> {
     .where(inArray(recipeIngredient.ingredientId, ids))
     .groupBy(recipeIngredient.ingredientId)
     .all();
-  for (const row of rows) out.set(row.id, Number(row.count));
+  // The inArray filter excludes unassigned (NULL ingredient_id) rows; the
+  // guard also narrows the type for the Map<number, number> below.
+  for (const row of rows) {
+    if (row.id == null) continue;
+    out.set(row.id, Number(row.count));
+  }
   return out;
 }
 
