@@ -867,3 +867,128 @@ describe("meal-plan view reports shopping impact", () => {
     expect(after[0].hasShoppingImpact).toBe(true);
   });
 });
+
+describe("patchItem LWW (client-stamped newest-wins)", () => {
+  let ctx: Ctx;
+  beforeEach(async () => { ctx = await seed(); });
+
+  it("applies a toggle when no clientStampedAt is provided (legacy path)", async () => {
+    const { db } = await import("@/db");
+    const { shoppingItem } = await import("@/db/schema");
+    const inserted = db
+      .insert(shoppingItem)
+      .values({ ingredientId: ctx.ingredientIds.salz, checked: false })
+      .returning({ id: shoppingItem.id })
+      .all();
+    const id = inserted[0].id;
+
+    const { patchItem } = await import("@/lib/shopping/items");
+    const v = patchItem(id, { checked: true });
+    expect(v.checked).toBe(true);
+    expect(v.checkedAt).not.toBeNull();
+  });
+
+  it("applies when clientStampedAt is newer than updatedAt", async () => {
+    const { db } = await import("@/db");
+    const { shoppingItem } = await import("@/db/schema");
+    const { eq } = await import("drizzle-orm");
+    const inserted = db
+      .insert(shoppingItem)
+      .values({ ingredientId: ctx.ingredientIds.salz, checked: false, updatedAt: 1000 })
+      .returning({ id: shoppingItem.id })
+      .all();
+    const id = inserted[0].id;
+
+    const { patchItem } = await import("@/lib/shopping/items");
+    // 2000 seconds later in ms.
+    const v = patchItem(id, { checked: true }, { clientStampedAt: 2000 * 1000 });
+    expect(v.checked).toBe(true);
+
+    const row = db
+      .select({ updatedAt: shoppingItem.updatedAt, checkedAt: shoppingItem.checkedAt })
+      .from(shoppingItem)
+      .where(eq(shoppingItem.id, id))
+      .get();
+    // updatedAt was at least 2000 (capped at now in real time, but >= 2000).
+    expect(row!.updatedAt).toBeGreaterThanOrEqual(2000);
+  });
+
+  it("skips the write when clientStampedAt is older than updatedAt", async () => {
+    const { db } = await import("@/db");
+    const { shoppingItem } = await import("@/db/schema");
+    const { eq } = await import("drizzle-orm");
+    const inserted = db
+      .insert(shoppingItem)
+      .values({
+        ingredientId: ctx.ingredientIds.salz,
+        checked: true,
+        checkedAt: 5000,
+        updatedAt: 5000,
+      })
+      .returning({ id: shoppingItem.id })
+      .all();
+    const id = inserted[0].id;
+
+    const { patchItem } = await import("@/lib/shopping/items");
+    // Stale offline replay: client thinks they unchecked at second 3000.
+    const v = patchItem(id, { checked: false }, { clientStampedAt: 3000 * 1000 });
+    // Returns the current (untouched) row.
+    expect(v.checked).toBe(true);
+    expect(v.checkedAt).toBe(5000);
+
+    const row = db
+      .select({ updatedAt: shoppingItem.updatedAt })
+      .from(shoppingItem)
+      .where(eq(shoppingItem.id, id))
+      .get();
+    expect(row!.updatedAt).toBe(5000); // untouched
+  });
+
+  it("caps clientStampedAt at unixepoch() to defeat future-dated clocks", async () => {
+    const { db } = await import("@/db");
+    const { shoppingItem } = await import("@/db/schema");
+    const { eq } = await import("drizzle-orm");
+    const inserted = db
+      .insert(shoppingItem)
+      .values({ ingredientId: ctx.ingredientIds.salz, checked: false, updatedAt: 1000 })
+      .returning({ id: shoppingItem.id })
+      .all();
+    const id = inserted[0].id;
+
+    const { patchItem } = await import("@/lib/shopping/items");
+    const farFuture = (Math.floor(Date.now() / 1000) + 10_000) * 1000;
+    patchItem(id, { checked: true }, { clientStampedAt: farFuture });
+
+    const row = db
+      .select({ updatedAt: shoppingItem.updatedAt })
+      .from(shoppingItem)
+      .where(eq(shoppingItem.id, id))
+      .get();
+    const now = Math.floor(Date.now() / 1000);
+    // updatedAt clamped to "now", not the far-future client timestamp.
+    expect(row!.updatedAt).toBeLessThanOrEqual(now + 2);
+    expect(row!.updatedAt).toBeGreaterThanOrEqual(now - 2);
+  });
+
+  it("does not gate non-checked patches (note edits apply unconditionally)", async () => {
+    const { db } = await import("@/db");
+    const { shoppingItem } = await import("@/db/schema");
+    const inserted = db
+      .insert(shoppingItem)
+      .values({
+        ingredientId: ctx.ingredientIds.salz,
+        checked: true,
+        checkedAt: 5000,
+        updatedAt: 5000,
+        note: "old",
+      })
+      .returning({ id: shoppingItem.id })
+      .all();
+    const id = inserted[0].id;
+
+    const { patchItem } = await import("@/lib/shopping/items");
+    // Stale clientStampedAt; note patch should still apply since it's not a check.
+    const v = patchItem(id, { note: "new" }, { clientStampedAt: 3000 * 1000 });
+    expect(v.note).toBe("new");
+  });
+});

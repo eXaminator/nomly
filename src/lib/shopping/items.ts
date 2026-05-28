@@ -96,11 +96,13 @@ export type ShoppingItemView = {
   manualAmounts: ShoppingItemManualAmount[];
 };
 
-export function listShoppingItems(): ShoppingItemView[] {
+export function listShoppingItems(
+  options: { skipSweep?: boolean } = {},
+): ShoppingItemView[] {
   // Sweep on read so stale checked items never display even when the
   // server.mts interval hasn't fired (between ticks, or in tests / one-off
   // scripts that don't boot the custom server).
-  sweepCheckedItems();
+  if (!options.skipSweep) sweepCheckedItems();
   const ingredientRows = db
     .select({
       id: shoppingItem.id,
@@ -894,41 +896,91 @@ export type PatchInput = {
   note?: string | null;
 };
 
+export type PatchOptions = {
+  /**
+   * Client-side wall-clock at the moment the user toggled the item (ms epoch).
+   * When provided, gates the write: if the row's `updatedAt` is newer than
+   * this timestamp, the patch is a no-op and the current row is returned.
+   * Only the `checked` field is gated — non-checked patches apply
+   * unconditionally even when `clientStampedAt` is present.
+   */
+  clientStampedAt?: number;
+};
+
 /**
  * Updates only the item-level fields (checked / note). Amount edits go
  * through `setItemAmount` / `deleteItemAmount` so each manual override
  * targets a specific dimension.
  */
-export function patchItem(id: number, patch: PatchInput): ShoppingItemView {
+export function patchItem(
+  id: number,
+  patch: PatchInput,
+  options: PatchOptions = {},
+): ShoppingItemView {
   const existing = db
-    .select({ id: shoppingItem.id, checked: shoppingItem.checked })
+    .select({
+      id: shoppingItem.id,
+      checked: shoppingItem.checked,
+      updatedAt: shoppingItem.updatedAt,
+    })
     .from(shoppingItem)
     .where(eq(shoppingItem.id, id))
     .get();
   if (!existing) throw new ShoppingApiError("item not found", 404);
 
+  const wantsCheckedChange = Object.prototype.hasOwnProperty.call(patch, "checked");
+  const clientTs = options.clientStampedAt;
+
+  // LWW gate: only for toggles, only when a client timestamp is supplied.
+  if (wantsCheckedChange && clientTs != null) {
+    const clientSeconds = Math.floor(clientTs / 1000);
+    if (clientSeconds < existing.updatedAt) {
+      // Skip the sweep so a stale-checkedAt row (the very thing this gate
+      // protects) doesn't get GC'd as we return its current state.
+      const v = listShoppingItems({ skipSweep: true }).find((i) => i.id === id);
+      if (!v) throw new ShoppingApiError("item not found", 404);
+      return v;
+    }
+  }
+
   const set: Partial<typeof shoppingItem.$inferInsert> = {};
-  if (Object.prototype.hasOwnProperty.call(patch, "checked")) {
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  // Cap the client timestamp at "now" so a clock-skewed device cannot
+  // lock the row against legitimate future writes.
+  const cappedClientSeconds =
+    clientTs != null ? Math.min(Math.floor(clientTs / 1000), nowSeconds) : null;
+
+  if (wantsCheckedChange) {
     set.checked = patch.checked;
-    set.checkedAt = patch.checked ? Math.floor(Date.now() / 1000) : null;
+    set.checkedAt = patch.checked
+      ? (cappedClientSeconds ?? nowSeconds)
+      : null;
   }
   if (Object.prototype.hasOwnProperty.call(patch, "note")) {
     set.note = patch.note ?? null;
   }
   if (Object.keys(set).length === 0) {
-    const v = getItemView(id);
+    const v = listShoppingItems({ skipSweep: true }).find((i) => i.id === id);
     if (!v) throw new ShoppingApiError("item not found", 404);
     return v;
   }
+
+  // updatedAt is the LWW comparison field. Stamp with the (capped) client
+  // time when the caller provided one; otherwise let the DB stamp now.
+  const stamp = cappedClientSeconds ?? nowSeconds;
+
   db.update(shoppingItem)
     .set({
       ...set,
       version: sql`${shoppingItem.version} + 1`,
-      updatedAt: sql`unixepoch()`,
+      updatedAt: stamp,
     })
     .where(eq(shoppingItem.id, id))
     .run();
-  const view = getItemView(id);
+  // Skip sweep on the post-update read: when the client legitimately stamps
+  // an old (capped) checkedAt — say from a delayed offline replay — the
+  // sweep would 86 the row before we can return its view.
+  const view = listShoppingItems({ skipSweep: true }).find((i) => i.id === id);
   if (!view) throw new ShoppingApiError("item not found", 404);
   return view;
 }
