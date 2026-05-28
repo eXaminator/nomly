@@ -966,8 +966,9 @@ export function patchItem(
   }
 
   // updatedAt is the LWW comparison field. Stamp with the (capped) client
-  // time when the caller provided one; otherwise let the DB stamp now.
-  const stamp = cappedClientSeconds ?? nowSeconds;
+  // time only when this patch carries a check toggle — note-only patches
+  // must not lower updatedAt below "now" via a stale client timestamp.
+  const stamp = wantsCheckedChange ? (cappedClientSeconds ?? nowSeconds) : nowSeconds;
 
   db.update(shoppingItem)
     .set({

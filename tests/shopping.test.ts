@@ -991,4 +991,32 @@ describe("patchItem LWW (client-stamped newest-wins)", () => {
     const v = patchItem(id, { note: "new" }, { clientStampedAt: 3000 * 1000 });
     expect(v.note).toBe("new");
   });
+
+  it("note-only patch with stale clientStampedAt does not lower updatedAt", async () => {
+    const { db } = await import("@/db");
+    const { shoppingItem } = await import("@/db/schema");
+    const { eq } = await import("drizzle-orm");
+    const inserted = db
+      .insert(shoppingItem)
+      .values({
+        ingredientId: ctx.ingredientIds.salz,
+        checked: false,
+        updatedAt: 8000,
+      })
+      .returning({ id: shoppingItem.id })
+      .all();
+    const id = inserted[0].id;
+
+    const { patchItem } = await import("@/lib/shopping/items");
+    patchItem(id, { note: "x" }, { clientStampedAt: 1000 * 1000 });
+
+    const row = db
+      .select({ updatedAt: shoppingItem.updatedAt })
+      .from(shoppingItem)
+      .where(eq(shoppingItem.id, id))
+      .get();
+    const now = Math.floor(Date.now() / 1000);
+    // updatedAt advanced to "now", not lowered to the stale client timestamp.
+    expect(row!.updatedAt).toBeGreaterThanOrEqual(now - 2);
+  });
 });
