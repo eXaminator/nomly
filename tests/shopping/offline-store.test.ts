@@ -95,3 +95,55 @@ describe("offline store", () => {
     expect(items[0].checked).toBe(true); // IDB-authoritative; pending overlay applied
   });
 });
+
+describe("reconcileFromServer", () => {
+  beforeEach(async () => {
+    await resetOfflineDbForTests();
+  });
+
+  it("replaces IDB with the server snapshot when there are no pending mutations", async () => {
+    const db = await openOfflineDb();
+    await db.put("items", makeItem({ id: 1, name: "stale" }));
+
+    const { reconcileFromServer } = await import("@/lib/shopping/offline/store");
+    const merged = await reconcileFromServer([
+      makeItem({ id: 2, name: "Salz" }),
+      makeItem({ id: 3, name: "Zucker" }),
+    ]);
+    expect(merged.map((i) => i.id).sort()).toEqual([2, 3]);
+
+    const stored = await db.getAll("items");
+    expect(stored.map((i) => i.id).sort()).toEqual([2, 3]);
+  });
+
+  it("overlays a pending toggle on top of the server snapshot", async () => {
+    const db = await openOfflineDb();
+    await db.put("items", makeItem({ id: 1, checked: true }));
+    await db.put("mutationQueue", {
+      mutationId: "m1",
+      itemId: 1,
+      type: "uncheck",
+      queuedAt: 7_000,
+      attempts: 0,
+    });
+
+    const { reconcileFromServer } = await import("@/lib/shopping/offline/store");
+    // Server insists the item is still checked.
+    const merged = await reconcileFromServer([
+      makeItem({ id: 1, checked: true, checkedAt: 5 }),
+    ]);
+    // Pending uncheck wins until drained.
+    expect(merged[0].checked).toBe(false);
+    expect(merged[0].checkedAt).toBeNull();
+  });
+
+  it("updates meta.shoppingFetchedAt", async () => {
+    const before = Date.now();
+    const { reconcileFromServer } = await import("@/lib/shopping/offline/store");
+    await reconcileFromServer([makeItem({ id: 1 })]);
+    const db = await openOfflineDb();
+    const meta = await db.get("meta", "shoppingFetchedAt");
+    expect(meta).toBeDefined();
+    expect(meta!.value).toBeGreaterThanOrEqual(before);
+  });
+});

@@ -81,3 +81,45 @@ export async function readPendingQueue() {
   const tx = db.transaction("mutationQueue", "readonly");
   return tx.store.index("byQueuedAt").getAll();
 }
+
+/**
+ * Replaces the IDB items store with `serverItems`, preserving rows whose
+ * id has a pending entry in `mutationQueue` — the queued toggle stays
+ * applied until it's drained. Updates `meta.shoppingFetchedAt`.
+ *
+ * Only call this after a confirmed `offline -> online` transition or when
+ * a realtime "shopping" event fires while online. Never on mount.
+ */
+export async function reconcileFromServer(
+  serverItems: ShoppingItemView[],
+): Promise<ShoppingItemView[]> {
+  const db = await openOfflineDb();
+  const queueEntries = await db.getAll("mutationQueue");
+  const pendingById = new Map(queueEntries.map((e) => [e.itemId, e] as const));
+
+  const tx = db.transaction(["items", "meta"], "readwrite");
+  await tx.objectStore("items").clear();
+  const merged: ShoppingItemView[] = [];
+  for (const item of serverItems) {
+    const pending = pendingById.get(item.id);
+    if (pending) {
+      const overlay: ShoppingItemView = {
+        ...item,
+        checked: pending.type === "check",
+        checkedAt:
+          pending.type === "check" ? Math.floor(pending.queuedAt / 1000) : null,
+      };
+      await tx.objectStore("items").put(overlay);
+      merged.push(overlay);
+    } else {
+      await tx.objectStore("items").put(item);
+      merged.push(item);
+    }
+  }
+  await tx.objectStore("meta").put({
+    key: "shoppingFetchedAt",
+    value: Date.now(),
+  });
+  await tx.done;
+  return merged;
+}
