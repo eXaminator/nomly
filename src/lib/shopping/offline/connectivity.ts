@@ -1,4 +1,5 @@
 export type ConnectivityState =
+  | "checking"
   | "online"
   | "offline"
   | "syncing"
@@ -6,7 +7,7 @@ export type ConnectivityState =
 
 type Listener = (state: ConnectivityState) => void;
 
-let state: ConnectivityState = "online";
+let state: ConnectivityState = "checking";
 const listeners = new Set<Listener>();
 
 export function getConnectivity(): ConnectivityState {
@@ -45,26 +46,39 @@ async function pingHealth(): Promise<boolean> {
 export function startConnectivityWatcher(): () => void {
   if (typeof window === "undefined") return () => undefined;
 
-  const onOnline = () => setConnectivity("online");
+  const onOnline = () => {
+    void runProbe();
+  };
   const onOffline = () => setConnectivity("offline");
   const onVisibility = async () => {
     if (document.visibilityState !== "visible") return;
-    const ok = await pingHealth();
-    setConnectivity(ok ? "online" : "offline");
+    if (state === "sessionExpired") return;
+    await runProbe();
   };
+
+  async function runProbe() {
+    if (navigator.onLine === false) {
+      setConnectivity("offline");
+      return;
+    }
+    const ok = await pingHealth();
+    if (state === "sessionExpired") return; // sticky until user re-auths
+    setConnectivity(ok ? "online" : "offline");
+  }
 
   window.addEventListener("online", onOnline);
   window.addEventListener("offline", onOffline);
   document.addEventListener("visibilitychange", onVisibility);
 
-  // Seed the initial state.
-  if (navigator.onLine === false) setConnectivity("offline");
+  // Pessimistic-by-default: probe immediately on mount so the chip is
+  // honest within ~5s of every fresh page load. `navigator.onLine === false`
+  // short-circuits to "offline" with no network call.
+  void runProbe();
 
-  heartbeatHandle = setInterval(async () => {
+  heartbeatHandle = setInterval(() => {
     if (document.visibilityState !== "visible") return;
-    const ok = await pingHealth();
-    if (state === "sessionExpired") return; // sticky until user re-auths
-    setConnectivity(ok ? "online" : "offline");
+    if (state === "sessionExpired") return;
+    void runProbe();
   }, HEARTBEAT_MS);
 
   return () => {
