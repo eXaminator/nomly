@@ -19,8 +19,10 @@ import { useConnectivity } from "./offline-indicator";
 export function useShoppingRealtime(onChanged: () => void): void {
   const state = useConnectivity();
   // Don't bother connecting when offline or when the session is dead (the
-  // upgrade would just 401-loop).
-  const shouldConnect = state !== "offline" && state !== "sessionExpired";
+  // upgrade would just 401-loop). Skip 'checking' too — wait for the probe
+  // to confirm online before opening the WS handshake.
+  const shouldConnect =
+    state !== "offline" && state !== "sessionExpired" && state !== "checking";
 
   const onChangedRef = React.useRef(onChanged);
   React.useEffect(() => {
