@@ -937,7 +937,7 @@ export function patchItem(
     if (clientSeconds < existing.updatedAt) {
       // Skip the sweep so a stale-checkedAt row (the very thing this gate
       // protects) doesn't get GC'd as we return its current state.
-      const v = listShoppingItems({ skipSweep: true }).find((i) => i.id === id);
+      const v = getItemView(id, { skipSweep: true });
       if (!v) throw new ShoppingApiError("item not found", 404);
       return v;
     }
@@ -960,7 +960,7 @@ export function patchItem(
     set.note = patch.note ?? null;
   }
   if (Object.keys(set).length === 0) {
-    const v = listShoppingItems({ skipSweep: true }).find((i) => i.id === id);
+    const v = getItemView(id, { skipSweep: true });
     if (!v) throw new ShoppingApiError("item not found", 404);
     return v;
   }
@@ -980,7 +980,7 @@ export function patchItem(
   // Skip sweep on the post-update read: when the client legitimately stamps
   // an old (capped) checkedAt — say from a delayed offline replay — the
   // sweep would 86 the row before we can return its view.
-  const view = listShoppingItems({ skipSweep: true }).find((i) => i.id === id);
+  const view = getItemView(id, { skipSweep: true });
   if (!view) throw new ShoppingApiError("item not found", 404);
   return view;
 }
@@ -1250,8 +1250,11 @@ export function clearAllItems(): { deletedCount: number } {
   return { deletedCount: result.changes };
 }
 
-export function getItemView(id: number): ShoppingItemView | null {
-  const items = listShoppingItems();
+export function getItemView(
+  id: number,
+  options: { skipSweep?: boolean } = {},
+): ShoppingItemView | null {
+  const items = listShoppingItems(options);
   return items.find((i) => i.id === id) ?? null;
 }
 
