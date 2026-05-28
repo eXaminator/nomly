@@ -89,7 +89,12 @@ export async function deleteStapleSource(
 
 export async function patchItem(
   id: number,
-  patch: { checked?: boolean; note?: string | null; mutationId?: string },
+  patch: {
+    checked?: boolean;
+    note?: string | null;
+    mutationId?: string;
+    clientStampedAt?: number;
+  },
 ): Promise<ShoppingItemView> {
   const res = await fetch(`/api/v1/shopping/items/${id}`, {
     method: "PATCH",
