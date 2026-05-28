@@ -2,58 +2,16 @@
 
 import * as React from "react";
 import { CloudOff, RefreshCw, Wifi, AlertTriangle } from "lucide-react";
-import { cn } from "@/lib/cn";
 import {
   getConnectivity,
   subscribeConnectivity,
   type ConnectivityState,
 } from "@/lib/shopping/offline/connectivity";
 
-type Props = {
-  pendingCount: number;
-  onOpenDrawer?: () => void;
-  className?: string;
-  /** Render nothing while everything is calm (online + nothing pending). Used
-   *  on the shopping shelf so the chip only appears when there's something to
-   *  surface — the always-on status lives in the app header. */
-  hideWhenIdle?: boolean;
-};
-
 export function useConnectivity(): ConnectivityState {
   const [state, setState] = React.useState<ConnectivityState>(() => getConnectivity());
   React.useEffect(() => subscribeConnectivity(setState), []);
   return state;
-}
-
-export function OfflineIndicator({
-  pendingCount,
-  onOpenDrawer,
-  className,
-  hideWhenIdle,
-}: Props) {
-  const state = useConnectivity();
-  if (hideWhenIdle && state === "online" && pendingCount === 0) return null;
-  const { dot, icon: Icon, label } = chipPresentation(state, pendingCount);
-  const isClickable = onOpenDrawer != null && (state !== "online" || pendingCount > 0);
-  const Tag = isClickable ? "button" : "span";
-
-  return (
-    <Tag
-      type={isClickable ? "button" : undefined}
-      onClick={isClickable ? onOpenDrawer : undefined}
-      className={cn(
-        "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium",
-        "border-[var(--color-border)] bg-[var(--color-card)] text-[var(--color-fg)]",
-        isClickable && "hover:bg-[var(--color-muted)]",
-        className,
-      )}
-      aria-label={`Verbindung: ${label}`}
-    >
-      <span className={cn("inline-block h-2 w-2 rounded-full", dot)} />
-      <Icon className="h-3.5 w-3.5" aria-hidden />
-      <span>{label}</span>
-    </Tag>
-  );
 }
 
 export function chipPresentation(state: ConnectivityState, pending: number) {

@@ -3,7 +3,7 @@
 // + supermarket + category GET endpoints (network-first with cache fallback).
 // Never intercepts non-GET — the offline mutation queue lives client-side.
 
-const CACHE_VERSION = "v1";
+const CACHE_VERSION = "v2";
 const SHELL_CACHE  = `nomly-shell-${CACHE_VERSION}`;
 const DATA_CACHE   = `nomly-data-${CACHE_VERSION}`;
 const STATIC_CACHE = `nomly-static-${CACHE_VERSION}`;
@@ -53,6 +53,9 @@ function isStaticAsset(url) {
 function isShellNavigation(req, url) {
   return req.mode === "navigate" && url.pathname === "/einkauf";
 }
+function isNavigation(req) {
+  return req.mode === "navigate";
+}
 
 self.addEventListener("fetch", (event) => {
   const req = event.request;
@@ -62,6 +65,12 @@ self.addEventListener("fetch", (event) => {
 
   if (isShellNavigation(req, url)) {
     event.respondWith(shellNavigationStrategy(req));
+    return;
+  }
+  if (isNavigation(req)) {
+    // Any other page: try network, fall back to the cached `/offline` shell
+    // so the header + nav stay reachable on every route while offline.
+    event.respondWith(navigationFallbackStrategy(req));
     return;
   }
   if (isDataPath(url)) {
@@ -87,8 +96,28 @@ async function shellNavigationStrategy(req) {
   } catch {
     const cached = await cache.match("/einkauf");
     if (cached) return cached;
+    const offline = await cache.match("/offline");
+    if (offline) return offline;
     return new Response(
       "<!doctype html><meta charset=utf-8><title>nomly offline</title><p>Offline — Einkaufsliste konnte nicht geladen werden. Öffne die Seite einmal online, dann steht sie auch offline bereit.</p>",
+      { headers: { "content-type": "text/html;charset=utf-8" }, status: 503 },
+    );
+  }
+}
+
+async function navigationFallbackStrategy(req) {
+  // Network-first; on failure serve the cached `/offline` so the AppShell
+  // chrome stays usable (the nav components re-derive their active state from
+  // `usePathname()` on the client, so highlighting is still correct).
+  const cache = await caches.open(SHELL_CACHE);
+  try {
+    const fresh = await fetch(req);
+    return fresh;
+  } catch {
+    const offline = await cache.match("/offline");
+    if (offline) return offline;
+    return new Response(
+      "<!doctype html><meta charset=utf-8><title>nomly offline</title><p>Offline.</p>",
       { headers: { "content-type": "text/html;charset=utf-8" }, status: 503 },
     );
   }

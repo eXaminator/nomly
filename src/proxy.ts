@@ -4,7 +4,15 @@ import { sessionOptions, isSessionLive, type SessionData } from "@/lib/session";
 import { extractBearer, verifyBearer } from "@/lib/bearer";
 
 const BYPASS_PREFIXES = ["/api/auth/", "/api/health", "/_next/", "/favicon"];
-const BYPASS_EXACT = new Set(["/manifest.webmanifest", "/robots.txt", "/sw.js", "/sw-precache.json"]);
+const BYPASS_EXACT = new Set([
+  "/manifest.webmanifest",
+  "/robots.txt",
+  "/sw.js",
+  "/sw-precache.json",
+  // The static offline fallback the SW caches — must succeed (not redirect to
+  // login) whenever the SW precaches it, even if the session has expired.
+  "/offline",
+]);
 
 function isBypassed(pathname: string): boolean {
   if (BYPASS_EXACT.has(pathname)) return true;

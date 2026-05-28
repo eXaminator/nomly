@@ -28,8 +28,6 @@ import {
   setSourceQuantity as apiSetSourceQty,
   setUnavailable as apiSetUnavailable,
 } from "./api";
-import { OfflineIndicator } from "./offline-indicator";
-import { PullToRefresh } from "./pull-to-refresh";
 import { EditArticleDrawer } from "@/components/articles/edit-article-drawer";
 import { useShoppingRealtime } from "./use-shopping-realtime";
 import { PendingMutationsDrawer } from "./pending-mutations-drawer";
@@ -140,10 +138,18 @@ export function ShoppingListView({
     };
   }, [initialItems, supermarkets]);
 
-  // Whenever the user comes back online, kick the queue.
+  // Refetch on every online transition (incl. initial mount) so a stale SW
+  // shell or a slow WS reconnect doesn't leave the user staring at an empty
+  // list after a PWA reopen.
   React.useEffect(() => {
     if (connectivity !== "online") return;
     void (async () => {
+      try {
+        const { items: fresh } = await fetchItems();
+        setItems(fresh);
+      } catch {
+        // Transient — the WS reconciler / next heartbeat will pick it up.
+      }
       await kickSync();
       const q = await readPendingQueue();
       setPendingCount(q.length);
@@ -372,7 +378,6 @@ export function ShoppingListView({
 
   return (
     <div className="flex flex-col gap-4">
-      <PullToRefresh />
       <h1 className="text-2xl font-semibold tracking-tight">Einkaufsliste</h1>
 
       {/* Sticky shelf: undo on the left; counter + supermarket select on the
@@ -392,11 +397,17 @@ export function ShoppingListView({
           <span className="hidden sm:inline">Rückgängig</span>
         </Button>
         <div className="flex min-w-0 items-center gap-2 md:gap-3">
-          <OfflineIndicator
-            pendingCount={pendingCount}
-            onOpenDrawer={() => setDrawerOpen(true)}
-            hideWhenIdle
-          />
+          {pendingCount > 0 ? (
+            <button
+              type="button"
+              onClick={() => setDrawerOpen(true)}
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-[var(--color-border)] bg-[var(--color-card)] px-2.5 py-1 text-xs font-medium text-[var(--color-fg)] hover:bg-[var(--color-muted)]"
+              aria-label={`${pendingCount} ausstehende Änderungen anzeigen`}
+            >
+              <span className="inline-block h-2 w-2 rounded-full bg-[var(--color-warning)]" />
+              <span>{pendingCount} ausstehend</span>
+            </button>
+          ) : null}
           <span className="whitespace-nowrap text-sm text-[var(--color-muted-fg)]">
             {filterActive ? (
               <>

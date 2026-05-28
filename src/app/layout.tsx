@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { ThemeInitScript, ThemeProvider } from "@/components/theme-provider";
 import { RegisterSW } from "@/components/pwa/register-sw";
+import { PullToRefresh } from "@/components/pwa/pull-to-refresh";
 import { AppShell } from "@/components/layout/app-shell";
 
 const geistSans = Geist({
@@ -44,6 +45,7 @@ export default function RootLayout({
       <body className="min-h-full">
         <ThemeProvider>
           <RegisterSW />
+          <PullToRefresh />
           <AppShell>{children}</AppShell>
         </ThemeProvider>
       </body>

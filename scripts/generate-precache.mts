@@ -24,7 +24,12 @@ async function main(): Promise<void> {
 
   if (manifest?.pages) {
     for (const [page, files] of Object.entries(manifest.pages)) {
-      if (page === "/einkauf" || page === "/_app" || page === "/_layout") {
+      if (
+        page === "/einkauf" ||
+        page === "/offline" ||
+        page === "/_app" ||
+        page === "/_layout"
+      ) {
         for (const f of files) assets.add(`/_next/${f}`);
       }
     }
@@ -33,9 +38,12 @@ async function main(): Promise<void> {
     for (const f of manifest.rootMainFiles) assets.add(`/_next/${f}`);
   }
 
-  // App shell extras the SW always wants cached on install.
+  // App shell extras the SW always wants cached on install. `/offline` is the
+  // generic fallback served when any non-`/einkauf` navigation fails offline —
+  // it keeps the app header + nav reachable on every page.
   const shell = [
     "/einkauf",
+    "/offline",
     "/manifest.webmanifest",
     "/icons/icon.svg",
     "/icons/icon-192.png",
