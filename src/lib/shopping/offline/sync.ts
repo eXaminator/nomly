@@ -28,6 +28,7 @@ export async function drainQueueOnce(): Promise<DrainResult> {
       const updated = await apiPatchItem(entry.itemId, {
         checked: entry.type === "check",
         mutationId: entry.mutationId,
+        clientStampedAt: entry.queuedAt,
       });
       const writeTx = db.transaction(["items", "mutationQueue"], "readwrite");
       await writeTx.objectStore("items").put(updated);

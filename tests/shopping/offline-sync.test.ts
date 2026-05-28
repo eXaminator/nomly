@@ -82,4 +82,26 @@ describe("drainQueueOnce", () => {
     const queue = await db.getAll("mutationQueue");
     expect(queue).toHaveLength(1); // not removed
   });
+
+  it("forwards clientStampedAt from queuedAt on the PATCH body", async () => {
+    const db = await openOfflineDb();
+    await db.put("items", makeItem({ id: 1 }));
+    await db.put("mutationQueue", {
+      mutationId: "m1", itemId: 1, type: "check", queuedAt: 42_000, attempts: 0,
+    });
+
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ item: makeItem({ id: 1, checked: true }) }),
+        { status: 200, headers: { "content-type": "application/json" } }),
+    );
+
+    await drainQueueOnce();
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    const [, init] = fetchMock.mock.calls[0];
+    const body = JSON.parse(String(init?.body ?? "{}"));
+    expect(body.clientStampedAt).toBe(42_000);
+    expect(body.checked).toBe(true);
+    expect(body.mutationId).toBe("m1");
+  });
 });
