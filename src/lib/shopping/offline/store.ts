@@ -1,28 +1,37 @@
 import { openOfflineDb } from "./db";
 import type { ShoppingItemView } from "@/lib/shopping/items";
 
-// Replace the IDB items store with the server snapshot, then overlay any
-// locally-pending toggles so the user's optimistic state survives a
-// re-fetch. Returns the merged list.
+/**
+ * Read-authoritative hydration for the /einkauf mount.
+ *
+ *   - If IDB has any items, return them with pending mutations overlaid.
+ *     IDB is the source of truth on the client; this path covers every
+ *     return visit, online or offline.
+ *   - If IDB is empty AND serverSeed is non-empty, write serverSeed into
+ *     IDB and return it. First-ever-visit case.
+ *   - If both are empty (or serverSeed is null), return an empty list.
+ *
+ * Never clears IDB. Never lets serverSeed override local rows.
+ */
 export async function hydrateFromIDB(
-  serverItems: ShoppingItemView[],
+  serverSeed: ShoppingItemView[] | null,
 ): Promise<ShoppingItemView[]> {
   const db = await openOfflineDb();
+  const localItems = await db.getAll("items");
 
-  // Stage 1: snapshot replace.
-  const tx = db.transaction(["items", "meta"], "readwrite");
-  await tx.objectStore("items").clear();
-  for (const item of serverItems) {
-    await tx.objectStore("items").put(item);
+  if (localItems.length === 0) {
+    if (!serverSeed || serverSeed.length === 0) return [];
+    const tx = db.transaction(["items", "meta"], "readwrite");
+    for (const item of serverSeed) await tx.objectStore("items").put(item);
+    await tx.objectStore("meta").put({ key: "shoppingFetchedAt", value: Date.now() });
+    await tx.done;
+    return serverSeed;
   }
-  await tx.objectStore("meta").put({ key: "shoppingFetchedAt", value: Date.now() });
-  await tx.done;
 
-  // Stage 2: overlay pending toggles.
   const queueEntries = await db.getAll("mutationQueue");
-  if (queueEntries.length === 0) return serverItems;
+  if (queueEntries.length === 0) return localItems;
 
-  const byId = new Map(serverItems.map((i) => [i.id, i] as const));
+  const byId = new Map(localItems.map((i) => [i.id, i] as const));
   for (const entry of queueEntries) {
     const base = byId.get(entry.itemId);
     if (!base) continue;

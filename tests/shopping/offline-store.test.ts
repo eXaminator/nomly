@@ -59,4 +59,39 @@ describe("offline store", () => {
     expect(queue).toHaveLength(1);
     expect(queue[0]).toMatchObject({ itemId: 1, type: "check", attempts: 0 });
   });
+
+  it("returns IDB items unchanged when called with an empty server seed", async () => {
+    // Seed IDB with two items as if from a previous online visit.
+    await hydrateFromIDB([
+      makeItem({ id: 1, name: "Mehl" }),
+      makeItem({ id: 2, name: "Zucker" }),
+    ]);
+
+    // Now simulate a cached-shell mount: serverSeed is empty.
+    const items = await hydrateFromIDB([]);
+    expect(items).toHaveLength(2);
+    expect(items.map((i) => i.id).sort()).toEqual([1, 2]);
+
+    // IDB still has both rows — nothing was cleared.
+    const db = await openOfflineDb();
+    const stored = await db.getAll("items");
+    expect(stored).toHaveLength(2);
+  });
+
+  it("returns IDB items unchanged when serverSeed is null", async () => {
+    await hydrateFromIDB([makeItem({ id: 1 })]);
+    const items = await hydrateFromIDB(null);
+    expect(items).toHaveLength(1);
+  });
+
+  it("does not clobber a locally-newer item when given a stale server seed", async () => {
+    // Seed once.
+    await hydrateFromIDB([makeItem({ id: 1, checked: false })]);
+    // User toggles it locally (writes to IDB + queue).
+    await toggleItemOptimistic(1, true);
+
+    // Cached SSR snapshot says it's still unchecked.
+    const items = await hydrateFromIDB([makeItem({ id: 1, checked: false })]);
+    expect(items[0].checked).toBe(true); // IDB-authoritative; pending overlay applied
+  });
 });
