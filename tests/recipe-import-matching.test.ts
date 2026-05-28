@@ -670,9 +670,15 @@ describe("colon-in-name treated as section + listed items", () => {
   });
 
   it("'alternativ:' splits into the primary (status preserved) + alternative(s) forced optional + flagged isAlternative", () => {
+    // Both ingredients in the catalog → the alternative stays as its own
+    // row (the fold-back-to-notes path only kicks in for unmatched alts).
+    const catalog: IngredientCatalog = [
+      { ingredientId: 1, canonicalName: "Tahin", aliasName: "Tahin", tokens: ["tahin"] },
+      { ingredientId: 2, canonicalName: "Mandelmus", aliasName: "Mandelmus", tokens: ["mandelmus"] },
+    ];
     const out = parseIngredientLines(
       ["1 g Tahin alternativ: 1 g Mandelmus"],
-      makeLookups([]),
+      makeLookups(catalog),
     );
     expect(out).toHaveLength(2);
     expect(out[0].name).toBe("Tahin");
@@ -684,9 +690,13 @@ describe("colon-in-name treated as section + listed items", () => {
   });
 
   it("'(Alternativ: X)' in parens after a primary ingredient adds X as an optional alternative", () => {
+    const catalog: IngredientCatalog = [
+      { ingredientId: 1, canonicalName: "Reis", aliasName: "Reis", tokens: ["reis"] },
+      { ingredientId: 2, canonicalName: "Naan-Brot", aliasName: "Naan-Brot", tokens: ["naan", "brot"] },
+    ];
     const out = parseIngredientLines(
       ["300 g Reis (Alternativ: Naan-Brot)"],
-      makeLookups([]),
+      makeLookups(catalog),
     );
     expect(out).toHaveLength(2);
     expect(out[0].name).toBe("Reis");
@@ -698,9 +708,13 @@ describe("colon-in-name treated as section + listed items", () => {
   });
 
   it("English 'alternatively:' behaves the same as German 'alternativ:'", () => {
+    const catalog: IngredientCatalog = [
+      { ingredientId: 1, canonicalName: "Tahini", aliasName: "Tahini", tokens: ["tahini"] },
+      { ingredientId: 2, canonicalName: "almond butter", aliasName: "almond butter", tokens: ["almond", "butter"] },
+    ];
     const out = parseIngredientLines(
       ["1 g Tahini alternatively: 1 g almond butter"],
-      makeLookups([]),
+      makeLookups(catalog),
     );
     expect(out).toHaveLength(2);
     expect(out[0].name).toBe("Tahini");
@@ -724,6 +738,17 @@ describe("colon-in-name treated as section + listed items", () => {
   });
 
   it("'oder' / 'or' / ' / ' between two ingredient names splits into primary + optional alternative", () => {
+    // The post-separator name needs to be in the catalog — otherwise the
+    // alternative gets folded back into the primary's notes (see the
+    // "unmatched alternative fold-back" describe block below).
+    const catalog: IngredientCatalog = [
+      { ingredientId: 1, canonicalName: "Zucker", aliasName: "Zucker", tokens: ["zucker"] },
+      { ingredientId: 2, canonicalName: "Honig", aliasName: "Honig", tokens: ["honig"] },
+      { ingredientId: 3, canonicalName: "Butter", aliasName: "Butter", tokens: ["butter"] },
+      { ingredientId: 4, canonicalName: "Margarine", aliasName: "Margarine", tokens: ["margarine"] },
+      { ingredientId: 5, canonicalName: "Tahini", aliasName: "Tahini", tokens: ["tahini"] },
+      { ingredientId: 6, canonicalName: "almond butter", aliasName: "almond butter", tokens: ["almond", "butter"] },
+    ];
     const cases: [string, string, string][] = [
       ["1 g Zucker oder Honig", "Zucker", "Honig"],
       ["100 g Butter / Margarine", "Butter", "Margarine"],
@@ -731,7 +756,7 @@ describe("colon-in-name treated as section + listed items", () => {
       ["1 g Tahini or almond butter", "Tahini", "almond butter"],
     ];
     for (const [raw, primary, alt] of cases) {
-      const out = parseIngredientLines([raw], makeLookups([]));
+      const out = parseIngredientLines([raw], makeLookups(catalog));
       expect(out, raw).toHaveLength(2);
       expect(out[0].name, raw).toBe(primary);
       expect(out[0].isAlternative, raw).toBe(false);
@@ -761,12 +786,16 @@ describe("colon-in-name treated as section + listed items", () => {
   });
 
   it("'alternative' / 'alternativly' word (with or without colon) splits into primary + optional alternative", () => {
+    const catalog: IngredientCatalog = [
+      { ingredientId: 1, canonicalName: "Tahini", aliasName: "Tahini", tokens: ["tahini"] },
+      { ingredientId: 2, canonicalName: "almond butter", aliasName: "almond butter", tokens: ["almond", "butter"] },
+    ];
     const cases: [string, string, string][] = [
       ["1 g Tahini alternative 1 g almond butter", "Tahini", "almond butter"],
       ["1 g Tahini alternativly: 1 g almond butter", "Tahini", "almond butter"],
     ];
     for (const [raw, primary, alt] of cases) {
-      const out = parseIngredientLines([raw], makeLookups([]));
+      const out = parseIngredientLines([raw], makeLookups(catalog));
       expect(out, raw).toHaveLength(2);
       expect(out[0].name, raw).toBe(primary);
       expect(out[0].isAlternative, raw).toBe(false);
@@ -888,5 +917,131 @@ it("'<qty> <unit> each: A, B, C' fans out into one row per item sharing qty + un
     expect(out).toHaveLength(1);
     expect(out[0].name).toBe("Mehl");
     expect(out[0].quantity).toBe(500);
+  });
+});
+
+describe("parseIngredientLines — unmatched alternative fold-back", () => {
+  it("folds an unmatched 'oder' alternative back into the primary's notes", () => {
+    const catalog: IngredientCatalog = [
+      { ingredientId: 1, canonicalName: "Mehl", aliasName: "Mehl", tokens: ["mehl"] },
+    ];
+    const out = parseIngredientLines(
+      ["200 g Mehl oder Stärke"],
+      makeLookups(catalog),
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0].ingredientId).toBe(1);
+    expect(out[0].name).toBe("Mehl");
+    expect(out[0].notes).toMatch(/oder Stärke/);
+  });
+
+  it("keeps a matched 'oder' alternative as its own row", () => {
+    const catalog: IngredientCatalog = [
+      { ingredientId: 1, canonicalName: "Mehl", aliasName: "Mehl", tokens: ["mehl"] },
+      { ingredientId: 2, canonicalName: "Stärke", aliasName: "Stärke", tokens: ["starke"] },
+    ];
+    const out = parseIngredientLines(
+      ["200 g Mehl oder Stärke"],
+      makeLookups(catalog),
+    );
+    expect(out).toHaveLength(2);
+    expect(out[0].ingredientId).toBe(1);
+    expect(out[1].ingredientId).toBe(2);
+    expect(out[1].isAlternative).toBe(true);
+  });
+
+  it("preserves the English 'or' as the connector when folding", () => {
+    const catalog: IngredientCatalog = [
+      { ingredientId: 1, canonicalName: "Butter", aliasName: "Butter", tokens: ["butter"] },
+    ];
+    const out = parseIngredientLines(
+      ["100 g Butter or Margarine"],
+      makeLookups(catalog),
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0].notes).toMatch(/or Margarine/);
+    expect(out[0].notes).not.toMatch(/oder/);
+  });
+
+  it("preserves the alternative's quantity in the folded note", () => {
+    const catalog: IngredientCatalog = [
+      { ingredientId: 1, canonicalName: "Mehl", aliasName: "Mehl", tokens: ["mehl"] },
+    ];
+    const out = parseIngredientLines(
+      ["200 g Mehl oder 100 g Stärke"],
+      makeLookups(catalog),
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0].notes).toMatch(/oder.*100\s*g\s*Stärke/);
+  });
+
+  it("emits the unmatched alternative as its own row when there is no primary to fold into", () => {
+    const out = parseIngredientLines(
+      ["(Alternativ: Stärke)"],
+      makeLookups([]),
+    );
+    // Bare "(Alternativ: X)" with no primary text emits a single standalone
+    // row — there's no primary to fold into, so the row stays.
+    expect(out).toHaveLength(1);
+    expect(out[0].name).toMatch(/Stärke/);
+  });
+
+  it("folds an unmatched 'alternativ:' tail back into the primary's notes", () => {
+    const catalog: IngredientCatalog = [
+      { ingredientId: 1, canonicalName: "Tahin", aliasName: "Tahin", tokens: ["tahin"] },
+    ];
+    const out = parseIngredientLines(
+      ["1 EL Tahin alternativ: 1 EL Mandelmus"],
+      makeLookups(catalog, ["el"]),
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0].ingredientId).toBe(1);
+    expect(out[0].notes).toMatch(/alternativ.*Mandelmus/i);
+  });
+
+  it("folds an unmatched '(Alternativ: …)' tail back into the primary's notes", () => {
+    const catalog: IngredientCatalog = [
+      { ingredientId: 1, canonicalName: "Mehl", aliasName: "Mehl", tokens: ["mehl"] },
+    ];
+    const out = parseIngredientLines(
+      ["200 g Mehl (Alternativ: Stärke)"],
+      makeLookups(catalog),
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0].ingredientId).toBe(1);
+    expect(out[0].notes).toMatch(/Alternativ.*Stärke/i);
+  });
+
+  it("scopes the fold-back to the current input line (no leak across lines)", () => {
+    const catalog: IngredientCatalog = [
+      { ingredientId: 1, canonicalName: "Mehl", aliasName: "Mehl", tokens: ["mehl"] },
+      { ingredientId: 2, canonicalName: "Butter", aliasName: "Butter", tokens: ["butter"] },
+    ];
+    const out = parseIngredientLines(
+      [
+        "200 g Mehl",
+        "100 g Butter oder Margarine",
+      ],
+      makeLookups(catalog),
+    );
+    expect(out).toHaveLength(2);
+    expect(out[0].ingredientId).toBe(1);
+    expect(out[0].notes).toBeNull();
+    expect(out[1].ingredientId).toBe(2);
+    expect(out[1].notes).toMatch(/oder Margarine/);
+  });
+
+  it("section variant: folds an unmatched alternative within its section", () => {
+    const catalog: IngredientCatalog = [
+      { ingredientId: 1, canonicalName: "Mehl", aliasName: "Mehl", tokens: ["mehl"] },
+    ];
+    const groups = parseIngredientLinesIntoSections(
+      ["200 g Mehl oder Stärke"],
+      makeLookups(catalog),
+    );
+    expect(groups).toHaveLength(1);
+    expect(groups[0].ingredients).toHaveLength(1);
+    expect(groups[0].ingredients[0].ingredientId).toBe(1);
+    expect(groups[0].ingredients[0].notes).toMatch(/oder Stärke/);
   });
 });

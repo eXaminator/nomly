@@ -1051,6 +1051,12 @@ export function parseIngredientLines(
     // Skip pure-noise lines (no letters at all, e.g. "—–", "***").
     if (!/\p{L}/u.test(rawLine)) continue;
 
+    // Index of the last PRIMARY (non-alternative) row emitted from this input
+    // line. Used to fold an alternative back into its primary's notes when
+    // the alternative doesn't match a catalog article. Scoped per rawLine so
+    // an alt from this line never folds into a primary from a previous line.
+    let lastPrimaryIndex: number | null = null;
+
     for (const row of expandIngredientLine(rawLine)) {
       if (row.kind === "header") continue;
       // Familywall opt-in: pre-resolve "X oder Y" alternatives + adjacent-pair
@@ -1096,6 +1102,23 @@ export function parseIngredientLines(
           parsed.quantity,
         );
         const resolved = resolveIngredientForRow(parsed, piece, lookups, threshold);
+        // Fold an unmatched alternative back into its primary's notes instead
+        // of creating an "orphan new-ingredient" row. Most recipe "or"s mean
+        // "or you could use this instead" rather than a parallel shopping
+        // entry — when the catalog doesn't recognise the alternative, the
+        // user's intent is information for the cook, not a second purchase.
+        if (
+          row.isAlternative &&
+          resolved.match === "new" &&
+          lastPrimaryIndex !== null
+        ) {
+          appendAlternativeToNotes(
+            out[lastPrimaryIndex],
+            row.alternativeConnector,
+            piece.trim(),
+          );
+          continue;
+        }
         const final = pickFinalUnit(
           initialUnit,
           parsed.unitName,
@@ -1133,10 +1156,23 @@ export function parseIngredientLines(
           candidateMatches: resolved.candidateMatches,
           newNameProposals: resolved.newNameProposals,
         });
+        if (!row.isAlternative) lastPrimaryIndex = out.length - 1;
       }
     }
   }
   return out;
+}
+
+function appendAlternativeToNotes(
+  target: ImportedIngredient,
+  connector: string | null,
+  altText: string,
+): void {
+  const fragment = connector
+    ? `${connector} ${altText}`.trim()
+    : altText.trim();
+  if (fragment.length === 0) return;
+  target.notes = target.notes ? `${target.notes}, ${fragment}` : fragment;
 }
 
 export type ParsedSectionGroup = {
@@ -1178,9 +1214,15 @@ export function parseIngredientLinesIntoSections(
     }
     if (!/\p{L}/u.test(rawLine)) continue;
 
+    // Mirror parseIngredientLines: track the most recent primary emitted
+    // FROM THIS INPUT LINE so unmatched alternatives fold back into it
+    // rather than into a primary from a previous line. Cleared each new line.
+    let lastPrimaryIndex: number | null = null;
+
     for (const row of expandIngredientLine(rawLine)) {
       if (row.kind === "header") {
         groups.push({ title: row.title, ingredients: [] });
+        lastPrimaryIndex = null;
         continue;
       }
       const raw = useFirstWins
@@ -1215,6 +1257,20 @@ export function parseIngredientLinesIntoSections(
           parsed.quantity,
         );
         const resolved = resolveIngredientForRow(parsed, piece, lookups, threshold);
+        // See parseIngredientLines: unmatched alternatives fold back into
+        // the primary's notes instead of becoming orphan new-ingredient rows.
+        if (
+          row.isAlternative &&
+          resolved.match === "new" &&
+          lastPrimaryIndex !== null
+        ) {
+          appendAlternativeToNotes(
+            currentGroup.ingredients[lastPrimaryIndex],
+            row.alternativeConnector,
+            piece.trim(),
+          );
+          continue;
+        }
         const final = pickFinalUnit(
           initialUnit,
           parsed.unitName,
@@ -1247,6 +1303,9 @@ export function parseIngredientLinesIntoSections(
           candidateMatches: resolved.candidateMatches,
           newNameProposals: resolved.newNameProposals,
         });
+        if (!row.isAlternative) {
+          lastPrimaryIndex = currentGroup.ingredients.length - 1;
+        }
       }
     }
   }

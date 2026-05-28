@@ -1688,6 +1688,12 @@ export type ExpandedIngredientRow =
        *  `recipe_ingredient.alternative_for_id` linking back to the most
        *  recent primary in the same section. */
       isAlternative: boolean;
+      /** When `isAlternative` is true, the original connecting word (or
+       *  short phrase) that joined this piece to its primary — "oder", "or",
+       *  "/", "alternativ:", "Alternativ:". Lets the downstream parser fold
+       *  the piece back into the primary's notes verbatim when the
+       *  alternative doesn't match a catalog article. Null for primary rows. */
+      alternativeConnector: string | null;
     };
 
 const OPTIONAL_PREFIX_RE =
@@ -1702,7 +1708,7 @@ const OPTIONAL_PREFIX_RE =
 const ALTERNATIV_SEP_RE =
   /\s+(?:alternativ|alternative|alternatively|alternativly)\s*:?\s+/i;
 const PARENS_ALTERNATIV_RE =
-  /\s*\((?:alternativ|alternative|alternatively|alternativly)\s*:\s*([^)]+)\)\s*$/i;
+  /\s*\((alternativ|alternative|alternatively|alternativly)\s*:\s*([^)]+)\)\s*$/i;
 const EACH_DIST_RE = /^(\S[^:]*?)\s+each\s*:\s*(.+)$/i;
 
 /**
@@ -1752,7 +1758,7 @@ function splitColonListItems(text: string): string[] {
  */
 function findOrSeparator(
   text: string,
-): { index: number; length: number } | null {
+): { index: number; length: number; word: string } | null {
   // " oder " / " or " / " / " — plus " o. " as German short form for
   // "oder". The negative lookahead skips "o. ä." / "o. Ä."
   // ("oder Ähnliches" = "or similar") which is a fixed phrase that belongs
@@ -1767,7 +1773,7 @@ function findOrSeparator(
     sepRe.lastIndex = i;
     const m = sepRe.exec(text);
     if (m && m.index === i) {
-      return { index: m.index, length: m[0].length };
+      return { index: m.index, length: m[0].length, word: m[0].trim() };
     }
   }
   return null;
@@ -1832,6 +1838,7 @@ export function expandIngredientLine(rawLine: string): ExpandedIngredientRow[] {
         rawText: original,
         forceOptional: baseOptional,
         isAlternative: false,
+        alternativeConnector: null,
       }));
     }
   }
@@ -1840,7 +1847,8 @@ export function expandIngredientLine(rawLine: string): ExpandedIngredientRow[] {
   const parensAlt = PARENS_ALTERNATIV_RE.exec(body);
   if (parensAlt) {
     const primary = body.slice(0, parensAlt.index).trim();
-    const altText = parensAlt[1].trim();
+    const altLeader = parensAlt[1];
+    const altText = parensAlt[2].trim();
     const rows: ExpandedIngredientRow[] = [];
     if (primary.length > 0) {
       rows.push({
@@ -1849,9 +1857,11 @@ export function expandIngredientLine(rawLine: string): ExpandedIngredientRow[] {
         rawText: original,
         forceOptional: baseOptional,
         isAlternative: false,
+        alternativeConnector: null,
       });
     }
     if (altText.length > 0) {
+      const hasPrimary = primary.length > 0;
       rows.push({
         kind: "ingredient",
         text: altText,
@@ -1860,7 +1870,8 @@ export function expandIngredientLine(rawLine: string): ExpandedIngredientRow[] {
         // Only flag as alternative when there IS a primary; a bare
         // "(Alternativ: X)" with no preceding text emits a single
         // standalone optional row.
-        isAlternative: primary.length > 0,
+        isAlternative: hasPrimary,
+        alternativeConnector: hasPrimary ? `${altLeader}:` : null,
       });
     }
     return rows;
@@ -1869,6 +1880,8 @@ export function expandIngredientLine(rawLine: string): ExpandedIngredientRow[] {
   // 4. "alternativ:" / "alternative" / "alternatively" inline separator
   //    (colon optional).
   if (ALTERNATIV_SEP_RE.test(body)) {
+    const sepMatch = ALTERNATIV_SEP_RE.exec(body);
+    const connector = sepMatch ? sepMatch[0].trim() : "alternativ";
     const parts = body
       .split(ALTERNATIV_SEP_RE)
       .map((p) => p.trim())
@@ -1882,6 +1895,7 @@ export function expandIngredientLine(rawLine: string): ExpandedIngredientRow[] {
         // wrapper. Alternatives are always optional.
         forceOptional: baseOptional || idx > 0,
         isAlternative: idx > 0,
+        alternativeConnector: idx > 0 ? connector : null,
       }));
     }
   }
@@ -1916,6 +1930,7 @@ export function expandIngredientLine(rawLine: string): ExpandedIngredientRow[] {
             rawText: original,
             forceOptional,
             isAlternative: false,
+            alternativeConnector: null,
           });
         }
         return rows;
@@ -1955,6 +1970,7 @@ export function expandIngredientLine(rawLine: string): ExpandedIngredientRow[] {
           rawText: original,
           forceOptional: baseOptional,
           isAlternative: false,
+          alternativeConnector: null,
         },
         {
           kind: "ingredient" as const,
@@ -1962,6 +1978,7 @@ export function expandIngredientLine(rawLine: string): ExpandedIngredientRow[] {
           rawText: original,
           forceOptional: true,
           isAlternative: true,
+          alternativeConnector: orSep.word,
         },
       ];
     }
@@ -1975,6 +1992,7 @@ export function expandIngredientLine(rawLine: string): ExpandedIngredientRow[] {
       rawText: original,
       forceOptional: baseOptional,
       isAlternative: false,
+      alternativeConnector: null,
     },
   ];
 }

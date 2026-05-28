@@ -439,13 +439,23 @@ describe("transformFamilywallRecipe", () => {
   });
 
   it("'oder'-alternatives split into primary + optional alternative row", () => {
-    // "Butter oder Margarine" now becomes Butter (primary) + Margarine
+    // "Butter oder Margarine" becomes Butter (primary) + Margarine
     // (alternative, isOptional + isAlternative both true). The downstream
     // service layer links the alternative to the primary via
     // recipe_ingredient.alternative_for_id at insert time.
+    // Both ingredients are seeded into the catalog so the matcher picks
+    // them up — otherwise the unmatched-alternative fold-back path absorbs
+    // Margarine into Butter's notes (covered separately).
+    const lookups = makeLookups();
+    lookups.ingredients.set("butter", { id: 20, canonicalName: "Butter" });
+    lookups.ingredients.set("margarine", { id: 21, canonicalName: "Margarine" });
+    lookups.ingredientCatalog = [
+      { ingredientId: 20, canonicalName: "Butter", aliasName: "Butter", tokens: ["butter"] },
+      { ingredientId: 21, canonicalName: "Margarine", aliasName: "Margarine", tokens: ["margarine"] },
+    ];
     const out = transformFamilywallRecipe(
       makeRaw({ ingredients: ["100g Butter oder Margarine"] }),
-      makeLookups(),
+      lookups,
       null,
     );
     const rows = out.sections[0].ingredients;
