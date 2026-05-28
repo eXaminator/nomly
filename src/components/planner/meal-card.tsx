@@ -14,7 +14,7 @@ type Props = {
   onReorderUp: (mealId: number) => void;
   onReorderDown: (mealId: number) => void;
   onDelete: (mealId: number) => void;
-  onPreviewRecipe: (recipeId: number) => void;
+  onPreviewRecipe: (recipeId: number, mealPlanId: number) => void;
   /** Disable DnD on mobile breakpoints — the parent decides via media query. */
   draggable: boolean;
 };
@@ -153,7 +153,7 @@ export function MealCard({
           coords let us tell a click apart from the synthetic click that
           fires at the end of a drag. */}
       <a
-        href={`/rezepte/${meal.recipe.id}`}
+        href={`/rezepte/${meal.recipe.id}?meal=${meal.id}`}
         className="flex min-w-0 flex-1 items-center gap-2 focus-visible:outline-none"
         onPointerDown={(e) => {
           downCoordsRef.current = { x: e.clientX, y: e.clientY };
@@ -176,7 +176,7 @@ export function MealCard({
           }
           e.preventDefault();
           e.stopPropagation();
-          onPreviewRecipe(meal.recipe.id);
+          onPreviewRecipe(meal.recipe.id, meal.id);
         }}
       >
         {meal.recipe.photoPath ? (

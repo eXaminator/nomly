@@ -92,6 +92,11 @@ export function PlannerView({
   // Owned at PlannerView level so both calendar meal cards and the recipe
   // panel rows can open the same dialog.
   const [previewRecipeId, setPreviewRecipeId] = React.useState<number | null>(null);
+  // Meal-plan context tied to the open preview. Set when the preview is opened
+  // from a meal card (so the recipe knows the meal's date and can show the
+  // upcoming-ingredient-uses affordance); null when opened from the recipe
+  // sidebar where no meal context exists.
+  const [previewMealPlanId, setPreviewMealPlanId] = React.useState<number | null>(null);
   const [activeDrag, setActiveDrag] = React.useState<DragData | null>(null);
   // Default to the fly-back animation; flipped to `null` synchronously on a
   // valid drop so the overlay vanishes in place instead of animating home.
@@ -684,7 +689,10 @@ export function PlannerView({
                 onReorderDown={(id) => handleReorder(id, "down")}
                 onDeleteMeal={(id) => handleDelete(id)}
                 onAddMeal={(date) => setAddingForDate(date)}
-                onPreviewRecipe={(id) => setPreviewRecipeId(id)}
+                onPreviewRecipe={(id, mealPlanId) => {
+                  setPreviewRecipeId(id);
+                  setPreviewMealPlanId(mealPlanId);
+                }}
                 dropTarget={dropTarget}
                 dragSourceSize={dragSourceSize}
                 draggable={true}
@@ -706,7 +714,10 @@ export function PlannerView({
             allTags={allTags}
             recipeUsage={recipeUsage}
             today={today}
-            onPreview={(id) => setPreviewRecipeId(id)}
+            onPreview={(id) => {
+              setPreviewRecipeId(id);
+              setPreviewMealPlanId(null);
+            }}
           />
         </div>
       </div>
@@ -733,7 +744,11 @@ export function PlannerView({
       />
       <RecipePreviewDialog
         recipeId={previewRecipeId}
-        onClose={() => setPreviewRecipeId(null)}
+        mealPlanId={previewMealPlanId}
+        onClose={() => {
+          setPreviewRecipeId(null);
+          setPreviewMealPlanId(null);
+        }}
       />
     </DndContext>
   );

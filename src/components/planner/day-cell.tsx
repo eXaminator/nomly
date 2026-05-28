@@ -23,7 +23,7 @@ type Props = {
   onReorderDown: (mealId: number) => void;
   onDeleteMeal: (mealId: number) => void;
   onAddMeal: (date: string) => void;
-  onPreviewRecipe: (recipeId: number) => void;
+  onPreviewRecipe: (recipeId: number, mealPlanId: number) => void;
   /** Hover state for the in-flight drag (see PlannerView). When set, this
    *  cell shows a phantom placeholder above or below the named meal. */
   dropTarget: { mealId: number; side: "above" | "below" } | null;

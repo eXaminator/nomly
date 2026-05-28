@@ -15,6 +15,10 @@ import {
 import { Button } from "@/components/ui/button";
 import { DietBadge } from "@/components/recipes/diet-badge";
 import { IngredientLine } from "@/components/recipes/ingredient-line";
+import {
+  UpcomingUsesButton,
+  UpcomingUsesProvider,
+} from "@/components/recipes/ingredient-upcoming-uses";
 import { cn } from "@/lib/cn";
 import { getRecipe } from "@/lib/recipes/service";
 import { isOptionalIngredient } from "@/lib/recipes/optional";
@@ -57,8 +61,10 @@ function DietMarker({ kind }: { kind: IngredientDietaryClass }) {
 
 export default async function RecipeViewPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ meal?: string }>;
 }) {
   const { id: rawId } = await params;
   const id = Number(rawId);
@@ -66,9 +72,20 @@ export default async function RecipeViewPage({
   const recipe = getRecipe(id);
   if (!recipe) notFound();
 
+  // Optional meal-context query param. When set, the recipe view enables
+  // the per-ingredient "upcoming uses" affordance, which only makes sense
+  // when "future" has a concrete anchor (the meal's date).
+  const { meal: rawMeal } = await searchParams;
+  const mealParam = Number(rawMeal);
+  const mealPlanId =
+    rawMeal != null && Number.isInteger(mealParam) && mealParam > 0
+      ? mealParam
+      : null;
+
   const descriptionHtml = renderMarkdown(recipe.description);
 
   return (
+    <UpcomingUsesProvider mealPlanId={mealPlanId}>
     <div className="mx-auto max-w-4xl">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex-1">
@@ -179,6 +196,10 @@ export default async function RecipeViewPage({
                   aria-hidden="true"
                 />
               ) : null}
+              <UpcomingUsesButton
+                ingredientId={ing.ingredientId}
+                ingredientName={ing.canonicalIngredientName ?? ing.ingredientName}
+              />
               <DietMarker kind={ing.isEquipment ? null : ing.dietaryClass} />
               <span className="inline-flex min-w-12 items-center gap-1 font-mono text-[var(--color-muted-fg)]">
                 {ing.fixedAmount ? (
@@ -287,5 +308,6 @@ export default async function RecipeViewPage({
         })}
       </div>
     </div>
+    </UpcomingUsesProvider>
   );
 }

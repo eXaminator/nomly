@@ -13,12 +13,20 @@ import {
 import { Button } from "@/components/ui/button";
 import { DietBadge } from "@/components/recipes/diet-badge";
 import { IngredientLine } from "@/components/recipes/ingredient-line";
+import {
+  UpcomingUsesButton,
+  UpcomingUsesProvider,
+} from "@/components/recipes/ingredient-upcoming-uses";
 import { renderMarkdown } from "@/lib/markdown";
 import { isOptionalIngredient } from "@/lib/recipes/optional";
 import type { RecipeView } from "@/lib/recipes/types";
 
 type Props = {
   recipeId: number | null;
+  /** When set, enables the per-ingredient "upcoming uses" affordance and
+   *  threads the meal id into the Vollansicht link so the full recipe page
+   *  inherits the same context. */
+  mealPlanId?: number | null;
   onClose: () => void;
 };
 
@@ -28,7 +36,7 @@ function formatQuantity(q: number | null): string {
   return new Intl.NumberFormat("de-DE", { maximumFractionDigits: 2 }).format(rounded);
 }
 
-export function RecipePreviewDialog({ recipeId, onClose }: Props) {
+export function RecipePreviewDialog({ recipeId, mealPlanId = null, onClose }: Props) {
   const open = recipeId != null;
   return (
     <Dialog open={open} onOpenChange={(v) => (!v ? onClose() : undefined)}>
@@ -37,7 +45,11 @@ export function RecipePreviewDialog({ recipeId, onClose }: Props) {
             a fresh loading state — avoids setState-in-effect resets. */}
         <DialogBody className="p-0">
           {recipeId != null ? (
-            <RecipeBody key={recipeId} recipeId={recipeId} />
+            <RecipeBody
+              key={`${recipeId}:${mealPlanId ?? "none"}`}
+              recipeId={recipeId}
+              mealPlanId={mealPlanId}
+            />
           ) : null}
         </DialogBody>
       </DialogContent>
@@ -45,7 +57,7 @@ export function RecipePreviewDialog({ recipeId, onClose }: Props) {
   );
 }
 
-function RecipeBody({ recipeId }: { recipeId: number }) {
+function RecipeBody({ recipeId, mealPlanId }: { recipeId: number; mealPlanId: number | null }) {
   const [recipe, setRecipe] = React.useState<RecipeView | null>(null);
   const [error, setError] = React.useState<string | null>(null);
 
@@ -89,7 +101,13 @@ function RecipeBody({ recipeId }: { recipeId: number }) {
 
   const descriptionHtml = renderMarkdown(recipe.description);
 
+  const fullViewHref =
+    mealPlanId != null
+      ? `/rezepte/${recipe.id}?meal=${mealPlanId}`
+      : `/rezepte/${recipe.id}`;
+
   return (
+    <UpcomingUsesProvider mealPlanId={mealPlanId}>
     <div className="flex flex-col">
       {recipe.photoPath ? (
         // eslint-disable-next-line @next/next/no-img-element
@@ -154,7 +172,7 @@ function RecipeBody({ recipeId }: { recipeId: number }) {
           </div>
           <div className="flex shrink-0 gap-2">
             <Button asChild variant="outline" size="sm">
-              <Link href={`/rezepte/${recipe.id}`}>Vollansicht</Link>
+              <Link href={fullViewHref}>Vollansicht</Link>
             </Button>
             <Button asChild variant="ghost" size="sm">
               <Link href={`/rezepte/${recipe.id}/bearbeiten`}>
@@ -188,9 +206,15 @@ function RecipeBody({ recipeId }: { recipeId: number }) {
                       <li
                         key={ing.id}
                         className={
-                          isOptionalIngredient(ing) ? "flex gap-2 italic opacity-65" : "flex gap-2"
+                          isOptionalIngredient(ing)
+                            ? "flex items-start gap-2 italic opacity-65"
+                            : "flex items-start gap-2"
                         }
                       >
+                        <UpcomingUsesButton
+                          ingredientId={ing.ingredientId}
+                          ingredientName={ing.canonicalIngredientName ?? ing.ingredientName}
+                        />
                         <span className="inline-flex min-w-12 items-center gap-1 font-mono text-[var(--color-muted-fg)]">
                           {ing.fixedAmount ? (
                             <Lock
@@ -232,5 +256,6 @@ function RecipeBody({ recipeId }: { recipeId: number }) {
         </div>
       </div>
     </div>
+    </UpcomingUsesProvider>
   );
 }
