@@ -8,6 +8,11 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/cn";
+import {
+  useDebouncedUrlString,
+  useUrlSort,
+  type SortState,
+} from "@/lib/url-state";
 
 import { DeleteDialog } from "./delete-dialog";
 import { DrawerShell } from "./drawer-shell";
@@ -30,7 +35,7 @@ export type ColumnDef<TItem> = {
   sortValue?: (item: TItem) => string | number | boolean | null;
 };
 
-export type SortState = { key: string; dir: "asc" | "desc" } | null;
+export type { SortState };
 
 function compareSortValues(
   a: string | number | boolean | null,
@@ -121,16 +126,10 @@ export function ListShell<TItem>({
   // don't change `initialItems`, so this won't clobber their optimistic state.
   // eslint-disable-next-line react-hooks/set-state-in-effect
   React.useEffect(() => setItems(initialItems), [initialItems]);
-  // `inputValue` reflects the input field; `query` is the debounced value
-  // actually used for filtering. Typing on a 400-row list is noticeably
-  // smoother when the filter run waits for the user to pause briefly.
-  const [inputValue, setInputValue] = React.useState("");
-  const [query, setQuery] = React.useState("");
-  React.useEffect(() => {
-    if (inputValue === query) return;
-    const handle = window.setTimeout(() => setQuery(inputValue), 180);
-    return () => window.clearTimeout(handle);
-  }, [inputValue, query]);
+  // Search is URL-backed: ?q=… persists across reloads / back-navigation. The
+  // hook owns the same debounced-input split the page used to do inline
+  // (input value is snappy, the debounced echo drives filtering + the URL).
+  const [inputValue, setInputValue, query] = useDebouncedUrlString("q", 180);
   const [selectedIds, setSelectedIds] = React.useState<Set<number>>(new Set());
 
   // Drawer state
@@ -157,7 +156,9 @@ export function ListShell<TItem>({
     [],
   );
 
-  const [sort, setSort] = React.useState<SortState>(initialSort ?? null);
+  // Sort is URL-backed too: ?sort=<column>:<asc|desc> survives reloads. The
+  // initialSort prop seeds the value used when the URL doesn't carry one.
+  const [sort, toggleSortInternal] = useUrlSort("sort", initialSort ?? null);
 
   const filtered = React.useMemo(() => {
     // Split on "|" so the user can OR-connect multiple terms
@@ -192,14 +193,7 @@ export function ListShell<TItem>({
     return tagged.map((t) => t.item);
   }, [items, query, applyFilters, nameOf, searchMatches, sort, columns]);
 
-  function toggleSort(key: string) {
-    setSort((prev) => {
-      if (!prev || prev.key !== key) return { key, dir: "asc" };
-      if (prev.dir === "asc") return { key, dir: "desc" };
-      // Third click clears the sort, restoring the service-side order.
-      return null;
-    });
-  }
+  const toggleSort = toggleSortInternal;
 
   const allFilteredSelected =
     filtered.length > 0 && filtered.every((i) => selectedIds.has(idOf(i)));

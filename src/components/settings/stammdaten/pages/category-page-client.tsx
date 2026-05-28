@@ -5,6 +5,7 @@ import * as React from "react";
 import { Badge } from "@/components/ui/badge";
 
 import { Button } from "@/components/ui/button";
+import { useUrlBoolean } from "@/lib/url-state";
 
 import { BulkSupermarketCategoryDialog } from "../bulk-supermarket-category-dialog";
 import { CategoryForm, type CategoryItem } from "../edit-forms/category-form";
@@ -52,7 +53,7 @@ export function CategoryPageClient({
 }: {
   initialItems: CategoryItem[];
 }) {
-  const [unusedOnly, setUnusedOnly] = React.useState(false);
+  const [unusedOnly, setUnusedOnly] = useUrlBoolean("unused");
   const [bulkDialog, setBulkDialog] = React.useState<{
     ids: number[];
     onApplied: () => void;
@@ -107,7 +108,7 @@ export function CategoryPageClient({
   const filterControls = (
     <button
       type="button"
-      onClick={() => setUnusedOnly((v) => !v)}
+      onClick={() => setUnusedOnly(!unusedOnly)}
       className={
         "rounded-full border px-3 py-1 text-xs transition-colors " +
         (unusedOnly

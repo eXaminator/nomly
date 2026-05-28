@@ -1,10 +1,10 @@
 "use client";
 
 import * as React from "react";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import * as Popover from "@radix-ui/react-popover";
 import { HelpCircle, Search } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import { useDebouncedUrlString } from "@/lib/url-state";
 
 type Props = {
   /** Controlled value. When both `value` and `onChange` are passed, the
@@ -19,28 +19,22 @@ export function RecipeSearch({
   onChange: controlledOnChange,
 }: Props = {}) {
   const isControlled = controlledValue != null && controlledOnChange != null;
-  const router = useRouter();
-  const pathname = usePathname();
-  const params = useSearchParams();
-  const initial = isControlled ? controlledValue : (params.get("q") ?? "");
-  const [value, setValue] = React.useState(initial);
+  // URL-backed path uses the shared hook. Controlled mode (the recipe-picker
+  // inside the planner) keeps its own local debouncer so it doesn't smear
+  // filter state onto /plan's URL.
+  const [urlValue, setUrlValue] = useDebouncedUrlString("q", 200);
+  const [localValue, setLocalValue] = React.useState(controlledValue ?? "");
+  const value = isControlled ? localValue : urlValue;
+  const setValue = isControlled ? setLocalValue : setUrlValue;
 
   React.useEffect(() => {
+    if (!isControlled) return;
     const handle = window.setTimeout(() => {
-      const q = value.trim();
-      if (isControlled) {
-        controlledOnChange(q);
-        return;
-      }
-      const url = new URLSearchParams(params.toString());
-      if (q) url.set("q", q);
-      else url.delete("q");
-      const qs = url.toString();
-      router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+      controlledOnChange(localValue.trim());
     }, 200);
     return () => window.clearTimeout(handle);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [value]);
+  }, [localValue]);
 
   return (
     <div className="relative">

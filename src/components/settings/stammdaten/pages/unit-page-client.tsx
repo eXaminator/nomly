@@ -3,6 +3,7 @@
 import * as React from "react";
 
 import { Badge } from "@/components/ui/badge";
+import { useUrlBoolean, useUrlString } from "@/lib/url-state";
 
 import {
   UnitForm,
@@ -86,8 +87,8 @@ export function UnitPageClient({
 }: {
   initialItems: UnitItem[];
 }) {
-  const [dimension, setDimension] = React.useState<DimensionFilter>("all");
-  const [unusedOnly, setUnusedOnly] = React.useState(false);
+  const [dimension, setDimension] = useUrlString<DimensionFilter>("dim", "all");
+  const [unusedOnly, setUnusedOnly] = useUrlBoolean("unused");
 
   const applyFilters = React.useCallback(
     (item: UnitItem) => {
@@ -131,7 +132,7 @@ export function UnitPageClient({
       <span className="mx-2 h-5 w-px bg-[var(--color-border)]" />
       <Chip
         active={unusedOnly}
-        onClick={() => setUnusedOnly((v) => !v)}
+        onClick={() => setUnusedOnly(!unusedOnly)}
         label="Ungenutzt"
       />
     </>

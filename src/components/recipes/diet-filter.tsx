@@ -1,37 +1,19 @@
 "use client";
 
 import * as React from "react";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Leaf, Salad } from "lucide-react";
 import { cn } from "@/lib/cn";
+import { useUrlString } from "@/lib/url-state";
 
 type Choice = "all" | "vegetarian" | "vegan";
 
-const PARAM_BY_CHOICE: Record<Choice, string | null> = {
-  all: null,
-  vegetarian: "vegetarian",
-  vegan: "vegan",
-};
-
-function readChoice(raw: string | null): Choice {
-  if (raw === "vegan") return "vegan";
-  if (raw === "vegetarian") return "vegetarian";
-  return "all";
-}
-
 export function DietFilter() {
-  const router = useRouter();
-  const pathname = usePathname();
-  const params = useSearchParams();
-  const current = readChoice(params.get("diet"));
+  const [raw, setRaw] = useUrlString<Choice>("diet", "all");
+  const current: Choice =
+    raw === "vegan" || raw === "vegetarian" ? raw : "all";
 
   function set(next: Choice) {
-    const url = new URLSearchParams(params.toString());
-    const value = PARAM_BY_CHOICE[next];
-    if (value) url.set("diet", value);
-    else url.delete("diet");
-    const qs = url.toString();
-    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+    setRaw(next);
   }
 
   return (

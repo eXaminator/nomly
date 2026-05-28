@@ -5,6 +5,7 @@ import * as React from "react";
 import { Badge } from "@/components/ui/badge";
 
 import { Button } from "@/components/ui/button";
+import { useUrlBoolean, useUrlString } from "@/lib/url-state";
 
 import { BulkIngredientDialog } from "../bulk-ingredient-dialog";
 import {
@@ -144,13 +145,16 @@ export function IngredientPageClient({
 }: {
   initialItems: IngredientItem[];
 }) {
-  const [kind, setKind] = React.useState<KindFilter>("all");
-  const [diet, setDiet] = React.useState<DietFilter>("all");
+  // Filter state lives in the URL so reload / back-navigation preserves it.
+  // Default values are stripped from the URL, so the canonical address is
+  // just /einstellungen/zutaten until the user actually narrows the list.
+  const [kind, setKind] = useUrlString<KindFilter>("kind", "all");
+  const [diet, setDiet] = useUrlString<DietFilter>("diet", "all");
   /** "" = no filter; NO_CATEGORY_VALUE = match rows with NULL category;
    *  otherwise the category name to match exactly. */
-  const [categoryFilter, setCategoryFilter] = React.useState<string>("");
-  const [excludedOnly, setExcludedOnly] = React.useState(false);
-  const [unusedOnly, setUnusedOnly] = React.useState(false);
+  const [categoryFilter, setCategoryFilter] = useUrlString<string>("cat", "");
+  const [excludedOnly, setExcludedOnly] = useUrlBoolean("excluded");
+  const [unusedOnly, setUnusedOnly] = useUrlBoolean("unused");
 
   // Build the category dropdown options from the items currently in scope.
   // Sorted by German locale so the select reads naturally; "no category"
@@ -251,12 +255,12 @@ export function IngredientPageClient({
       <span className="mx-1 h-5 w-px bg-[var(--color-border)]" />
       <Chip
         active={excludedOnly}
-        onClick={() => setExcludedOnly((v) => !v)}
+        onClick={() => setExcludedOnly(!excludedOnly)}
         label="Ausgeschlossen"
       />
       <Chip
         active={unusedOnly}
-        onClick={() => setUnusedOnly((v) => !v)}
+        onClick={() => setUnusedOnly(!unusedOnly)}
         label="Ungenutzt"
       />
     </>

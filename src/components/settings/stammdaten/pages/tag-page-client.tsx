@@ -2,6 +2,8 @@
 
 import * as React from "react";
 
+import { useUrlBoolean } from "@/lib/url-state";
+
 import { TagForm, type TagItem } from "../edit-forms/tag-form";
 import { ListShell, type ColumnDef } from "../list-shell";
 
@@ -23,7 +25,7 @@ const columns: ColumnDef<TagItem>[] = [
 ];
 
 export function TagPageClient({ initialItems }: { initialItems: TagItem[] }) {
-  const [unusedOnly, setUnusedOnly] = React.useState(false);
+  const [unusedOnly, setUnusedOnly] = useUrlBoolean("unused");
 
   const searchMatches = React.useCallback(
     (item: TagItem, q: string) => item.name.toLowerCase().includes(q),
@@ -41,7 +43,7 @@ export function TagPageClient({ initialItems }: { initialItems: TagItem[] }) {
   const filterControls = (
     <button
       type="button"
-      onClick={() => setUnusedOnly((v) => !v)}
+      onClick={() => setUnusedOnly(!unusedOnly)}
       className={
         "rounded-full border px-3 py-1 text-xs transition-colors " +
         (unusedOnly
