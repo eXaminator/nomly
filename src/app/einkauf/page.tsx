@@ -1,3 +1,4 @@
+import { headers } from "next/headers";
 import { ShoppingListView } from "@/components/shopping/shopping-list-view";
 import { listShoppingItems } from "@/lib/shopping/items";
 import {
@@ -10,7 +11,14 @@ import { getPlannerSettings } from "@/lib/settings/planner";
 export const dynamic = "force-dynamic";
 
 export default async function ShoppingPage() {
-  const items = listShoppingItems();
+  const requestHeaders = await headers();
+  const isShellPrecache = requestHeaders.get("x-nomly-shell") === "1";
+
+  // The SW pre-caches /einkauf once at install with `X-Nomly-Shell: 1`.
+  // That cached shell carries no items so it can never clobber IDB on an
+  // offline navigation. Online navigations come through as a normal
+  // request and get the full list.
+  const items = isShellPrecache ? [] : listShoppingItems();
   const supermarketList = listSupermarkets();
   const supermarkets = supermarketList
     .map((s) => getSupermarketDetail(s.id))
@@ -23,9 +31,6 @@ export default async function ShoppingPage() {
         sortOrder: c.sortOrder,
       })),
     }));
-  // Default the add-meals dialog to the next planner-week boundary so a
-  // fresh shopping pass covers a forward window aligned to the configured
-  // start weekday. Today wins when today already is that weekday.
   const planner = getPlannerSettings();
   const today = todayIso();
   const defaultStart = nextStartWeekdayOnOrAfter(today, planner.startWeekday);
