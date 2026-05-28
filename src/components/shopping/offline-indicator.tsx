@@ -22,6 +22,13 @@ export function chipPresentation(state: ConnectivityState, pending: number) {
     const label = pending > 0 ? `Offline – ${pending} ausstehend` : "Offline";
     return { dot: "bg-[var(--color-muted-fg)]", icon: CloudOff, label };
   }
+  if (state === "checking") {
+    return {
+      dot: "bg-[var(--color-muted-fg)]",
+      icon: RefreshCw,
+      label: "Prüfe Verbindung…",
+    };
+  }
   if (state === "syncing" || pending > 0) {
     return {
       dot: "bg-[var(--color-warning)]",
