@@ -12,6 +12,7 @@ const patchSchema = z
     checked: z.boolean().optional(),
     note: z.string().nullable().optional(),
     mutationId: z.string().uuid().optional(),
+    clientStampedAt: z.number().int().positive().optional(),
   })
   .strict();
 
@@ -35,13 +36,13 @@ export async function PATCH(
       { status: 400 },
     );
   }
-  const { mutationId, ...patch } = parsed.data;
+  const { mutationId, clientStampedAt, ...patch } = parsed.data;
   if (mutationId) {
     const cached = recallMutation<{ item: unknown }>(mutationId);
     if (cached) return NextResponse.json(cached);
   }
   try {
-    const item = patchItem(id, patch);
+    const item = patchItem(id, patch, { clientStampedAt });
     const payload = { item };
     if (mutationId) recordMutation(mutationId, payload);
     publishShoppingChanged();
