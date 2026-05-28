@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import * as Popover from "@radix-ui/react-popover";
-import { HelpCircle, Search } from "lucide-react";
+import { HelpCircle, Search, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { useDebouncedUrlString } from "@/lib/url-state";
 
@@ -26,6 +26,7 @@ export function RecipeSearch({
   const [localValue, setLocalValue] = React.useState(controlledValue ?? "");
   const value = isControlled ? localValue : urlValue;
   const setValue = isControlled ? setLocalValue : setUrlValue;
+  const inputRef = React.useRef<HTMLInputElement>(null);
 
   React.useEffect(() => {
     if (!isControlled) return;
@@ -40,13 +41,31 @@ export function RecipeSearch({
     <div className="relative">
       <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-[var(--color-muted-fg)]" />
       <Input
+        ref={inputRef}
         type="search"
         value={value}
         onChange={(e) => setValue(e.target.value)}
         placeholder='Suche: tomate "rote linsen" zutat:basilikum -nudeln'
-        className="pl-9 pr-10"
+        // Wider right padding so the text never runs under the clear + help
+        // buttons. The native WebKit `type=search` clear button is suppressed
+        // since we render our own positioned correctly next to the help icon.
+        className="pl-9 pr-20 [&::-webkit-search-cancel-button]:appearance-none"
         aria-label="Rezepte durchsuchen"
       />
+      {value.length > 0 ? (
+        <button
+          type="button"
+          onClick={() => {
+            setValue("");
+            inputRef.current?.focus();
+          }}
+          aria-label="Suche zurücksetzen"
+          title="Suche zurücksetzen"
+          className="absolute right-10 top-1/2 inline-flex size-7 -translate-y-1/2 items-center justify-center rounded-full text-[var(--color-muted-fg)] hover:bg-[var(--color-muted)] hover:text-[var(--color-fg)]"
+        >
+          <X className="size-4" />
+        </button>
+      ) : null}
       <Popover.Root>
         <Popover.Trigger
           className="absolute right-2 top-1/2 inline-flex size-7 -translate-y-1/2 items-center justify-center rounded-full text-[var(--color-muted-fg)] hover:bg-[var(--color-muted)] hover:text-[var(--color-fg)]"

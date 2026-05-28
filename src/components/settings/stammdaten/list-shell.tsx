@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
-import { ArrowDown, ArrowUp, ArrowUpDown, Plus, Search } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, Plus, Search, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -130,6 +130,7 @@ export function ListShell<TItem>({
   // hook owns the same debounced-input split the page used to do inline
   // (input value is snappy, the debounced echo drives filtering + the URL).
   const [inputValue, setInputValue, query] = useDebouncedUrlString("q", 180);
+  const searchInputRef = React.useRef<HTMLInputElement>(null);
   const [selectedIds, setSelectedIds] = React.useState<Set<number>>(new Set());
 
   // Drawer state
@@ -367,11 +368,26 @@ export function ListShell<TItem>({
         <div className="relative">
           <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-[var(--color-muted-fg)]" />
           <Input
+            ref={searchInputRef}
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
             placeholder={`Suchen… (mehrere mit „|" trennen)`}
-            className="pl-9"
+            className="pl-9 pr-10"
           />
+          {inputValue.length > 0 ? (
+            <button
+              type="button"
+              onClick={() => {
+                setInputValue("");
+                searchInputRef.current?.focus();
+              }}
+              aria-label="Suche zurücksetzen"
+              title="Suche zurücksetzen"
+              className="absolute right-2 top-1/2 inline-flex size-7 -translate-y-1/2 items-center justify-center rounded-full text-[var(--color-muted-fg)] hover:bg-[var(--color-muted)] hover:text-[var(--color-fg)]"
+            >
+              <X className="size-4" />
+            </button>
+          ) : null}
         </div>
         {filterControls && (
           <div className="flex flex-wrap items-center gap-2">{filterControls}</div>
