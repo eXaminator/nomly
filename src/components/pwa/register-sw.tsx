@@ -33,6 +33,17 @@ export function RegisterSW(): null {
         });
         reg.update().catch(() => undefined);
         document.addEventListener("visibilitychange", checkForUpdate);
+        // Warm the offline shell from a known-authenticated context. Fires
+        // only when the user is actually on /einkauf so we don't churn the
+        // cache for unrelated routes. Safe to fire on every mount — the SW
+        // handler dedupes via no-store fetch semantics and serves identical
+        // bytes when nothing changed.
+        if (
+          window.location.pathname === "/einkauf"
+          && navigator.serviceWorker.controller
+        ) {
+          navigator.serviceWorker.controller.postMessage("REFRESH_SHELL");
+        }
       })
       .catch((err) => console.warn("[sw] registration failed", err));
     return () => {

@@ -1,9 +1,11 @@
-// nomly service worker — Epic 8.
-// Caches the /einkauf shell + static chunks (cache-first) and the shopping
-// + supermarket + category GET endpoints (network-first with cache fallback).
-// Never intercepts non-GET — the offline mutation queue lives client-side.
+// nomly service worker — local-first offline shell.
+// - Pre-caches a data-less /einkauf shell at install time via the
+//   X-Nomly-Shell header. The cached shell never contains live items, so
+//   navigating to /einkauf while offline can no longer clobber IDB.
+// - Caches static assets + supermarket/category data only. The shopping
+//   list itself is owned by IndexedDB on the client.
 
-const CACHE_VERSION = "v2";
+const CACHE_VERSION = "v3";
 const SHELL_CACHE  = `nomly-shell-${CACHE_VERSION}`;
 const DATA_CACHE   = `nomly-data-${CACHE_VERSION}`;
 const STATIC_CACHE = `nomly-static-${CACHE_VERSION}`;
@@ -11,18 +13,36 @@ const ALL_CACHES   = new Set([SHELL_CACHE, DATA_CACHE, STATIC_CACHE]);
 
 self.addEventListener("install", (event) => {
   event.waitUntil((async () => {
+    const cache = await caches.open(SHELL_CACHE);
+
+    // Pre-cache the data-less /einkauf shell. The server returns
+    // initialItems=[] when this header is present. `redirect: "error"`
+    // makes the fetch throw (instead of caching the login page) when the
+    // user isn't signed in at install time — the page re-triggers a
+    // refresh via postMessage on first mount once we know the session is
+    // live, see REFRESH_SHELL handler below.
+    try {
+      const shellRes = await fetch("/einkauf", {
+        cache: "no-store",
+        redirect: "error",
+        headers: { "X-Nomly-Shell": "1" },
+      });
+      if (shellRes.ok) await cache.put("/einkauf", shellRes.clone());
+    } catch (e) {
+      console.warn("[sw] shell pre-cache failed", e);
+    }
+
+    // Pre-cache static asset list from the build manifest.
     try {
       const res = await fetch("/sw-precache.json", { cache: "no-store" });
       if (res.ok) {
         const { shell = [], assets = [] } = await res.json();
-        const cache = await caches.open(SHELL_CACHE);
         await cache.addAll([...shell, ...assets].filter(Boolean));
       }
     } catch (e) {
-      // Precache failure is non-fatal — the SW still installs; missing
-      // assets just stream from the network until they're cached on demand.
-      console.warn("[sw] precache failed", e);
+      console.warn("[sw] precache manifest failed", e);
     }
+
     await self.skipWaiting();
   })());
 });
@@ -40,10 +60,33 @@ self.addEventListener("activate", (event) => {
 });
 
 self.addEventListener("message", (event) => {
-  if (event.data === "SKIP_WAITING") self.skipWaiting();
+  if (event.data === "SKIP_WAITING") {
+    self.skipWaiting();
+    return;
+  }
+  if (event.data === "REFRESH_SHELL") {
+    event.waitUntil((async () => {
+      try {
+        const res = await fetch("/einkauf", {
+          cache: "no-store",
+          redirect: "error",
+          headers: { "X-Nomly-Shell": "1" },
+        });
+        if (res.ok) {
+          const cache = await caches.open(SHELL_CACHE);
+          await cache.put("/einkauf", res.clone());
+        }
+      } catch (e) {
+        console.warn("[sw] shell refresh failed", e);
+      }
+    })());
+  }
 });
 
-const DATA_PATHS = ["/api/v1/shopping", "/api/v1/supermarkets", "/api/v1/categories"];
+// Note: /api/v1/shopping is intentionally NOT cached. The client reads
+// shopping data from IndexedDB; caching the API would let stale responses
+// clobber IDB on an "online" probe blip.
+const DATA_PATHS = ["/api/v1/supermarkets", "/api/v1/categories"];
 function isDataPath(url) {
   return DATA_PATHS.some((p) => url.pathname === p || url.pathname.startsWith(p + "/"));
 }
@@ -68,8 +111,6 @@ self.addEventListener("fetch", (event) => {
     return;
   }
   if (isNavigation(req)) {
-    // Any other page: try network, fall back to the cached `/offline` shell
-    // so the header + nav stay reachable on every route while offline.
     event.respondWith(navigationFallbackStrategy(req));
     return;
   }
@@ -81,19 +122,18 @@ self.addEventListener("fetch", (event) => {
     event.respondWith(cacheFirst(req, STATIC_CACHE));
     return;
   }
-  // Everything else: pass through.
 });
 
 async function shellNavigationStrategy(req) {
-  // Network-first: while online a reload always returns the freshest shell
-  // (so a deploy is picked up on the next load / pull-to-refresh), updating
-  // the cache as it goes. Offline falls back to the cached shell.
-  const cache = await caches.open(SHELL_CACHE);
+  // Live navigations pass through to the network for fresh data. The
+  // cached shell (data-less, owned by `install`) is served only as an
+  // offline fallback — we deliberately do NOT cache.put the live
+  // response, because that would re-introduce the "cached SSR snapshot
+  // carries baked-in items" bug.
   try {
-    const fresh = await fetch(req);
-    if (fresh.ok) cache.put("/einkauf", fresh.clone());
-    return fresh;
+    return await fetch(req);
   } catch {
+    const cache = await caches.open(SHELL_CACHE);
     const cached = await cache.match("/einkauf");
     if (cached) return cached;
     const offline = await cache.match("/offline");
@@ -106,13 +146,9 @@ async function shellNavigationStrategy(req) {
 }
 
 async function navigationFallbackStrategy(req) {
-  // Network-first; on failure serve the cached `/offline` so the AppShell
-  // chrome stays usable (the nav components re-derive their active state from
-  // `usePathname()` on the client, so highlighting is still correct).
   const cache = await caches.open(SHELL_CACHE);
   try {
-    const fresh = await fetch(req);
-    return fresh;
+    return await fetch(req);
   } catch {
     const offline = await cache.match("/offline");
     if (offline) return offline;
