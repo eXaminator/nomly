@@ -37,7 +37,14 @@ self.addEventListener("install", (event) => {
       const res = await fetch("/sw-precache.json", { cache: "no-store" });
       if (res.ok) {
         const { shell = [], assets = [] } = await res.json();
-        await cache.addAll([...shell, ...assets].filter(Boolean));
+        // Skip /einkauf — we already cached the data-less version above
+        // with the X-Nomly-Shell header. A second fetch without that
+        // header would replace it with a data-full page that re-introduces
+        // the stale-snapshot bug.
+        const items = [...shell, ...assets].filter(
+          (p) => Boolean(p) && p !== "/einkauf",
+        );
+        await cache.addAll(items);
       }
     } catch (e) {
       console.warn("[sw] precache manifest failed", e);
