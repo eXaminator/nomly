@@ -38,6 +38,7 @@ import {
 import { openOfflineDb } from "@/lib/shopping/offline/db";
 import {
   hydrateFromIDB,
+  readItemsFromIDB,
   readPendingQueue,
   reconcileFromServer,
   toggleItemOptimistic,
@@ -159,6 +160,8 @@ export function ShoppingListView({
       await kickSync();
       const q = await readPendingQueue();
       setPendingCount(q.length);
+      const refreshed = await readItemsFromIDB();
+      setItems(refreshed);
     })();
   }, [connectivity]);
 
@@ -206,6 +209,8 @@ export function ShoppingListView({
       await kickSync();
       const q2 = await readPendingQueue();
       setPendingCount(q2.length);
+      const refreshed = await readItemsFromIDB();
+      setItems(refreshed);
     }
   }
 
