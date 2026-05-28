@@ -39,6 +39,7 @@ import { openOfflineDb } from "@/lib/shopping/offline/db";
 import {
   hydrateFromIDB,
   readPendingQueue,
+  reconcileFromServer,
   toggleItemOptimistic,
 } from "@/lib/shopping/offline/store";
 import { kickSync } from "@/lib/shopping/offline/sync";
@@ -66,8 +67,11 @@ export function ShoppingListView({
 }: Props) {
   const router = useRouter();
   const [items, setItems] = React.useState(initialItems);
-  // eslint-disable-next-line react-hooks/set-state-in-effect
-  React.useEffect(() => setItems(initialItems), [initialItems]);
+  // NOTE: we deliberately do NOT re-sync `items` from `initialItems` on
+  // every render. IDB is the source of truth on the client; treating
+  // `initialItems` as authoritative would let a cached SSR snapshot (e.g.,
+  // the data-less offline shell) overwrite live local state. The mount
+  // effect below seeds IDB from `initialItems` only when IDB is empty.
   const [supermarketId, setSupermarketId] = React.useState<number | null>(null);
   const [addItemOpen, setAddItemOpen] = React.useState(false);
   const [addMealsOpen, setAddMealsOpen] = React.useState(false);
@@ -105,17 +109,16 @@ export function ShoppingListView({
     React.useCallback(async () => {
       try {
         const { items: fresh } = await fetchItems();
-        setItems(fresh);
+        const merged = await reconcileFromServer(fresh);
+        setItems(merged);
       } catch {
-        // Transient fetch failure — the connectivity watcher will flip us
-        // offline if it's real; nothing else to do here.
+        // Transient — connectivity watcher will flip if it's real.
       }
     }, []),
   );
 
-  // On mount, hydrate IDB from the SSR snapshot + overlay any pending toggles
-  // the user made in a previous session. Then mirror cached supermarkets +
-  // categories so the offline filter has data to drive.
+  // Mount: hydrate UI from IDB, mirror supermarkets cache, then attempt
+  // a sync drain only if connectivity has already resolved to online.
   React.useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -129,7 +132,7 @@ export function ShoppingListView({
       await wtx.done;
       const q = await readPendingQueue();
       if (!cancelled) setPendingCount(q.length);
-      if (navigator.onLine) await kickSync();
+      if (getConnectivity() === "online") await kickSync();
       const q2 = await readPendingQueue();
       if (!cancelled) setPendingCount(q2.length);
     })().catch((err) => console.warn("offline init failed", err));
@@ -138,17 +141,20 @@ export function ShoppingListView({
     };
   }, [initialItems, supermarkets]);
 
-  // Refetch on every online transition (incl. initial mount) so a stale SW
-  // shell or a slow WS reconnect doesn't leave the user staring at an empty
-  // list after a PWA reopen.
+  const prevConnectivityRef = React.useRef(connectivity);
   React.useEffect(() => {
+    const prev = prevConnectivityRef.current;
+    prevConnectivityRef.current = connectivity;
     if (connectivity !== "online") return;
+    if (prev === "online") return; // not a transition
     void (async () => {
       try {
         const { items: fresh } = await fetchItems();
-        setItems(fresh);
+        const merged = await reconcileFromServer(fresh);
+        setItems(merged);
       } catch {
-        // Transient — the WS reconciler / next heartbeat will pick it up.
+        // Probe says online but the request failed; the watcher will flip
+        // us back on the next probe.
       }
       await kickSync();
       const q = await readPendingQueue();
