@@ -445,7 +445,8 @@ export function PlannerView({
       data != null &&
       (dropData?.type === "day" ||
         dropData?.type === "meal" ||
-        dropData?.type === "day-end");
+        dropData?.type === "day-end" ||
+        dropData?.type === "remove");
 
     // Resolve the target meal + side based on what the user actually
     // dropped onto:
@@ -470,6 +471,14 @@ export function PlannerView({
     setDropTarget(null);
     setDragSourceSize(null);
     if (!isValidDrop || !data || !dropData) return;
+
+    // Dropped on the recipe list → remove the meal from the plan. Reuses the
+    // shopping-aware delete (subtracts the meal's contributions). Dragging a
+    // recipe (not a meal) here is a no-op.
+    if (dropData.type === "remove") {
+      if (data.type === "meal") await handleDelete(data.mealId);
+      return;
+    }
 
     const targetDate = dropData.date;
 

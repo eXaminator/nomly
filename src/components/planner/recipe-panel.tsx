@@ -1,10 +1,11 @@
 "use client";
 
 import * as React from "react";
-import { useDraggable } from "@dnd-kit/core";
+import { useDraggable, useDndContext, useDroppable } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { Eye } from "lucide-react";
+import { Eye, Trash2 } from "lucide-react";
+import type { DragData } from "./types";
 import { DietBadge } from "@/components/recipes/diet-badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { PlannerRecipe } from "@/lib/recipes/types";
@@ -69,6 +70,17 @@ export function RecipePanel({
   const { recipes: filtered, loading, error } = useFilteredRecipes(filter);
   const scrollRef = React.useRef<HTMLDivElement>(null);
 
+  // The panel doubles as a "drop a meal here to remove it from the plan"
+  // target. The overlay only appears while a *meal* is being dragged (dragging
+  // a recipe out of the list shouldn't suggest removal).
+  const { setNodeRef: setRemoveRef, isOver } = useDroppable({
+    id: "planner-remove",
+    data: { type: "remove" },
+  });
+  const { active } = useDndContext();
+  const draggingMeal =
+    (active?.data.current as DragData | undefined)?.type === "meal";
+
   const usageByRecipe = React.useMemo(() => {
     const map = new Map<number, RecipeUsageStats>();
     for (const u of recipeUsage) {
@@ -87,8 +99,9 @@ export function RecipePanel({
 
   return (
     <aside
+      ref={setRemoveRef}
       className={cn(
-        "hidden md:flex flex-col gap-3",
+        "relative hidden md:flex flex-col gap-3",
         // Stick the panel below the AppShell header (top-20 = 5rem) and give
         // it a DEFINITE full-viewport-minus-chrome height (not just max-h).
         // The inner list is virtualized, so its scroll viewport needs a real
@@ -101,6 +114,39 @@ export function RecipePanel({
         "md:sticky md:top-20 md:self-start md:h-[calc(100vh-9rem)]",
       )}
     >
+      {draggingMeal ? (
+        <div
+          className={cn(
+            // Visual only — pointer-events-none so dnd-kit's collision math
+            // still resolves against the <aside> rect underneath.
+            "pointer-events-none absolute inset-0 z-20 flex flex-col items-center justify-center gap-2 rounded-[var(--radius)] border-2 border-dashed p-4 text-center transition-colors",
+            isOver
+              ? "border-[var(--color-danger)] bg-[color-mix(in_srgb,var(--color-danger),transparent_80%)]"
+              : "border-[var(--color-border)] bg-[var(--color-bg)]/85 backdrop-blur-sm",
+          )}
+        >
+          <Trash2
+            className={cn(
+              "size-8",
+              isOver
+                ? "text-[var(--color-danger)]"
+                : "text-[var(--color-muted-fg)]",
+            )}
+          />
+          <span
+            className={cn(
+              "text-sm font-medium",
+              isOver
+                ? "text-[var(--color-danger)]"
+                : "text-[var(--color-muted-fg)]",
+            )}
+          >
+            {isOver
+              ? "Loslassen zum Entfernen"
+              : "Mahlzeit hierher ziehen, um sie zu entfernen"}
+          </span>
+        </div>
+      ) : null}
       <RecipeFilterControls allTags={allTags} value={filter} onChange={setFilter} />
       {/* `pb-4` lives inside the scroll container so the last recipe has
           a bit of breathing room at the bottom when scrolled all the way.

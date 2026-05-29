@@ -7,6 +7,8 @@ export type DragData =
 export type DropData =
   | { type: "day"; date: string }
   | { type: "meal"; mealId: number; date: string }
-  | { type: "day-end"; date: string; lastMealId: number };
+  | { type: "day-end"; date: string; lastMealId: number }
+  // The recipe list doubles as a "drag a meal here to remove it" target.
+  | { type: "remove" };
 
 export type { MealPlanView };
