@@ -31,12 +31,14 @@ function formatQuantity(q: number | null): string {
 }
 
 function DietMarker({ kind }: { kind: IngredientDietaryClass }) {
-  // Fixed-width slot, height-stretch so the icon is vertically centered in
-  // the line — keeps the amount column aligned whether or not a marker shows.
+  // Fixed-width slot one line tall (`h-[1lh]`) so the icon centers on the
+  // first text line even when the row's name/notes wrap — the parent `li`
+  // is `items-start`, so without a line-height box the short icon would pin
+  // to the very top, sitting above the text's optical center.
   // Color-only signal; labels are kept in `title` for screen readers.
   return (
     <span
-      className="inline-flex w-3 shrink-0 items-center justify-center"
+      className="inline-flex h-[1lh] w-3 shrink-0 items-center justify-center"
       aria-hidden={kind == null ? "true" : undefined}
     >
       {kind === "vegan" ? (
