@@ -139,7 +139,7 @@ card:
               data: {
                 title: m.recipe.title,
                 content: { type: 'iframe', url: BASE + '/embed/rezepte/' + m.recipe.id + '?k=' + TOKEN, aspect_ratio: '75%' },
-                card_mod: { style: ':host { --mdc-dialog-min-width: 92vw !important; --mdc-dialog-max-width: 92vw !important; --mdc-dialog-max-height: 92vh !important; }' }
+                style: 'ha-dialog { --mdc-dialog-min-width: 92vw !important; --mdc-dialog-max-width: 92vw !important; --mdc-dialog-max-height: 92vh !important; }'
               }
             }
           },
@@ -203,14 +203,14 @@ section header you can also add from the dashboard UI — with the weekday + dat
 (e.g. "Heute – Fr. 29. Mai"). Date math is in **local** time so it can't drift a
 day near midnight.
 
-**Popup size** is set via the `card_mod` block in the `tap_action` — `:host`
-targets the browser_mod dialog and the `--mdc-dialog-*` custom properties
-(`92vw`/`92vh`, with `!important` to beat HA's defaults) size it. (The simpler
-`style:` field is ignored in some browser_mod versions — `card_mod` is the
-reliable lever, and you have card-mod installed.) On mobile the popup is already
-near-full-width, so the change is mainly visible on desktop. The recipe's height
-comes from the iframe card's `aspect_ratio`; the embed page scrolls internally,
-so a moderate ratio is fine. Adjust to taste.
+**Popup size** is set via the `style` line in the `tap_action`. browser_mod
+injects `style` as a *stylesheet*, so it needs a real selector: target the
+`ha-dialog` element directly and set `--mdc-dialog-*` with `!important` (the
+dialog re-declares those vars on itself, so an ancestor/`:host` value or a bare
+declaration won't take — it must hit `ha-dialog` with `!important`). On mobile
+the popup is already near-full-width, so the change mainly shows on desktop. The
+recipe's height comes from the iframe card's `aspect_ratio`; the embed page
+scrolls internally, so a moderate ratio is fine. Adjust to taste.
 
 > Prefer Bubble Card for the popup? You can put the same `iframe` inside a
 > Bubble Card pop-up, but Bubble pop-ups are keyed by a URL hash (one
