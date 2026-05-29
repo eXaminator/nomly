@@ -116,8 +116,9 @@ card:
       var BASE = 'https://nomly.weingaertner.pro';
       var TOKEN = 'PASTE_EMBED_TOKEN';
       var FALLBACK = 'https://external-content.duckduckgo.com/iu/?u=https%3A%2F%2Fpng.pngtree.com%2Fbackground%2F20220721%2Foriginal%2Fpngtree-empty-plate-kitchenware-kitchen-material-wooden-table-background-picture-image_1706347.jpg&f=1&nofb=1&ipt=4f167ea99981bab66b662b3cbe97fa3ebe989f98becf96927aff53368b4550f8';
+      var TILE_HEIGHT = '120px';
       var STYLES = {
-        card: [{ padding: '0' }],
+        card: [{ padding: '0' }, { height: TILE_HEIGHT }],
         grid: [{ 'grid-template-rows': '1fr min-content' }],
         img_cell: [{ 'align-self': 'start' }, { 'justify-self': 'start' }, { 'text-align': 'start' }],
         entity_picture: [{ width: '100%' }, { height: '100%' }, { 'object-fit': 'cover' }],
@@ -141,8 +142,7 @@ card:
               }
             }
           },
-          styles: STYLES,
-          grid_options: { rows: 2, columns: 12 }
+          styles: STYLES
         };
       }
       function placeholder() {
@@ -154,25 +154,34 @@ card:
           entity_picture: FALLBACK,
           state_display: 'Kein Essen geplant',
           tap_action: { action: 'none' },
-          styles: STYLES,
-          grid_options: { rows: 2, columns: 12 }
+          styles: STYLES
         };
       }
-      function header(text) { return { type: 'markdown', content: '## ' + text }; }
+      function localISO(d) {
+        return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+      }
+      function fmt(d) {
+        return d.toLocaleDateString('de-DE', { weekday: 'short', day: 'numeric', month: 'long' }).replace(',', '');
+      }
+      function header(label, d) {
+        return { type: 'heading', heading: label + ' – ' + fmt(d), heading_style: 'title' };
+      }
 
       var s = states['sensor.nomly_meals'];
       if (!s) { return [{ type: 'markdown', content: '⚠️ `sensor.nomly_meals` nicht gefunden — REST-Sensor anlegen (Abschnitt 2) und neu laden.' }]; }
       var meals = (s.attributes && s.attributes.mealPlans) || [];
-      var today = new Date().toISOString().slice(0, 10);
-      var tomorrow = new Date(Date.now() + 864e5).toISOString().slice(0, 10);
+      var todayD = new Date();
+      var tomorrowD = new Date(Date.now() + 864e5);
+      var today = localISO(todayD);
+      var tomorrow = localISO(tomorrowD);
       var todays = meals.filter(function (m) { return m.date === today; });
       var tomorrows = meals.filter(function (m) { return m.date === tomorrow; });
 
-      var cards = [header('Heute')];
+      var cards = [header('Heute', todayD)];
       if (todays.length) { todays.forEach(function (m) { cards.push(tile(m)); }); }
       else { cards.push(placeholder()); }
       if (tomorrows.length) {
-        cards.push(header('Morgen'));
+        cards.push(header('Morgen', tomorrowD));
         tomorrows.forEach(function (m) { cards.push(tile(m)); });
       }
       return cards;
@@ -182,6 +191,16 @@ card:
 The tiles mirror the look of your existing `custom:button-card` (full-bleed
 photo, bold meal name bottom-left, empty-plate fallback). The placeholder's
 `tap_action: { action: 'none' }` makes it inert.
+
+> **Tile height:** `grid_options: { rows: 2 }` only sizes a card when it sits
+> directly in a Sections-view grid — inside this `vertical-stack` it's ignored.
+> So the height is set explicitly via `TILE_HEIGHT` (`120px` ≈ the old 2-row
+> size); change that one variable to taste.
+
+The day headers use the native **Heading card** (`type: heading`) — the plain
+section header you can also add from the dashboard UI — with the weekday + date
+(e.g. "Heute – Fr. 29. Mai"). Date math is in **local** time so it can't drift a
+day near midnight.
 
 > Prefer Bubble Card for the popup? You can put the same `iframe` inside a
 > Bubble Card pop-up, but Bubble pop-ups are keyed by a URL hash (one
