@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { NAV_ITEMS, isNavItemActive, useActiveNavPath } from "./nav-items";
+import { NAV_ITEMS, isNavItemActive } from "./nav-items";
+import { useActiveNavPath } from "./use-active-nav-path";
 import { cn } from "@/lib/cn";
 
 export function BottomNav() {
