@@ -5,6 +5,7 @@ import {
   category,
   ingredient,
   ingredientAlias,
+  ingredientSubUnit,
   ingredientSupermarketUnavailable,
   mealPlan,
   recipe,
@@ -24,6 +25,11 @@ import {
 import type { Dimension, UnitRow } from "./format.ts";
 import { sweepCheckedItems } from "./sweeper.ts";
 import { loadUnitsByDimension } from "./units-db.ts";
+import {
+  groupSubUnitTotals,
+  rollupPurchaseTrack,
+  type SubUnitRef,
+} from "./subunit-rollup.ts";
 
 export type ShoppingItemSourceView = {
   sourceId: number;
@@ -35,6 +41,10 @@ export type ShoppingItemSourceView = {
   contributedQuantity: number | null;
   contributedUnitId: number | null;
   contributedUnit: string | null;
+  /** Set instead of contributedUnit when the line used an ingredient sub-unit
+   *  ("5 Stäbchen"). The source line renders this; the aggregate rolls it up. */
+  contributedSubUnitId: number | null;
+  contributedSubUnit: string | null;
   recipeNotes: string | null;
 };
 
@@ -45,6 +55,8 @@ export type ShoppingItemStapleSourceView = {
   contributedQuantity: number | null;
   contributedUnitId: number | null;
   contributedUnit: string | null;
+  contributedSubUnitId: number | null;
+  contributedSubUnit: string | null;
 };
 
 /** Tag used in shopping_item_amount.dimension when the row carries no unit. */
@@ -108,6 +120,7 @@ export function listShoppingItems(
       id: shoppingItem.id,
       refId: shoppingItem.ingredientId,
       name: ingredient.name,
+      purchaseUnitId: ingredient.purchaseUnitId,
       categoryId: shoppingItem.categoryId,
       categoryName: category.name,
       checked: shoppingItem.checked,
@@ -144,6 +157,8 @@ export function listShoppingItems(
         contributedQuantity: shoppingItemSource.contributedQuantity,
         contributedUnit: unit.name,
         contributedUnitId: shoppingItemSource.contributedUnitId,
+        contributedSubUnitId: shoppingItemSource.contributedSubUnitId,
+        contributedSubUnit: ingredientSubUnit.name,
         recipeNotes: recipeIngredient.notes,
       })
       .from(shoppingItemSource)
@@ -154,6 +169,10 @@ export function listShoppingItems(
         eq(recipeIngredient.id, shoppingItemSource.recipeIngredientId),
       )
       .leftJoin(unit, eq(unit.id, shoppingItemSource.contributedUnitId))
+      .leftJoin(
+        ingredientSubUnit,
+        eq(ingredientSubUnit.id, shoppingItemSource.contributedSubUnitId),
+      )
       .where(inArray(shoppingItemSource.itemId, itemIds))
       .orderBy(asc(mealPlan.date), asc(recipe.title))
       .all();
@@ -169,6 +188,8 @@ export function listShoppingItems(
         contributedQuantity: s.contributedQuantity,
         contributedUnit: s.contributedUnit,
         contributedUnitId: s.contributedUnitId,
+        contributedSubUnitId: s.contributedSubUnitId,
+        contributedSubUnit: s.contributedSubUnit,
         recipeNotes: s.recipeNotes,
       });
       sourcesByItem.set(s.itemId, arr);
@@ -186,6 +207,8 @@ export function listShoppingItems(
         contributedQuantity: shoppingItemStapleSource.contributedQuantity,
         contributedUnitId: shoppingItemStapleSource.contributedUnitId,
         contributedUnit: unit.name,
+        contributedSubUnitId: shoppingItemStapleSource.contributedSubUnitId,
+        contributedSubUnit: ingredientSubUnit.name,
       })
       .from(shoppingItemStapleSource)
       .innerJoin(
@@ -193,6 +216,10 @@ export function listShoppingItems(
         eq(stapleGroup.id, shoppingItemStapleSource.stapleGroupId),
       )
       .leftJoin(unit, eq(unit.id, shoppingItemStapleSource.contributedUnitId))
+      .leftJoin(
+        ingredientSubUnit,
+        eq(ingredientSubUnit.id, shoppingItemStapleSource.contributedSubUnitId),
+      )
       .where(inArray(shoppingItemStapleSource.itemId, itemIds))
       .orderBy(asc(stapleGroup.sortOrder), asc(stapleGroup.name))
       .all();
@@ -205,6 +232,8 @@ export function listShoppingItems(
         contributedQuantity: r.contributedQuantity,
         contributedUnitId: r.contributedUnitId,
         contributedUnit: r.contributedUnit,
+        contributedSubUnitId: r.contributedSubUnitId,
+        contributedSubUnit: r.contributedSubUnit,
       });
       stapleSourcesByItem.set(r.itemId, arr);
     }
@@ -247,7 +276,8 @@ export function listShoppingItems(
     }
   }
 
-  // Look up unit metadata (factor + dimension) for every unit referenced.
+  // Look up unit metadata (factor + dimension) for every unit referenced —
+  // including each item's purchase unit, the target of the sub-unit rollup.
   const allUnitIds = new Set<number>();
   for (const sources of sourcesByItem.values())
     for (const s of sources)
@@ -257,6 +287,8 @@ export function listShoppingItems(
       if (s.contributedUnitId != null) allUnitIds.add(s.contributedUnitId);
   for (const manuals of manualsByItem.values())
     for (const m of manuals) if (m.unitId != null) allUnitIds.add(m.unitId);
+  for (const r of baseRows)
+    if (r.purchaseUnitId != null) allUnitIds.add(r.purchaseUnitId);
   const unitRows = allUnitIds.size === 0
     ? []
     : (db
@@ -271,6 +303,30 @@ export function listShoppingItems(
         .where(inArray(unit.id, Array.from(allUnitIds)))
         .all() as UnitRow[]);
   const unitsById = new Map(unitRows.map((u) => [u.id, u]));
+
+  // Sub-unit factors (per_purchase) for every sub-unit referenced by a
+  // contribution. Drives the rollup into the purchase unit.
+  const allSubUnitIds = new Set<number>();
+  for (const sources of sourcesByItem.values())
+    for (const s of sources)
+      if (s.contributedSubUnitId != null) allSubUnitIds.add(s.contributedSubUnitId);
+  for (const sources of stapleSourcesByItem.values())
+    for (const s of sources)
+      if (s.contributedSubUnitId != null) allSubUnitIds.add(s.contributedSubUnitId);
+  const subUnitsById = new Map<number, SubUnitRef>();
+  if (allSubUnitIds.size > 0) {
+    const rows = db
+      .select({
+        id: ingredientSubUnit.id,
+        name: ingredientSubUnit.name,
+        perPurchase: ingredientSubUnit.perPurchase,
+      })
+      .from(ingredientSubUnit)
+      .where(inArray(ingredientSubUnit.id, Array.from(allSubUnitIds)))
+      .all();
+    for (const r of rows)
+      subUnitsById.set(r.id, { id: r.id, name: r.name, perPurchase: r.perPurchase });
+  }
 
   const ingredientIds = baseRows.map((r) => r.refId as number);
   const ingredientUnavailable = new Map<number, number[]>();
@@ -294,21 +350,24 @@ export function listShoppingItems(
     const sources = sourcesByItem.get(r.id) ?? [];
     const stapleSources = stapleSourcesByItem.get(r.id) ?? [];
     const manuals = manualsByItem.get(r.id) ?? [];
+    const toContribution = (s: {
+      contributedQuantity: number | null;
+      contributedUnitId: number | null;
+      contributedSubUnitId: number | null;
+    }): Contribution => ({
+      quantity: s.contributedQuantity,
+      unit:
+        s.contributedUnitId != null
+          ? unitsById.get(s.contributedUnitId) ?? null
+          : null,
+      subUnit:
+        s.contributedSubUnitId != null
+          ? subUnitsById.get(s.contributedSubUnitId) ?? null
+          : null,
+    });
     const sourceContributions: Contribution[] = [
-      ...sources.map((s) => ({
-        quantity: s.contributedQuantity,
-        unit:
-          s.contributedUnitId != null
-            ? unitsById.get(s.contributedUnitId) ?? null
-            : null,
-      })),
-      ...stapleSources.map((s) => ({
-        quantity: s.contributedQuantity,
-        unit:
-          s.contributedUnitId != null
-            ? unitsById.get(s.contributedUnitId) ?? null
-            : null,
-      })),
+      ...sources.map(toContribution),
+      ...stapleSources.map(toContribution),
     ];
     const amounts = buildAggregatedAmounts({
       manuals: manuals.map((m) => ({
@@ -318,6 +377,8 @@ export function listShoppingItems(
         dimension: m.dimension,
       })),
       sources: sourceContributions,
+      purchaseUnit:
+        r.purchaseUnitId != null ? unitsById.get(r.purchaseUnitId) ?? null : null,
     });
     const unavailable = ingredientUnavailable.get(r.refId as number) ?? [];
     return {
@@ -346,6 +407,8 @@ export function listShoppingItems(
         contributedQuantity: s.contributedQuantity,
         contributedUnitId: s.contributedUnitId,
         contributedUnit: s.contributedUnit,
+        contributedSubUnitId: s.contributedSubUnitId,
+        contributedSubUnit: s.contributedSubUnit,
         recipeNotes: s.recipeNotes,
       })),
       stapleSources,
@@ -367,7 +430,11 @@ export function listShoppingItems(
   return all;
 }
 
-type Contribution = { quantity: number | null; unit: UnitRow | null };
+type Contribution = {
+  quantity: number | null;
+  unit: UnitRow | null;
+  subUnit: SubUnitRef | null;
+};
 
 type AggregateInput = {
   manuals: Array<{
@@ -377,6 +444,8 @@ type AggregateInput = {
     dimension: AmountDimension;
   }>;
   sources: Contribution[];
+  /** The ingredient's purchase unit, when set — the rollup target. */
+  purchaseUnit: UnitRow | null;
 };
 
 /**
@@ -385,22 +454,65 @@ type AggregateInput = {
  * underlying contributions (sources first, manuals second); deleting a meal
  * subtracts only its source rows. The on-screen amounts always equal
  * `sum(source) + sum(manuals)` for each dimension, never an override.
+ *
+ * Sub-unit contributions ("5 Stäbchen") are pulled out of the per-dimension
+ * sum and rolled into the ingredient's purchase unit: each becomes a fraction
+ * of a purchase unit, the fractions sum, and the total rounds up to whole
+ * purchase units ("2 Packung"). A contribution already in the purchase unit
+ * joins that same track. With no purchase unit set, sub-units fall back to a
+ * per-sub-unit total ("22 Stäbchen").
  */
 function buildAggregatedAmounts(input: AggregateInput): ShoppingItemAmount[] {
-  const byDim = new Map<AmountDimension, Contribution[]>();
-  for (const s of input.sources) {
-    const dim: AmountDimension = s.unit?.dimension ?? "none";
-    const arr = byDim.get(dim) ?? [];
-    arr.push(s);
-    byDim.set(dim, arr);
-  }
-  for (const m of input.manuals) {
-    const arr = byDim.get(m.dimension) ?? [];
-    arr.push({ quantity: m.quantity, unit: m.unit });
-    byDim.set(m.dimension, arr);
-  }
+  const purchaseUnit = input.purchaseUnit;
+  const purchaseTrack: Contribution[] = [];
+  const subUnitFallback: Array<{ quantity: number | null; subUnit: SubUnitRef }> = [];
+  const rest: Contribution[] = [];
+
+  const route = (c: Contribution) => {
+    if (c.subUnit) {
+      if (purchaseUnit) purchaseTrack.push(c);
+      else subUnitFallback.push({ quantity: c.quantity, subUnit: c.subUnit });
+    } else if (
+      purchaseUnit &&
+      c.unit != null &&
+      c.unit.id === purchaseUnit.id
+    ) {
+      purchaseTrack.push(c);
+    } else {
+      rest.push(c);
+    }
+  };
+  for (const s of input.sources) route(s);
+  for (const m of input.manuals)
+    route({ quantity: m.quantity, unit: m.unit, subUnit: null });
 
   const out: ShoppingItemAmount[] = [];
+
+  if (purchaseUnit && purchaseTrack.length > 0) {
+    const rolled = rollupPurchaseTrack(
+      purchaseTrack.map((c) => ({ quantity: c.quantity, subUnit: c.subUnit })),
+      purchaseUnit,
+    );
+    out.push({ ...rolled, manualAmountId: null });
+  }
+  for (const t of groupSubUnitTotals(subUnitFallback)) {
+    out.push({
+      quantity: t.quantity,
+      unitId: null,
+      unitName: t.subUnitName,
+      dimension: "none",
+      manualAmountId: null,
+    });
+  }
+
+  const byDim = new Map<AmountDimension, Contribution[]>();
+  for (const c of rest) {
+    const dim: AmountDimension = c.unit?.dimension ?? "none";
+    const arr = byDim.get(dim) ?? [];
+    arr.push(c);
+    byDim.set(dim, arr);
+  }
+
   for (const [dim, contribs] of byDim) {
     out.push({
       ...computeSourcesSum(contribs, dim),

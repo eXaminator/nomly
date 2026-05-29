@@ -348,7 +348,7 @@ function EditItemDialogBody({
                     className="w-24"
                   />
                   <span className="w-10 text-xs text-[var(--color-muted-fg)]">
-                    {s.contributedUnit ?? ""}
+                    {s.contributedUnit ?? s.contributedSubUnit ?? ""}
                   </span>
                   <Button
                     variant="ghost"
@@ -385,7 +385,7 @@ function EditItemDialogBody({
                       : "—"}
                   </span>
                   <span className="w-10 text-xs text-[var(--color-muted-fg)]">
-                    {s.contributedUnit ?? ""}
+                    {s.contributedUnit ?? s.contributedSubUnit ?? ""}
                   </span>
                   <Button
                     variant="ghost"

@@ -346,8 +346,18 @@ export function buildIngredientCatalog(): IngredientCatalog {
       id: ingredient.id,
       name: ingredient.name,
       isEquipment: ingredient.isEquipment,
+      defaultUnitId: ingredient.defaultUnitId,
+      defaultUnitName: unit.name,
+      defaultSubUnitId: ingredient.defaultSubUnitId,
+      defaultSubUnitName: ingredientSubUnit.name,
+      defaultSubUnitPerPurchase: ingredientSubUnit.perPurchase,
     })
     .from(ingredient)
+    .leftJoin(unit, eq(unit.id, ingredient.defaultUnitId))
+    .leftJoin(
+      ingredientSubUnit,
+      eq(ingredientSubUnit.id, ingredient.defaultSubUnitId),
+    )
     .all();
   for (const i of canonicals) {
     out.push({
@@ -355,6 +365,18 @@ export function buildIngredientCatalog(): IngredientCatalog {
       canonicalName: i.name,
       aliasName: i.name,
       tokens: tokenizeEntryNameForCatalog(i.name),
+      defaultUnit:
+        i.defaultUnitId != null && i.defaultUnitName != null
+          ? { id: i.defaultUnitId, name: i.defaultUnitName }
+          : undefined,
+      defaultSubUnit:
+        i.defaultSubUnitId != null && i.defaultSubUnitName != null
+          ? {
+              id: i.defaultSubUnitId,
+              name: i.defaultSubUnitName,
+              perPurchase: i.defaultSubUnitPerPurchase ?? 1,
+            }
+          : undefined,
       isEquipment: i.isEquipment || undefined,
     });
   }
@@ -417,8 +439,21 @@ function tokenizeEntryNameForCatalog(name: string): string[] {
 export function buildIngredientLookup(): IngredientLookup {
   const lookup: IngredientLookup = new Map();
   const canonical = db
-    .select({ id: ingredient.id, name: ingredient.name })
+    .select({
+      id: ingredient.id,
+      name: ingredient.name,
+      defaultUnitId: ingredient.defaultUnitId,
+      defaultUnitName: unit.name,
+      defaultSubUnitId: ingredient.defaultSubUnitId,
+      defaultSubUnitName: ingredientSubUnit.name,
+      defaultSubUnitPerPurchase: ingredientSubUnit.perPurchase,
+    })
     .from(ingredient)
+    .leftJoin(unit, eq(unit.id, ingredient.defaultUnitId))
+    .leftJoin(
+      ingredientSubUnit,
+      eq(ingredientSubUnit.id, ingredient.defaultSubUnitId),
+    )
     .all();
   // Two keys per row: the lowercase form AND the diacritic-stripped form.
   // The stripped form lets "Möhre" / "Moehre"-style inputs match the same
@@ -429,7 +464,22 @@ export function buildIngredientLookup(): IngredientLookup {
     if (!lookup.has(key)) lookup.set(key, hit);
   }
   for (const i of canonical) {
-    const hit: IngredientLookupHit = { id: i.id, canonicalName: i.name };
+    const hit: IngredientLookupHit = {
+      id: i.id,
+      canonicalName: i.name,
+      defaultUnit:
+        i.defaultUnitId != null && i.defaultUnitName != null
+          ? { id: i.defaultUnitId, name: i.defaultUnitName }
+          : undefined,
+      defaultSubUnit:
+        i.defaultSubUnitId != null && i.defaultSubUnitName != null
+          ? {
+              id: i.defaultSubUnitId,
+              name: i.defaultSubUnitName,
+              perPurchase: i.defaultSubUnitPerPurchase ?? 1,
+            }
+          : undefined,
+    };
     add(i.name.toLowerCase(), hit);
     add(normalizeForMatch(i.name), hit);
   }

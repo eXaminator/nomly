@@ -27,6 +27,11 @@ export type IngredientItem = {
     unitName: string;
   }>;
   subUnits: Array<{ id: number; name: string; perPurchase: number }>;
+  /** Canonical-name parser default (mirrors aliasUnitDefaults). Exactly one of
+   *  defaultUnitId / defaultSubUnitId is set, or both null. */
+  defaultUnitId: number | null;
+  defaultUnitName: string | null;
+  defaultSubUnitId: number | null;
   defaultCategoryId: number | null;
   defaultCategoryName: string | null;
   purchaseUnitId: number | null;
@@ -146,6 +151,25 @@ export function IngredientForm({
       ? { id: item.purchaseUnitId, name: item.purchaseUnitName }
       : null,
   );
+  // Canonical-name default unit/sub-unit — same picker model as alias
+  // defaults. A sub-unit reference is held by tempKey so it survives renames.
+  const [canonicalDefault, setCanonicalDefault] =
+    React.useState<AliasUnitRef | null>(() => {
+      if (item?.defaultSubUnitId != null) {
+        const su = (item.subUnits ?? []).find(
+          (s) => s.id === item.defaultSubUnitId,
+        );
+        if (su) return { kind: "subUnit", tempKey: `existing-${su.id}` };
+      }
+      if (item?.defaultUnitId != null && item?.defaultUnitName != null) {
+        return {
+          kind: "unit",
+          unitId: item.defaultUnitId,
+          unitName: item.defaultUnitName,
+        };
+      }
+      return null;
+    });
   const [excludeFromShoppingList, setExclude] = React.useState(
     item?.excludeFromShoppingList ?? false,
   );
@@ -213,12 +237,24 @@ export function IngredientForm({
         });
       }
     }
+    let defaultUnitId: number | null = null;
+    let defaultSubUnitIndex: number | null = null;
+    if (canonicalDefault) {
+      if (canonicalDefault.kind === "unit") {
+        defaultUnitId = canonicalDefault.unitId;
+      } else {
+        const idx = subUnitIndexByTempKey.get(canonicalDefault.tempKey);
+        if (idx != null) defaultSubUnitIndex = idx;
+      }
+    }
     onPayloadChange(
       {
         name: trimmedName,
         aliases: aliasNames,
         aliasUnitDefaults: aliasUnitDefaultsPayload,
         subUnits: subUnitsPayload,
+        defaultUnitId,
+        defaultSubUnitIndex,
         defaultCategoryId: category?.id ?? null,
         purchaseUnitId: purchaseUnit?.id ?? null,
         excludeFromShoppingList,
@@ -231,6 +267,7 @@ export function IngredientForm({
     name,
     aliases,
     subUnits,
+    canonicalDefault,
     category,
     purchaseUnit,
     excludeFromShoppingList,
@@ -311,6 +348,9 @@ export function IngredientForm({
           : a,
       ),
     );
+    setCanonicalDefault((prev) =>
+      prev?.kind === "subUnit" && prev.tempKey === tempKey ? null : prev,
+    );
   }
 
   function addAlias() {
@@ -371,6 +411,21 @@ export function IngredientForm({
         unitName: picked.name,
       },
     });
+  }
+
+  function onPickCanonicalDefault(picked: SelectSearchItem | null) {
+    if (!picked) {
+      setCanonicalDefault(null);
+      return;
+    }
+    const subUnitIdx = decodeSubUnitIndex(picked.id);
+    if (subUnitIdx !== null) {
+      const su = subUnits[subUnitIdx];
+      if (!su) return;
+      setCanonicalDefault({ kind: "subUnit", tempKey: su.tempKey });
+      return;
+    }
+    setCanonicalDefault({ kind: "unit", unitId: picked.id, unitName: picked.name });
   }
 
   return (
@@ -454,6 +509,22 @@ export function IngredientForm({
         >
           <Plus className="size-4" /> Teil-Einheit hinzufügen
         </Button>
+      </div>
+
+      <div className="flex flex-col gap-2">
+        <Label>Standard-Einheit des Namens</Label>
+        <p className="text-xs text-[var(--color-muted-fg)]">
+          Optional. Welche Einheit der Import annimmt, wenn die Zutat über
+          ihren kanonischen Namen (ohne Alias) und ohne explizite Einheit
+          erkannt wird — z.&nbsp;B. „Stäbchen“ bei Gemüsestäbchen. Ohne Default
+          fällt der Import auf „Stück“ zurück.
+        </p>
+        <SelectSearch
+          value={pickerValueFor(canonicalDefault)}
+          onChange={onPickCanonicalDefault}
+          search={searchUnitsAndSubUnits}
+          placeholder="Default-Einheit…"
+        />
       </div>
 
       <div className="flex flex-col gap-2">

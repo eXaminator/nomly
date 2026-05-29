@@ -96,6 +96,21 @@ export const ingredient = sqliteTable("ingredient", {
   purchaseUnitId: integer("purchase_unit_id").references(() => unit.id, {
     onDelete: "set null",
   }),
+  /**
+   * Canonical-name parser defaults, mirroring `ingredient_alias`'
+   * `default_unit_id` / `default_sub_unit_id`. When a recipe line matches this
+   * ingredient by its *canonical* name (not via an alias) and carries no
+   * explicit unit, the parser substitutes these instead of the generic
+   * "Stück" fallback. Resolution order: alias default → ingredient default →
+   * "Stück". Exactly one of the two is meaningful at a time.
+   */
+  defaultUnitId: integer("default_unit_id").references(() => unit.id, {
+    onDelete: "set null",
+  }),
+  defaultSubUnitId: integer("default_sub_unit_id").references(
+    (): AnySQLiteColumn => ingredientSubUnit.id,
+    { onDelete: "set null" },
+  ),
   excludeFromShoppingList: integer("exclude_from_shopping_list", { mode: "boolean" })
     .notNull()
     .default(false),
@@ -385,6 +400,16 @@ export const shoppingItemSource = sqliteTable(
     contributedUnitId: integer("contributed_unit_id").references(() => unit.id, {
       onDelete: "set null",
     }),
+    /**
+     * Set instead of `contributed_unit_id` when the recipe line used an
+     * ingredient sub-unit ("5 Stäbchen"). The read-time aggregator rolls
+     * these up into the ingredient's purchase unit via `per_purchase`. The
+     * two columns are mutually exclusive, mirroring `recipe_ingredient`.
+     */
+    contributedSubUnitId: integer("contributed_sub_unit_id").references(
+      () => ingredientSubUnit.id,
+      { onDelete: "set null" },
+    ),
     addedAt: integer("added_at").notNull().default(now),
   },
   (t) => [
@@ -470,6 +495,13 @@ export const shoppingItemStapleSource = sqliteTable(
     contributedUnitId: integer("contributed_unit_id").references(() => unit.id, {
       onDelete: "set null",
     }),
+    /** Mirrors `shopping_item_source.contributed_sub_unit_id`: set when the
+     *  staple item used an ingredient sub-unit. Rolled up to the purchase
+     *  unit at read time. */
+    contributedSubUnitId: integer("contributed_sub_unit_id").references(
+      () => ingredientSubUnit.id,
+      { onDelete: "set null" },
+    ),
     addedAt: integer("added_at").notNull().default(now),
   },
   (t) => [

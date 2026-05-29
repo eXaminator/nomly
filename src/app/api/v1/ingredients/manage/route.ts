@@ -27,6 +27,8 @@ const upsertSchema = z.object({
   aliases: z.array(z.string()).default([]),
   aliasUnitDefaults: z.array(aliasDefaultSchema).default([]),
   subUnits: z.array(subUnitSchema).default([]),
+  defaultUnitId: z.number().int().positive().nullable().default(null),
+  defaultSubUnitIndex: z.number().int().nonnegative().nullable().default(null),
   defaultCategoryId: z.number().int().positive().nullable(),
   purchaseUnitId: z.number().int().positive().nullable().default(null),
   excludeFromShoppingList: z.boolean(),

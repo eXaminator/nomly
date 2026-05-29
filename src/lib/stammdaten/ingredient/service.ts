@@ -56,6 +56,11 @@ export type IngredientListItem = {
   purchaseUnitName: string | null;
   /** All sub-units defined on this ingredient (Knoblauch → [Zehe]). */
   subUnits: SubUnitItem[];
+  /** Canonical-name parser default (mirrors aliasUnitDefaults). At most one of
+   *  defaultUnitId / defaultSubUnitId is set. */
+  defaultUnitId: number | null;
+  defaultUnitName: string | null;
+  defaultSubUnitId: number | null;
   excludeFromShoppingList: boolean;
   isEquipment: boolean;
   dietaryClass: "vegan" | "vegetarian" | "meat" | null;
@@ -82,6 +87,11 @@ export type IngredientUpsertInput = {
   /** Sub-units to write (replaces all existing rows for this ingredient).
    *  Order matters: `aliasUnitDefaults.subUnitIndex` indexes into this array. */
   subUnits?: Array<{ name: string; perPurchase: number }>;
+  /** Canonical-name parser default. `defaultSubUnitIndex` indexes into
+   *  `subUnits` (same mechanism as `aliasUnitDefaults.subUnitIndex`); takes
+   *  precedence over `defaultUnitId` when set. Both omitted/null clears it. */
+  defaultUnitId?: number | null;
+  defaultSubUnitIndex?: number | null;
   defaultCategoryId: number | null;
   /** Override the ingredient's purchase unit. Null clears it. Undefined
    *  leaves it untouched (only matters on update). */
@@ -111,6 +121,8 @@ function selectIngredientWithJoinedData(query?: string) {
       defaultCategoryName: categoryTable.name,
       purchaseUnitId: ingredient.purchaseUnitId,
       purchaseUnitName: unitTable.name,
+      defaultUnitId: ingredient.defaultUnitId,
+      defaultSubUnitId: ingredient.defaultSubUnitId,
       excludeFromShoppingList: ingredient.excludeFromShoppingList,
       isEquipment: ingredient.isEquipment,
       dietaryClass: ingredient.dietaryClass,
@@ -248,6 +260,20 @@ function loadSubUnits(ids: number[]): Map<number, SubUnitItem[]> {
   return out;
 }
 
+/** unitId → name, for resolving canonical-name default unit display names. */
+function loadUnitNames(unitIds: number[]): Map<number, string> {
+  const out = new Map<number, string>();
+  const ids = Array.from(new Set(unitIds.filter((id): id is number => id != null)));
+  if (ids.length === 0) return out;
+  const rows = db
+    .select({ id: unitTable.id, name: unitTable.name })
+    .from(unitTable)
+    .where(inArray(unitTable.id, ids))
+    .all();
+  for (const row of rows) out.set(row.id, row.name);
+  return out;
+}
+
 function loadRecipeRefCounts(ids: number[]): Map<number, number> {
   const out = new Map<number, number>();
   if (ids.length === 0) return out;
@@ -275,6 +301,7 @@ export function listIngredients(query?: string): IngredientListItem[] {
   const aliases = loadAliasesGrouped(ids);
   const aliasUnitDefaults = loadAliasUnitDefaults(ids);
   const subUnits = loadSubUnits(ids);
+  const unitNames = loadUnitNames(baseRows.map((r) => r.defaultUnitId ?? -1));
   const recipeCounts = loadRecipeRefCounts(ids);
   return baseRows.map((row) => ({
     id: row.id,
@@ -282,6 +309,10 @@ export function listIngredients(query?: string): IngredientListItem[] {
     aliases: aliases.get(row.id) ?? [],
     aliasUnitDefaults: aliasUnitDefaults.get(row.id) ?? [],
     subUnits: subUnits.get(row.id) ?? [],
+    defaultUnitId: row.defaultUnitId,
+    defaultUnitName:
+      row.defaultUnitId != null ? unitNames.get(row.defaultUnitId) ?? null : null,
+    defaultSubUnitId: row.defaultSubUnitId,
     defaultCategoryId: row.defaultCategoryId,
     defaultCategoryName: row.defaultCategoryName,
     purchaseUnitId: row.purchaseUnitId,
@@ -308,6 +339,8 @@ function listIngredientsByIds(ids: number[]): IngredientListItem[] {
       defaultCategoryName: categoryTable.name,
       purchaseUnitId: ingredient.purchaseUnitId,
       purchaseUnitName: unitTable.name,
+      defaultUnitId: ingredient.defaultUnitId,
+      defaultSubUnitId: ingredient.defaultSubUnitId,
       excludeFromShoppingList: ingredient.excludeFromShoppingList,
       isEquipment: ingredient.isEquipment,
       dietaryClass: ingredient.dietaryClass,
@@ -320,6 +353,7 @@ function listIngredientsByIds(ids: number[]): IngredientListItem[] {
   const aliases = loadAliasesGrouped(ids);
   const aliasUnitDefaults = loadAliasUnitDefaults(ids);
   const subUnits = loadSubUnits(ids);
+  const unitNames = loadUnitNames(baseRows.map((r) => r.defaultUnitId ?? -1));
   const recipeCounts = loadRecipeRefCounts(ids);
   return baseRows.map((row) => ({
     id: row.id,
@@ -327,6 +361,10 @@ function listIngredientsByIds(ids: number[]): IngredientListItem[] {
     aliases: aliases.get(row.id) ?? [],
     aliasUnitDefaults: aliasUnitDefaults.get(row.id) ?? [],
     subUnits: subUnits.get(row.id) ?? [],
+    defaultUnitId: row.defaultUnitId,
+    defaultUnitName:
+      row.defaultUnitId != null ? unitNames.get(row.defaultUnitId) ?? null : null,
+    defaultSubUnitId: row.defaultSubUnitId,
     defaultCategoryId: row.defaultCategoryId,
     defaultCategoryName: row.defaultCategoryName,
     purchaseUnitId: row.purchaseUnitId,
@@ -413,6 +451,14 @@ export function createIngredient(input: IngredientUpsertInput): IngredientDetail
       .all();
     const newId = inserted[0].id;
     const subUnitIds = writeSubUnits(tx, newId, input.subUnits ?? []);
+    const canonicalDefault = resolveCanonicalDefault(input, subUnitIds);
+    tx.update(ingredient)
+      .set({
+        defaultUnitId: canonicalDefault.defaultUnitId,
+        defaultSubUnitId: canonicalDefault.defaultSubUnitId,
+      })
+      .where(eq(ingredient.id, newId))
+      .run();
     if (aliases.length > 0) {
       const defaultsByAlias = mapAliasDefaults(
         input.aliasUnitDefaults,
@@ -513,6 +559,28 @@ function mapAliasDefaults(
   return out;
 }
 
+/**
+ * Resolve the canonical-name default into concrete column values.
+ * `defaultSubUnitIndex` indexes into the freshly-written `subUnitIds`
+ * (positions from `writeSubUnits`); it wins over `defaultUnitId` when it
+ * points at a successfully-written row.
+ */
+function resolveCanonicalDefault(
+  input: IngredientUpsertInput,
+  subUnitIds: number[],
+): { defaultUnitId: number | null; defaultSubUnitId: number | null } {
+  if (input.defaultSubUnitIndex != null) {
+    const id = subUnitIds[input.defaultSubUnitIndex];
+    if (id != null && id > 0) {
+      return { defaultUnitId: null, defaultSubUnitId: id };
+    }
+  }
+  if (input.defaultUnitId != null) {
+    return { defaultUnitId: input.defaultUnitId, defaultSubUnitId: null };
+  }
+  return { defaultUnitId: null, defaultSubUnitId: null };
+}
+
 export function updateIngredient(
   id: number,
   input: IngredientUpsertInput,
@@ -543,6 +611,14 @@ export function updateIngredient(
       .where(eq(ingredientAlias.ingredientId, id))
       .run();
     const subUnitIds = writeSubUnits(tx, id, input.subUnits ?? []);
+    const canonicalDefault = resolveCanonicalDefault(input, subUnitIds);
+    tx.update(ingredient)
+      .set({
+        defaultUnitId: canonicalDefault.defaultUnitId,
+        defaultSubUnitId: canonicalDefault.defaultSubUnitId,
+      })
+      .where(eq(ingredient.id, id))
+      .run();
     if (aliases.length > 0) {
       const defaultsByAlias = mapAliasDefaults(
         input.aliasUnitDefaults,

@@ -2,6 +2,7 @@ import { and, asc, between, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { db } from "../../db/index.ts";
 import {
   ingredient,
+  ingredientSubUnit,
   mealPlan,
   recipe,
   recipeIngredient,
@@ -26,6 +27,10 @@ export type PreviewIngredient = {
   qty: number | null;
   unitId: number | null;
   unitName: string | null;
+  /** Set instead of unitId/unitName when the line uses an ingredient sub-unit
+   *  ("5 Stäbchen"). The dialog renders this as the unit. */
+  subUnitId: number | null;
+  subUnitName: string | null;
   notes: string | null;
   /**
    * The recipe tagged this line as optional. The dialog surfaces it with a
@@ -116,6 +121,8 @@ export function previewMeals(start: string, lengthDays: number): PreviewMeal[] {
       qty: recipeIngredient.quantity,
       unitId: recipeIngredient.unitId,
       unitName: unit.name,
+      subUnitId: recipeIngredient.subUnitId,
+      subUnitName: ingredientSubUnit.name,
       notes: recipeIngredient.notes,
       isOptional: recipeIngredient.isOptional,
       alternativeForId: recipeIngredient.alternativeForId,
@@ -127,6 +134,10 @@ export function previewMeals(start: string, lengthDays: number): PreviewMeal[] {
     .innerJoin(recipeSection, eq(recipeSection.id, recipeIngredient.sectionId))
     .innerJoin(ingredient, eq(ingredient.id, recipeIngredient.ingredientId))
     .leftJoin(unit, eq(unit.id, recipeIngredient.unitId))
+    .leftJoin(
+      ingredientSubUnit,
+      eq(ingredientSubUnit.id, recipeIngredient.subUnitId),
+    )
     // The inner join on `ingredient` already drops "Nicht zugeordnet" lines
     // (ingredient_id NULL); the explicit guard documents that intent.
     .where(
@@ -200,6 +211,8 @@ export function previewMeals(start: string, lengthDays: number): PreviewMeal[] {
         qty: l.qty == null ? null : l.fixedAmount ? l.qty : l.qty * scale,
         unitId: l.unitId,
         unitName: l.unitName,
+        subUnitId: l.subUnitId,
+        subUnitName: l.subUnitName,
         notes: l.notes,
         isOptional: !!l.isOptional,
         alternativeForId: l.alternativeForId,
