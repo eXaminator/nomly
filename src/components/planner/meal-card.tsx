@@ -10,6 +10,7 @@ import {
   Minus,
   Pencil,
   Plus,
+  RotateCcw,
   Soup,
   Trash2,
 } from "lucide-react";
@@ -287,6 +288,26 @@ export function MealCard({
           >
             <Plus className="size-3" />
           </button>
+          {isCustomServings ? (
+            <button
+              type="button"
+              aria-label="Auf Standardportionen zurücksetzen"
+              title={`Auf ${meal.recipe.baseServings} Portionen (Rezept-Standard) zurücksetzen`}
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                // Reset = adjust by the delta back to the recipe's default.
+                onAdjustPortions(
+                  meal.id,
+                  meal.recipe.baseServings - meal.servings,
+                );
+              }}
+              className="inline-flex size-5 shrink-0 items-center justify-center rounded text-[var(--color-muted-fg)] hover:bg-[var(--color-muted)] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+            >
+              <RotateCcw className="size-3" />
+            </button>
+          ) : null}
           {meal.note ? <span className="truncate">· {meal.note}</span> : null}
         </div>
       </div>
