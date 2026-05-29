@@ -21,6 +21,15 @@ export const recipe = sqliteTable("recipe", {
   servings: integer("servings").notNull().default(1),
   prepTimeMin: integer("prep_time_min"),
   cookTimeMin: integer("cook_time_min"),
+  /**
+   * User flag: "this recipe needs a later edit" (a wrong amount, a missing
+   * step, a photo to add …). Set/cleared from the recipe detail page; the
+   * recipe list can filter to just the flagged ones. Purely a reminder — it
+   * has no effect on parsing, planning or shopping.
+   */
+  needsUpdate: integer("needs_update", { mode: "boolean" })
+    .notNull()
+    .default(false),
   createdAt: integer("created_at").notNull().default(now),
   updatedAt: integer("updated_at").notNull().default(now),
 });

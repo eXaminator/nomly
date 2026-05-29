@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Clock, Pencil, Users } from "lucide-react";
+import { Clock, Pencil, Users, Wrench } from "lucide-react";
 import type { RecipeListItem } from "@/lib/recipes/types";
 import { cn } from "@/lib/cn";
 import { DietBadge } from "./diet-badge";
@@ -24,6 +24,15 @@ export function RecipeCard({ recipe }: Props) {
         href={`/rezepte/${recipe.id}`}
         className="flex h-full flex-col"
       >
+      {recipe.needsUpdate ? (
+        <span
+          className="absolute left-2 top-2 z-10 inline-flex items-center gap-1 rounded-full bg-[var(--color-warning)] px-2 py-0.5 text-[10px] font-medium text-white shadow-sm"
+          title="Für ein Update vorgemerkt"
+        >
+          <Wrench className="size-3" />
+          Update nötig
+        </span>
+      ) : null}
       <div className="aspect-video w-full shrink-0 overflow-hidden bg-[var(--color-muted)]">
         {recipe.photoPath ? (
           // eslint-disable-next-line @next/next/no-img-element

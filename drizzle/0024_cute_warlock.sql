@@ -1,0 +1,1 @@
+ALTER TABLE `recipe` ADD `needs_update` integer DEFAULT false NOT NULL;

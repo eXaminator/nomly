@@ -26,12 +26,14 @@ export function toListOptions(params: {
   must?: string | null;
   not?: string | null;
   diet?: string | null;
+  update?: string | null;
 }): ListRecipesOptions {
   return {
     query: params.q ?? undefined,
     mustTags: parseTagList(params.must),
     notTags: parseTagList(params.not),
     diet: parseDiet(params.diet),
+    needsUpdate: params.update === "1" ? true : undefined,
   };
 }
 
@@ -42,6 +44,7 @@ export function filtersActive(opts: ListRecipesOptions): boolean {
     opts.query?.trim().length ||
       opts.mustTags?.length ||
       opts.notTags?.length ||
-      opts.diet,
+      opts.diet ||
+      opts.needsUpdate,
   );
 }

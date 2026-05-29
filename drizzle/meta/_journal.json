@@ -169,6 +169,13 @@
       "when": 1780080672903,
       "tag": "0023_plain_cardiac",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "6",
+      "when": 1780085229636,
+      "tag": "0024_cute_warlock",
+      "breakpoints": true
     }
   ]
 }

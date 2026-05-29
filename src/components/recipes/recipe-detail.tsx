@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DietBadge } from "@/components/recipes/diet-badge";
+import { NeedsUpdateToggle } from "@/components/recipes/needs-update-toggle";
 import { IngredientLine } from "@/components/recipes/ingredient-line";
 import {
   UpcomingUsesButton,
@@ -134,12 +135,18 @@ export function RecipeDetail({
             ) : null}
           </div>
           {showEdit ? (
-            <Button asChild variant="outline">
-              <Link href={`/rezepte/${recipe.id}/bearbeiten`}>
-                <Pencil className="size-4" />
-                Bearbeiten
-              </Link>
-            </Button>
+            <div className="flex shrink-0 flex-wrap gap-2">
+              <NeedsUpdateToggle
+                recipeId={recipe.id}
+                initial={recipe.needsUpdate}
+              />
+              <Button asChild variant="outline">
+                <Link href={`/rezepte/${recipe.id}/bearbeiten`}>
+                  <Pencil className="size-4" />
+                  Bearbeiten
+                </Link>
+              </Button>
+            </div>
           ) : null}
         </div>
 

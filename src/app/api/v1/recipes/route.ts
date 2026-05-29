@@ -16,6 +16,7 @@ export async function GET(request: Request) {
       must: sp.get("must"),
       not: sp.get("not"),
       diet: sp.get("diet"),
+      update: sp.get("update"),
     }),
   );
   // `fields=light` returns the PlannerRecipe subset — the meal planner only

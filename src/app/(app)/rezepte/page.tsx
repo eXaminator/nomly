@@ -3,6 +3,7 @@ import { asc } from "drizzle-orm";
 import { Download, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DietFilter } from "@/components/recipes/diet-filter";
+import { NeedsUpdateFilter } from "@/components/recipes/needs-update-filter";
 import { RecipeGridVirtual } from "@/components/recipes/recipe-grid-virtual";
 import { RecipeSearch } from "@/components/recipes/recipe-search";
 import { TagFilterBar } from "@/components/recipes/tag-filter-bar";
@@ -22,6 +23,7 @@ type Search = {
   must?: string;
   not?: string;
   diet?: string;
+  update?: string;
 };
 
 export default async function RezeptePage({
@@ -29,8 +31,8 @@ export default async function RezeptePage({
 }: {
   searchParams: Promise<Search>;
 }) {
-  const { q, must, not, diet } = await searchParams;
-  const matched = listRecipes(toListOptions({ q, must, not, diet }));
+  const { q, must, not, diet, update } = await searchParams;
+  const matched = listRecipes(toListOptions({ q, must, not, diet, update }));
   const initialRecipes = matched.slice(0, SSR_RECIPE_COUNT);
   const totalUnfiltered = countRecipes();
 
@@ -67,8 +69,9 @@ export default async function RezeptePage({
         <RecipeSearch />
       </div>
 
-      <div className="mt-4">
+      <div className="mt-4 flex flex-wrap items-center gap-3">
         <DietFilter />
+        <NeedsUpdateFilter />
       </div>
 
       {allTags.length > 0 ? (
@@ -81,7 +84,7 @@ export default async function RezeptePage({
         initialRecipes={initialRecipes}
         initialMatchedCount={matched.length}
         totalUnfiltered={totalUnfiltered}
-        filters={{ q, must, not, diet }}
+        filters={{ q, must, not, diet, update }}
       />
     </>
   );
