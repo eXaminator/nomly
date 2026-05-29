@@ -22,6 +22,7 @@ type Props = {
   onReorderUp: (mealId: number) => void;
   onReorderDown: (mealId: number) => void;
   onDeleteMeal: (mealId: number) => void;
+  onAdjustPortions: (mealId: number, delta: number) => void;
   onAddMeal: (date: string) => void;
   onPreviewRecipe: (recipeId: number, mealPlanId: number) => void;
   /** Hover state for the in-flight drag (see PlannerView). When set, this
@@ -42,6 +43,7 @@ export function DayCell({
   onReorderUp,
   onReorderDown,
   onDeleteMeal,
+  onAdjustPortions,
   onAddMeal,
   onPreviewRecipe,
   dropTarget,
@@ -128,6 +130,7 @@ export function DayCell({
                       onReorderUp={onReorderUp}
                       onReorderDown={onReorderDown}
                       onDelete={onDeleteMeal}
+                      onAdjustPortions={onAdjustPortions}
                       onPreviewRecipe={onPreviewRecipe}
                       draggable={draggable}
                     />

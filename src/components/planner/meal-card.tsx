@@ -3,7 +3,7 @@
 import * as React from "react";
 import { useDraggable, useDroppable } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
-import { ChevronDown, ChevronUp, Pencil, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronUp, Minus, Pencil, Plus, Trash2 } from "lucide-react";
 import type { MealPlanView } from "@/lib/meal-plans/types";
 import { DietBadge } from "@/components/recipes/diet-badge";
 import { cn } from "@/lib/cn";
@@ -14,6 +14,8 @@ type Props = {
   onReorderUp: (mealId: number) => void;
   onReorderDown: (mealId: number) => void;
   onDelete: (mealId: number) => void;
+  /** Adjust this meal's portions by `delta` (clamped to ≥ 1 by the parent). */
+  onAdjustPortions: (mealId: number, delta: number) => void;
   onPreviewRecipe: (recipeId: number, mealPlanId: number) => void;
   /** Disable DnD on mobile breakpoints — the parent decides via media query. */
   draggable: boolean;
@@ -25,6 +27,7 @@ export function MealCard({
   onReorderUp,
   onReorderDown,
   onDelete,
+  onAdjustPortions,
   onPreviewRecipe,
   draggable,
 }: Props) {
@@ -74,6 +77,34 @@ export function MealCard({
   // drag and swallow it.
   const downCoordsRef = React.useRef<{ x: number; y: number } | null>(null);
   const ACTIVATION_DISTANCE = 5;
+
+  // True when the meal's portions differ from the recipe's own serving count
+  // — drives the highlight on the stepper's number.
+  const isCustomServings = meal.servings !== meal.recipe.baseServings;
+
+  // Shared by the image + title links: record the pointer-down coords, then
+  // on click distinguish a genuine click (open preview) from the synthetic
+  // click that ends a drag (movement past the sensor threshold → swallow).
+  const handlePreviewPointerDown = (e: React.PointerEvent) => {
+    downCoordsRef.current = { x: e.clientX, y: e.clientY };
+  };
+  const handlePreviewClick = (e: React.MouseEvent) => {
+    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) {
+      return;
+    }
+    const down = downCoordsRef.current;
+    if (
+      down &&
+      Math.hypot(e.clientX - down.x, e.clientY - down.y) > ACTIVATION_DISTANCE
+    ) {
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
+    e.preventDefault();
+    e.stopPropagation();
+    onPreviewRecipe(meal.recipe.id, meal.id);
+  };
 
   // Capture the source's viewport rect at pointer-down so the dragging style
   // can pin it explicitly via `position: fixed`. `position: absolute` (the
@@ -147,66 +178,93 @@ export function MealCard({
       {/* Drop indicator lives in DayCell (a sized phantom placeholder
           above/below this card), not here — keeps the card itself stable. */}
 
-      {/* Real <a> so cmd/ctrl/shift-click and middle-click open the recipe
+      {/* Real <a>s so cmd/ctrl/shift-click and middle-click open the recipe
           in a new tab natively. A plain left-click is intercepted to open
           the in-page preview dialog (owned by PlannerView). The pointer
           coords let us tell a click apart from the synthetic click that
-          fires at the end of a drag. */}
+          fires at the end of a drag. The portion stepper below is NOT inside
+          an anchor (nested buttons are invalid), so the image + title are
+          their own links and the content column holds the stepper alongside. */}
       <a
         href={`/rezepte/${meal.recipe.id}?meal=${meal.id}`}
-        className="flex min-w-0 flex-1 items-center gap-2 focus-visible:outline-none"
-        onPointerDown={(e) => {
-          downCoordsRef.current = { x: e.clientX, y: e.clientY };
-        }}
-        onClick={(e) => {
-          if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) {
-            return;
-          }
-          const down = downCoordsRef.current;
-          if (
-            down &&
-            Math.hypot(e.clientX - down.x, e.clientY - down.y) > ACTIVATION_DISTANCE
-          ) {
-            // The pointer moved further than the drag sensor's threshold —
-            // this is the tail of a drag, not a click. Block the link too
-            // so the browser doesn't navigate.
-            e.preventDefault();
-            e.stopPropagation();
-            return;
-          }
-          e.preventDefault();
-          e.stopPropagation();
-          onPreviewRecipe(meal.recipe.id, meal.id);
-        }}
+        aria-label={`„${meal.recipe.title}“ ansehen`}
+        className="shrink-0 self-center focus-visible:outline-none"
+        onPointerDown={handlePreviewPointerDown}
+        onClick={handlePreviewClick}
       >
         {meal.recipe.photoPath ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
             src={`/api/v1/${meal.recipe.photoPath}`}
             alt=""
-            className="size-12 shrink-0 rounded object-cover"
+            className="size-12 rounded object-cover"
           />
         ) : (
-          <div className="size-12 shrink-0 rounded bg-[var(--color-muted)]" />
+          <div className="size-12 rounded bg-[var(--color-muted)]" />
         )}
-        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <div className="flex items-center gap-1.5">
-            <DietBadge
-              isVegan={meal.recipe.isVegan}
-              isVegetarian={meal.recipe.isVegetarian}
-              confidence={meal.recipe.dietConfidence}
-              size="sm"
-            />
-            <span className="truncate text-sm font-medium text-[var(--color-fg)]">
-              {meal.recipe.title}
-            </span>
-          </div>
-          <span className="text-xs text-[var(--color-muted-fg)]">
-            {meal.servings} Portionen
-            {meal.note ? ` · ${meal.note}` : ""}
-          </span>
-        </div>
       </a>
+      <div className="flex min-w-0 flex-1 flex-col justify-center gap-0.5">
+        <a
+          href={`/rezepte/${meal.recipe.id}?meal=${meal.id}`}
+          className="flex min-w-0 items-center gap-1.5 focus-visible:outline-none"
+          onPointerDown={handlePreviewPointerDown}
+          onClick={handlePreviewClick}
+        >
+          <DietBadge
+            isVegan={meal.recipe.isVegan}
+            isVegetarian={meal.recipe.isVegetarian}
+            confidence={meal.recipe.dietConfidence}
+            size="sm"
+          />
+          <span className="truncate text-sm font-medium text-[var(--color-fg)]">
+            {meal.recipe.title}
+          </span>
+        </a>
+        <div className="flex min-w-0 items-center gap-1 text-xs text-[var(--color-muted-fg)]">
+          <button
+            type="button"
+            aria-label="Weniger Portionen"
+            title="Weniger Portionen"
+            disabled={meal.servings <= 1}
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation();
+              e.preventDefault();
+              onAdjustPortions(meal.id, -1);
+            }}
+            className="inline-flex size-5 shrink-0 items-center justify-center rounded text-[var(--color-muted-fg)] hover:bg-[var(--color-muted)] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] disabled:pointer-events-none disabled:opacity-40"
+          >
+            <Minus className="size-3" />
+          </button>
+          <span
+            className={cn(
+              "shrink-0 tabular-nums",
+              // Highlight when the meal deviates from the recipe's own
+              // serving count, so a customised portion stands out.
+              isCustomServings
+                ? "font-semibold text-[var(--color-accent)]"
+                : undefined,
+            )}
+          >
+            {meal.servings} Portionen
+          </span>
+          <button
+            type="button"
+            aria-label="Mehr Portionen"
+            title="Mehr Portionen"
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation();
+              e.preventDefault();
+              onAdjustPortions(meal.id, 1);
+            }}
+            className="inline-flex size-5 shrink-0 items-center justify-center rounded text-[var(--color-muted-fg)] hover:bg-[var(--color-muted)] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+          >
+            <Plus className="size-3" />
+          </button>
+          {meal.note ? <span className="truncate">· {meal.note}</span> : null}
+        </div>
+      </div>
 
       <div className="flex shrink-0 items-start gap-0.5">
         {/* Edit + delete sit side-by-side so the card stays short. */}
