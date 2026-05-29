@@ -28,7 +28,8 @@ test.describe("shopping list — offline", () => {
     const rows = page.locator("[data-shopping-row]");
     await rows.nth(1).locator("[data-toggle]").click();
     await rows.nth(2).locator("[data-toggle]").click();
-    await expect(page.locator("text=ausstehend")).toContainText("2");
+    await expect(rows.nth(1)).toHaveAttribute("data-checked", "true");
+    await expect(rows.nth(2)).toHaveAttribute("data-checked", "true");
 
     // Verify IDB contains the queued mutations.
     const queueLength = await page.evaluate(async () => {

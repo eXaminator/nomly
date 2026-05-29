@@ -30,7 +30,6 @@ import {
 } from "./api";
 import { EditArticleDrawer } from "@/components/articles/edit-article-drawer";
 import { useShoppingRealtime } from "./use-shopping-realtime";
-import { PendingMutationsDrawer } from "./pending-mutations-drawer";
 import {
   getConnectivity,
   subscribeConnectivity,
@@ -39,7 +38,6 @@ import { openOfflineDb } from "@/lib/shopping/offline/db";
 import {
   hydrateFromIDB,
   readItemsFromIDB,
-  readPendingQueue,
   reconcileFromServer,
   toggleItemOptimistic,
 } from "@/lib/shopping/offline/store";
@@ -97,8 +95,6 @@ export function ShoppingListView({
   const [recentChecks, setRecentChecks] = React.useState<number[]>([]);
 
   const [connectivity, setConnectivityState] = React.useState(getConnectivity());
-  const [pendingCount, setPendingCount] = React.useState(0);
-  const [drawerOpen, setDrawerOpen] = React.useState(false);
 
   // The connectivity watcher is owned app-wide by the header
   // (ConnectivityStatus); here we just subscribe to read the state.
@@ -131,11 +127,7 @@ export function ShoppingListView({
       await wtx.objectStore("supermarkets").clear();
       for (const s of supermarkets) await wtx.objectStore("supermarkets").put(s);
       await wtx.done;
-      const q = await readPendingQueue();
-      if (!cancelled) setPendingCount(q.length);
       if (getConnectivity() === "online") await kickSync();
-      const q2 = await readPendingQueue();
-      if (!cancelled) setPendingCount(q2.length);
     })().catch((err) => console.warn("offline init failed", err));
     return () => {
       cancelled = true;
@@ -158,8 +150,6 @@ export function ShoppingListView({
         // us back on the next probe.
       }
       await kickSync();
-      const q = await readPendingQueue();
-      setPendingCount(q.length);
       const refreshed = await readItemsFromIDB();
       setItems(refreshed);
     })();
@@ -203,12 +193,8 @@ export function ShoppingListView({
       return nextChecked ? [...without, item.id] : without;
     });
     await toggleItemOptimistic(item.id, nextChecked);
-    const q = await readPendingQueue();
-    setPendingCount(q.length);
     if (connectivity === "online") {
       await kickSync();
-      const q2 = await readPendingQueue();
-      setPendingCount(q2.length);
       const refreshed = await readItemsFromIDB();
       setItems(refreshed);
     }
@@ -251,10 +237,6 @@ export function ShoppingListView({
 
   const disabledOffline =
     connectivity === "offline" || connectivity === "sessionExpired";
-  const itemNameById = React.useMemo(
-    () => Object.fromEntries(items.map((i) => [i.id, i.name])),
-    [items],
-  );
 
   async function onPatchNote(id: number, note: string | null) {
     try {
@@ -406,11 +388,11 @@ export function ShoppingListView({
         </Button>
       </div>
 
-      {/* Sticky shelf: counter pinned far left, the pending-changes pill
-          centered in the middle, supermarket select pinned right. Sits below
-          the AppShell topbar (h-16) at z-20 so it doesn't outrank it. */}
-      <div className="sticky top-16 z-20 -mx-4 flex items-center gap-2 border-b border-[var(--color-border)] bg-[var(--color-bg)]/95 px-4 py-2 backdrop-blur supports-[backdrop-filter]:bg-[var(--color-bg)]/80 md:-mx-6 md:gap-3 md:px-6">
-        <span className="shrink-0 whitespace-nowrap text-sm text-[var(--color-muted-fg)]">
+      {/* Sticky shelf: counter pinned left, supermarket select pinned right.
+          Sits below the AppShell topbar (h-16) at z-20 so it doesn't outrank
+          it. */}
+      <div className="sticky top-16 z-20 -mx-4 flex items-center justify-between gap-2 border-b border-[var(--color-border)] bg-[var(--color-bg)]/95 px-4 py-2 backdrop-blur supports-[backdrop-filter]:bg-[var(--color-bg)]/80 md:-mx-6 md:gap-3 md:px-6">
+        <span className="min-w-0 whitespace-nowrap text-sm text-[var(--color-muted-fg)]">
           {filterActive ? (
             <>
               <strong className="font-semibold text-[var(--color-fg)]">
@@ -431,19 +413,6 @@ export function ShoppingListView({
           {" · "}
           {checkedTotal} erledigt
         </span>
-        <div className="flex min-w-0 flex-1 justify-center">
-          {pendingCount > 0 ? (
-            <button
-              type="button"
-              onClick={() => setDrawerOpen(true)}
-              className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-[var(--color-border)] bg-[var(--color-card)] px-2.5 py-1 text-xs font-medium text-[var(--color-fg)] hover:bg-[var(--color-muted)]"
-              aria-label={`${pendingCount} ausstehende Änderungen anzeigen`}
-            >
-              <span className="inline-block h-2 w-2 rounded-full bg-[var(--color-warning)]" />
-              <span>{pendingCount} ausstehend</span>
-            </button>
-          ) : null}
-        </div>
         <div className="shrink-0">
           <SupermarketFilter
             value={supermarketId}
@@ -626,11 +595,6 @@ export function ShoppingListView({
           }}
         />
       ) : null}
-      <PendingMutationsDrawer
-        open={drawerOpen}
-        onOpenChange={setDrawerOpen}
-        itemNameById={itemNameById}
-      />
     </div>
   );
 }
