@@ -1,16 +1,15 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { NAV_ITEMS } from "./nav-items";
+import { NAV_ITEMS, isNavItemActive, useActiveNavPath } from "./nav-items";
 import { cn } from "@/lib/cn";
 
 export function TopNav() {
-  const pathname = usePathname();
+  const pathname = useActiveNavPath();
   return (
     <nav className="hidden md:flex items-center gap-1">
       {NAV_ITEMS.map((item) => {
-        const active = pathname === item.href || pathname.startsWith(item.matchPrefix + "/");
+        const active = isNavItemActive(item, pathname);
         return (
           <Link
             key={item.href}

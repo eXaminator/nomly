@@ -1,12 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { NAV_ITEMS } from "./nav-items";
+import { NAV_ITEMS, isNavItemActive, useActiveNavPath } from "./nav-items";
 import { cn } from "@/lib/cn";
 
 export function BottomNav() {
-  const pathname = usePathname();
+  const pathname = useActiveNavPath();
   return (
     <nav
       className="md:hidden fixed bottom-0 inset-x-0 z-40 border-t border-[var(--color-border)] bg-[var(--color-card)]/95 backdrop-blur supports-[backdrop-filter]:bg-[var(--color-card)]/80 pb-[env(safe-area-inset-bottom)]"
@@ -14,7 +13,7 @@ export function BottomNav() {
     >
       <ul className="grid grid-cols-4">
         {NAV_ITEMS.map((item) => {
-          const active = pathname === item.href || pathname.startsWith(item.matchPrefix + "/");
+          const active = isNavItemActive(item, pathname);
           return (
             <li key={item.href}>
               <Link
