@@ -156,12 +156,17 @@ export function ShoppingListView({
   }, [connectivity]);
 
   React.useEffect(() => {
-    const stored = window.localStorage.getItem(STORAGE_KEY);
-    if (stored == null) return;
-    const n = Number.parseInt(stored, 10);
+    // A `?supermarket=<id>` deep link (e.g. the Home Assistant geofence
+    // notification) takes precedence over the stored default. A deep-linked
+    // store is also persisted, so a later reload keeps it.
+    const fromUrl = new URLSearchParams(window.location.search).get("supermarket");
+    const candidate = fromUrl ?? window.localStorage.getItem(STORAGE_KEY);
+    if (candidate == null) return;
+    const n = Number.parseInt(candidate, 10);
     if (Number.isFinite(n) && supermarkets.some((s) => s.id === n)) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setSupermarketId(n);
+      if (fromUrl != null) window.localStorage.setItem(STORAGE_KEY, String(n));
     }
   }, [supermarkets]);
 

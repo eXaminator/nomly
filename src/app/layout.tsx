@@ -2,9 +2,6 @@ import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { ThemeInitScript, ThemeProvider } from "@/components/theme-provider";
-import { RegisterSW } from "@/components/pwa/register-sw";
-import { PullToRefresh } from "@/components/pwa/pull-to-refresh";
-import { AppShell } from "@/components/layout/app-shell";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -43,11 +40,10 @@ export default function RootLayout({
         <ThemeInitScript />
       </head>
       <body className="min-h-full">
-        <ThemeProvider>
-          <RegisterSW />
-          <PullToRefresh />
-          <AppShell>{children}</AppShell>
-        </ThemeProvider>
+        {/* The app chrome (nav, service worker, pull-to-refresh) lives in the
+            (app) route group's layout. The root layout stays minimal so the
+            embed routes (Home Assistant recipe iframe) render bare. */}
+        <ThemeProvider>{children}</ThemeProvider>
       </body>
     </html>
   );

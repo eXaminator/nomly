@@ -4,6 +4,7 @@ import { createApiToken, listApiTokens } from "@/lib/bearer";
 
 const createSchema = z.object({
   name: z.string().trim().min(1).max(80),
+  scope: z.enum(["full", "embed"]).default("full"),
 });
 
 export function GET() {
@@ -19,7 +20,7 @@ export async function POST(request: Request) {
       { status: 400 },
     );
   }
-  const minted = createApiToken(parsed.data.name);
+  const minted = createApiToken(parsed.data.name, parsed.data.scope);
   // The raw `token` is returned here ONCE — it is never stored or retrievable
   // again (only its hash lives in the DB).
   return NextResponse.json(minted, { status: 201 });

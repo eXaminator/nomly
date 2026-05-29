@@ -516,6 +516,13 @@ export const apiToken = sqliteTable("api_token", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   name: text("name").notNull(),
   tokenHash: text("token_hash").notNull().unique(),
+  // Access scope. "full" tokens reach the whole API (the historical default,
+  // so existing rows keep working). "embed" tokens are restricted to the
+  // read-only embed allow-list (see proxy.ts) — used by the Home Assistant
+  // recipe iframe, where the token must travel in the URL.
+  scope: text("scope", { enum: ["full", "embed"] })
+    .notNull()
+    .default("full"),
   lastUsedAt: integer("last_used_at"),
   createdAt: integer("created_at").notNull().default(now),
   revokedAt: integer("revoked_at"),
