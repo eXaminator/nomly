@@ -91,11 +91,16 @@ content: |
 
 ## 2b. Dynamic meals card — one button per meal, no limit
 
-Render one `custom:button-card` per planned meal (today + tomorrow, however
-many there are) and open the recipe in a popup on tap. Uses
+Renders a **"Heute"** header followed by every meal planned for today, then a
+**"Morgen"** header + tomorrow's meals — each an image tile that opens the
+recipe in a popup on tap. No fixed meal count. If today has nothing, a
+do-nothing placeholder tile shows instead; if tomorrow has nothing, the whole
+"Morgen" area is omitted. Uses
 [`config-template-card`](https://github.com/iantrich/config-template-card),
 [`button-card`](https://github.com/custom-cards/button-card) and
 [`browser_mod`](https://github.com/thomasloven/hass-browser_mod) (all HACS).
+
+Replace `PASTE_EMBED_TOKEN` with your embed token.
 
 ```yaml
 type: custom:config-template-card
@@ -103,50 +108,82 @@ entities:
   - sensor.nomly_meals
 card:
   type: vertical-stack
-  cards: >
-    ${ (states['sensor.nomly_meals'].attributes.mealPlans || []).map(function (m) {
-      var today = new Date().toISOString().slice(0, 10);
-      var tomorrow = new Date(Date.now() + 864e5).toISOString().slice(0, 10);
-      var when = m.date === today ? 'Heute' : (m.date === tomorrow ? 'Morgen' : m.date);
-      return {
-        type: 'custom:button-card',
-        name: m.recipe.title,
-        label: when + ' · ' + m.servings + ' Portionen',
-        show_label: true,
-        entity_picture: m.recipe.photoPath
-          ? 'https://nomly.weingaertner.pro/api/v1/' + m.recipe.photoPath
-          : undefined,
-        show_entity_picture: !!m.recipe.photoPath,
-        tap_action: {
-          action: 'fire-dom-event',
-          browser_mod: {
-            service: 'browser_mod.popup',
-            data: {
-              title: m.recipe.title,
-              content: {
-                type: 'iframe',
-                url: 'https://nomly.weingaertner.pro/embed/rezepte/'
-                     + m.recipe.id + '?k=<embed token>',
-                aspect_ratio: '90%'
+  cards: |
+    ${ (function () {
+      var BASE = 'https://nomly.weingaertner.pro';
+      var TOKEN = 'PASTE_EMBED_TOKEN';
+      var FALLBACK = 'https://external-content.duckduckgo.com/iu/?u=https%3A%2F%2Fpng.pngtree.com%2Fbackground%2F20220721%2Foriginal%2Fpngtree-empty-plate-kitchenware-kitchen-material-wooden-table-background-picture-image_1706347.jpg&f=1&nofb=1&ipt=4f167ea99981bab66b662b3cbe97fa3ebe989f98becf96927aff53368b4550f8';
+      var STYLES = {
+        card: [{ padding: '0' }],
+        grid: [{ 'grid-template-rows': '1fr min-content' }],
+        img_cell: [{ 'align-self': 'start' }, { 'justify-self': 'start' }, { 'text-align': 'start' }],
+        entity_picture: [{ width: '100%' }, { height: '100%' }, { 'object-fit': 'cover' }],
+        state: [{ 'font-weight': 'bold' }, { 'place-self': 'start' }, { padding: '1em .5em' }]
+      };
+      function tile(m) {
+        return {
+          type: 'custom:button-card',
+          show_name: false,
+          show_state: true,
+          show_entity_picture: true,
+          entity_picture: m.recipe.photoPath ? (BASE + '/api/v1/' + m.recipe.photoPath) : FALLBACK,
+          state_display: m.recipe.title,
+          tap_action: {
+            action: 'fire-dom-event',
+            browser_mod: {
+              service: 'browser_mod.popup',
+              data: {
+                title: m.recipe.title,
+                content: { type: 'iframe', url: BASE + '/embed/rezepte/' + m.recipe.id + '?k=' + TOKEN, aspect_ratio: '90%' }
               }
             }
-          }
-        }
-      };
-    }) }
+          },
+          styles: STYLES,
+          grid_options: { rows: 2, columns: 12 }
+        };
+      }
+      function placeholder() {
+        return {
+          type: 'custom:button-card',
+          show_name: false,
+          show_state: true,
+          show_entity_picture: true,
+          entity_picture: FALLBACK,
+          state_display: 'Kein Essen geplant',
+          tap_action: { action: 'none' },
+          styles: STYLES,
+          grid_options: { rows: 2, columns: 12 }
+        };
+      }
+      function header(text) { return { type: 'markdown', content: '## ' + text }; }
+
+      var meals = (states['sensor.nomly_meals'].attributes.mealPlans) || [];
+      var today = new Date().toISOString().slice(0, 10);
+      var tomorrow = new Date(Date.now() + 864e5).toISOString().slice(0, 10);
+      var todays = meals.filter(function (m) { return m.date === today; });
+      var tomorrows = meals.filter(function (m) { return m.date === tomorrow; });
+
+      var cards = [header('Heute')];
+      if (todays.length) { todays.forEach(function (m) { cards.push(tile(m)); }); }
+      else { cards.push(placeholder()); }
+      if (tomorrows.length) {
+        cards.push(header('Morgen'));
+        tomorrows.forEach(function (m) { cards.push(tile(m)); });
+      }
+      return cards;
+    })() }
 ```
 
-Because the cards are generated from the `mealPlans` array, there's **no fixed
-limit** — 1 meal or 5, today-only or today+tomorrow, it just renders what's
-planned. To show today only, filter the array:
-`.filter(m => m.date === new Date().toISOString().slice(0,10))`.
+The tiles mirror the look of your existing `custom:button-card` (full-bleed
+photo, bold meal name bottom-left, empty-plate fallback). The placeholder's
+`tap_action: { action: 'none' }` makes it inert.
 
 > Prefer Bubble Card for the popup? You can put the same `iframe` inside a
 > Bubble Card pop-up, but Bubble pop-ups are keyed by a URL hash (one
 > definition per hash), so they can't take a per-recipe URL dynamically.
 > `browser_mod.popup` is parameterised per tap, which is why it's used here.
 > The dynamic *list* (config-template-card) is independent of which popup
-> mechanism you choose.
+> mechanism you choose — swap the `tap_action` if you keep Bubble Card.
 
 ## 3. Recipe in an iframe (tap a meal)
 
