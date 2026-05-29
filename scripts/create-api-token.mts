@@ -9,10 +9,14 @@ import { parseArgs } from "node:util";
 //
 // The raw token is printed ONCE — only its sha256 hash is stored.
 
-const HELP = `Usage: npm run token:create -- --name <label>
+const HELP = `Usage: npm run token:create -- --name <label> [--scope full|embed]
 
 Required:
   --name <label>   Human label stored with the token (e.g. "import-cli")
+
+Optional:
+  --scope <scope>  "full" (default, whole API) or "embed" (read-only, only the
+                   Home Assistant recipe-iframe allow-list)
   --help           Print this help`;
 
 async function main() {
@@ -21,6 +25,7 @@ async function main() {
   const { values } = parseArgs({
     options: {
       name: { type: "string" },
+      scope: { type: "string", default: "full" },
       help: { type: "boolean", default: false },
     },
     allowPositionals: false,
@@ -39,15 +44,26 @@ async function main() {
     process.exit(2);
   }
 
-  const { createApiToken } = await import("../src/lib/bearer.ts");
-  const minted = createApiToken(name);
+  const scope = values.scope;
+  if (scope !== "full" && scope !== "embed") {
+    console.error(`[token] --scope must be "full" or "embed" (got "${scope}").`);
+    console.error(HELP);
+    process.exit(2);
+  }
 
-  console.log(`[token] created "${minted.name}" (id ${minted.id}).`);
+  const { createApiToken } = await import("../src/lib/bearer.ts");
+  const minted = createApiToken(name, scope);
+
+  console.log(`[token] created "${minted.name}" (id ${minted.id}, scope ${minted.scope}).`);
   console.log("[token] Store this now — it is not recoverable:");
   console.log("");
   console.log(`  ${minted.token}`);
   console.log("");
-  console.log("[token] Use it as: Authorization: Bearer <token>");
+  if (minted.scope === "embed") {
+    console.log("[token] Embed token — pass as ?k=<token> on /embed/** URLs.");
+  } else {
+    console.log("[token] Use it as: Authorization: Bearer <token>");
+  }
 }
 
 main().catch((err) => {

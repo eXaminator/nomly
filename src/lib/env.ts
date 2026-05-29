@@ -48,6 +48,15 @@ export const env = {
   get DATABASE_URL() {
     return optional("DATABASE_URL") ?? "./data/nomly.db";
   },
+  /**
+   * Space-separated origin(s) permitted to frame the app, beyond 'self' — e.g.
+   * "https://home.weingaertner.pro" so Home Assistant can embed the recipe
+   * iframe. Unset → only 'self' may frame (the default, which also tightens
+   * the previously wide-open framing).
+   */
+  get EMBED_FRAME_ANCESTORS() {
+    return optional("EMBED_FRAME_ANCESTORS");
+  },
 };
 
 /** Validate at boot and surface a single readable error. */

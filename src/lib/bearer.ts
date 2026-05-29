@@ -7,11 +7,16 @@ export function hashToken(rawToken: string): string {
   return createHash("sha256").update(rawToken).digest("hex");
 }
 
+/** Access scope of a token — see the `scope` column on `api_token`. */
+export type TokenScope = "full" | "embed";
+
 export type MintedToken = {
   /** DB row id of the new api_token. */
   id: number;
   /** Human label stored with the token. */
   name: string;
+  /** Access scope. */
+  scope: TokenScope;
   /** The raw token — shown ONCE; only its hash is persisted. */
   token: string;
 };
@@ -19,23 +24,29 @@ export type MintedToken = {
 /**
  * Create a new machine API token. Returns the raw token to hand to the
  * caller (e.g. the import CLI); the DB only ever stores its sha256 hash.
+ * `scope` defaults to "full"; pass "embed" for the read-only Home Assistant
+ * recipe-iframe token.
  */
-export function createApiToken(name: string): MintedToken {
+export function createApiToken(
+  name: string,
+  scope: TokenScope = "full",
+): MintedToken {
   const trimmed = name.trim();
   if (trimmed.length === 0) throw new Error("token name is required");
   const raw = randomBytes(32).toString("base64url");
   const inserted = db
     .insert(apiToken)
-    .values({ name: trimmed, tokenHash: hashToken(raw) })
+    .values({ name: trimmed, tokenHash: hashToken(raw), scope })
     .returning({ id: apiToken.id })
     .all();
-  return { id: inserted[0].id, name: trimmed, token: raw };
+  return { id: inserted[0].id, name: trimmed, scope, token: raw };
 }
 
 export type BearerPrincipal = {
   kind: "machine";
   tokenId: number;
   name: string;
+  scope: TokenScope;
 };
 
 export function verifyBearer(rawToken: string): BearerPrincipal | null {
@@ -52,7 +63,7 @@ export function verifyBearer(rawToken: string): BearerPrincipal | null {
     .where(eq(apiToken.id, row.id))
     .run();
 
-  return { kind: "machine", tokenId: row.id, name: row.name };
+  return { kind: "machine", tokenId: row.id, name: row.name, scope: row.scope };
 }
 
 export function extractBearer(authHeader: string | null | undefined): string | null {
@@ -75,6 +86,7 @@ export class ApiTokenError extends Error {
 export type ApiTokenSummary = {
   id: number;
   name: string;
+  scope: TokenScope;
   createdAt: number;
   lastUsedAt: number | null;
 };
@@ -89,6 +101,7 @@ export function listApiTokens(): ApiTokenSummary[] {
     .select({
       id: apiToken.id,
       name: apiToken.name,
+      scope: apiToken.scope,
       createdAt: apiToken.createdAt,
       lastUsedAt: apiToken.lastUsedAt,
     })
