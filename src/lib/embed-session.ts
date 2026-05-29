@@ -89,17 +89,24 @@ export function frameAncestorsCsp(): string {
   return `frame-ancestors ${sources}`;
 }
 
+/** GET-only read endpoints the embed recipe view calls from the client. */
+const EMBED_API_GET = [
+  // recipe photos (the <img> in the embed view)
+  /^\/api\/v1\/photos(\/|$)/,
+  // "where else is this ingredient used this week" — the upcoming-uses popover,
+  // enabled when the embed is opened with ?meal=<mealPlanId>.
+  /^\/api\/v1\/meal-plans\/\d+\/upcoming-ingredient-uses$/,
+];
+
 /**
  * What an "embed"-scoped principal may reach. Deliberately tiny: the embed
- * recipe pages, and GET on recipe photos (the <img> in the embed view).
- * Everything else is denied — the embed token is read-only by construction.
+ * recipe pages, and a short GET-only allow-list of read endpoints the page
+ * fetches. Everything else is denied — the embed token is read-only by
+ * construction.
  */
 export function isEmbedAllowedPath(pathname: string, method: string): boolean {
   if (pathname === "/embed" || pathname.startsWith("/embed/")) return true;
-  if (
-    method === "GET" &&
-    (pathname === "/api/v1/photos" || pathname.startsWith("/api/v1/photos/"))
-  ) {
+  if (method === "GET" && EMBED_API_GET.some((re) => re.test(pathname))) {
     return true;
   }
   return false;

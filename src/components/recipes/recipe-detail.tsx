@@ -65,10 +65,14 @@ export function RecipeDetail({
   recipe,
   mealPlanId,
   showEdit,
+  showTitle = true,
 }: {
   recipe: RecipeView;
   mealPlanId: number | null;
   showEdit: boolean;
+  /** When false, the recipe-name heading is hidden — used by the embed view
+   *  where the surrounding chrome (e.g. the HA popup header) already shows it. */
+  showTitle?: boolean;
 }) {
   const descriptionHtml = renderMarkdown(recipe.description);
 
@@ -77,7 +81,9 @@ export function RecipeDetail({
       <div className="mx-auto max-w-4xl">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div className="flex-1">
-            <h1 className="text-3xl font-semibold tracking-tight">{recipe.title}</h1>
+            {showTitle ? (
+              <h1 className="text-3xl font-semibold tracking-tight">{recipe.title}</h1>
+            ) : null}
             <div className="mt-2 flex flex-wrap items-center gap-4 text-sm text-[var(--color-muted-fg)]">
               <DietBadge
                 isVegan={recipe.isVegan}
