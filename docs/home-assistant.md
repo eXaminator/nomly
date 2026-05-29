@@ -157,7 +157,9 @@ card:
       }
       function header(text) { return { type: 'markdown', content: '## ' + text }; }
 
-      var meals = (states['sensor.nomly_meals'].attributes.mealPlans) || [];
+      var s = states['sensor.nomly_meals'];
+      if (!s) { return [{ type: 'markdown', content: '⚠️ `sensor.nomly_meals` nicht gefunden — REST-Sensor anlegen (Abschnitt 2) und neu laden.' }]; }
+      var meals = (s.attributes && s.attributes.mealPlans) || [];
       var today = new Date().toISOString().slice(0, 10);
       var tomorrow = new Date(Date.now() + 864e5).toISOString().slice(0, 10);
       var todays = meals.filter(function (m) { return m.date === today; });
