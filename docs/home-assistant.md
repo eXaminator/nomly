@@ -138,7 +138,8 @@ card:
               service: 'browser_mod.popup',
               data: {
                 title: m.recipe.title,
-                content: { type: 'iframe', url: BASE + '/embed/rezepte/' + m.recipe.id + '?k=' + TOKEN, aspect_ratio: '90%' }
+                content: { type: 'iframe', url: BASE + '/embed/rezepte/' + m.recipe.id + '?k=' + TOKEN, aspect_ratio: '75%' },
+                style: '--mdc-dialog-min-width: 92vw; --mdc-dialog-max-width: 92vw; --mdc-dialog-max-height: 92vh;'
               }
             }
           },
@@ -202,12 +203,29 @@ section header you can also add from the dashboard UI — with the weekday + dat
 (e.g. "Heute – Fr. 29. Mai"). Date math is in **local** time so it can't drift a
 day near midnight.
 
+**Popup size** is set via the `style` line in the `tap_action` (`--mdc-dialog-*`
+custom properties on the browser_mod dialog — `92vw`/`92vh` here). The recipe's
+height comes from the iframe card's `aspect_ratio`; the embed page scrolls
+internally, so a moderate ratio is fine. Adjust both to taste.
+
 > Prefer Bubble Card for the popup? You can put the same `iframe` inside a
 > Bubble Card pop-up, but Bubble pop-ups are keyed by a URL hash (one
 > definition per hash), so they can't take a per-recipe URL dynamically.
 > `browser_mod.popup` is parameterised per tap, which is why it's used here.
 > The dynamic *list* (config-template-card) is independent of which popup
 > mechanism you choose — swap the `tap_action` if you keep Bubble Card.
+
+### Iframe shows an error?
+
+- **"Refused to display … frame-ancestors 'self'"** — `EMBED_FRAME_ANCESTORS`
+  isn't set to your HA origin on the nomly container (or it wasn't restarted).
+  Set `EMBED_FRAME_ANCESTORS: "https://home.weingaertner.pro"` and recreate the
+  container.
+- **Error points at your `auth.…` / OIDC domain** — the `?k=` token isn't a
+  valid **embed**-scoped token, so the page redirected to login and the IdP
+  refuses framing. Mint an `embed`-scoped token and use that.
+- **Blank / 404** — check the recipe id exists and the base URL is reachable
+  from the device.
 
 ## 3. Recipe in an iframe (tap a meal)
 
