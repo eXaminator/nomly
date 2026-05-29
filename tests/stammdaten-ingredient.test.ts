@@ -126,6 +126,26 @@ describe("ingredient stammdaten service", () => {
       ).toThrow(/bereits vergeben/);
     });
 
+    it("persists a canonical-name default sub-unit and reads it back", async () => {
+      const { service } = await loadModules();
+      const created = service.createIngredient({
+        name: "Gemüsestäbchen",
+        aliases: [],
+        subUnits: [{ name: "Stäbchen", perPurchase: 16 }],
+        // Index 0 → the "Stäbchen" sub-unit written above.
+        defaultSubUnitIndex: 0,
+        defaultCategoryId: null,
+        excludeFromShoppingList: false,
+        dietaryClass: "vegan",
+      });
+      const subUnitId = created.subUnits.find((s) => s.name === "Stäbchen")!.id;
+      expect(created.defaultSubUnitId).toBe(subUnitId);
+      expect(created.defaultUnitId).toBeNull();
+
+      const detail = service.getIngredientDetail(created.id)!;
+      expect(detail.defaultSubUnitId).toBe(subUnitId);
+    });
+
     it("update can swap aliases and rename", async () => {
       const { service } = await loadModules();
       const id = service.listIngredients().find((r) => r.name === "Tomate")!.id;

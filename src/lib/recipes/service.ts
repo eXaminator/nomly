@@ -452,6 +452,7 @@ export function getRecipe(id: number): RecipeView | null {
     isVegan: diet.isVegan,
     isVegetarian: diet.isVegetarian,
     dietConfidence: diet.confidence,
+    needsUpdate: head.needsUpdate,
     sections: sections.map((s) => ({
       id: s.id,
       title: s.title,
@@ -502,6 +503,8 @@ export type ListRecipesOptions = {
    *  vegan). "vegan" includes definite+probable vegan. Recipes whose diet
    *  is `unknown` are excluded for any non-empty filter. */
   diet?: "vegetarian" | "vegan";
+  /** When true, keep only recipes flagged `needs_update`. */
+  needsUpdate?: boolean;
 };
 
 /**
@@ -550,7 +553,7 @@ function loadIngredientIndex(recipeIds: number[]): Map<number, string> {
 }
 
 export function listRecipes(opts: ListRecipesOptions = {}): RecipeListItem[] {
-  const { query, mustTags = [], notTags = [], diet } = opts;
+  const { query, mustTags = [], notTags = [], diet, needsUpdate } = opts;
 
   const rows = db.select().from(recipe).all();
   if (rows.length === 0) return [];
@@ -583,6 +586,7 @@ export function listRecipes(opts: ListRecipesOptions = {}): RecipeListItem[] {
   const scored: Scored[] = [];
 
   for (const r of rows) {
+    if (needsUpdate === true && !r.needsUpdate) continue;
     const recipeTags = (tagsByRecipe.get(r.id) ?? []).map((t) => t.toLowerCase());
     if (mustLower.length > 0 || notLower.length > 0) {
       const have = new Set(recipeTags);
@@ -643,8 +647,23 @@ export function listRecipes(opts: ListRecipesOptions = {}): RecipeListItem[] {
       isVegan: dietRow.isVegan,
       isVegetarian: dietRow.isVegetarian,
       dietConfidence: dietRow.confidence,
+      needsUpdate: r.needsUpdate,
     };
   });
+}
+
+/**
+ * Toggle the "needs update" reminder flag on a recipe. Returns false when no
+ * recipe matched. Deliberately narrow — it touches only `needs_update` (not
+ * `updatedAt`), so flagging a recipe doesn't masquerade as a content edit.
+ */
+export function setRecipeNeedsUpdate(id: number, needsUpdate: boolean): boolean {
+  const result = db
+    .update(recipe)
+    .set({ needsUpdate })
+    .where(eq(recipe.id, id))
+    .run();
+  return result.changes > 0;
 }
 
 /**

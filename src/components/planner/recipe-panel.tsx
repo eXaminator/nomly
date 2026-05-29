@@ -89,18 +89,16 @@ export function RecipePanel({
     <aside
       className={cn(
         "hidden md:flex flex-col gap-3",
-        // Stick the panel below the AppShell header (top-20 = 5rem). The
-        // panel sits BELOW the planner header + container pt, so its max
-        // height has to leave room for that chrome — otherwise the grid
-        // row is taller than the viewport and the page scrolls "just to
-        // fit the panel" even when the calendar is short.
+        // Stick the panel below the AppShell header (top-20 = 5rem) and give
+        // it a DEFINITE full-viewport-minus-chrome height (not just max-h).
+        // The inner list is virtualized, so its scroll viewport needs a real
+        // bounded height — a content-sized container collapses toward the
+        // row-height estimate and clips a single tall result (one recipe with
+        // several tag lines) instead of scrolling. A fixed height makes the
+        // `flex-1` scroll child a stable, full-height viewport.
         // Total chrome above the grid:
         //   AppShell header (4) + container pt (1.5) + planner header (2.5) + gap (1) ≈ 9rem.
-        // Trade-off: on a long calendar, the panel's bottom edge stops
-        // ~4rem above viewport bottom at scroll-end (since sticky-top is
-        // 5rem, not 9rem). Acceptable — and far better than constant
-        // forced scroll.
-        "md:sticky md:top-20 md:self-start md:max-h-[calc(100vh-9rem)]",
+        "md:sticky md:top-20 md:self-start md:h-[calc(100vh-9rem)]",
       )}
     >
       <RecipeFilterControls allTags={allTags} value={filter} onChange={setFilter} />

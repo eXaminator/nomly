@@ -44,6 +44,7 @@ import {
   apiCreateMeal,
   apiDeleteMeal,
   apiDeleteMealWithShopping,
+  apiDuplicateMealToNextDay,
   apiMoveMeal,
   apiReorderDay,
   apiReorderMeal,
@@ -144,6 +145,7 @@ export function PlannerView({
       note,
       sortOrder: maxSortOrderForDate(date) + 1,
       hasShoppingImpact: false,
+      isLeftover: false,
       recipe: {
         id: recipe.id,
         title: recipe.title,
@@ -259,6 +261,48 @@ export function PlannerView({
       if (patch.date) {
         await apiMoveMeal(id, patch.date);
       }
+      router.refresh();
+    });
+  }
+
+  async function handleAdjustPortions(mealId: number, delta: number) {
+    const meal = mealPlans.find((m) => m.id === mealId);
+    if (!meal) return;
+    // Portions never drop below 1; a no-op (e.g. "−" at 1) skips the round-trip.
+    const next = Math.max(1, meal.servings + delta);
+    if (next === meal.servings) return;
+    setMealPlans((prev) =>
+      prev.map((m) =>
+        m.id === mealId
+          ? { ...m, servings: next, servingsOverride: next }
+          : m,
+      ),
+    );
+    await withBusy(async () => {
+      // The server recomputes any shopping-list contributions for this meal
+      // from the new portion count; router.refresh() pulls the fresh view.
+      await apiUpdateMeal(mealId, { servingsOverride: next });
+      router.refresh();
+    });
+  }
+
+  async function handleToggleLeftover(mealId: number, next: boolean) {
+    setMealPlans((prev) =>
+      prev.map((m) => (m.id === mealId ? { ...m, isLeftover: next } : m)),
+    );
+    await withBusy(async () => {
+      // Flag-only: already-added shopping items stay; only future adds and
+      // ingredient timing change. router.refresh() pulls the fresh view.
+      await apiUpdateMeal(mealId, { isLeftover: next });
+      router.refresh();
+    });
+  }
+
+  async function handleDuplicateLeftover(mealId: number) {
+    await withBusy(async () => {
+      // The duplicate lands on the next day (possibly off the visible page);
+      // a refresh is simpler and correct than constructing an optimistic copy.
+      await apiDuplicateMealToNextDay(mealId);
       router.refresh();
     });
   }
@@ -690,6 +734,9 @@ export function PlannerView({
                 onReorderUp={(id) => handleReorder(id, "up")}
                 onReorderDown={(id) => handleReorder(id, "down")}
                 onDeleteMeal={(id) => handleDelete(id)}
+                onAdjustPortions={handleAdjustPortions}
+                onToggleLeftover={handleToggleLeftover}
+                onDuplicateLeftover={handleDuplicateLeftover}
                 onAddMeal={(date) => setAddingForDate(date)}
                 onPreviewRecipe={(id, mealPlanId) => {
                   setPreviewRecipeId(id);

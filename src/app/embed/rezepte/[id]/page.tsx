@@ -1,6 +1,8 @@
 import { notFound } from "next/navigation";
+import { Soup } from "lucide-react";
 import { RecipeDetail } from "@/components/recipes/recipe-detail";
 import { getRecipe } from "@/lib/recipes/service";
+import { isMealLeftover } from "@/lib/meal-plans/service";
 
 export const dynamic = "force-dynamic";
 
@@ -35,10 +37,20 @@ export default async function EmbedRecipePage({
       ? mealParam
       : null;
   const showTitle = rawTitle !== "0";
+  const leftover = mealPlanId != null && isMealLeftover(mealPlanId);
 
   return (
     <main className="min-h-screen bg-[var(--color-bg)]">
       <div className="mx-auto max-w-screen-2xl px-4 py-6 md:px-6">
+        {leftover ? (
+          <div className="mb-4 flex items-center gap-2 rounded-[var(--radius)] border border-dashed border-[var(--color-border)] bg-[var(--color-muted)]/40 px-3 py-2 text-sm text-[var(--color-muted-fg)]">
+            <Soup className="size-4 shrink-0" />
+            <span>
+              <span className="font-medium text-[var(--color-fg)]">Reste</span>{" "}
+              — heute gibt es die Reste dieses Gerichts.
+            </span>
+          </div>
+        ) : null}
         <RecipeDetail
           recipe={recipe}
           mealPlanId={mealPlanId}

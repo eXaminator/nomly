@@ -1,0 +1,1 @@
+ALTER TABLE `meal_plan` ADD `is_leftover` integer DEFAULT false NOT NULL;

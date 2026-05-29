@@ -212,14 +212,18 @@ function SourceLine({ source }: { source: ShoppingItemSourceView }) {
     <li className="inline-flex flex-wrap items-baseline gap-x-1.5 px-1">
       <span className="font-medium text-[var(--color-fg)]/80">{source.recipeTitle}</span>
       <span>({formatDate(source.mealDate)})</span>
-      {source.contributedQuantity != null || source.contributedUnit ? (
-        <span>
-          {source.contributedQuantity != null
-            ? formatQty(source.contributedQuantity)
-            : ""}
-          {source.contributedUnit ? ` ${source.contributedUnit}` : ""}
-        </span>
-      ) : null}
+      {(() => {
+        const unitLabel = source.contributedUnit ?? source.contributedSubUnit;
+        if (source.contributedQuantity == null && !unitLabel) return null;
+        return (
+          <span>
+            {source.contributedQuantity != null
+              ? formatQty(source.contributedQuantity)
+              : ""}
+            {unitLabel ? ` ${unitLabel}` : ""}
+          </span>
+        );
+      })()}
       {source.recipeNotes ? <span>· {source.recipeNotes}</span> : null}
     </li>
   );

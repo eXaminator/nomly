@@ -27,7 +27,11 @@ export async function apiCreateMeal(input: {
 
 export async function apiUpdateMeal(
   id: number,
-  patch: { servingsOverride?: number | null; note?: string | null },
+  patch: {
+    servingsOverride?: number | null;
+    note?: string | null;
+    isLeftover?: boolean;
+  },
 ): Promise<void> {
   const res = await fetch(`/api/v1/meal-plans/${id}`, {
     method: "PATCH",
@@ -35,6 +39,18 @@ export async function apiUpdateMeal(
     body: JSON.stringify(patch),
   });
   await jsonOrThrow(res);
+}
+
+/** Duplicate a meal onto the next day as a leftover. Returns the new id. */
+export async function apiDuplicateMealToNextDay(
+  id: number,
+): Promise<{ id: number }> {
+  const res = await fetch(`/api/v1/meal-plans/${id}/duplicate-next`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: "{}",
+  });
+  return jsonOrThrow(res) as Promise<{ id: number }>;
 }
 
 export async function apiDeleteMeal(id: number): Promise<void> {

@@ -589,3 +589,56 @@ describe("createRecipe + getRecipe with alternatives", () => {
     expect(r!.sections[0].ingredients[0].alternativeForId).toBeNull();
   });
 });
+
+describe("needsUpdate flag + filter", () => {
+  let ids: Ids;
+  beforeAll(async () => {
+    ids = await seed();
+  });
+
+  it("defaults to false and round-trips through getRecipe", async () => {
+    const { getRecipe } = await import("@/lib/recipes/service");
+    expect(getRecipe(ids.tomatensuppe)!.needsUpdate).toBe(false);
+  });
+
+  it("setRecipeNeedsUpdate flips the flag; listRecipes exposes it", async () => {
+    const { setRecipeNeedsUpdate, getRecipe, listRecipes } = await import(
+      "@/lib/recipes/service"
+    );
+    expect(setRecipeNeedsUpdate(ids.spaghettiBolognese, true)).toBe(true);
+    expect(getRecipe(ids.spaghettiBolognese)!.needsUpdate).toBe(true);
+    const byId = new Map(listRecipes().map((r) => [r.id, r]));
+    expect(byId.get(ids.spaghettiBolognese)?.needsUpdate).toBe(true);
+    expect(byId.get(ids.tomatensuppe)?.needsUpdate).toBe(false);
+  });
+
+  it("setRecipeNeedsUpdate returns false for a missing recipe", async () => {
+    const { setRecipeNeedsUpdate } = await import("@/lib/recipes/service");
+    expect(setRecipeNeedsUpdate(999_999, true)).toBe(false);
+  });
+
+  it("needsUpdate filter keeps only flagged recipes", async () => {
+    const { setRecipeNeedsUpdate, listRecipes } = await import(
+      "@/lib/recipes/service"
+    );
+    setRecipeNeedsUpdate(ids.spaghettiBolognese, true);
+    setRecipeNeedsUpdate(ids.apfelkuchen, true);
+    const out = listRecipes({ needsUpdate: true })
+      .map((r) => r.id)
+      .sort();
+    expect(out).toEqual([ids.spaghettiBolognese, ids.apfelkuchen].sort());
+  });
+
+  it("needsUpdate filter composes with other filters", async () => {
+    const { setRecipeNeedsUpdate, listRecipes } = await import(
+      "@/lib/recipes/service"
+    );
+    setRecipeNeedsUpdate(ids.tomatensuppe, true);
+    setRecipeNeedsUpdate(ids.spaghettiBolognese, true);
+    // Only the flagged AND vegan one survives.
+    const out = listRecipes({ needsUpdate: true, diet: "vegan" }).map(
+      (r) => r.id,
+    );
+    expect(out).toEqual([ids.tomatensuppe]);
+  });
+});

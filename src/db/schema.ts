@@ -21,6 +21,15 @@ export const recipe = sqliteTable("recipe", {
   servings: integer("servings").notNull().default(1),
   prepTimeMin: integer("prep_time_min"),
   cookTimeMin: integer("cook_time_min"),
+  /**
+   * User flag: "this recipe needs a later edit" (a wrong amount, a missing
+   * step, a photo to add …). Set/cleared from the recipe detail page; the
+   * recipe list can filter to just the flagged ones. Purely a reminder — it
+   * has no effect on parsing, planning or shopping.
+   */
+  needsUpdate: integer("needs_update", { mode: "boolean" })
+    .notNull()
+    .default(false),
   createdAt: integer("created_at").notNull().default(now),
   updatedAt: integer("updated_at").notNull().default(now),
 });
@@ -96,6 +105,21 @@ export const ingredient = sqliteTable("ingredient", {
   purchaseUnitId: integer("purchase_unit_id").references(() => unit.id, {
     onDelete: "set null",
   }),
+  /**
+   * Canonical-name parser defaults, mirroring `ingredient_alias`'
+   * `default_unit_id` / `default_sub_unit_id`. When a recipe line matches this
+   * ingredient by its *canonical* name (not via an alias) and carries no
+   * explicit unit, the parser substitutes these instead of the generic
+   * "Stück" fallback. Resolution order: alias default → ingredient default →
+   * "Stück". Exactly one of the two is meaningful at a time.
+   */
+  defaultUnitId: integer("default_unit_id").references(() => unit.id, {
+    onDelete: "set null",
+  }),
+  defaultSubUnitId: integer("default_sub_unit_id").references(
+    (): AnySQLiteColumn => ingredientSubUnit.id,
+    { onDelete: "set null" },
+  ),
   excludeFromShoppingList: integer("exclude_from_shopping_list", { mode: "boolean" })
     .notNull()
     .default(false),
@@ -287,6 +311,16 @@ export const mealPlan = sqliteTable(
     servingsOverride: integer("servings_override"),
     note: text("note"),
     sortOrder: integer("sort_order").notNull().default(0),
+    /**
+     * "We're eating the same dish again" — a leftover day. A leftover meal is
+     * skipped by the shopping-list builder and by the "when is this ingredient
+     * next needed" timing (you cooked/bought for it on the original day), and
+     * doesn't count toward recipe usage stats. It still shows on the plan,
+     * muted and labelled.
+     */
+    isLeftover: integer("is_leftover", { mode: "boolean" })
+      .notNull()
+      .default(false),
     createdAt: integer("created_at").notNull().default(now),
   },
   (t) => [index("meal_plan_date_idx").on(t.date)],
@@ -385,6 +419,16 @@ export const shoppingItemSource = sqliteTable(
     contributedUnitId: integer("contributed_unit_id").references(() => unit.id, {
       onDelete: "set null",
     }),
+    /**
+     * Set instead of `contributed_unit_id` when the recipe line used an
+     * ingredient sub-unit ("5 Stäbchen"). The read-time aggregator rolls
+     * these up into the ingredient's purchase unit via `per_purchase`. The
+     * two columns are mutually exclusive, mirroring `recipe_ingredient`.
+     */
+    contributedSubUnitId: integer("contributed_sub_unit_id").references(
+      () => ingredientSubUnit.id,
+      { onDelete: "set null" },
+    ),
     addedAt: integer("added_at").notNull().default(now),
   },
   (t) => [
@@ -470,6 +514,13 @@ export const shoppingItemStapleSource = sqliteTable(
     contributedUnitId: integer("contributed_unit_id").references(() => unit.id, {
       onDelete: "set null",
     }),
+    /** Mirrors `shopping_item_source.contributed_sub_unit_id`: set when the
+     *  staple item used an ingredient sub-unit. Rolled up to the purchase
+     *  unit at read time. */
+    contributedSubUnitId: integer("contributed_sub_unit_id").references(
+      () => ingredientSubUnit.id,
+      { onDelete: "set null" },
+    ),
     addedAt: integer("added_at").notNull().default(now),
   },
   (t) => [

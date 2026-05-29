@@ -6,6 +6,7 @@ const updateSchema = z
   .object({
     servingsOverride: z.number().int().positive().nullable().optional(),
     note: z.string().nullable().optional(),
+    isLeftover: z.boolean().optional(),
   })
   .strict();
 
