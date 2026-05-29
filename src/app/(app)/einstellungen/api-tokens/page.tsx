@@ -6,6 +6,8 @@ import { listApiTokens } from "@/lib/bearer";
 
 export const dynamic = "force-dynamic";
 
+export const metadata = { title: "API-Tokens" };
+
 export default function ApiTokensPage() {
   const initial = listApiTokens();
   return (

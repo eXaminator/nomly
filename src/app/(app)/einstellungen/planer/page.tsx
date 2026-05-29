@@ -3,6 +3,8 @@ import { getPlannerSettings } from "@/lib/settings/planner";
 
 export const dynamic = "force-dynamic";
 
+export const metadata = { title: "Planer" };
+
 export default function PlannerSettingsPage() {
   const settings = getPlannerSettings();
   return (

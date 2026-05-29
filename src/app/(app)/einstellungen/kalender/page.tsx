@@ -6,6 +6,8 @@ import { listFeeds } from "@/lib/ical/feeds";
 
 export const dynamic = "force-dynamic";
 
+export const metadata = { title: "Kalender" };
+
 export default function CalendarFeedsPage() {
   const initial = listFeeds();
   return (

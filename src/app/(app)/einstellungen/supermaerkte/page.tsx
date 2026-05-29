@@ -6,6 +6,8 @@ import { listSupermarkets } from "@/lib/stammdaten/supermarket/service";
 
 export const dynamic = "force-dynamic";
 
+export const metadata = { title: "Supermärkte" };
+
 export default function SupermarketStammdatenPage() {
   const initial = listSupermarkets();
   return (

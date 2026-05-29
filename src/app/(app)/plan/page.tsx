@@ -18,6 +18,8 @@ import { refreshStaleEnabledFeeds } from "@/lib/ical/fetch";
 
 export const dynamic = "force-dynamic";
 
+export const metadata = { title: "Essensplan" };
+
 export default async function PlanPage({
   searchParams,
 }: {

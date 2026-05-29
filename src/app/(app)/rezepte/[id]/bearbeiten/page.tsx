@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { ChevronLeft } from "lucide-react";
 import { notFound } from "next/navigation";
@@ -9,6 +10,17 @@ import { db } from "@/db";
 import { tag } from "@/db/schema";
 
 export const dynamic = "force-dynamic";
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}): Promise<Metadata> {
+  const { id: rawId } = await params;
+  const id = Number(rawId);
+  const recipe = Number.isInteger(id) && id > 0 ? getRecipe(id) : null;
+  return { title: recipe ? `${recipe.title} bearbeiten` : "Rezept bearbeiten" };
+}
 
 export default async function EditRecipePage({
   params,

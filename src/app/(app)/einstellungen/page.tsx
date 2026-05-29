@@ -70,6 +70,8 @@ const STAMMDATEN_LINKS: Array<{
   },
 ];
 
+export const metadata = { title: "Einstellungen" };
+
 export default async function EinstellungenPage() {
   return (
     <>

@@ -10,6 +10,8 @@ import { getPlannerSettings } from "@/lib/settings/planner";
 
 export const dynamic = "force-dynamic";
 
+export const metadata = { title: "Einkaufsliste" };
+
 export default async function ShoppingPage() {
   const requestHeaders = await headers();
   const isShellPrecache = requestHeaders.get("x-nomly-shell") === "1";

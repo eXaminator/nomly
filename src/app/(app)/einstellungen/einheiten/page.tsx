@@ -6,6 +6,8 @@ import { listUnitsManaged } from "@/lib/stammdaten/unit/service";
 
 export const dynamic = "force-dynamic";
 
+export const metadata = { title: "Einheiten" };
+
 export default function UnitStammdatenPage() {
   const initial = listUnitsManaged();
   return (

@@ -8,6 +8,8 @@ import { tag } from "@/db/schema";
 
 export const dynamic = "force-dynamic";
 
+export const metadata = { title: "Neues Rezept" };
+
 export default function NewRecipePage() {
   const tagSuggestions = db
     .select({ name: tag.name })

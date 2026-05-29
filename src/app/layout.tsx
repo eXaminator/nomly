@@ -14,7 +14,12 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "nomly",
+  // Per-page titles fill the `%s`; pages without their own title fall back to
+  // the bare default. e.g. recipe page → "Lasagne · nomly".
+  title: {
+    default: "nomly",
+    template: "%s · nomly",
+  },
   description: "Kochbuch, Mahlzeitenplaner und Einkaufsliste",
 };
 

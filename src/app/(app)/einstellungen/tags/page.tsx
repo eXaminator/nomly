@@ -6,6 +6,8 @@ import { listTags } from "@/lib/stammdaten/tag/service";
 
 export const dynamic = "force-dynamic";
 
+export const metadata = { title: "Tags" };
+
 export default function TagStammdatenPage() {
   const initial = listTags();
   return (

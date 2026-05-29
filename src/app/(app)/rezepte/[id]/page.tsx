@@ -1,8 +1,22 @@
+import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { RecipeDetail } from "@/components/recipes/recipe-detail";
 import { getRecipe } from "@/lib/recipes/service";
 
 export const dynamic = "force-dynamic";
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}): Promise<Metadata> {
+  const { id: rawId } = await params;
+  const id = Number(rawId);
+  const recipe = Number.isInteger(id) && id > 0 ? getRecipe(id) : null;
+  // Fall back to the bare default when the recipe is missing (the page itself
+  // renders notFound()).
+  return recipe ? { title: recipe.title } : {};
+}
 
 export default async function RecipeViewPage({
   params,

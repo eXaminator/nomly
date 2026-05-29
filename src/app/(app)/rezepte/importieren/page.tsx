@@ -7,6 +7,8 @@ import { tag } from "@/db/schema";
 
 export const dynamic = "force-dynamic";
 
+export const metadata = { title: "Rezept importieren" };
+
 export default function ImportRecipePage() {
   const tagSuggestions = db
     .select({ name: tag.name })

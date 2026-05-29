@@ -2,6 +2,8 @@ import { CloudOff } from "lucide-react";
 
 // Static fallback the SW serves for any non-`/einkauf` navigation that fails
 // offline; renders inside the root `AppShell` so header + nav stay reachable.
+export const metadata = { title: "Offline" };
+
 export default function OfflinePage() {
   return (
     <div className="mx-auto flex max-w-md flex-col items-center gap-4 px-4 py-16 text-center">

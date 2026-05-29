@@ -6,6 +6,8 @@ import { listIngredients } from "@/lib/stammdaten/ingredient/service";
 
 export const dynamic = "force-dynamic";
 
+export const metadata = { title: "Zutaten" };
+
 export default function IngredientStammdatenPage() {
   const initial = listIngredients();
   return (

@@ -6,6 +6,8 @@ import { listGroups } from "@/lib/staples/groups";
 
 export const dynamic = "force-dynamic";
 
+export const metadata = { title: "Standards" };
+
 export default function StandardsListPage() {
   const initial = listGroups();
   return (

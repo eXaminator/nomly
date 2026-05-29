@@ -6,6 +6,8 @@ import { listCategories } from "@/lib/stammdaten/category/service";
 
 export const dynamic = "force-dynamic";
 
+export const metadata = { title: "Kategorien" };
+
 export default function CategoryStammdatenPage() {
   const initial = listCategories();
   return (

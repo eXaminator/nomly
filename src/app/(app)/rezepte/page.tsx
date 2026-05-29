@@ -26,6 +26,8 @@ type Search = {
   update?: string;
 };
 
+export const metadata = { title: "Rezepte" };
+
 export default async function RezeptePage({
   searchParams,
 }: {

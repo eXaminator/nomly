@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { ChevronLeft } from "lucide-react";
 import { notFound } from "next/navigation";
@@ -10,6 +11,17 @@ import { unit } from "@/db/schema";
 import { getGroup } from "@/lib/staples/groups";
 
 export const dynamic = "force-dynamic";
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}): Promise<Metadata> {
+  const { id: rawId } = await params;
+  const id = Number(rawId);
+  const group = Number.isInteger(id) && id > 0 ? getGroup(id) : null;
+  return { title: group ? group.name : "Standards" };
+}
 
 export default async function StandardsDetailPage({
   params,
