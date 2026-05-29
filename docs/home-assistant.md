@@ -27,14 +27,19 @@ docker compose exec nomly \
   scripts/create-api-token.mts --name home-assistant-embed --scope embed
 ```
 
-Each raw token is printed **once**. Store both in HA's `secrets.yaml`:
+Each raw token is printed **once**. The **full** token is used in
+`configuration.yaml` (sensors / rest_commands), so put it in `secrets.yaml` as a
+ready-to-use `Authorization` value:
 
 ```yaml
 # secrets.yaml
-nomly_base: "https://nomly.weingaertner.pro"
-nomly_token: "<full token>"
-nomly_embed_token: "<embed token>"
+nomly_bearer: "Bearer <full token>"
 ```
+
+The **embed** token is used in a Lovelace dashboard card (the iframe URL).
+Lovelace can't read `secrets.yaml`, so paste the embed token directly into the
+card config wherever you see `?k=<embed token>` below. It's a read-only token by
+construction, so that's fine.
 
 ### Allow framing
 
@@ -52,12 +57,10 @@ EMBED_FRAME_ANCESTORS: "https://home.weingaertner.pro"
 # configuration.yaml
 rest:
   - resource_template: >-
-      {{ states('input_text.nomly_base') if false else
-         '__BASE__/api/v1/meal-plans?from=' ~ now().strftime('%Y-%m-%d')
-         ~ '&to=' ~ (now() + timedelta(days=1)).strftime('%Y-%m-%d') }}
+      https://nomly.weingaertner.pro/api/v1/meal-plans?from={{ now().strftime('%Y-%m-%d') }}&to={{ (now() + timedelta(days=1)).strftime('%Y-%m-%d') }}
     headers:
-      Authorization: !secret nomly_token_bearer   # "Bearer <full token>"
-    scan_interval: 900
+      Authorization: !secret nomly_bearer   # literal "Bearer <full token>"
+    scan_interval: 600
     sensor:
       - name: "Nomly meals"
         unique_id: nomly_meals
@@ -66,15 +69,17 @@ rest:
           - mealPlans
 ```
 
-> Replace `__BASE__` with `https://nomly.weingaertner.pro`. HA's REST sensor
-> can't read `!secret` inside `resource_template`, so hard-code the base URL
-> here (it isn't a secret). Add a `nomly_token_bearer` secret containing the
-> literal `Bearer <full token>`.
+> `resource_template` is re-evaluated each `scan_interval`, so the `from`/`to`
+> dates roll over at midnight on their own. `!secret nomly_bearer` is the literal
+> string `Bearer <full token>` (the base URL isn't a secret, so it stays inline —
+> `!secret` can't be used mid-template anyway).
 
-Each meal exposes `recipe.id`, `recipe.title`, `recipe.photoPath`, `date`,
-`servings`. Photo URL: `https://nomly.weingaertner.pro/api/v1/<photoPath>`.
+The sensor's **state** is the meal count; the `mealPlans` **attribute** is the
+full array. Each meal exposes `recipe.id`, `recipe.title`, `recipe.photoPath`,
+`date`, `servings`. Photo URL:
+`https://nomly.weingaertner.pro/api/v1/<photoPath>`.
 
-A simple dashboard list (Markdown card):
+A throwaway Markdown list to confirm it works:
 
 ```yaml
 type: markdown
@@ -83,6 +88,65 @@ content: |
   - **{{ m.date }}** — {{ m.recipe.title }} ({{ m.servings }} P.)
   {% endfor %}
 ```
+
+## 2b. Dynamic meals card — one button per meal, no limit
+
+Render one `custom:button-card` per planned meal (today + tomorrow, however
+many there are) and open the recipe in a popup on tap. Uses
+[`config-template-card`](https://github.com/iantrich/config-template-card),
+[`button-card`](https://github.com/custom-cards/button-card) and
+[`browser_mod`](https://github.com/thomasloven/hass-browser_mod) (all HACS).
+
+```yaml
+type: custom:config-template-card
+entities:
+  - sensor.nomly_meals
+card:
+  type: vertical-stack
+  cards: >
+    ${ (states['sensor.nomly_meals'].attributes.mealPlans || []).map(function (m) {
+      var today = new Date().toISOString().slice(0, 10);
+      var tomorrow = new Date(Date.now() + 864e5).toISOString().slice(0, 10);
+      var when = m.date === today ? 'Heute' : (m.date === tomorrow ? 'Morgen' : m.date);
+      return {
+        type: 'custom:button-card',
+        name: m.recipe.title,
+        label: when + ' · ' + m.servings + ' Portionen',
+        show_label: true,
+        entity_picture: m.recipe.photoPath
+          ? 'https://nomly.weingaertner.pro/api/v1/' + m.recipe.photoPath
+          : undefined,
+        show_entity_picture: !!m.recipe.photoPath,
+        tap_action: {
+          action: 'fire-dom-event',
+          browser_mod: {
+            service: 'browser_mod.popup',
+            data: {
+              title: m.recipe.title,
+              content: {
+                type: 'iframe',
+                url: 'https://nomly.weingaertner.pro/embed/rezepte/'
+                     + m.recipe.id + '?k=<embed token>',
+                aspect_ratio: '90%'
+              }
+            }
+          }
+        }
+      };
+    }) }
+```
+
+Because the cards are generated from the `mealPlans` array, there's **no fixed
+limit** — 1 meal or 5, today-only or today+tomorrow, it just renders what's
+planned. To show today only, filter the array:
+`.filter(m => m.date === new Date().toISOString().slice(0,10))`.
+
+> Prefer Bubble Card for the popup? You can put the same `iframe` inside a
+> Bubble Card pop-up, but Bubble pop-ups are keyed by a URL hash (one
+> definition per hash), so they can't take a per-recipe URL dynamically.
+> `browser_mod.popup` is parameterised per tap, which is why it's used here.
+> The dynamic *list* (config-template-card) is independent of which popup
+> mechanism you choose.
 
 ## 3. Recipe in an iframe (tap a meal)
 
@@ -118,7 +182,7 @@ rest_command:
     url: "https://nomly.weingaertner.pro/api/v1/shopping/items"
     method: POST
     headers:
-      Authorization: !secret nomly_token_bearer
+      Authorization: !secret nomly_bearer
       Content-Type: "application/json"
     payload: '{"byName": "{{ item }}"}'
 ```
@@ -152,7 +216,7 @@ rest_command:
     url: "https://nomly.weingaertner.pro/api/v1/ingredients/usage?name={{ item }}"
     method: GET
     headers:
-      Authorization: !secret nomly_token_bearer
+      Authorization: !secret nomly_bearer
 
 intent_script:
   NomlyIngredientUsage:
@@ -179,7 +243,7 @@ rest_command:
     url: "https://nomly.weingaertner.pro/api/v1/shopping/store-availability"
     method: GET
     headers:
-      Authorization: !secret nomly_token_bearer
+      Authorization: !secret nomly_bearer
 
 automation:
   - alias: "Nomly — Einkauf bei Edeka"
