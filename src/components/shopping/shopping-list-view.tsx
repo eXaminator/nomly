@@ -389,12 +389,9 @@ export function ShoppingListView({
 
   return (
     <div className="flex flex-col gap-4">
-      <h1 className="text-2xl font-semibold tracking-tight">Einkaufsliste</h1>
-
-      {/* Sticky shelf: undo on the left; counter + supermarket select on the
-          right. Sits below the AppShell topbar (h-16) at z-20 so it doesn't
-          outrank it. */}
-      <div className="sticky top-16 z-20 -mx-4 flex items-center justify-between gap-2 border-b border-[var(--color-border)] bg-[var(--color-bg)]/95 px-4 py-2 backdrop-blur supports-[backdrop-filter]:bg-[var(--color-bg)]/80 md:-mx-6 md:gap-3 md:px-6">
+      {/* Title row: headline on the left, undo aligned to its right. */}
+      <div className="flex items-center justify-between gap-2">
+        <h1 className="text-2xl font-semibold tracking-tight">Einkaufsliste</h1>
         <Button
           variant="outline"
           size="sm"
@@ -407,7 +404,34 @@ export function ShoppingListView({
           <RotateCcw className="size-4" />
           <span className="hidden sm:inline">Rückgängig</span>
         </Button>
-        <div className="flex min-w-0 items-center gap-2 md:gap-3">
+      </div>
+
+      {/* Sticky shelf: counter pinned far left, the pending-changes pill
+          centered in the middle, supermarket select pinned right. Sits below
+          the AppShell topbar (h-16) at z-20 so it doesn't outrank it. */}
+      <div className="sticky top-16 z-20 -mx-4 flex items-center gap-2 border-b border-[var(--color-border)] bg-[var(--color-bg)]/95 px-4 py-2 backdrop-blur supports-[backdrop-filter]:bg-[var(--color-bg)]/80 md:-mx-6 md:gap-3 md:px-6">
+        <span className="shrink-0 whitespace-nowrap text-sm text-[var(--color-muted-fg)]">
+          {filterActive ? (
+            <>
+              <strong className="font-semibold text-[var(--color-fg)]">
+                {visibleOpen}
+              </strong>
+              <span className="hidden sm:inline"> von </span>
+              <span className="sm:hidden">/</span>
+              {openTotal} offen
+            </>
+          ) : (
+            <>
+              <strong className="font-semibold text-[var(--color-fg)]">
+                {openTotal}
+              </strong>{" "}
+              offen
+            </>
+          )}
+          {" · "}
+          {checkedTotal} erledigt
+        </span>
+        <div className="flex min-w-0 flex-1 justify-center">
           {pendingCount > 0 ? (
             <button
               type="button"
@@ -419,27 +443,8 @@ export function ShoppingListView({
               <span>{pendingCount} ausstehend</span>
             </button>
           ) : null}
-          <span className="whitespace-nowrap text-sm text-[var(--color-muted-fg)]">
-            {filterActive ? (
-              <>
-                <strong className="font-semibold text-[var(--color-fg)]">
-                  {visibleOpen}
-                </strong>
-                <span className="hidden sm:inline"> von </span>
-                <span className="sm:hidden">/</span>
-                {openTotal} offen
-              </>
-            ) : (
-              <>
-                <strong className="font-semibold text-[var(--color-fg)]">
-                  {openTotal}
-                </strong>{" "}
-                offen
-              </>
-            )}
-            {" · "}
-            {checkedTotal} erledigt
-          </span>
+        </div>
+        <div className="shrink-0">
           <SupermarketFilter
             value={supermarketId}
             supermarkets={supermarkets}
