@@ -55,6 +55,18 @@ describe("embed allow-list", () => {
     expect(isEmbedAllowedPath("/api/v1/photos/abc.webp", "POST")).toBe(false);
   });
 
+  it("permits GET on a meal's upcoming-ingredient-uses (for ?meal=)", () => {
+    expect(
+      isEmbedAllowedPath("/api/v1/meal-plans/42/upcoming-ingredient-uses", "GET"),
+    ).toBe(true);
+    expect(
+      isEmbedAllowedPath("/api/v1/meal-plans/42/upcoming-ingredient-uses", "POST"),
+    ).toBe(false);
+    // not the bare meal-plan endpoints
+    expect(isEmbedAllowedPath("/api/v1/meal-plans/42", "GET")).toBe(false);
+    expect(isEmbedAllowedPath("/api/v1/meal-plans", "GET")).toBe(false);
+  });
+
   it("denies everything else", () => {
     expect(isEmbedAllowedPath("/api/v1/recipes", "GET")).toBe(false);
     expect(isEmbedAllowedPath("/rezepte/12", "GET")).toBe(false);

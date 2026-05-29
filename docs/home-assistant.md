@@ -137,9 +137,22 @@ card:
             browser_mod: {
               service: 'browser_mod.popup',
               data: {
+                // &meal=<id> → ingredient "used elsewhere this week" popovers.
+                // &title=0   → hide the recipe name in the iframe (the popup
+                //              header already shows it).
+                // No aspect_ratio: the iframe card's #root (the aspect-ratio
+                // box) is overridden via card-mod to fill the full dialog
+                // height (height:100% collapses to 0 here, so use a dvh calc).
+                content: { type: 'iframe', url: BASE + '/embed/rezepte/' + m.recipe.id + '?k=' + TOKEN + '&meal=' + m.id + '&title=0', card_mod: { style: ':host{display:block} ha-card{height:auto} #root{padding-top:0 !important; height: calc(100dvh - 70px) !important;}' } },
                 title: m.recipe.title,
-                content: { type: 'iframe', url: BASE + '/embed/rezepte/' + m.recipe.id + '?k=' + TOKEN, aspect_ratio: '75%' },
-                style: 'ha-dialog { --mdc-dialog-min-width: 92vw !important; --mdc-dialog-max-width: 92vw !important; --mdc-dialog-max-height: 92vh !important; }'
+                // Size the popup: HA's dialog is a WebAwesome <wa-dialog> two
+                // shadow-roots deep, so we use card-mod's `$` to pierce into
+                // ha-dialog's shadow and set wa-dialog's own --width/--height.
+                // 1060px → the iframe lands ~1043px, just over the recipe's
+                // 1024px (lg) breakpoint, so ingredients + instructions sit
+                // side-by-side. (The iframe is ~17px narrower than the dialog,
+                // so ~1030px would still stack.) 100dvh = full viewport height.
+                card_mod: { style: { 'ha-dialog$': 'wa-dialog { --width: min(96vw, 1060px) !important; --height: 100dvh !important; }' } }
               }
             }
           },
@@ -203,14 +216,29 @@ section header you can also add from the dashboard UI — with the weekday + dat
 (e.g. "Heute – Fr. 29. Mai"). Date math is in **local** time so it can't drift a
 day near midnight.
 
-**Popup size** is set via the `style` line in the `tap_action`. browser_mod
-injects `style` as a *stylesheet*, so it needs a real selector: target the
-`ha-dialog` element directly and set `--mdc-dialog-*` with `!important` (the
-dialog re-declares those vars on itself, so an ancestor/`:host` value or a bare
-declaration won't take — it must hit `ha-dialog` with `!important`). On mobile
-the popup is already near-full-width, so the change mainly shows on desktop. The
-recipe's height comes from the iframe card's `aspect_ratio`; the embed page
-scrolls internally, so a moderate ratio is fine. Adjust to taste.
+**Popup size** is the fiddly bit, because recent HA renders the popup as a
+**WebAwesome `<wa-dialog>` nested two shadow-roots deep** (inside `ha-dialog`,
+inside `browser-mod-popup`). Its width is driven by `wa-dialog`'s own `--width`
+variable — *not* `--mdc-dialog-*`, and not reachable by browser_mod's `style` /
+`popup_styles` (those can only reach `ha-dialog`, and `--width` doesn't inherit
+across the boundary). The working lever is **card-mod's `$` shadow-pierce**:
+`card_mod.style` keyed `ha-dialog$` injects a stylesheet *into* ha-dialog's
+shadow, where `wa-dialog { --width; --height }` finally lands. `1060px` puts the
+**iframe** at ~1043px — just over the recipe's `lg` (1024px) breakpoint — so the
+ingredients and instructions render **side-by-side**. Note the iframe is ~17px
+narrower than the dialog, so a ~1030px dialog would still stack. For height, the
+dialog is set to `100dvh` and the iframe card's `#root` (its aspect-ratio box) is
+overridden via card-mod to `height: calc(100dvh - 70px)` so the recipe **fills
+the full viewport height** with no aspect-ratio letterboxing — `height: 100%`
+collapses to 0 through the slotted shadow chain, so a `dvh` calc is used instead.
+Requires card-mod installed (HACS). On mobile the popup is near-full-width and
+the recipe stacks to one column.
+
+**Meal context + de-duplicated title** come from the iframe URL params:
+`&meal=<m.id>` turns on the per-ingredient "used elsewhere this week" popovers
+(needs nomly's embed allow-list to permit that read — shipped), and `&title=0`
+hides the recipe name inside the iframe so it isn't duplicated under the popup's
+own header (which keeps the title + close button).
 
 > Prefer Bubble Card for the popup? You can put the same `iframe` inside a
 > Bubble Card pop-up, but Bubble pop-ups are keyed by a URL hash (one
