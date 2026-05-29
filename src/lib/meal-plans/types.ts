@@ -5,12 +5,15 @@ export type MealPlanCreateInput = {
   date: string;
   servingsOverride?: number | null;
   note?: string | null;
+  isLeftover?: boolean;
 };
 
 export type MealPlanUpdateInput = {
   /** When omitted, leaves the value untouched. `null` clears the override. */
   servingsOverride?: number | null;
   note?: string | null;
+  /** Toggle the leftover flag. Omitted = untouched. */
+  isLeftover?: boolean;
 };
 
 export type MealPlanMoveInput = {
@@ -59,6 +62,9 @@ export type MealPlanView = {
    * deleted.
    */
   hasShoppingImpact: boolean;
+  /** Leftover day: shown muted + labelled, skipped by shopping + ingredient
+   *  timing + usage stats. */
+  isLeftover: boolean;
   recipe: {
     id: number;
     title: string;

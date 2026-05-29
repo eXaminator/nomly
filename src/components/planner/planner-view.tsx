@@ -44,6 +44,7 @@ import {
   apiCreateMeal,
   apiDeleteMeal,
   apiDeleteMealWithShopping,
+  apiDuplicateMealToNextDay,
   apiMoveMeal,
   apiReorderDay,
   apiReorderMeal,
@@ -144,6 +145,7 @@ export function PlannerView({
       note,
       sortOrder: maxSortOrderForDate(date) + 1,
       hasShoppingImpact: false,
+      isLeftover: false,
       recipe: {
         id: recipe.id,
         title: recipe.title,
@@ -280,6 +282,27 @@ export function PlannerView({
       // The server recomputes any shopping-list contributions for this meal
       // from the new portion count; router.refresh() pulls the fresh view.
       await apiUpdateMeal(mealId, { servingsOverride: next });
+      router.refresh();
+    });
+  }
+
+  async function handleToggleLeftover(mealId: number, next: boolean) {
+    setMealPlans((prev) =>
+      prev.map((m) => (m.id === mealId ? { ...m, isLeftover: next } : m)),
+    );
+    await withBusy(async () => {
+      // Flag-only: already-added shopping items stay; only future adds and
+      // ingredient timing change. router.refresh() pulls the fresh view.
+      await apiUpdateMeal(mealId, { isLeftover: next });
+      router.refresh();
+    });
+  }
+
+  async function handleDuplicateLeftover(mealId: number) {
+    await withBusy(async () => {
+      // The duplicate lands on the next day (possibly off the visible page);
+      // a refresh is simpler and correct than constructing an optimistic copy.
+      await apiDuplicateMealToNextDay(mealId);
       router.refresh();
     });
   }
@@ -712,6 +735,8 @@ export function PlannerView({
                 onReorderDown={(id) => handleReorder(id, "down")}
                 onDeleteMeal={(id) => handleDelete(id)}
                 onAdjustPortions={handleAdjustPortions}
+                onToggleLeftover={handleToggleLeftover}
+                onDuplicateLeftover={handleDuplicateLeftover}
                 onAddMeal={(date) => setAddingForDate(date)}
                 onPreviewRecipe={(id, mealPlanId) => {
                   setPreviewRecipeId(id);

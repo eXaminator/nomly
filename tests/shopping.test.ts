@@ -158,6 +158,19 @@ describe("shopping preview", () => {
     expect(tomate?.qty).toBe(1000); // 500 * (4/2)
   });
 
+  it("excludes leftover meals from the preview", async () => {
+    const { db } = await import("@/db");
+    const { mealPlan } = await import("@/db/schema");
+    const { eq } = await import("drizzle-orm");
+    const { previewMeals } = await import("@/lib/shopping/preview");
+    expect(previewMeals("2026-05-23", 1)).toHaveLength(1);
+    db.update(mealPlan)
+      .set({ isLeftover: true })
+      .where(eq(mealPlan.id, ctx.mealPlanId))
+      .run();
+    expect(previewMeals("2026-05-23", 1)).toHaveLength(0);
+  });
+
   it("drops exclude_from_shopping_list ingredients", async () => {
     const { db } = await import("@/db");
     const { ingredient } = await import("@/db/schema");

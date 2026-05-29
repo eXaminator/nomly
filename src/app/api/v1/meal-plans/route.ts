@@ -9,6 +9,7 @@ const createSchema = z.object({
   date: z.string().regex(ISO_DATE),
   servingsOverride: z.number().int().positive().nullable().optional(),
   note: z.string().nullable().optional(),
+  isLeftover: z.boolean().optional(),
 });
 
 export async function GET(request: Request) {

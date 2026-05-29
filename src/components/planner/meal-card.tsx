@@ -3,7 +3,16 @@
 import * as React from "react";
 import { useDraggable, useDroppable } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
-import { ChevronDown, ChevronUp, Minus, Pencil, Plus, Trash2 } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronUp,
+  CopyPlus,
+  Minus,
+  Pencil,
+  Plus,
+  Soup,
+  Trash2,
+} from "lucide-react";
 import type { MealPlanView } from "@/lib/meal-plans/types";
 import { DietBadge } from "@/components/recipes/diet-badge";
 import { cn } from "@/lib/cn";
@@ -16,6 +25,10 @@ type Props = {
   onDelete: (mealId: number) => void;
   /** Adjust this meal's portions by `delta` (clamped to ≥ 1 by the parent). */
   onAdjustPortions: (mealId: number, delta: number) => void;
+  /** Toggle the leftover flag on this meal. */
+  onToggleLeftover: (mealId: number, next: boolean) => void;
+  /** Duplicate this meal onto the next day as a leftover. */
+  onDuplicateLeftover: (mealId: number) => void;
   onPreviewRecipe: (recipeId: number, mealPlanId: number) => void;
   /** Disable DnD on mobile breakpoints — the parent decides via media query. */
   draggable: boolean;
@@ -28,6 +41,8 @@ export function MealCard({
   onReorderDown,
   onDelete,
   onAdjustPortions,
+  onToggleLeftover,
+  onDuplicateLeftover,
   onPreviewRecipe,
   draggable,
 }: Props) {
@@ -155,6 +170,10 @@ export function MealCard({
         // Whole card is the drag handle on desktop. Keep `select-none` so
         // text doesn't get selected mid-drag.
         draggable && "cursor-grab select-none active:cursor-grabbing",
+        // Leftover days read as secondary: muted background, dashed border,
+        // slightly faded. The "Reste" label + active toggle make it explicit.
+        meal.isLeftover &&
+          "border-dashed bg-[var(--color-muted)]/30 opacity-75 shadow-none",
       )}
       {...(draggable ? listeners : {})}
       {...(draggable ? attributes : {})}
@@ -219,6 +238,12 @@ export function MealCard({
           <span className="truncate text-sm font-medium text-[var(--color-fg)]">
             {meal.recipe.title}
           </span>
+          {meal.isLeftover ? (
+            <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-[var(--color-muted)] px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-[var(--color-muted-fg)]">
+              <Soup className="size-3" />
+              Reste
+            </span>
+          ) : null}
         </a>
         <div className="flex min-w-0 items-center gap-1 text-xs text-[var(--color-muted-fg)]">
           <button
@@ -267,8 +292,40 @@ export function MealCard({
       </div>
 
       <div className="flex shrink-0 items-start gap-0.5">
-        {/* Edit + delete sit side-by-side so the card stays short. */}
-        <div className="flex gap-0.5">
+        {/* Leftover controls + edit + delete. */}
+        <div className="flex flex-wrap justify-end gap-0.5">
+          <button
+            type="button"
+            aria-label={meal.isLeftover ? "Reste-Markierung entfernen" : "Als Reste markieren"}
+            title={meal.isLeftover ? "Reste-Markierung entfernen" : "Als Reste markieren"}
+            aria-pressed={meal.isLeftover}
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleLeftover(meal.id, !meal.isLeftover);
+            }}
+            className={cn(
+              "inline-flex size-7 items-center justify-center rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]",
+              meal.isLeftover
+                ? "bg-[var(--color-muted)] text-[var(--color-fg)]"
+                : "text-[var(--color-muted-fg)] hover:bg-[var(--color-muted)] hover:text-[var(--color-fg)]",
+            )}
+          >
+            <Soup className="size-4" />
+          </button>
+          <button
+            type="button"
+            aria-label="Als Reste auf nächsten Tag kopieren"
+            title="Als Reste auf nächsten Tag kopieren"
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation();
+              onDuplicateLeftover(meal.id);
+            }}
+            className="inline-flex size-7 items-center justify-center rounded-md text-[var(--color-muted-fg)] hover:bg-[var(--color-muted)] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+          >
+            <CopyPlus className="size-4" />
+          </button>
           <button
             type="button"
             aria-label="Bearbeiten"

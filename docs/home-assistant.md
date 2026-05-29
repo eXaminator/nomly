@@ -76,16 +76,21 @@ rest:
 
 The sensor's **state** is the meal count; the `mealPlans` **attribute** is the
 full array. Each meal exposes `recipe.id`, `recipe.title`, `recipe.photoPath`,
-`date`, `servings`. Photo URL:
+`date`, `servings`, and `isLeftover`. Photo URL:
 `https://nomly.weingaertner.pro/api/v1/<photoPath>`.
 
-A throwaway Markdown list to confirm it works:
+`isLeftover` is `true` for a leftover day ("we're eating this again"). These
+meals are intentionally excluded from the shopping list and ingredient timing —
+surface them with a label rather than hiding them, so the dashboard still shows
+what's for dinner.
+
+A throwaway Markdown list to confirm it works (leftovers get a "♻︎ Reste" tag):
 
 ```yaml
 type: markdown
 content: |
   {% for m in state_attr('sensor.nomly_meals','mealPlans') %}
-  - **{{ m.date }}** — {{ m.recipe.title }} ({{ m.servings }} P.)
+  - **{{ m.date }}** — {{ m.recipe.title }} ({{ m.servings }} P.){% if m.isLeftover %} — ♻︎ Reste{% endif %}
   {% endfor %}
 ```
 
@@ -131,7 +136,8 @@ card:
           show_state: true,
           show_entity_picture: true,
           entity_picture: m.recipe.photoPath ? (BASE + '/api/v1/' + m.recipe.photoPath) : FALLBACK,
-          state_display: m.recipe.title,
+          // Leftover days are tagged so the tile reads "♻︎ Reste · <title>".
+          state_display: (m.isLeftover ? '♻︎ Reste · ' : '') + m.recipe.title,
           tap_action: {
             action: 'fire-dom-event',
             browser_mod: {
@@ -387,7 +393,7 @@ JSON. Match the store by `name` or by hard-coding its `id`.)
 
 | Method | Path | Purpose |
 | ------ | ---- | ------- |
-| GET | `/api/v1/meal-plans?from=&to=` | Meals in a date range (existing). |
+| GET | `/api/v1/meal-plans?from=&to=` | Meals in a date range. Each carries `isLeftover`. |
 | POST | `/api/v1/shopping/items` `{byName}` | Add an item (existing). |
 | GET | `/api/v1/ingredients/usage?name=` | Where an ingredient is used + on-list. |
 | GET | `/api/v1/shopping/store-availability` | Per-store still-needed count. |

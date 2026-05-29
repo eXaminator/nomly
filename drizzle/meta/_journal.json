@@ -176,6 +176,13 @@
       "when": 1780085229636,
       "tag": "0024_cute_warlock",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "6",
+      "when": 1780086749092,
+      "tag": "0025_curved_luminals",
+      "breakpoints": true
     }
   ]
 }

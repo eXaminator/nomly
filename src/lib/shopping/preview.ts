@@ -102,7 +102,11 @@ export function previewMeals(start: string, lengthDays: number): PreviewMeal[] {
     })
     .from(mealPlan)
     .innerJoin(recipe, eq(recipe.id, mealPlan.recipeId))
-    .where(between(mealPlan.date, start, end))
+    // Leftover meals never reach the shopping list — they reuse what the
+    // original day already shopped for. This single filter also covers the
+    // ingredient-timing helpers (upcoming-uses, ingredient usage) since they
+    // both source their meals from previewMeals.
+    .where(and(between(mealPlan.date, start, end), eq(mealPlan.isLeftover, false)))
     .orderBy(asc(mealPlan.date), asc(mealPlan.sortOrder))
     .all();
 

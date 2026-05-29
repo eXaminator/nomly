@@ -378,3 +378,76 @@ describe("planner date helpers", () => {
     expect(r.to).toBe("2026-05-24");
   });
 });
+
+describe("leftovers flag", () => {
+  let recipeId: number;
+  beforeAll(async () => {
+    recipeId = await seedRecipe();
+  });
+  beforeEach(async () => {
+    await resetMeals();
+  });
+
+  it("createMeal defaults isLeftover to false; honours an explicit true", async () => {
+    const { createMeal, listByDateRange } = await import(
+      "@/lib/meal-plans/service"
+    );
+    const a = createMeal({ recipeId, date: "2026-06-01" });
+    const b = createMeal({ recipeId, date: "2026-06-01", isLeftover: true });
+    const byId = new Map(
+      listByDateRange("2026-06-01", "2026-06-01").map((m) => [m.id, m]),
+    );
+    expect(byId.get(a)?.isLeftover).toBe(false);
+    expect(byId.get(b)?.isLeftover).toBe(true);
+  });
+
+  it("updateMeal toggles isLeftover without touching servings", async () => {
+    const { createMeal, updateMeal, listByDateRange } = await import(
+      "@/lib/meal-plans/service"
+    );
+    const id = createMeal({ recipeId, date: "2026-06-01", servingsOverride: 3 });
+    updateMeal(id, { isLeftover: true });
+    const m = listByDateRange("2026-06-01", "2026-06-01").find((x) => x.id === id)!;
+    expect(m.isLeftover).toBe(true);
+    expect(m.servings).toBe(3);
+  });
+
+  it("duplicateMealToNextDay creates a next-day leftover copy", async () => {
+    const { createMeal, duplicateMealToNextDay, listByDateRange } = await import(
+      "@/lib/meal-plans/service"
+    );
+    const src = createMeal({ recipeId, date: "2026-06-01", servingsOverride: 4 });
+    const dupId = duplicateMealToNextDay(src);
+    const next = listByDateRange("2026-06-02", "2026-06-02");
+    const dup = next.find((m) => m.id === dupId)!;
+    expect(dup.date).toBe("2026-06-02");
+    expect(dup.isLeftover).toBe(true);
+    expect(dup.servings).toBe(4);
+    // Source stays a real meal.
+    const srcView = listByDateRange("2026-06-01", "2026-06-01").find(
+      (m) => m.id === src,
+    )!;
+    expect(srcView.isLeftover).toBe(false);
+  });
+
+  it("getRecipeUsageStats excludes leftover days", async () => {
+    const { createMeal, getRecipeUsageStats } = await import(
+      "@/lib/meal-plans/service"
+    );
+    // One real cook in the past, one leftover in the past.
+    createMeal({ recipeId, date: "2026-05-20" });
+    createMeal({ recipeId, date: "2026-05-21", isLeftover: true });
+    const stats = getRecipeUsageStats("2026-05-25").get(recipeId)!;
+    expect(stats.lastPlanned).toBe("2026-05-20"); // not the 21st leftover
+    expect(stats.count30d).toBe(1); // leftover not counted
+  });
+
+  it("isMealLeftover reflects the flag", async () => {
+    const { createMeal, isMealLeftover } = await import(
+      "@/lib/meal-plans/service"
+    );
+    const id = createMeal({ recipeId, date: "2026-06-01", isLeftover: true });
+    expect(isMealLeftover(id)).toBe(true);
+    expect(isMealLeftover(999999)).toBe(false);
+  });
+});

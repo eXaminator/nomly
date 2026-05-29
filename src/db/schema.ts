@@ -311,6 +311,16 @@ export const mealPlan = sqliteTable(
     servingsOverride: integer("servings_override"),
     note: text("note"),
     sortOrder: integer("sort_order").notNull().default(0),
+    /**
+     * "We're eating the same dish again" — a leftover day. A leftover meal is
+     * skipped by the shopping-list builder and by the "when is this ingredient
+     * next needed" timing (you cooked/bought for it on the original day), and
+     * doesn't count toward recipe usage stats. It still shows on the plan,
+     * muted and labelled.
+     */
+    isLeftover: integer("is_leftover", { mode: "boolean" })
+      .notNull()
+      .default(false),
     createdAt: integer("created_at").notNull().default(now),
   },
   (t) => [index("meal_plan_date_idx").on(t.date)],

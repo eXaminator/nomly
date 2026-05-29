@@ -78,6 +78,35 @@ export function createMeal(input: MealPlanCreateInput): number {
         servingsOverride:
           input.servingsOverride ?? defaultMealPortions(base.servings),
         note: input.note ?? null,
+        isLeftover: input.isLeftover ?? false,
+        sortOrder,
+      })
+      .returning({ id: mealPlan.id })
+      .all();
+    return inserted[0].id;
+  });
+}
+
+/**
+ * Duplicate a meal onto the next calendar day as a leftover ("we'll eat this
+ * again tomorrow"). The copy carries the same recipe + portions and is always
+ * flagged `is_leftover`, so it never re-shops and doesn't skew usage stats —
+ * regardless of whether the source was itself a leftover. Returns the new id.
+ */
+export function duplicateMealToNextDay(id: number): number {
+  return db.transaction((tx) => {
+    const m = tx.select().from(mealPlan).where(eq(mealPlan.id, id)).get();
+    if (!m) throw new Error(`meal ${id} not found`);
+    const nextDate = shiftDate(m.date, 1);
+    const sortOrder = nextSortOrderOnDate(tx, nextDate);
+    const inserted = tx
+      .insert(mealPlan)
+      .values({
+        recipeId: m.recipeId,
+        date: nextDate,
+        servingsOverride: m.servingsOverride,
+        note: m.note,
+        isLeftover: true,
         sortOrder,
       })
       .returning({ id: mealPlan.id })
@@ -93,6 +122,9 @@ export function updateMeal(id: number, patch: MealPlanUpdateInput): void {
   }
   if (Object.prototype.hasOwnProperty.call(patch, "note")) {
     patchData.note = patch.note ?? null;
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, "isLeftover")) {
+    patchData.isLeftover = patch.isLeftover ?? false;
   }
   if (Object.keys(patchData).length === 0) return;
 
@@ -309,6 +341,17 @@ export function reorderDay(date: string, orderedIds: number[]): void {
   });
 }
 
+/** Whether a given meal is flagged as a leftover. Used by the embed view to
+ *  surface a "Reste" banner. Returns false for a missing meal. */
+export function isMealLeftover(id: number): boolean {
+  const row = db
+    .select({ isLeftover: mealPlan.isLeftover })
+    .from(mealPlan)
+    .where(eq(mealPlan.id, id))
+    .get();
+  return row?.isLeftover ?? false;
+}
+
 export function listByDateRange(from: string, to: string): MealPlanView[] {
   assertIsoDate(from);
   assertIsoDate(to);
@@ -319,6 +362,7 @@ export function listByDateRange(from: string, to: string): MealPlanView[] {
       servingsOverride: mealPlan.servingsOverride,
       note: mealPlan.note,
       sortOrder: mealPlan.sortOrder,
+      isLeftover: mealPlan.isLeftover,
       recipeId: recipe.id,
       recipeTitle: recipe.title,
       recipePhoto: recipe.photoPath,
@@ -359,6 +403,7 @@ export function listByDateRange(from: string, to: string): MealPlanView[] {
       note: m.note,
       sortOrder: m.sortOrder,
       hasShoppingImpact: hasShopping.has(m.id),
+      isLeftover: m.isLeftover,
       recipe: {
         id: m.recipeId,
         title: m.recipeTitle,
@@ -387,9 +432,11 @@ export function getRecipeUsageStats(today: string): Map<number, RecipeUsageStats
   const rows = db
     .select({
       recipeId: mealPlan.recipeId,
-      lastPlanned: sql<string | null>`MAX(CASE WHEN ${mealPlan.date} < ${today} THEN ${mealPlan.date} END)`,
-      nextPlanned: sql<string | null>`MIN(CASE WHEN ${mealPlan.date} >= ${today} THEN ${mealPlan.date} END)`,
-      count30d: sql<number>`COUNT(CASE WHEN ${mealPlan.date} >= ${thirtyDaysAgo} AND ${mealPlan.date} < ${today} THEN 1 END)`,
+      // Leftover days are excluded — usage stats reflect when the recipe is
+      // actually cooked, not re-eaten.
+      lastPlanned: sql<string | null>`MAX(CASE WHEN ${mealPlan.date} < ${today} AND ${mealPlan.isLeftover} = 0 THEN ${mealPlan.date} END)`,
+      nextPlanned: sql<string | null>`MIN(CASE WHEN ${mealPlan.date} >= ${today} AND ${mealPlan.isLeftover} = 0 THEN ${mealPlan.date} END)`,
+      count30d: sql<number>`COUNT(CASE WHEN ${mealPlan.date} >= ${thirtyDaysAgo} AND ${mealPlan.date} < ${today} AND ${mealPlan.isLeftover} = 0 THEN 1 END)`,
     })
     .from(mealPlan)
     .groupBy(mealPlan.recipeId)
