@@ -100,7 +100,10 @@ do-nothing placeholder tile shows instead; if tomorrow has nothing, the whole
 [`button-card`](https://github.com/custom-cards/button-card) and
 [`browser_mod`](https://github.com/thomasloven/hass-browser_mod) (all HACS).
 
-Replace `PASTE_EMBED_TOKEN` with your embed token.
+Replace `PASTE_EMBED_TOKEN` with your embed token. Note the `cards: |-` block
+scalar: the `-` strips the trailing newline, which config-template-card requires
+(it expects the value to end in `}` — a plain `|` leaves a `\n` and throws
+"Unexpected token '}'").
 
 ```yaml
 type: custom:config-template-card
@@ -108,7 +111,7 @@ entities:
   - sensor.nomly_meals
 card:
   type: vertical-stack
-  cards: |
+  cards: |-
     ${ (function () {
       var BASE = 'https://nomly.weingaertner.pro';
       var TOKEN = 'PASTE_EMBED_TOKEN';
