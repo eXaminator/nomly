@@ -13,11 +13,6 @@ import { NumberInput } from "@/components/ui/number-input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { DietBadge } from "@/components/recipes/diet-badge";
-import { RecipeSearch } from "@/components/recipes/recipe-search";
-import {
-  TagFilterBar,
-  type TagFilterValue,
-} from "@/components/recipes/tag-filter-bar";
 import type { PlannerRecipe } from "@/lib/recipes/types";
 import { defaultMealPortions } from "@/lib/meal-plans/types";
 import {
@@ -25,10 +20,15 @@ import {
   formatWeekdayLongDe,
 } from "@/lib/meal-plans/dates";
 import { cn } from "@/lib/cn";
+import {
+  EMPTY_RECIPE_FILTER,
+  RecipeFilterControls,
+  useFilteredRecipes,
+  type PlannerRecipeFilter,
+} from "./recipe-filter";
 
 type Props = {
   date: string | null;
-  recipes: PlannerRecipe[];
   allTags: string[];
   onClose: () => void;
   onSelect: (input: {
@@ -39,7 +39,10 @@ type Props = {
   }) => Promise<void>;
 };
 
-const EMPTY_TAG_VALUE: TagFilterValue = { must: [], not: [] };
+// The modal isn't virtualised, so cap how many matches we render to keep the
+// DOM small. Users narrow further with the filter; the panel (which is
+// virtualised) shows the unbounded list.
+const MAX_RESULTS = 50;
 
 export function AddMealModal(props: Props) {
   // Key on the target date so form state resets between consecutive opens
@@ -49,38 +52,22 @@ export function AddMealModal(props: Props) {
 
 function AddMealModalInner({
   date,
-  recipes,
   allTags,
   onClose,
   onSelect,
 }: Props) {
-  const [query, setQuery] = React.useState("");
-  const [tagFilter, setTagFilter] = React.useState<TagFilterValue>(EMPTY_TAG_VALUE);
+  const [filter, setFilter] =
+    React.useState<PlannerRecipeFilter>(EMPTY_RECIPE_FILTER);
+  const { recipes: matches } = useFilteredRecipes(filter);
   const [selected, setSelected] = React.useState<PlannerRecipe | null>(null);
   const [servings, setServings] = React.useState<number>(1);
   const [note, setNote] = React.useState("");
   const [saving, setSaving] = React.useState(false);
 
-  const filtered = React.useMemo(() => {
-    const q = query.trim().toLowerCase();
-    const mustSet = new Set(tagFilter.must.map((t) => t.toLowerCase()));
-    const notSet = new Set(tagFilter.not.map((t) => t.toLowerCase()));
-    return recipes
-      .filter((r) => {
-        if (q.length > 0) {
-          const hayTitle = r.title.toLowerCase();
-          const hayTags = r.tags.join(" ").toLowerCase();
-          if (!hayTitle.includes(q) && !hayTags.includes(q)) return false;
-        }
-        if (mustSet.size > 0 || notSet.size > 0) {
-          const have = new Set(r.tags.map((t) => t.toLowerCase()));
-          for (const m of mustSet) if (!have.has(m)) return false;
-          for (const n of notSet) if (have.has(n)) return false;
-        }
-        return true;
-      })
-      .slice(0, 50);
-  }, [recipes, query, tagFilter]);
+  const filtered = React.useMemo(
+    () => matches.slice(0, MAX_RESULTS),
+    [matches],
+  );
 
   async function handleSave() {
     if (!selected || !date) return;
@@ -112,14 +99,11 @@ function AddMealModalInner({
 
         {selected == null ? (
           <div className="flex flex-col gap-3">
-            <RecipeSearch value={query} onChange={setQuery} />
-            {allTags.length > 0 ? (
-              <TagFilterBar
-                allTags={allTags}
-                value={tagFilter}
-                onChange={setTagFilter}
-              />
-            ) : null}
+            <RecipeFilterControls
+              allTags={allTags}
+              value={filter}
+              onChange={setFilter}
+            />
             <div className="max-h-72 space-y-1 overflow-y-auto">
               {filtered.length === 0 ? (
                 <p className="text-sm text-[var(--color-muted-fg)]">

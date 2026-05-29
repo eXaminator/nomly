@@ -6,29 +6,25 @@ import { CSS } from "@dnd-kit/utilities";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { Eye } from "lucide-react";
 import { DietBadge } from "@/components/recipes/diet-badge";
-import { RecipeSearch } from "@/components/recipes/recipe-search";
-import {
-  TagFilterBar,
-  type TagFilterValue,
-} from "@/components/recipes/tag-filter-bar";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { PlannerRecipe } from "@/lib/recipes/types";
 import type { RecipeUsageStats } from "@/lib/meal-plans/types";
 import { formatDayMonthDe } from "@/lib/meal-plans/dates";
 import { cn } from "@/lib/cn";
+import {
+  EMPTY_RECIPE_FILTER,
+  RecipeFilterControls,
+  useFilteredRecipes,
+  type PlannerRecipeFilter,
+} from "./recipe-filter";
 
 type Props = {
-  recipes: PlannerRecipe[];
-  /** True while the catalog is still being fetched client-side. */
-  loading: boolean;
   allTags: string[];
   recipeUsage: Array<{ recipeId: number } & RecipeUsageStats>;
   today: string;
   /** Opens the shared recipe-preview dialog (owned by PlannerView). */
   onPreview: (recipeId: number) => void;
 };
-
-const EMPTY_TAG_VALUE: TagFilterValue = { must: [], not: [] };
 
 function daysBetween(a: string, b: string): number {
   const da = new Date(`${a}T00:00:00Z`);
@@ -53,24 +49,24 @@ function formatNextPlanned(iso: string, today: string): string {
 
 /**
  * Recipe list shown alongside the meal planner. Reuses the shared
- * `RecipeSearch` + `TagFilterBar` components in **controlled mode** so the
- * filter state lives in local React state and never touches the URL — the
- * planner already owns `?from=` and we don't want recipe filters leaking
- * into the meal-plan URL.
+ * `RecipeFilterControls` + server-side `listRecipes` filtering (via
+ * {@link useFilteredRecipes}) so the planner's filter behaves **exactly** like
+ * the main `/rezepte` list — including the advanced search syntax (`zutat:`,
+ * phrases, OR, negation, typo tolerance). Filter state lives in local React
+ * state so it never touches the meal-plan URL (which owns `?from=`).
  *
  * Rendering is intentionally compact (small rows + drag handle + eye preview)
  * because the panel coexists with the calendar column.
  */
 export function RecipePanel({
-  recipes,
-  loading,
   allTags,
   recipeUsage,
   today,
   onPreview,
 }: Props) {
-  const [query, setQuery] = React.useState("");
-  const [tagFilter, setTagFilter] = React.useState<TagFilterValue>(EMPTY_TAG_VALUE);
+  const [filter, setFilter] =
+    React.useState<PlannerRecipeFilter>(EMPTY_RECIPE_FILTER);
+  const { recipes: filtered, loading, error } = useFilteredRecipes(filter);
   const scrollRef = React.useRef<HTMLDivElement>(null);
 
   const usageByRecipe = React.useMemo(() => {
@@ -81,25 +77,6 @@ export function RecipePanel({
     }
     return map;
   }, [recipeUsage]);
-
-  const filtered = React.useMemo(() => {
-    const q = query.trim().toLowerCase();
-    const mustSet = new Set(tagFilter.must.map((t) => t.toLowerCase()));
-    const notSet = new Set(tagFilter.not.map((t) => t.toLowerCase()));
-    return recipes.filter((r) => {
-      if (q.length > 0) {
-        const hayTitle = r.title.toLowerCase();
-        const hayTags = r.tags.join(" ").toLowerCase();
-        if (!hayTitle.includes(q) && !hayTags.includes(q)) return false;
-      }
-      if (mustSet.size > 0 || notSet.size > 0) {
-        const have = new Set(r.tags.map((t) => t.toLowerCase()));
-        for (const m of mustSet) if (!have.has(m)) return false;
-        for (const n of notSet) if (have.has(n)) return false;
-      }
-      return true;
-    });
-  }, [recipes, query, tagFilter]);
 
   const rowVirtualizer = useVirtualizer({
     count: filtered.length,
@@ -126,25 +103,22 @@ export function RecipePanel({
         "md:sticky md:top-20 md:self-start md:max-h-[calc(100vh-9rem)]",
       )}
     >
-      <RecipeSearch value={query} onChange={setQuery} />
-      {allTags.length > 0 ? (
-        <TagFilterBar
-          allTags={allTags}
-          value={tagFilter}
-          onChange={setTagFilter}
-        />
-      ) : null}
+      <RecipeFilterControls allTags={allTags} value={filter} onChange={setFilter} />
       {/* `pb-4` lives inside the scroll container so the last recipe has
           a bit of breathing room at the bottom when scrolled all the way.
           Rows are virtualized: only the on-screen slice is in the DOM, which
           keeps a large catalog cheap to render (and to keep draggable). */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto pr-1 pb-4">
-        {loading ? (
+        {loading && filtered.length === 0 ? (
           <div className="space-y-1.5">
             {Array.from({ length: 8 }).map((_, i) => (
               <Skeleton key={i} className="h-[52px] w-full" />
             ))}
           </div>
+        ) : error && filtered.length === 0 ? (
+          <p className="text-sm text-[var(--color-danger)]">
+            Liste konnte nicht geladen werden.
+          </p>
         ) : filtered.length === 0 ? (
           <p className="text-sm text-[var(--color-muted-fg)]">Keine Treffer.</p>
         ) : (

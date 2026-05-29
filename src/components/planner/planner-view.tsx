@@ -75,9 +75,11 @@ export function PlannerView({
   calendarEvents,
 }: Props) {
   const router = useRouter();
-  // The recipe catalog (for the panel, drag previews and optimistic meal
-  // creation) is fetched client-side so /plan's initial payload stays light.
-  const { recipes, loading: recipesLoading } = useRecipeCatalog();
+  // The full recipe catalog (for drag previews and optimistic meal creation)
+  // is fetched client-side so /plan's initial payload stays light. The recipe
+  // panel and add-meal modal fetch their own filtered slices via the shared
+  // server-side filtering, so they no longer need the catalog passed down.
+  const { recipes } = useRecipeCatalog();
   // Local copy lets us run optimistic mutations against the server data.
   const [mealPlans, setMealPlans] = React.useState(initialMealPlans);
   // Sync the server snapshot back into local state whenever the SSR prop
@@ -709,8 +711,6 @@ export function PlannerView({
             </button>
           </div>
           <RecipePanel
-            recipes={recipes}
-            loading={recipesLoading}
             allTags={allTags}
             recipeUsage={recipeUsage}
             today={today}
@@ -737,7 +737,6 @@ export function PlannerView({
       />
       <AddMealModal
         date={addingForDate}
-        recipes={recipes}
         allTags={allTags}
         onClose={() => setAddingForDate(null)}
         onSelect={handleAdd}
