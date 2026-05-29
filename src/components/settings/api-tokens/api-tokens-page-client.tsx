@@ -16,15 +16,23 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
+import type { TokenScope } from "@/lib/bearer";
 
 export type TokenSummary = {
   id: number;
   name: string;
+  scope: TokenScope;
   createdAt: number;
   lastUsedAt: number | null;
 };
 
-type MintedToken = { id: number; name: string; token: string };
+type MintedToken = { id: number; name: string; scope: TokenScope; token: string };
+
+const SCOPE_LABEL: Record<TokenScope, string> = {
+  full: "Voll",
+  embed: "Embed · nur Lesen",
+};
 
 type Props = { initial: TokenSummary[] };
 
@@ -143,7 +151,12 @@ function TokenRow({
           <KeyRound className="size-4" />
         </span>
         <div className="flex min-w-0 flex-1 flex-col">
-          <span className="truncate font-medium">{token.name}</span>
+          <span className="flex items-center gap-2">
+            <span className="truncate font-medium">{token.name}</span>
+            <Badge variant={token.scope === "embed" ? "warning" : "outline"}>
+              {SCOPE_LABEL[token.scope]}
+            </Badge>
+          </span>
           <span className="truncate text-xs text-[var(--color-muted-fg)]">
             Erstellt {formatRelative(token.createdAt)}
             {" · "}
@@ -181,6 +194,7 @@ function CreateTokenDialog({
   onCreated: (minted: MintedToken) => void;
 }) {
   const [name, setName] = React.useState("");
+  const [scope, setScope] = React.useState<TokenScope>("full");
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const canSubmit = name.trim().length > 0;
@@ -193,7 +207,7 @@ function CreateTokenDialog({
       const res = await fetch("/api/v1/api-tokens", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ name: name.trim() }),
+        body: JSON.stringify({ name: name.trim(), scope }),
       });
       if (!res.ok) throw new Error(await readError(res));
       const minted = (await res.json()) as MintedToken;
@@ -232,6 +246,31 @@ function CreateTokenDialog({
           <p className="text-xs text-[var(--color-muted-fg)]">
             Ein Label, an dem du den Token später wiedererkennst. Der Token wird
             nach dem Erstellen nur einmal angezeigt.
+          </p>
+        </div>
+
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="token-scope">Berechtigung</Label>
+          <select
+            id="token-scope"
+            value={scope}
+            onChange={(e) => setScope(e.target.value as TokenScope)}
+            className="h-9 rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-bg)] px-2 text-sm text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+          >
+            <option value="full">Voll — gesamte API (Lesen + Schreiben)</option>
+            <option value="embed">Embed — nur Lesen (Rezept-iframe)</option>
+          </select>
+          <p className="text-xs text-[var(--color-muted-fg)]">
+            {scope === "embed" ? (
+              <>
+                Nur-Lesen, beschränkt auf die Rezept-Ansicht
+                (<code className="rounded bg-[var(--color-muted)] px-1 py-0.5">/embed/…</code>).
+                Wird als <code className="rounded bg-[var(--color-muted)] px-1 py-0.5">?k=&lt;token&gt;</code>{" "}
+                in der iframe-URL übergeben — gedacht fürs Home-Assistant-Dashboard.
+              </>
+            ) : (
+              <>Voller Zugriff auf die API — z. B. für Sensoren, Einkaufsliste oder den Familywall-Import.</>
+            )}
           </p>
         </div>
 
@@ -315,11 +354,28 @@ function TokenRevealDialog({
       </div>
 
       <p className="mt-3 text-xs text-[var(--color-muted-fg)]">
-        Sende ihn als{" "}
-        <code className="rounded bg-[var(--color-muted)] px-1 py-0.5">
-          Authorization: Bearer {"<token>"}
-        </code>
-        . Verloren? Erstelle einfach einen neuen und widerrufe diesen.
+        {minted.scope === "embed" ? (
+          <>
+            Übergib ihn als{" "}
+            <code className="rounded bg-[var(--color-muted)] px-1 py-0.5">
+              ?k={"<token>"}
+            </code>{" "}
+            in der iframe-URL (
+            <code className="rounded bg-[var(--color-muted)] px-1 py-0.5">
+              /embed/rezepte/…
+            </code>
+            ).
+          </>
+        ) : (
+          <>
+            Sende ihn als{" "}
+            <code className="rounded bg-[var(--color-muted)] px-1 py-0.5">
+              Authorization: Bearer {"<token>"}
+            </code>
+            .
+          </>
+        )}{" "}
+        Verloren? Erstelle einfach einen neuen und widerrufe diesen.
       </p>
 
       <div className="mt-5 flex justify-end">
