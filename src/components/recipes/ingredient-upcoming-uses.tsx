@@ -119,7 +119,7 @@ export function UpcomingUsesButton({
 
   return (
     <span
-      className="inline-flex shrink-0 items-center justify-center"
+      className="inline-flex h-[1lh] shrink-0 items-center justify-center"
       style={{ width: columnWidth }}
     >
       {status.kind === "loading" ? (
