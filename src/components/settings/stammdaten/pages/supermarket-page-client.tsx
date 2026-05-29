@@ -13,6 +13,19 @@ import { ListShell, type ColumnDef } from "../list-shell";
 
 const columns: ColumnDef<SupermarketItem>[] = [
   {
+    key: "id",
+    header: "ID",
+    // Surfaced so it can be wired into external integrations (e.g. the Home
+    // Assistant geofence automation maps a zone to this supermarket id).
+    cell: (item) => (
+      <span className="font-mono tabular-nums text-[var(--color-muted-fg)]">
+        {item.id}
+      </span>
+    ),
+    sortValue: (item) => item.id,
+    className: "w-16",
+  },
+  {
     key: "name",
     header: "Name",
     cell: (item) => <span className="font-medium">{item.name}</span>,
