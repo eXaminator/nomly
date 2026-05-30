@@ -62,10 +62,10 @@ describe("parseIngredientLines — substring matcher + threshold", () => {
     );
     expect(out).toHaveLength(1);
     expect(out[0].ingredientId).toBe(2);
-    // The 2-token alias covers both "Paprikapulver" (pre-comma) and
-    // "rosenscharfes" (post-comma, close-inflection), so the whole span is
-    // the name. The interior comma is dropped (span tokens space-joined).
-    expect(out[0].name).toBe("Paprikapulver rosenscharfes");
+    // The display name is the matched alias verbatim. The 2-token alias covers
+    // both "Paprikapulver" and "rosenscharfes" (post-comma, close-inflection),
+    // so nothing is left over for notes.
+    expect(out[0].name).toBe("Paprikapulver rosenscharf");
     expect(out[0].ingredientMatch).toBe("existing");
     // Whole candidate covered by the match → no leftover in notes.
     expect(out[0].notes).toBeNull();
@@ -115,10 +115,10 @@ describe("parseIngredientLines — substring matcher + threshold", () => {
   });
 
   it("merges a German plural inflection into its singular (Paprikaschoten → Paprikaschote)", () => {
-    // After displayName preservation: the row keeps the user's spelling
-    // (`Paprikaschoten`) while `ingredientId` still points at the singular
-    // canonical for shopping-list merging. The canonical surfaces as
-    // `canonicalIngredientName`.
+    // The display name is the matched alias (here the canonical "Paprikaschote"
+    // itself), so the plural input collapses to the catalog spelling and
+    // `ingredientId` points at the singular for shopping-list merging. Name ==
+    // canonical, so no separate `canonicalIngredientName` disclosure is needed.
     const catalog: IngredientCatalog = [
       {
         ingredientId: 5,
@@ -133,8 +133,8 @@ describe("parseIngredientLines — substring matcher + threshold", () => {
     );
     expect(out).toHaveLength(1);
     expect(out[0].ingredientId).toBe(5);
-    expect(out[0].name).toBe("Paprikaschoten");
-    expect(out[0].canonicalIngredientName).toBe("Paprikaschote");
+    expect(out[0].name).toBe("Paprikaschote");
+    expect(out[0].canonicalIngredientName).toBeNull();
     expect(out[0].ingredientMatch).toBe("existing");
   });
 
@@ -244,8 +244,8 @@ describe("parseIngredientLines — substring matcher + threshold", () => {
 
   it("each candidate match carries its own finished name/notes (uncovered tokens → notes)", () => {
     // A wide-text match that didn't auto-pick still surfaces as a pill,
-    // carrying the name/notes it WOULD apply if picked — the matched span as
-    // the name, the rest as notes. No client-side token subtraction needed.
+    // carrying the name/notes it WOULD apply if picked — the matched alias as
+    // the name, every uncovered token as notes. No client-side subtraction.
     const catalog: IngredientCatalog = [
       {
         ingredientId: 5,
@@ -263,16 +263,16 @@ describe("parseIngredientLines — substring matcher + threshold", () => {
       (c) => c.ingredientId === 5,
     );
     expect(knoblauchCandidate).toBeDefined();
-    // "knoblauch" prefix-matches "knoblauchzehe" (the covered span), so the
-    // pill's name is "Knoblauchzehe" and "rote" lands in notes.
-    expect(knoblauchCandidate?.name).toBe("Knoblauchzehe");
+    // "knoblauch" prefix-matches "knoblauchzehe" (the covered token), so the
+    // pill's name is the alias "Knoblauch" and "rote" lands in notes.
+    expect(knoblauchCandidate?.name).toBe("Knoblauch");
     expect(knoblauchCandidate?.notes).toBe("rote");
   });
 
   it("merges a German plural inflection in the reverse direction (Paprikaschote → catalog Paprikaschoten)", () => {
     // The catalog happens to hold the plural form (whichever recipe got
-    // imported first); a later recipe with the singular should still merge,
-    // and the singular's spelling wins in the row's displayName.
+    // imported first); a later recipe with the singular still merges, and the
+    // matched alias (the catalog's plural spelling) becomes the display name.
     const catalog: IngredientCatalog = [
       {
         ingredientId: 6,
@@ -287,8 +287,8 @@ describe("parseIngredientLines — substring matcher + threshold", () => {
     );
     expect(out).toHaveLength(1);
     expect(out[0].ingredientId).toBe(6);
-    expect(out[0].name).toBe("Paprikaschote");
-    expect(out[0].canonicalIngredientName).toBe("Paprikaschoten");
+    expect(out[0].name).toBe("Paprikaschoten");
+    expect(out[0].canonicalIngredientName).toBeNull();
     expect(out[0].ingredientMatch).toBe("existing");
   });
 
@@ -296,9 +296,8 @@ describe("parseIngredientLines — substring matcher + threshold", () => {
     // The dash tokenises into ["paprika", "pulver"] under the primary
     // tokenisation — Paprika would win on a 1-token exact hit. The joined
     // variant gives Paprikapulver an equal 135 plus the alias-length
-    // tiebreak, so the parser picks Paprikapulver. After displayName
-    // preservation, the row keeps the user's "Paprika-Pulver" spelling and
-    // surfaces the canonical separately.
+    // tiebreak, so the parser picks Paprikapulver. The display name is the
+    // matched alias "Paprikapulver" (== canonical, so no separate disclosure).
     const catalog: IngredientCatalog = [
       {
         ingredientId: 1,
@@ -319,8 +318,8 @@ describe("parseIngredientLines — substring matcher + threshold", () => {
     );
     expect(out).toHaveLength(1);
     expect(out[0].ingredientId).toBe(2);
-    expect(out[0].name).toBe("Paprika-Pulver");
-    expect(out[0].canonicalIngredientName).toBe("Paprikapulver");
+    expect(out[0].name).toBe("Paprikapulver");
+    expect(out[0].canonicalIngredientName).toBeNull();
     expect(out[0].ingredientMatch).toBe("existing");
   });
 
@@ -351,10 +350,10 @@ describe("parseIngredientLines — substring matcher + threshold", () => {
     );
     expect(secondOut[0].ingredientMatch).toBe("existing");
     expect(secondOut[0].ingredientId).toBe(42);
-    // displayName preservation: the row keeps the plural the user typed,
-    // canonical surfaces separately.
-    expect(secondOut[0].name).toBe("Paprikaschoten");
-    expect(secondOut[0].canonicalIngredientName).toBe("Paprikaschote");
+    // The matched alias is the display name: the plural input collapses to the
+    // catalog's "Paprikaschote" (== canonical, so no separate disclosure).
+    expect(secondOut[0].name).toBe("Paprikaschote");
+    expect(secondOut[0].canonicalIngredientName).toBeNull();
   });
 
   it("matches 'Paprikapulver edelsüß' to bare 'Paprikapulver' (edelsüß → notes)", () => {
@@ -423,8 +422,8 @@ describe("parseIngredientLines — substring matcher + threshold", () => {
 
   it("'Erbsen, TK' wins the 2-token 'TK Erbsen' entry when the catalog has it", () => {
     // The catalog has the canonical "TK Erbsen". The matcher covers BOTH
-    // "erbsen" (pre-comma) and "tk" (post-comma) → full span is the name.
-    // The interior comma is dropped (span tokens space-joined).
+    // "erbsen" (pre-comma) and "tk" (post-comma), and the display name is the
+    // matched alias verbatim ("TK Erbsen") — not the source word order.
     const catalog: IngredientCatalog = [
       {
         ingredientId: 42,
@@ -436,17 +435,16 @@ describe("parseIngredientLines — substring matcher + threshold", () => {
     const out = parseIngredientLines(["2 g Erbsen, TK"], makeLookups(catalog));
     expect(out).toHaveLength(1);
     expect(out[0].ingredientId).toBe(42);
-    expect(out[0].name).toBe("Erbsen TK");
-    // Canonical differs from the displayed span → surface it for the
-    // import-review UI's "kanonisch: …" pill.
-    expect(out[0].canonicalIngredientName).toBe("TK Erbsen");
+    expect(out[0].name).toBe("TK Erbsen");
+    // Name == canonical → no separate disclosure needed.
+    expect(out[0].canonicalIngredientName).toBeNull();
     // Whole candidate covered → no leftover note.
     expect(out[0].notes).toBeNull();
   });
 
-  it("leaves unmatched tokens in notes ('Erbsen, TK, saftig' → name 'Erbsen TK' + notes 'saftig')", () => {
-    // "TK" + "erbsen" are covered by the 2-token entry; "saftig" sits after
-    // the span → notes.
+  it("leaves unmatched tokens in notes ('Erbsen, TK, saftig' → name 'TK Erbsen' + notes 'saftig')", () => {
+    // "TK" + "erbsen" are covered by the 2-token entry (name = the alias
+    // "TK Erbsen"); "saftig" sits outside the match → notes.
     const catalog: IngredientCatalog = [
       {
         ingredientId: 42,
@@ -461,16 +459,15 @@ describe("parseIngredientLines — substring matcher + threshold", () => {
     );
     expect(out).toHaveLength(1);
     expect(out[0].ingredientId).toBe(42);
-    expect(out[0].name).toBe("Erbsen TK");
+    expect(out[0].name).toBe("TK Erbsen");
     expect(out[0].notes).toMatch(/saftig/);
   });
 
   it("still merges 'Tomaten, klein gehackt' to Tomate (commaTail is all prep-like)", () => {
     // Counterpoint: when the comma-tail content is ALL prep-like
-    // ("klein" is SIZE_MODIFIER, "gehackt" is PREP_LEADING_TOKEN), the
-    // cleanup-rematch path still fires and the row links to the broader
-    // canonical. The displayName is the pre-comma identity and the
-    // qualifier lands in notes — same shape as before this fix.
+    // ("klein" is SIZE_MODIFIER, "gehackt" is PREP_LEADING_TOKEN), the row
+    // links to the broader canonical. The display name is the matched alias
+    // ("Tomate") and the qualifier lands in notes.
     const catalog: IngredientCatalog = [
       {
         ingredientId: 3,
@@ -485,7 +482,7 @@ describe("parseIngredientLines — substring matcher + threshold", () => {
     );
     expect(out).toHaveLength(1);
     expect(out[0].ingredientId).toBe(3);
-    expect(out[0].name).toBe("Tomaten");
+    expect(out[0].name).toBe("Tomate");
     expect(out[0].notes).toMatch(/klein gehackt/);
   });
 
@@ -658,11 +655,50 @@ describe("colon-in-name treated as section + listed items", () => {
     expect(out[0].name).toBe("Reis");
     expect(out[0].isOptional).toBe(false);
     expect(out[0].isAlternative).toBe(false);
-    // 2-token catalog entry matched via the dash-split variant → the span is
-    // space-joined ("Naan Brot"); the canonical "Naan-Brot" surfaces separately.
-    expect(out[1].name).toBe("Naan Brot");
+    // Name = the matched alias "Naan-Brot" verbatim (not a space-joined span).
+    expect(out[1].name).toBe("Naan-Brot");
     expect(out[1].isOptional).toBe(true);
     expect(out[1].isAlternative).toBe(true);
+  });
+
+  it("uses the matched alias as the name ('extra-virgin olive oil', not 'extra virgin …')", () => {
+    const catalog: IngredientCatalog = [
+      {
+        ingredientId: 1,
+        canonicalName: "Olivenöl",
+        aliasName: "extra-virgin olive oil",
+        tokens: ["extra", "virgin", "olive", "oil"],
+      },
+    ];
+    const out = parseIngredientLines(
+      ["2 teaspoons extra-virgin olive oil"],
+      makeLookups(catalog),
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0].ingredientId).toBe(1);
+    // Name is the curated alias string verbatim — no tokenisation artefacts
+    // ("extra virgin") and no source-span reconstruction.
+    expect(out[0].name).toBe("extra-virgin olive oil");
+    // Alias differs from canonical → canonical surfaces for the read view.
+    expect(out[0].canonicalIngredientName).toBe("Olivenöl");
+  });
+
+  it("surfaces the original source span as sourceName when the alias replaced it", () => {
+    const catalog: IngredientCatalog = [
+      {
+        ingredientId: 7,
+        canonicalName: "Zwiebel",
+        aliasName: "Zwiebel",
+        tokens: ["zwiebel"],
+      },
+    ];
+    const out = parseIngredientLines(["100 g Zwiebeln"], makeLookups(catalog));
+    expect(out).toHaveLength(1);
+    expect(out[0].ingredientId).toBe(7);
+    // Display name is the matched alias…
+    expect(out[0].name).toBe("Zwiebel");
+    // …but the user's original spelling is preserved for the alias toggle.
+    expect(out[0].sourceName).toBe("Zwiebeln");
   });
 
   it("English 'alternatively:' behaves the same as German 'alternativ:'", () => {

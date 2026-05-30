@@ -60,6 +60,13 @@ export type DraftIngredient = {
   /** Canonical name of the selected ingredient when it differs from
    *  `name`. Shown as a small pill under the input. Cleared on edit. */
   canonicalName: string | null;
+  /** The user's ORIGINAL spelling before the parser's auto-match replaced it
+   *  with the catalog alias ("Zwiebeln" → display became "Zwiebel"). Set on
+   *  import (from the parser's source span) and when a candidate pill replaces
+   *  the name (captures the prior text). Cleared when the user types a fresh
+   *  name. Powers the "keep my spelling & add as alias" toggle so it offers
+   *  the original, not the parser-substituted, name. UI-only — never persisted. */
+  originalName?: string;
   /** Pre-resolved ingredient id chosen via the pill UI. `null` means "save
    *  as new ingredient with `name`". Auto-set by the matcher when text
    *  changes; manually-set when the user clicks a candidate pill. */
@@ -152,6 +159,10 @@ export type ParsedIngredientResponse = {
   ingredientId: number | null;
   ingredientMatch: "existing" | "new";
   canonicalIngredientName: string | null;
+  /** The original source span the matched alias replaced ("Zwiebeln" when
+   *  `name` became the alias "Zwiebel"). Lets the import-review UI offer the
+   *  user's own spelling as the alias to remember. Null on the new path. */
+  sourceName?: string | null;
   /** Ranked candidate matches from the substring matcher, already sorted
    *  server-side (score desc → alias-length desc → alphabetical). The pill
    *  UI renders these in order. */
@@ -204,10 +215,18 @@ export function parsedIngredientToDraft(
         ? i.rawUnit
         : i.unit.name
       : null;
+  // Carry the original source spelling only when the parser actually
+  // substituted a different display name (matched via an alias / inflection),
+  // so the import-review UI can offer it as the alias to remember.
+  const originalName =
+    i.sourceName && i.sourceName.trim().toLowerCase() !== i.name.trim().toLowerCase()
+      ? i.sourceName.trim()
+      : undefined;
   return {
     uid: crypto.randomUUID(),
     name: i.name,
     canonicalName: i.canonicalIngredientName,
+    originalName,
     selectedIngredientId: i.ingredientId,
     candidates: (i.candidateMatches ?? []).map((c) => ({
       ingredientId: c.ingredientId,

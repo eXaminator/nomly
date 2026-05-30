@@ -2,9 +2,10 @@
  * Structural ingredient matching. Given a candidate text (the name area +
  * comma-tail), find every catalog entry whose tokens line up as a contiguous
  * window inside the candidate's tokens, and rank them. Name/notes derivation
- * (the matched span becomes the name, everything outside it becomes notes)
- * lives in the parser ({@link CandidateToken.coveredCandidateTokens}); this
- * module is purely structural — NO prep/descriptor word-lists.
+ * (the matched catalog alias becomes the name, every uncovered input token
+ * becomes notes) lives in the parser; this module reports which candidate
+ * tokens a match covered ({@link IngredientCandidateMatch.coveredCandidateTokens}).
+ * It is purely structural — NO prep/descriptor word-lists.
  *
  * Design choices:
  *   - Gate on LOOKUP coverage, not input coverage. Extra INPUT tokens outside
@@ -34,9 +35,10 @@
  *   - The candidate is tokenised TWO ways: the primary split (dashes split,
  *     so "Cherry-Tomate" aligns against a 2-token "Cherry-Tomate" entry) and
  *     a join-dashes variant (intra-letter dashes kept in one token, normalised
- *     away, so "Paprika-Pulver" aligns against closed "Paprikapulver" while
- *     keeping the user's dash in the display name). Best score per ingredient
- *     survives; ties break on alias length.
+ *     away, so "Paprika-Pulver" aligns against closed "Paprikapulver"). Best
+ *     score per ingredient survives; ties break on alias length. (The display
+ *     name comes from the matched alias, so neither variant's raw spelling
+ *     leaks into it.)
  *   - Scoring is intentionally tiny — see {@link scoreMatch} /
  *     {@link perTokenBonus}.
  */
@@ -154,8 +156,8 @@ export function tokenizeCandidate(text: string): CandidateToken[] {
 export function tokenizeCandidateJoinDashes(text: string): CandidateToken[] {
   // Do NOT split on intra-letter dashes here: keep "Paprika-Pulver" as one
   // token so it can align against a closed-form catalog entry
-  // ("Paprikapulver"). The `raw` keeps the user's dash (so the display name
-  // stays "Paprika-Pulver"); only `normalized` drops the dash for matching.
+  // ("Paprikapulver"). Only `normalized` drops the dash for matching; `raw` is
+  // retained for note reconstruction (the display name comes from the alias).
   const out: CandidateToken[] = [];
   let postComma = false;
   let pendingComma = false;
@@ -290,8 +292,9 @@ function scoreMatch(
  * (no interior input gaps — that's the "adjacent window" rule; "red bell
  * pepper" doesn't cleanly hit "red pepper", it'd need a "bell pepper" alias).
  * Entry tokens may be left uncovered (penalised −50 each). The best-scoring
- * window survives. The matched span (first→last covered token) is what the
- * parser turns into the display name; tokens outside it become notes.
+ * window survives. Its covered candidate tokens tell the parser which input is
+ * "used up" by the alias; the alias becomes the display name and every
+ * uncovered input token becomes notes.
  */
 function bestMatchForEntry(
   entry: CatalogEntry,

@@ -76,6 +76,11 @@ export type ImportedIngredient = {
   /** Canonical name of the matched ingredient — only set when the typed
    *  name differs from the canonical (i.e. we matched via an alias). */
   canonicalIngredientName: string | null;
+  /** The original source span the matched alias replaced ("Zwiebeln" when the
+   *  display name became the alias "Zwiebel"). Null on the new-ingredient
+   *  path. Lets the import-review UI offer the user's own spelling as the
+   *  alias to remember. */
+  sourceName: string | null;
   notes: string | null;
   /** True when the source line carried an "optional" marker ("opt.",
    *  "Optional:", "evtl.", "nach Belieben", "(optional)" inline, …). */
@@ -618,37 +623,45 @@ export type ParseLookups = {
 };
 
 /**
- * Derive a row's display name + notes from a matched span. The name is the
- * raw text of the input tokens from the first matched token to the last
- * (inclusive — interior unmatched tokens stay in the name, e.g. "bell" in a
- * "red bell pepper" hit on "red pepper"). Notes are the input tokens before
- * the span + the tokens after it + the parser's base notes (parens /
- * brackets / usage / range / "to taste"), with the comma-tail content
- * subtracted so post-comma tokens aren't double-counted — they're already
- * represented in the candidate token stream.
+ * Derive a row's display name + notes from a matched alias. The name is the
+ * matched catalog alias verbatim (`aliasName`) — a curated string, so it's
+ * clean and consistent regardless of how the source was spelled or tokenised
+ * ("extra-virgin olive oil", not "extra virgin …"; "TK Erbsen", not the source
+ * order "Erbsen TK"). Notes are EVERY input token the alias didn't cover —
+ * before, interior ("bell" in a "red bell pepper" hit on "red pepper"), and
+ * after the matched span — plus the parser's base notes (parens / brackets /
+ * usage / range / "to taste"), with the comma-tail content subtracted so
+ * post-comma tokens aren't double-counted.
  */
 function computeNameAndNotes(
   parsed: ParsedIngredient,
   candidate: CandidateToken[],
   coveredCandidateTokens: number[],
   aliasName: string,
-): { name: string; notes: string | null } {
+): { name: string; notes: string | null; sourceName: string | null } {
   if (coveredCandidateTokens.length === 0) {
-    return { name: parsed.name, notes: parsed.notes };
+    return { name: parsed.name, notes: parsed.notes, sourceName: parsed.name };
   }
+  // The display name is the matched catalog alias verbatim — a curated string,
+  // so it's clean and consistent (no tokenisation artefacts like "extra virgin"
+  // for a "extra-virgin" source). Every input token the alias didn't cover —
+  // leading, interior ("bell" in "red bell pepper" → "red pepper"), or
+  // trailing — falls through to the notes below.
+  const name = aliasName;
+  // The original SOURCE span the alias replaced (first→last covered token,
+  // space-joined; internal commas kept when the alias itself carries one).
+  // Surfaced so the UI can offer "keep my spelling and remember it as an
+  // alias" instead of the parser's substituted name.
   const lo = Math.min(...coveredCandidateTokens);
   const hi = Math.max(...coveredCandidateTokens);
-  // The span tokens are normally space-joined (the comma was a delimiter).
-  // But when the matched alias itself carries a comma ("Tomaten, passiert"),
-  // re-insert the user's internal comma so the display name matches the
-  // catalog form rather than flattening to "Tomaten passiert".
   const keepCommas = aliasName.includes(",");
-  let name = candidate[lo].raw;
+  let sourceName = candidate[lo].raw;
   for (let k = lo + 1; k <= hi; k++) {
-    const sep = keepCommas && candidate[k].precededByComma ? ", " : " ";
-    name += sep + candidate[k].raw;
+    sourceName +=
+      (keepCommas && candidate[k].precededByComma ? ", " : " ") +
+      candidate[k].raw;
   }
-  name = name.replace(/\s+/g, " ").trim();
+  sourceName = sourceName.replace(/\s+/g, " ").trim();
   // Reassemble notes in SOURCE order:
   //   leadingNotes (range/size, front)
   //   → the name area walked left-to-right, emitting the descriptor runs the
@@ -709,7 +722,7 @@ function computeNameAndNotes(
       .map((s) => s.trim())
       .filter((s) => s.length > 0)
       .join(", ") || null;
-  return { name, notes };
+  return { name, notes, sourceName };
 }
 
 /**
@@ -735,6 +748,10 @@ function resolveIngredientForRow(
   ingredientId: number | null;
   match: IngredientMatch;
   canonicalIngredientName: string | null;
+  /** The original source span the matched alias replaced ("Zwiebeln" when the
+   *  alias-name became "Zwiebel"). Null on the new-ingredient path. Lets the
+   *  UI offer the user's own spelling as the alias to remember. */
+  sourceName: string | null;
   candidateMatches: ImportedCandidateMatch[];
   newNameProposals: ImportedNameProposal[];
   /** Defaults attached to the resolved alias entry, if any. */
@@ -764,7 +781,7 @@ function resolveIngredientForRow(
         // shopping-list aggregator keys off `ingredientId` so cross-language
         // merging ("tomatoes" + "Tomate") still happens while the recipe
         // keeps the user's source spelling for the matched span.
-        const { name, notes } = computeNameAndNotes(
+        const { name, notes, sourceName } = computeNameAndNotes(
           parsed,
           top.candidate,
           top.coveredCandidateTokens,
@@ -779,6 +796,7 @@ function resolveIngredientForRow(
             name.toLowerCase() === top.canonicalName.toLowerCase()
               ? null
               : top.canonicalName,
+          sourceName,
           candidateMatches: matches.map((m) =>
             toImportedCandidateMatch(m, parsed),
           ),
@@ -836,6 +854,7 @@ function resolveIngredientForRow(
     ingredientId: null,
     match: "new",
     canonicalIngredientName: null,
+    sourceName: null,
     candidateMatches: wideMatches.map((m) =>
       toImportedCandidateMatch(m, parsed),
     ),
@@ -1153,6 +1172,7 @@ export function parseIngredientLines(
           ingredientId: resolved.ingredientId,
           ingredientMatch: resolved.match,
           canonicalIngredientName: resolved.canonicalIngredientName,
+          sourceName: resolved.sourceName,
           notes: resolved.notes,
           // Equipment-flagged ingredients (Backpapier, Einmachgläser …)
           // default to optional so the user decides per-recipe whether they
@@ -1370,6 +1390,7 @@ export function parseIngredientLinesIntoSections(
           ingredientId: resolved.ingredientId,
           ingredientMatch: resolved.match,
           canonicalIngredientName: resolved.canonicalIngredientName,
+          sourceName: resolved.sourceName,
           notes: resolved.notes,
           // Mirror parseIngredientLines: equipment items (Backpapier,
           // Einmachgläser …) auto-default to optional. `forceOptional`

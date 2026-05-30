@@ -111,9 +111,9 @@ describe("transformFamilywallRecipe", () => {
       null,
     );
     const ing = out.sections[0].ingredients[0];
-    // displayName keeps the user's "Paprika-Pulver" spelling, but the row
-    // is pinned to the existing Paprikapulver canonical.
-    expect(ing.ingredientName).toBe("Paprika-Pulver");
+    // displayName is the matched alias (the canonical "Paprikapulver"), and the
+    // row is pinned to that existing ingredient id.
+    expect(ing.ingredientName).toBe("Paprikapulver");
     expect(ing.ingredientId).toBe(99);
   });
 
