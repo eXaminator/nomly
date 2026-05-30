@@ -7,6 +7,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { BulkReparseButton } from "@/components/recipes/bulk-reparse-button";
 
 export const dynamic = "force-dynamic";
 
@@ -105,6 +106,23 @@ export default async function EinstellungenPage() {
               </Link>
             ))}
           </div>
+        </div>
+        <div>
+          <h2 className="mb-3 text-sm font-medium uppercase tracking-wider text-[var(--color-muted-fg)]">
+            Wartung
+          </h2>
+          <Card>
+            <CardHeader className="flex flex-row items-start justify-between gap-3">
+              <div>
+                <CardTitle>Rezepte neu parsen</CardTitle>
+                <CardDescription>
+                  Den aktuellen Zutaten-Parser auf alle Rezepte anwenden und
+                  Änderungen vor dem Übernehmen prüfen.
+                </CardDescription>
+              </div>
+              <BulkReparseButton />
+            </CardHeader>
+          </Card>
         </div>
       </div>
     </>
