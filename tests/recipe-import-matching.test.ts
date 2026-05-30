@@ -661,6 +661,28 @@ describe("colon-in-name treated as section + listed items", () => {
     expect(out[1].isAlternative).toBe(true);
   });
 
+  it("'(alternativ X)' in parens WITHOUT a colon still adds X as an optional alternative", () => {
+    const catalog: IngredientCatalog = [
+      { ingredientId: 20, canonicalName: "Honig", aliasName: "Honig", tokens: ["honig"] },
+      {
+        ingredientId: 21,
+        canonicalName: "Agavendicksaft",
+        aliasName: "Agavendicksaft",
+        tokens: ["agavendicksaft"],
+      },
+    ];
+    const out = parseIngredientLines(
+      ["2 EL flüssigen Honig (alternativ Agavendicksaft)"],
+      makeLookups(catalog, ["EL"]),
+    );
+    expect(out).toHaveLength(2);
+    expect(out[0].ingredientId).toBe(20);
+    expect(out[0].isAlternative).toBe(false);
+    expect(out[1].ingredientId).toBe(21);
+    expect(out[1].isAlternative).toBe(true);
+    expect(out[1].isOptional).toBe(true);
+  });
+
   it("uses the matched alias as the name ('extra-virgin olive oil', not 'extra virgin …')", () => {
     const catalog: IngredientCatalog = [
       {
@@ -768,6 +790,30 @@ describe("colon-in-name treated as section + listed items", () => {
     );
     expect(out).toHaveLength(1);
     expect(out[0].name).toContain("shiitake mushrooms");
+  });
+
+  it("'oder' DOES split when the alternative starts with a descriptor but the primary has its own head noun", () => {
+    // "brauner Zucker" leads with a descriptor ("brauner") yet is a complete
+    // ingredient. The pre side "Rohrzucker" is a real noun (not headless like
+    // "6 dried"), so the line is two alternatives, not a shared-head modifier.
+    const catalog: IngredientCatalog = [
+      { ingredientId: 1, canonicalName: "Rohrzucker", aliasName: "Rohrzucker", tokens: ["rohrzucker"] },
+      {
+        ingredientId: 2,
+        canonicalName: "brauner Zucker",
+        aliasName: "brauner Zucker",
+        tokens: ["brauner", "zucker"],
+      },
+    ];
+    const out = parseIngredientLines(
+      ["2 EL Rohrzucker oder brauner Zucker"],
+      makeLookups(catalog, ["EL"]),
+    );
+    expect(out).toHaveLength(2);
+    expect(out[0].ingredientId).toBe(1);
+    expect(out[0].isAlternative).toBe(false);
+    expect(out[1].ingredientId).toBe(2);
+    expect(out[1].isAlternative).toBe(true);
   });
 
   it("'oder' does NOT split when pre-separator ends with a dash (compound stem like 'Weizen- oder Dinkelmehl')", () => {

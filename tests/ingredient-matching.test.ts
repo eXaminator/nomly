@@ -483,7 +483,32 @@ describe("structural matcher scoring", () => {
     const { matches } = findIngredientCandidates("Tomaten", cat);
     expect(matches[0].ingredientId).toBe(1);
     expect(matches[0].score).toBe(131);
-    expect(matches.find((m) => m.ingredientId === 2)?.score).toBe(81);
+    // "Cherry Tomate" covers only "Tomate" (1 of 2 tokens); the uncovered
+    // "Cherry" costs −120: 100 + 20 + 10 + 1 canonical − 120 = 11.
+    expect(matches.find((m) => m.ingredientId === 2)?.score).toBe(11);
+  });
+
+  it("a fully-covered entry beats a partial one even when the partial matched MORE input tokens", () => {
+    // "quick cooking oats": "oat cooking cream" matches two input tokens
+    // (cooking + oat~oats) but leaves "cream" uncovered; "oats" matches one
+    // and is fully covered. Net coverage must let "oats" win.
+    const { matches } = findIngredientCandidates("quick cooking oats", [
+      entry(1, "oats"),
+      entry(2, "oat cooking cream"),
+    ]);
+    expect(matches[0].ingredientId).toBe(1);
+  });
+
+  it("a compound suffix is a fragment, not a close inflection — exact stem wins", () => {
+    // "Kichererbsenmehl" (chickpea flour) is a prefix-match for input
+    // "Kichererbsen" at ratio 12/16 = 0.75, but the 4-char compound head
+    // "mehl" is no inflection, so it earns no close-inflection bonus and
+    // loses to the exact "Kichererbsen".
+    const { matches } = findIngredientCandidates("Kichererbsen", [
+      entry(2, "Kichererbsenmehl"),
+      entry(1, "Kichererbsen"),
+    ]);
+    expect(matches[0].ingredientId).toBe(1);
   });
 
   it("full coverage of the longer entry wins when the input supports it", () => {

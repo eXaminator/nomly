@@ -1823,7 +1823,7 @@ const OPTIONAL_PREFIX_RE =
 const ALTERNATIV_SEP_RE =
   /\s+(?:alternativ|alternative|alternatively|alternativly)\s*:?\s+/i;
 const PARENS_ALTERNATIV_RE =
-  /\s*\((alternativ|alternative|alternatively|alternativly)\s*:\s*([^)]+)\)\s*$/i;
+  /\s*\((alternativ|alternative|alternatively|alternativly)(?:\s*:\s*|\s+)([^)]+)\)\s*$/i;
 const EACH_DIST_RE = /^(\S[^:]*?)\s+each\s*:\s*(.+)$/i;
 
 /**
@@ -1895,17 +1895,27 @@ function findOrSeparator(
 }
 
 /**
- * Returns true when the first word of `text` is a known descriptor /
- * prep-leading token. Used to gate the "or/oder splits into alternatives"
- * rule so e.g. "dried or fresh shiitake mushrooms" stays as one row
- * (the post-or "fresh" is a modifier, not an alternative ingredient).
+ * Returns true when `pre` (the text BEFORE an "oder"/"or" separator) carries
+ * no head noun of its own — it's a quantity plus bare descriptor(s). In that
+ * case the descriptors share the head noun that lives on the POST side, so
+ * the line is one ingredient with alternative modifiers, not two ingredients
+ * ("6 dried" in "6 dried or fresh shiitake mushrooms" — "dried"/"fresh" both
+ * modify "shiitake mushrooms").
+ *
+ * When `pre` does have its own noun the post is a genuine alternative
+ * ingredient and the line splits ("Rohrzucker" in "2 EL Rohrzucker oder
+ * brauner Zucker" → Rohrzucker + brauner Zucker). Inspecting the pre side is
+ * what distinguishes the two; the post side starts with a descriptor in both
+ * ("fresh …", "brauner …"), so a post-only test can't tell them apart.
  */
-function postOrIsDescriptorModifier(text: string): boolean {
-  const firstWord = text.trim().split(/\s+/)[0]?.toLowerCase() ?? "";
-  if (firstWord.length === 0) return true;
-  if (PREP_LEADING_TOKENS.has(firstWord)) return true;
-  if (STANDALONE_DESCRIPTOR_NAMES.has(firstWord)) return true;
-  return false;
+function preIsHeadlessModifier(pre: string): boolean {
+  const tokens = pre.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  // Drop leading quantity-shaped tokens (numbers, ranges, fractions).
+  let i = 0;
+  while (i < tokens.length && /^[\d¼½¾⅓⅔⅛⅜⅝⅞.,/–-]+$/.test(tokens[i])) i += 1;
+  const rest = tokens.slice(i);
+  if (rest.length === 0) return false;
+  return rest.every((t) => STANDALONE_DESCRIPTOR_NAMES.has(t));
 }
 
 /**
@@ -2061,9 +2071,10 @@ export function expandIngredientLine(rawLine: string): ExpandedIngredientRow[] {
   //      - pre-sep must not end with "-" (preserves compound stems like
   //        "Weizen- oder Dinkelmehl" — those are first stitched together
   //        by preprocessAlternatives in the Familywall opt-in).
-  //      - post-sep first word must NOT be a descriptor / prep-leading
-  //        token (preserves "6 dried or fresh shiitake mushrooms" —
-  //        "fresh" is a modifier, not an alternative).
+  //      - pre-sep must carry its own head noun (preserves "6 dried or
+  //        fresh shiitake mushrooms" — "6 dried" is headless, so "dried"/
+  //        "fresh" share the post's "shiitake mushrooms"). See
+  //        {@link preIsHeadlessModifier}.
   //
   //    Only the FIRST separator is consumed. Chains like
   //    "A oder B oder C" emit A primary + B alt; the trailing "oder C"
@@ -2076,7 +2087,7 @@ export function expandIngredientLine(rawLine: string): ExpandedIngredientRow[] {
       pre.length > 0 &&
       post.length > 0 &&
       !pre.endsWith("-") &&
-      !postOrIsDescriptorModifier(post)
+      !preIsHeadlessModifier(pre)
     ) {
       return [
         {

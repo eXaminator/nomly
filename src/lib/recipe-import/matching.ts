@@ -11,9 +11,11 @@
  *   - Gate on LOOKUP coverage, not input coverage. Extra INPUT tokens outside
  *     the matched window are free (the parser turns them into notes), so
  *     "Salt divided" still matches "Salt". A catalog entry, by contrast, wants
- *     (near-)full coverage: unmatched entry tokens are penalised −50 each, so
- *     a fully-covered shorter entry ("Tomate" for "Tomaten") beats a
- *     partially-covered longer one ("Cherry Tomate", −50). Identity lives in
+ *     (near-)full coverage: unmatched entry tokens are penalised −120 each
+ *     (one matched token's worth), so a fully-covered shorter entry ("Tomate"
+ *     for "Tomaten") beats a partially-covered longer one even when the longer
+ *     one matched more input tokens ("oat cooking cream" loses to "oats" for
+ *     "quick cooking oats"). Identity lives in
  *     the catalog: seed "Cherry Tomate" as its own entry and it wins by token
  *     count.
  *   - "Adjacent window": every INPUT token inside the matched window must
@@ -269,8 +271,11 @@ function alignWindowToEntry(
  * - +20 per matched token that's exact or close-inflection-shaped (see
  *   {@link perTokenBonus}); 0 for a true fragment.
  * - +10 when the matched entry indices are strictly increasing (in order).
- * - −50 per UNMATCHED entry token (partial coverage). A fully-covered
- *   shorter entry therefore always beats a partially-covered longer one.
+ * - −120 per UNMATCHED entry token (partial coverage) — one matched token's
+ *   worth (100 base + 20 bonus), so each token an entry leaves uncovered
+ *   cancels a token it did match. A fully-covered shorter entry therefore
+ *   beats a partially-covered longer one even when the latter matched more
+ *   input tokens (it scores by NET covered-minus-uncovered token value).
  */
 function scoreMatch(
   aligned: AlignedTokenMatch[],
@@ -284,7 +289,7 @@ function scoreMatch(
     s += base + perTokenBonus(a.entryToken, a.windowToken);
   }
   if (inOrder) s += 10;
-  s -= unmatchedEntryCount * 50;
+  s -= unmatchedEntryCount * 120;
   return s;
 }
 
@@ -293,7 +298,7 @@ function scoreMatch(
  * is valid only if every input token in it aligns to a distinct entry token
  * (no interior input gaps — that's the "adjacent window" rule; "red bell
  * pepper" doesn't cleanly hit "red pepper", it'd need a "bell pepper" alias).
- * Entry tokens may be left uncovered (penalised −50 each). The best-scoring
+ * Entry tokens may be left uncovered (penalised −120 each). The best-scoring
  * window survives. Its covered candidate tokens tell the parser which input is
  * "used up" by the alias; the alias becomes the display name and every
  * uncovered input token becomes notes.
@@ -349,22 +354,27 @@ function bestMatchForEntry(
  * "Paprikaschoten"); 0 otherwise.
  *
  * "Close enough" = length ratio (shorter / longer) ≥ 0.75 AND both tokens
- * at least 4 characters. The min-length floor is what stops short-word
- * inflections like "Ei" / "Eis" (ratio 0.67, too low anyway) and "Tee" /
- * "Tees" (ratio 0.75 but min length 3) from auto-merging — those ambiguous
+ * at least 4 characters AND the absolute length gap is at most 2. An
+ * inflectional ending is short ("-n", "-en", "-er", "-es"); a whole-word
+ * compound head ("…mehl", "…pulver") is not. The ratio alone is fooled by a
+ * long stem with a compound suffix — "Kichererbsen" / "Kichererbsenmehl"
+ * (12/16 = 0.75) would otherwise read as one word and tie with the exact
+ * "Kichererbsen" match. The min-length floor stops short-word inflections
+ * like "Ei" / "Eis" and "Tee" / "Tees" from auto-merging — those ambiguous
  * shapes still surface as pills, just not as auto-picks.
  *
  * Cases the cutoff is calibrated to:
- *   - "Paprika" / "Paprikapulver" (7/13 = 0.54) → 0, stays a fragment
- *   - "Brot" / "Vollkornbrot" (4/12 = 0.33) → 0, stays a fragment
- *   - "Paprikaschote" / "Paprikaschoten" (13/14 = 0.93) → +20, merges
- *   - "Salz" / "Salze" (4/5 = 0.80) → +20, merges
+ *   - "Paprika" / "Paprikapulver" (Δ6) → 0, stays a fragment
+ *   - "Brot" / "Vollkornbrot" (Δ8) → 0, stays a fragment
+ *   - "Kichererbsen" / "Kichererbsenmehl" (Δ4) → 0, stays a fragment
+ *   - "Paprikaschote" / "Paprikaschoten" (Δ1, 13/14 = 0.93) → +20, merges
+ *   - "Salz" / "Salze" (Δ1, 4/5 = 0.80) → +20, merges
  */
 function perTokenBonus(et: string, wt: string): number {
   if (et === wt) return 20;
   const minLen = Math.min(et.length, wt.length);
   const maxLen = Math.max(et.length, wt.length);
-  if (minLen >= 4 && minLen / maxLen >= 0.75) return 20;
+  if (minLen >= 4 && maxLen - minLen <= 2 && minLen / maxLen >= 0.75) return 20;
   return 0;
 }
 
@@ -400,7 +410,7 @@ function perTokenBonus(et: string, wt: string): number {
  * A single exact (or close-inflection) pre-comma token scores
  * 100 + 20 + 10 = 130, so the gate sits exactly there: clean single-token
  * hits auto-pick, prefix fragments ("Paprika" inside "Paprikapulver", 110)
- * and partial-coverage hits (penalised −50) stay below and only surface as
+ * and partial-coverage hits (penalised −120) stay below and only surface as
  * pills.
  */
 export const MIN_AUTO_MATCH_SCORE = 130;
