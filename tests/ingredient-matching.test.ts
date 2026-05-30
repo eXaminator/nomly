@@ -384,3 +384,22 @@ describe("tokenizeCandidate", () => {
     ]);
   });
 });
+
+describe("tokenizeCandidate postComma", () => {
+  it("flags every token after the first comma as postComma", () => {
+    const toks = tokenizeCandidate("olive oil, divided");
+    expect(toks.map((t) => t.raw)).toEqual(["olive", "oil", "divided"]);
+    expect(toks.map((t) => t.postComma)).toEqual([false, false, true]);
+  });
+
+  it("treats tokens before any comma as pre-comma", () => {
+    const toks = tokenizeCandidate("chick peas in a can");
+    expect(toks.every((t) => t.postComma === false)).toBe(true);
+  });
+
+  it("still splits on semicolon/slash/dash without flagging postComma", () => {
+    const toks = tokenizeCandidate("salz/pfeffer");
+    expect(toks.map((t) => t.raw)).toEqual(["salz", "pfeffer"]);
+    expect(toks.map((t) => t.postComma)).toEqual([false, false]);
+  });
+});

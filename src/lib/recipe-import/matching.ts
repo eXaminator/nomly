@@ -97,25 +97,37 @@ export type IngredientCandidateMatch = {
   isCanonical: boolean;
 };
 
-/** A token of the candidate text — both the normalised form (used for
- *  matching) and the raw text (used for note reconstruction). */
-export type CandidateToken = { raw: string; normalized: string };
+/** A token of the candidate text — normalised (matching), raw (note
+ *  reconstruction), and whether it sits after the first top-level comma.
+ *  Post-comma tokens score fewer points (see {@link scoreMatch}): a comma
+ *  is a soft signal that what follows reads more like an annotation than
+ *  part of the core name. */
+export type CandidateToken = {
+  raw: string;
+  normalized: string;
+  postComma: boolean;
+};
 
 /**
- * Punctuation that's allowed to split candidate tokens. Commas in
- * particular are treated as whitespace so the substring algorithm sees
- * `"Paprikapulver, rosenscharfes"` and `"Paprikapulver rosenscharfes"` the
- * same way.
+ * Split a candidate into tokens. Commas are dropped as delimiters BUT flip
+ * every following token to `postComma: true`. Other separators (whitespace,
+ * semicolon, slash, dash) split without affecting the comma flag.
  */
-const TOKEN_SPLIT_RE = /[\s,;/\-–—]+/u;
-
 export function tokenizeCandidate(text: string): CandidateToken[] {
   const out: CandidateToken[] = [];
-  for (const raw of text.split(TOKEN_SPLIT_RE)) {
-    if (raw.length === 0) continue;
-    const normalized = normalizeForMatch(raw);
-    if (normalized.length === 0) continue;
-    out.push({ raw, normalized });
+  let postComma = false;
+  // Keep commas as their own pieces so we can flip the flag as we cross them.
+  for (const segment of text.split(/(,)/u)) {
+    if (segment === ",") {
+      postComma = true;
+      continue;
+    }
+    for (const raw of segment.split(/[\s;/\-–—]+/u)) {
+      if (raw.length === 0) continue;
+      const normalized = normalizeForMatch(raw);
+      if (normalized.length === 0) continue;
+      out.push({ raw, normalized, postComma });
+    }
   }
   return out;
 }
