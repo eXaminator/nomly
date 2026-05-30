@@ -43,7 +43,7 @@
  *     {@link perTokenBonus}.
  */
 
-import { normalizeForMatch } from "./ingredient.ts";
+import { canonicalizeMatchToken, normalizeForMatch } from "./ingredient.ts";
 
 export type CatalogEntry = {
   /** The ingredient row this entry resolves to. */
@@ -135,7 +135,7 @@ export function tokenizeCandidate(text: string): CandidateToken[] {
     }
     for (const raw of segment.split(/[\s;/\-–—]+/u)) {
       if (raw.length === 0) continue;
-      const normalized = normalizeForMatch(raw);
+      const normalized = canonicalizeMatchToken(normalizeForMatch(raw));
       if (normalized.length === 0) continue;
       out.push({ raw, normalized, postComma, precededByComma: pendingComma });
       pendingComma = false;
@@ -172,7 +172,9 @@ export function tokenizeCandidateJoinDashes(text: string): CandidateToken[] {
     // surrounding whitespace).
     for (const raw of segment.split(/[\s;/]+/u)) {
       if (raw.length === 0) continue;
-      const normalized = normalizeForMatch(raw.replace(/(\p{L})[-–—](\p{L})/gu, "$1$2"));
+      const normalized = canonicalizeMatchToken(
+        normalizeForMatch(raw.replace(/(\p{L})[-–—](\p{L})/gu, "$1$2")),
+      );
       if (normalized.length === 0) continue;
       out.push({ raw, normalized, postComma, precededByComma: pendingComma });
       pendingComma = false;

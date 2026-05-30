@@ -419,6 +419,24 @@ describe("tokenizeCandidate postComma", () => {
     expect(toks.map((t) => t.raw)).toEqual(["salz", "pfeffer"]);
     expect(toks.map((t) => t.postComma)).toEqual([false, false]);
   });
+
+  it("folds '&', 'und' and 'and' onto one normalized token", () => {
+    expect(tokenizeCandidate("Salz & Pfeffer").map((t) => t.normalized)).toEqual([
+      "salz",
+      "und",
+      "pfeffer",
+    ]);
+    expect(tokenizeCandidate("Salz und Pfeffer").map((t) => t.normalized)).toEqual([
+      "salz",
+      "und",
+      "pfeffer",
+    ]);
+    expect(tokenizeCandidate("Salt and Pepper").map((t) => t.normalized)).toEqual([
+      "salt",
+      "und",
+      "pepper",
+    ]);
+  });
 });
 
 describe("structural matcher scoring", () => {
@@ -480,5 +498,14 @@ describe("structural matcher scoring", () => {
       entry(1, "Paprika"),
     ]);
     expect(matches[0]?.score ?? 0).toBeLessThan(130);
+  });
+
+  it("matches an alias spelled with 'und' against a line using '&'", () => {
+    // The catalog tokenizer folds "&"/"und"/"and" to "und", so the entry's
+    // tokens are ["salz", "und", "pfeffer"] regardless of the source spelling.
+    const cat = [{ ...entry(1, "Salz und Pfeffer"), tokens: ["salz", "und", "pfeffer"] }];
+    const { matches } = findIngredientCandidates("Salz & Pfeffer", cat);
+    expect(matches[0].ingredientId).toBe(1);
+    expect(matches[0].score).toBeGreaterThanOrEqual(MIN_AUTO_MATCH_SCORE);
   });
 });

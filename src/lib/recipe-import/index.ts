@@ -18,6 +18,7 @@ import {
 } from "./json-ld.ts";
 import { parseIsoDurationToMinutes } from "./duration.ts";
 import {
+  canonicalizeMatchToken,
   detectSectionHeader,
   expandIngredientLine,
   isPrepLeadingToken,
@@ -435,7 +436,7 @@ function tokenizeEntryNameForCatalog(name: string): string[] {
   const out: string[] = [];
   for (const piece of name.split(/[\s,;/\-–—]+/u)) {
     if (piece.length === 0) continue;
-    const normalized = normalizeForMatch(piece);
+    const normalized = canonicalizeMatchToken(normalizeForMatch(piece));
     if (normalized.length === 0) continue;
     out.push(normalized);
   }

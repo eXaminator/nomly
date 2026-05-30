@@ -559,6 +559,20 @@ export function normalizeForMatch(s: string): string {
     .toLowerCase();
 }
 
+/** The conjunction "&" and its spelled-out German/English forms, all folded
+ *  onto one canonical token so an alias written "Salz und Pfeffer" still
+ *  matches a line that uses "Salz & Pfeffer" (or "Salt and Pepper"). */
+const CONJUNCTION_TOKENS = new Set(["&", "und", "and"]);
+
+/**
+ * Collapse the conjunctions "&", "und" and "and" to a single token. Applied to
+ * an already-{@link normalizeForMatch}'d token by every tokenizer (candidate
+ * and catalog sides), so the three forms align during matching.
+ */
+export function canonicalizeMatchToken(normalized: string): string {
+  return CONJUNCTION_TOKENS.has(normalized) ? "und" : normalized;
+}
+
 /**
  * Pre-process the raw line: strip noise punctuation, brackets-as-notes,
  * to-taste phrases, and amount-at-end inversions.
