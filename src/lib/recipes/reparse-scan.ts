@@ -180,6 +180,7 @@ export function scanAllRecipesForReparse(): ReparseScanEntry[] {
       quantity: recipeIngredient.quantity,
       unitId: recipeIngredient.unitId,
       unitName: unit.name,
+      displayUnit: recipeIngredient.displayUnit,
       subUnitId: recipeIngredient.subUnitId,
       subUnitName: ingredientSubUnit.name,
       notes: recipeIngredient.notes,
@@ -237,7 +238,9 @@ export function scanAllRecipesForReparse(): ReparseScanEntry[] {
         name: g.name ?? "",
         canonicalName: g.canonicalName ?? null,
         quantity: g.quantity,
-        unitLabel: g.subUnitName ?? g.unitName ?? null,
+        // Match the recipe read view: display_unit, then the canonical unit
+        // name, then the sub-unit name.
+        unitLabel: g.displayUnit ?? g.unitName ?? g.subUnitName ?? null,
         notes: g.notes,
         isOptional: g.isOptional,
         isAlternative: g.alternativeForId != null,

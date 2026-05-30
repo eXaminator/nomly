@@ -392,20 +392,24 @@ export function BulkReparseDialog({
                                     >
                                       {st.editing ? "Bearbeitung schließen" : "Bearbeiten"}
                                     </button>
-                                    {st.editing ? (
-                                      <div className="mt-2 flex flex-col gap-2 rounded-[var(--radius)] bg-[var(--color-muted)] p-2">
-                                        {st.draft.map((d, k) => (
-                                          <IngredientRow
-                                            key={d.uid}
-                                            value={d}
-                                            onChange={(next) => setDraftRow(i, k, next)}
-                                            onRemove={() => removeDraftRow(i, k)}
-                                          />
-                                        ))}
-                                      </div>
-                                    ) : null}
                                   </div>
                                 </div>
+                                {st.editing ? (
+                                  // Full-width edit panel (outside the checkbox
+                                  // column) on a distinct background so the
+                                  // non-selected candidate pills (which use the
+                                  // muted background) stay visible.
+                                  <div className="flex flex-col gap-2 rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-bg)] p-3">
+                                    {st.draft.map((d, k) => (
+                                      <IngredientRow
+                                        key={d.uid}
+                                        value={d}
+                                        onChange={(next) => setDraftRow(i, k, next)}
+                                        onRemove={() => removeDraftRow(i, k)}
+                                      />
+                                    ))}
+                                  </div>
+                                ) : null}
                               </div>
                             );
                           })}
