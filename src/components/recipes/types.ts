@@ -40,10 +40,12 @@ export type DraftIngredientCandidate = {
   /** Match score from the server-side matcher. Used purely for sort
    *  stability and the auto-select rules; never rendered to the user. */
   score: number;
-  /** Raw text of the candidate tokens NOT covered by this match. When the
-   *  user clicks a pill, these tokens get moved out of the name input and
-   *  appended to the notes field. */
-  uncoveredText: string;
+  /** Finished display name to apply if the user picks this pill — the
+   *  matched span of the input. Selecting a pill is a pure replace. */
+  name: string;
+  /** Finished notes to apply if the user picks this pill — the input tokens
+   *  outside the matched span plus the parser's base notes. */
+  notes: string | null;
   /** True when the underlying ingredient is flagged as equipment — the pill
    *  click handler and auto-select rule default `isOptional` to true. */
   isEquipment: boolean;
@@ -151,7 +153,8 @@ export type ParsedIngredientResponse = {
     canonicalName: string;
     matchedName: string;
     score: number;
-    uncoveredText: string;
+    name: string;
+    notes: string | null;
     isEquipment: boolean;
   }>;
   notes: string | null;
@@ -204,7 +207,8 @@ export function parsedIngredientToDraft(
       canonicalName: c.canonicalName,
       matchedName: c.matchedName,
       score: c.score,
-      uncoveredText: c.uncoveredText ?? "",
+      name: c.name,
+      notes: c.notes ?? null,
       isEquipment: c.isEquipment ?? false,
     })),
     addAsAlias: false,

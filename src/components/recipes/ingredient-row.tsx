@@ -102,10 +102,10 @@ type ServerMatch = {
   canonicalName: string;
   matchedName: string;
   score: number;
-  /** Raw text of candidate tokens NOT covered by this match — moved into the
-   *  notes field when the user picks this pill. Empty when the match covers
-   *  every token of the candidate. */
-  uncoveredText: string;
+  /** Finished display name applied on pick — the matched span of the input. */
+  name: string;
+  /** Finished notes applied on pick — the input tokens outside the span. */
+  notes: string | null;
   /** True when the underlying ingredient is flagged as equipment. The pill
    *  click and auto-select rule default `isOptional` to true on first
    *  resolution to equipment — matching the import-time behavior. */
@@ -124,55 +124,6 @@ function subUnitPickerId(subUnitId: number): number {
 }
 function isSubUnitPickerId(id: number): boolean {
   return id < 0;
-}
-
-/**
- * Remove each whitespace-separated token in `uncoveredText` from `name`
- * (case-insensitive, first occurrence only per token). Used when the user
- * picks a pill whose match did not cover the full name input — e.g.
- * "Paprikaschote rote" minus "rote" → "Paprikaschote". Punctuation that
- * surrounded the removed token (commas, dashes) is also tidied so the
- * resulting name doesn't read as "Paprikaschote, " or "Paprikaschote -".
- */
-function subtractTokensFromName(name: string, uncoveredText: string): string {
-  const toRemove = uncoveredText
-    .split(/\s+/)
-    .map((t) => t.toLowerCase())
-    .filter((t) => t.length > 0);
-  if (toRemove.length === 0) return name;
-  const parts = name.split(/(\s+|[,;])/u);
-  const remainingToRemove = new Map<string, number>();
-  for (const t of toRemove) {
-    remainingToRemove.set(t, (remainingToRemove.get(t) ?? 0) + 1);
-  }
-  const kept: string[] = [];
-  for (const part of parts) {
-    const lower = part.toLowerCase().replace(/[.,;]+$/, "");
-    const count = remainingToRemove.get(lower);
-    if (count && count > 0) {
-      remainingToRemove.set(lower, count - 1);
-      continue;
-    }
-    kept.push(part);
-  }
-  // Tidy stranded separators: leading/trailing whitespace/punctuation and
-  // double-separators left behind by the removals.
-  return kept
-    .join("")
-    .replace(/\s*[,;]\s*[,;]\s*/g, ", ")
-    .replace(/^[\s,;-]+|[\s,;-]+$/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-/** Append a string to the notes field with a comma separator when both
- *  sides are non-empty. Trims and dedups consecutive separators. */
-function appendToNotes(existing: string, addition: string): string {
-  const a = existing.trim();
-  const b = addition.trim();
-  if (a.length === 0) return b;
-  if (b.length === 0) return a;
-  return `${a}, ${b}`;
 }
 
 type Props = {
@@ -270,7 +221,8 @@ export function IngredientRow({
           // rather than collapsing both to the canonical.
           matchedName: c.matchedName,
           score: c.score,
-          uncoveredText: c.uncoveredText,
+          name: c.name,
+          notes: c.notes,
           isEquipment: c.isEquipment,
         }));
       }
@@ -290,9 +242,10 @@ export function IngredientRow({
             canonicalName: value.canonicalName ?? value.name,
             matchedName: label,
             score: 999,
-            // Edit-flow synthetic — no live matcher info, treat as fully
-            // covered so the pill click is a no-op on name/notes.
-            uncoveredText: "",
+            // Edit-flow synthetic — carry the row's current name/notes so
+            // clicking this pill is a no-op on name/notes.
+            name: value.name,
+            notes: value.notes,
             // Equipment status is unknown at synth time; the live matcher's
             // first response will fill it in. Defaulting to false here
             // avoids accidentally flipping isOptional on initial render.
@@ -359,10 +312,10 @@ export function IngredientRow({
                 canonicalName: v.canonicalName ?? v.name,
                 matchedName: label,
                 score: 999,
-                // Synthetic pin — name/notes are already in the user's
-                // intended state; treat as fully covered so re-picking
-                // this pill doesn't shuffle text around.
-                uncoveredText: "",
+                // Synthetic pin — carry the row's current name/notes so
+                // re-picking this pill doesn't shuffle text around.
+                name: v.name,
+                notes: v.notes,
                 // Equipment flag isn't surfaced by the synthetic pin path
                 // (the live matcher dropped it). The user already has the
                 // row in their preferred state, so default to false to
@@ -458,32 +411,25 @@ export function IngredientRow({
     });
   }
 
-  /** Click on a candidate pill: select that ingredient and delegate any
-   *  tokens the match did NOT cover into the notes field. The row's
-   *  display_name keeps the user's spelling minus the uncovered tokens
+  /** Click on a candidate pill: replace the row's name + notes with the
+   *  candidate's finished values (computed server-side from the matched
+   *  span) and link the ingredient. Pure replace — idempotent, so
+   *  re-clicking or switching pills never accumulates leftover notes
    *  ("Paprikaschote rote" + pick Paprikaschoten → name "Paprikaschote",
-   *  note "rote"); `ingredient_id` links to the picked canonical. When
-   *  uncoveredText is empty the name is preserved verbatim, matching the
-   *  prior behavior for clean covers.
+   *  note "rote"). `ingredient_id` links to the picked canonical.
    *
    *  Equipment-flagged ingredients (Backpapier, Backform, …) default the
    *  row to isOptional=true on first resolution, mirroring the import-time
    *  parser behavior. A user-toggled isOptional=true is left in place;
    *  we never auto-unset. */
   function selectCandidate(c: ServerMatch) {
-    const nextName = c.uncoveredText
-      ? subtractTokensFromName(value.name, c.uncoveredText)
-      : value.name;
-    const nextNotes = c.uncoveredText
-      ? appendToNotes(value.notes, c.uncoveredText)
-      : value.notes;
     onChange({
       ...value,
-      name: nextName,
-      notes: nextNotes,
+      name: c.name,
+      notes: c.notes ?? "",
       selectedIngredientId: c.ingredientId,
       canonicalName:
-        nextName.toLowerCase() === c.canonicalName.toLowerCase()
+        c.name.toLowerCase() === c.canonicalName.toLowerCase()
           ? null
           : c.canonicalName,
       isOptional: value.isOptional || c.isEquipment,
