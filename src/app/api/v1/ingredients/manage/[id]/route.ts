@@ -37,6 +37,12 @@ const updateSchema = z.object({
   purchaseUnitId: z.number().int().positive().nullable().default(null),
   excludeFromShoppingList: z.boolean(),
   dietaryClass: z.enum(["vegan", "vegetarian", "meat"]).nullable(),
+  // Optional propagation rider: rewrite exact display_name matches on this
+  // ingredient's existing recipe rows when a name/alias was renamed.
+  renamePairs: z
+    .array(z.object({ from: z.string().min(1), to: z.string().min(1) }))
+    .default([]),
+  propagateRenames: z.boolean().default(false),
 });
 
 export async function GET(
@@ -63,8 +69,11 @@ export async function PATCH(
   if (!parsed.success) {
     return NextResponse.json({ error: "validation" }, { status: 400 });
   }
+  const { renamePairs, propagateRenames, ...upsert } = parsed.data;
   try {
-    return NextResponse.json(updateIngredient(id, parsed.data));
+    return NextResponse.json(
+      updateIngredient(id, upsert, propagateRenames ? renamePairs : []),
+    );
   } catch (e) {
     return errorToResponse(e);
   }

@@ -12,6 +12,7 @@ import {
   type SelectSearchItem,
 } from "@/components/ui/select-search";
 import { Switch } from "@/components/ui/switch";
+import { Checkbox } from "@/components/ui/checkbox";
 
 import { ImpactSection } from "../impact-section";
 import type { EditFormProps } from "../list-shell";
@@ -135,6 +136,9 @@ export function IngredientForm({
       defaultUnit: defaultsByAliasLower.get(aliasName.toLowerCase()) ?? null,
     }));
   });
+  // Opt-in: also rewrite the matching display names on existing recipes when
+  // the canonical name or an existing alias is renamed here.
+  const [propagateRenames, setPropagateRenames] = React.useState(false);
   const [category, setCategory] = React.useState<{
     id: number;
     name: string;
@@ -187,6 +191,30 @@ export function IngredientForm({
   React.useEffect(() => {
     subUnitsRef.current = subUnits;
   });
+
+  // Renames the user made to the canonical name or to EXISTING aliases (whose
+  // key encodes the original name). New/removed aliases aren't renames. Used to
+  // offer propagating the change into existing recipes' display names.
+  const renamePairs = React.useMemo(() => {
+    if (!item) return [] as Array<{ from: string; to: string }>;
+    const pairs: Array<{ from: string; to: string }> = [];
+    const seen = new Set<string>();
+    const push = (from: string, to: string) => {
+      const f = from.trim();
+      const t = to.trim();
+      if (f.length === 0 || t.length === 0 || f === t) return;
+      const k = f.toLowerCase();
+      if (seen.has(k)) return;
+      seen.add(k);
+      pairs.push({ from: f, to: t });
+    };
+    push(item.name, name);
+    const prefix = "existing-";
+    for (const a of aliases) {
+      if (a.key.startsWith(prefix)) push(a.key.slice(prefix.length), a.name);
+    }
+    return pairs;
+  }, [item, name, aliases]);
 
   React.useEffect(() => {
     const trimmedName = name.trim();
@@ -260,6 +288,10 @@ export function IngredientForm({
         excludeFromShoppingList,
         isEquipment,
         dietaryClass,
+        // Propagation rider — ignored by the server unless propagateRenames is
+        // true (and only applied for exact display_name matches).
+        renamePairs,
+        propagateRenames: propagateRenames && renamePairs.length > 0,
       },
       valid,
     );
@@ -273,6 +305,8 @@ export function IngredientForm({
     excludeFromShoppingList,
     isEquipment,
     dietaryClass,
+    renamePairs,
+    propagateRenames,
     onPayloadChange,
   ]);
 
@@ -578,6 +612,28 @@ export function IngredientForm({
         >
           <Plus className="size-4" /> Alias hinzufügen
         </Button>
+        {renamePairs.length > 0 ? (
+          <label className="mt-1 flex cursor-pointer items-start gap-2 rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-muted)] px-3 py-2 text-sm">
+            <Checkbox
+              checked={propagateRenames}
+              onCheckedChange={(v) => setPropagateRenames(Boolean(v))}
+              className="mt-0.5"
+            />
+            <span className="flex-1">
+              <span className="font-medium">
+                Umbenennungen auf bestehende Rezepte übertragen
+              </span>
+              <span className="mt-0.5 block text-xs text-[var(--color-muted-fg)]">
+                Ersetzt den Anzeigenamen in vorhandenen Rezeptzeilen, die exakt
+                so heißen:{" "}
+                {renamePairs
+                  .map((p) => `„${p.from}“ → „${p.to}“`)
+                  .join(", ")}
+                . Sonst bleiben bestehende Rezepte unverändert.
+              </span>
+            </span>
+          </label>
+        ) : null}
       </div>
 
       <div className="flex flex-col gap-2">

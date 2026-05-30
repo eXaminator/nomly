@@ -1,4 +1,4 @@
-import { asc, eq, inArray, or, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, or, sql } from "drizzle-orm";
 
 import { db } from "../../../db/index.ts";
 import {
@@ -584,6 +584,10 @@ function resolveCanonicalDefault(
 export function updateIngredient(
   id: number,
   input: IngredientUpsertInput,
+  /** Optional name renames to propagate: each existing recipe row of THIS
+   *  ingredient whose `display_name` exactly equals `from` is rewritten to
+   *  `to`. Empty (the default) leaves recipes untouched. */
+  propagateRenames: Array<{ from: string; to: string }> = [],
 ): IngredientDetail {
   const existing = db
     .select({ id: ingredient.id })
@@ -636,6 +640,21 @@ export function updateIngredient(
               defaultSubUnitId: def?.subUnitId ?? null,
             };
           }),
+        )
+        .run();
+    }
+    // Propagate renames into existing recipe rows of this ingredient. Exact
+    // display_name match only (case-sensitive), scoped to `ingredient_id` so a
+    // coincidental same-text row of another ingredient is never touched.
+    for (const { from, to } of propagateRenames) {
+      if (from === to) continue;
+      tx.update(recipeIngredient)
+        .set({ displayName: to })
+        .where(
+          and(
+            eq(recipeIngredient.ingredientId, id),
+            eq(recipeIngredient.displayName, from),
+          ),
         )
         .run();
     }
