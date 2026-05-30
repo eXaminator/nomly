@@ -989,6 +989,10 @@ export function parseIngredientString(
     if (!inNotes && t === ",") {
       inNotes = true;
       inCommaTail = true;
+      // A note fragment already exists (e.g. a paren block that appeared
+      // before the name, "(225g) large shrimp, …") — separate it from the
+      // upcoming comma-tail with a comma so the two stay distinct fragments.
+      if (noteTokens.length > 0) noteTokens.push(",");
       continue;
     }
     if (t === "," || t === ";") {
@@ -1000,6 +1004,7 @@ export function parseIngredientString(
     }
     if (!inNotes && USAGE_PREFIX_TOKENS.has(lower) && nameTokens.length > 0) {
       inNotes = true;
+      if (noteTokens.length > 0) noteTokens.push(",");
       noteTokens.push(t);
       continue;
     }
@@ -1014,6 +1019,7 @@ export function parseIngredientString(
         continue;
       }
       inNotes = true;
+      if (noteTokens.length > 0) noteTokens.push(",");
       noteTokens.push(t);
       continue;
     }
@@ -1141,8 +1147,13 @@ export function parseIngredientString(
       .replace(/^[\s,;]+|[\s,;]+$/g, "")
       .trim();
   const sizeNote = sizeModifiers.join(" ").trim();
+  // Order fragments by where they sit in the source line so notes keep their
+  // relative place: leading quantity/size, then in-line parens/secondary
+  // amounts, then the trailing comma-tail / usage phrase. Each fragment is a
+  // separate comma-separated part. e.g. "1/2 pound (225g) large shrimp,
+  // peeled and deveined" → "large, 225 g, peeled and deveined".
   const notes =
-    [sizeNote, ...rangeNotes, ...secondaryAmounts, noteBody, ...capturedNotes]
+    [sizeNote, ...rangeNotes, ...secondaryAmounts, ...capturedNotes, noteBody]
       .map((p) => p.trim())
       .filter((p) => p.length > 0)
       .join(", ") || null;

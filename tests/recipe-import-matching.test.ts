@@ -1130,3 +1130,33 @@ describe("internal comma preservation in matched name", () => {
     expect(out[0].name).toBe("Paprikapulver rosenscharf");
   });
 });
+
+describe("note fragments keep source order, comma-separated", () => {
+  it("range note leads, trailing usage follows (matched ingredient)", () => {
+    const catalog: IngredientCatalog = [
+      {
+        ingredientId: 1,
+        canonicalName: "vegetable oil",
+        aliasName: "vegetable oil",
+        tokens: ["vegetable", "oil"],
+      },
+    ];
+    const out = parseIngredientLines(
+      ["2-3 cups vegetable oil, for frying"],
+      makeLookups(catalog, ["cups"]),
+    );
+    expect(out[0].ingredientId).toBe(1);
+    expect(out[0].name).toBe("vegetable oil");
+    expect(out[0].notes).toBe("2-3, for frying");
+  });
+
+  it("size, paren amount, then comma-tail prep — all comma-separated, in order (new ingredient)", () => {
+    const out = parseIngredientLines(
+      ["1/2 pound (225g) large shrimp, peeled and deveined"],
+      makeLookups([], ["pound"]),
+    );
+    expect(out[0].ingredientMatch).toBe("new");
+    expect(out[0].name).toBe("shrimp");
+    expect(out[0].notes).toBe("large, 225 g, peeled and deveined");
+  });
+});

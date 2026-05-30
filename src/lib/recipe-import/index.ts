@@ -658,9 +658,14 @@ function computeNameAndNotes(
     .map((t) => t.raw)
     .join(" ")
     .trim();
+  // `baseNotes` holds the parser's pre-extracted fragments (range, size,
+  // secondary amounts, parens) — these originate at/before the name in the
+  // source, so they lead. Then the span's leftover tokens in source order:
+  // `before` (descriptors ahead of the matched name) then `after`. Every
+  // fragment is comma-separated.
   const baseNotes = subtractCommaTail(parsed.notes, parsed.commaTailText);
   const notes =
-    [before, after, baseNotes ?? ""]
+    [baseNotes ?? "", before, after]
       .map((s) => s.trim())
       .filter((s) => s.length > 0)
       .join(", ") || null;
@@ -822,19 +827,28 @@ function toImportedCandidateMatch(
   };
 }
 
+/** Conjunctions that link prep words ("peeled AND deveined") — ignored when
+ *  deciding whether a comma-tail is all prep-like, but kept in the notes. */
+const PREP_CONJUNCTIONS = new Set(["and", "und", "&", "or", "oder"]);
+
 /**
- * True when every token in `text` is a prep-like word (PREP_LEADING_TOKENS
- * or SIZE_MODIFIER_TOKENS — "klein", "gehackt", "fein", …). The
- * cleanup-rematch path uses this to decide whether the comma-tail content
- * is a user-marked note ("Tomaten, klein gehackt") or part of the
- * identity ("Paprikapulver, edelsüß").
+ * True when the meaningful tokens in `text` are ALL prep-like words
+ * (PREP_LEADING_TOKENS or SIZE_MODIFIER_TOKENS — "klein", "gehackt", "fein",
+ * …). Linking conjunctions ("and"/"und") are ignored so "peeled and
+ * deveined" still reads as all-prep. The new-ingredient naming path uses this
+ * to decide whether the comma-tail is a note ("Tomaten, klein gehackt" →
+ * notes) or part of the identity ("Paprikapulver, edelsüß" → name).
  */
 function isAllPrepLikeText(text: string): boolean {
   const tokens = text
     .split(/[\s,;]+/)
+    .map((t) => t.replace(/[.,;]$/, ""))
     .filter((t) => t.length > 0);
-  if (tokens.length === 0) return false;
-  return tokens.every((t) => isPrepLeadingToken(t.replace(/[.,;]$/, "")));
+  const meaningful = tokens.filter(
+    (t) => !PREP_CONJUNCTIONS.has(t.toLowerCase()),
+  );
+  if (meaningful.length === 0) return false;
+  return meaningful.every((t) => isPrepLeadingToken(t));
 }
 
 /**
