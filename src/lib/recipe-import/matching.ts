@@ -105,28 +105,38 @@ export type IngredientCandidateMatch = {
 export type CandidateToken = {
   raw: string;
   normalized: string;
+  /** True for every token after the first top-level comma (cumulative) —
+   *  drives the post-comma score discount. */
   postComma: boolean;
+  /** True only for the token IMMEDIATELY following a comma delimiter — lets
+   *  the parser re-insert internal commas in a name when the matched alias
+   *  itself contains one. */
+  precededByComma: boolean;
 };
 
 /**
  * Split a candidate into tokens. Commas are dropped as delimiters BUT flip
- * every following token to `postComma: true`. Other separators (whitespace,
- * semicolon, slash, dash) split without affecting the comma flag.
+ * every following token to `postComma: true` (and mark the immediately-next
+ * token `precededByComma: true`). Other separators (whitespace, semicolon,
+ * slash, dash) split without affecting the comma flags.
  */
 export function tokenizeCandidate(text: string): CandidateToken[] {
   const out: CandidateToken[] = [];
   let postComma = false;
-  // Keep commas as their own pieces so we can flip the flag as we cross them.
+  let pendingComma = false;
+  // Keep commas as their own pieces so we can flip the flags as we cross them.
   for (const segment of text.split(/(,)/u)) {
     if (segment === ",") {
       postComma = true;
+      pendingComma = true;
       continue;
     }
     for (const raw of segment.split(/[\s;/\-–—]+/u)) {
       if (raw.length === 0) continue;
       const normalized = normalizeForMatch(raw);
       if (normalized.length === 0) continue;
-      out.push({ raw, normalized, postComma });
+      out.push({ raw, normalized, postComma, precededByComma: pendingComma });
+      pendingComma = false;
     }
   }
   return out;
@@ -148,9 +158,11 @@ export function tokenizeCandidateJoinDashes(text: string): CandidateToken[] {
   // stays "Paprika-Pulver"); only `normalized` drops the dash for matching.
   const out: CandidateToken[] = [];
   let postComma = false;
+  let pendingComma = false;
   for (const segment of text.split(/(,)/u)) {
     if (segment === ",") {
       postComma = true;
+      pendingComma = true;
       continue;
     }
     // Split on whitespace / semicolon / slash, but not on dashes between
@@ -160,7 +172,8 @@ export function tokenizeCandidateJoinDashes(text: string): CandidateToken[] {
       if (raw.length === 0) continue;
       const normalized = normalizeForMatch(raw.replace(/(\p{L})[-–—](\p{L})/gu, "$1$2"));
       if (normalized.length === 0) continue;
-      out.push({ raw, normalized, postComma });
+      out.push({ raw, normalized, postComma, precededByComma: pendingComma });
+      pendingComma = false;
     }
   }
   return out;

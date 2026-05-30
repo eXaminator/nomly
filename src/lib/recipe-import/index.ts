@@ -630,18 +630,24 @@ function computeNameAndNotes(
   parsed: ParsedIngredient,
   candidate: CandidateToken[],
   coveredCandidateTokens: number[],
+  aliasName: string,
 ): { name: string; notes: string | null } {
   if (coveredCandidateTokens.length === 0) {
     return { name: parsed.name, notes: parsed.notes };
   }
   const lo = Math.min(...coveredCandidateTokens);
   const hi = Math.max(...coveredCandidateTokens);
-  const name = candidate
-    .slice(lo, hi + 1)
-    .map((t) => t.raw)
-    .join(" ")
-    .replace(/\s+/g, " ")
-    .trim();
+  // The span tokens are normally space-joined (the comma was a delimiter).
+  // But when the matched alias itself carries a comma ("Tomaten, passiert"),
+  // re-insert the user's internal comma so the display name matches the
+  // catalog form rather than flattening to "Tomaten passiert".
+  const keepCommas = aliasName.includes(",");
+  let name = candidate[lo].raw;
+  for (let k = lo + 1; k <= hi; k++) {
+    const sep = keepCommas && candidate[k].precededByComma ? ", " : " ";
+    name += sep + candidate[k].raw;
+  }
+  name = name.replace(/\s+/g, " ").trim();
   const before = candidate
     .slice(0, lo)
     .map((t) => t.raw)
@@ -717,6 +723,7 @@ function resolveIngredientForRow(
           parsed,
           top.candidate,
           top.coveredCandidateTokens,
+          top.aliasName,
         );
         return {
           name,
@@ -802,6 +809,7 @@ function toImportedCandidateMatch(
     parsed,
     m.candidate,
     m.coveredCandidateTokens,
+    m.aliasName,
   );
   return {
     ingredientId: m.ingredientId,

@@ -1094,3 +1094,39 @@ describe("alternative amount/unit/notes inheritance", () => {
     expect(out.find((r) => r.isAlternative)!.notes).toMatch(/diced/);
   });
 });
+
+describe("internal comma preservation in matched name", () => {
+  it("keeps the comma when the matched alias contains one", () => {
+    const catalog: IngredientCatalog = [
+      {
+        ingredientId: 1,
+        canonicalName: "Tomaten, passiert",
+        aliasName: "Tomaten, passiert",
+        tokens: ["tomaten", "passiert"],
+      },
+    ];
+    const out = parseIngredientLines(
+      ["500 g Tomaten, passiert"],
+      makeLookups(catalog),
+    );
+    expect(out[0].ingredientId).toBe(1);
+    expect(out[0].name).toBe("Tomaten, passiert");
+    expect(out[0].notes).toBeNull();
+  });
+
+  it("drops the comma when the matched alias has none", () => {
+    const catalog: IngredientCatalog = [
+      {
+        ingredientId: 2,
+        canonicalName: "Paprikapulver",
+        aliasName: "Paprikapulver rosenscharf",
+        tokens: ["paprikapulver", "rosenscharf"],
+      },
+    ];
+    const out = parseIngredientLines(
+      ["1 g Paprikapulver, rosenscharf"],
+      makeLookups(catalog),
+    );
+    expect(out[0].name).toBe("Paprikapulver rosenscharf");
+  });
+});
