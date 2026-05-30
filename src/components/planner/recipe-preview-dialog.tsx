@@ -13,6 +13,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { DietBadge } from "@/components/recipes/diet-badge";
 import { IngredientLine } from "@/components/recipes/ingredient-line";
+import { NeedsUpdateToggle } from "@/components/recipes/needs-update-toggle";
 import {
   UpcomingUsesButton,
   UpcomingUsesProvider,
@@ -170,7 +171,8 @@ function RecipeBody({ recipeId, mealPlanId }: { recipeId: number; mealPlanId: nu
               </div>
             ) : null}
           </div>
-          <div className="flex shrink-0 gap-2">
+          <div className="flex shrink-0 flex-wrap justify-end gap-2">
+            <NeedsUpdateToggle recipeId={recipe.id} initial={recipe.needsUpdate} />
             <Button asChild variant="outline" size="sm">
               <Link href={fullViewHref}>Vollansicht</Link>
             </Button>

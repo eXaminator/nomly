@@ -7,6 +7,7 @@ import {
   ChevronDown,
   ChevronUp,
   CopyPlus,
+  Eye,
   Minus,
   Pencil,
   Plus,
@@ -313,76 +314,95 @@ export function MealCard({
       </div>
 
       <div className="flex shrink-0 items-start gap-0.5">
-        {/* Leftover controls + edit + delete. */}
-        <div className="flex flex-wrap justify-end gap-0.5">
-          <button
-            type="button"
-            aria-label={meal.isLeftover ? "Reste-Markierung entfernen" : "Als Reste markieren"}
-            title={meal.isLeftover ? "Reste-Markierung entfernen" : "Als Reste markieren"}
-            aria-pressed={meal.isLeftover}
-            onPointerDown={(e) => e.stopPropagation()}
-            onClick={(e) => {
-              e.stopPropagation();
-              onToggleLeftover(meal.id, !meal.isLeftover);
-            }}
-            className={cn(
-              "inline-flex size-7 items-center justify-center rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]",
-              meal.isLeftover
-                ? "bg-[var(--color-muted)] text-[var(--color-fg)]"
-                : "text-[var(--color-muted-fg)] hover:bg-[var(--color-muted)] hover:text-[var(--color-fg)]",
-            )}
-          >
-            <Soup className="size-4" />
-          </button>
-          <button
-            type="button"
-            aria-label="Als Reste auf nächsten Tag kopieren"
-            title="Als Reste auf nächsten Tag kopieren"
-            onPointerDown={(e) => e.stopPropagation()}
-            onClick={(e) => {
-              e.stopPropagation();
-              onDuplicateLeftover(meal.id);
-            }}
-            className="inline-flex size-7 items-center justify-center rounded-md text-[var(--color-muted-fg)] hover:bg-[var(--color-muted)] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
-          >
-            <CopyPlus className="size-4" />
-          </button>
-          <button
-            type="button"
-            aria-label="Bearbeiten"
-            title="Bearbeiten"
-            onPointerDown={(e) => e.stopPropagation()}
-            onClick={(e) => {
-              e.stopPropagation();
-              onEdit(meal);
-            }}
-            className="inline-flex size-7 items-center justify-center rounded-md text-[var(--color-muted-fg)] hover:bg-[var(--color-muted)] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
-          >
-            <Pencil className="size-4" />
-          </button>
-          <button
-            type="button"
-            aria-label={confirmDelete ? "Wirklich löschen?" : "Löschen"}
-            title={confirmDelete ? "Wirklich löschen?" : "Löschen"}
-            onPointerDown={(e) => e.stopPropagation()}
-            onClick={(e) => {
-              e.stopPropagation();
-              if (confirmDelete) {
-                setConfirmDelete(false);
-                onDelete(meal.id);
-              } else {
-                setConfirmDelete(true);
-              }
-            }}
-            className={cn(
-              "inline-flex size-7 items-center justify-center rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]",
-              confirmDelete
-                ? "bg-[var(--color-danger)] text-white animate-pulse"
-                : "text-[var(--color-muted-fg)] hover:bg-[color-mix(in_srgb,var(--color-danger),transparent_88%)] hover:text-[var(--color-danger)]",
-            )}
-          >
-            <Trash2 className="size-4" />
-          </button>
+        {/* Two rows: primary actions (view / edit / delete) on top, leftover
+            controls below, so the cluster stays compact instead of one long
+            wrapping row. */}
+        <div className="flex flex-col gap-0.5">
+          <div className="flex justify-end gap-0.5">
+            <button
+              type="button"
+              aria-label="Vorschau anzeigen"
+              title="Vorschau anzeigen"
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                onPreviewRecipe(meal.recipe.id, meal.id);
+              }}
+              className="inline-flex size-7 items-center justify-center rounded-md text-[var(--color-muted-fg)] hover:bg-[var(--color-muted)] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+            >
+              <Eye className="size-4" />
+            </button>
+            <button
+              type="button"
+              aria-label="Bearbeiten"
+              title="Bearbeiten"
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                onEdit(meal);
+              }}
+              className="inline-flex size-7 items-center justify-center rounded-md text-[var(--color-muted-fg)] hover:bg-[var(--color-muted)] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+            >
+              <Pencil className="size-4" />
+            </button>
+            <button
+              type="button"
+              aria-label={confirmDelete ? "Wirklich löschen?" : "Löschen"}
+              title={confirmDelete ? "Wirklich löschen?" : "Löschen"}
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                if (confirmDelete) {
+                  setConfirmDelete(false);
+                  onDelete(meal.id);
+                } else {
+                  setConfirmDelete(true);
+                }
+              }}
+              className={cn(
+                "inline-flex size-7 items-center justify-center rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]",
+                confirmDelete
+                  ? "bg-[var(--color-danger)] text-white animate-pulse"
+                  : "text-[var(--color-muted-fg)] hover:bg-[color-mix(in_srgb,var(--color-danger),transparent_88%)] hover:text-[var(--color-danger)]",
+              )}
+            >
+              <Trash2 className="size-4" />
+            </button>
+          </div>
+          <div className="flex justify-end gap-0.5">
+            <button
+              type="button"
+              aria-label={meal.isLeftover ? "Reste-Markierung entfernen" : "Als Reste markieren"}
+              title={meal.isLeftover ? "Reste-Markierung entfernen" : "Als Reste markieren"}
+              aria-pressed={meal.isLeftover}
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                onToggleLeftover(meal.id, !meal.isLeftover);
+              }}
+              className={cn(
+                "inline-flex size-7 items-center justify-center rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]",
+                meal.isLeftover
+                  ? "bg-[var(--color-muted)] text-[var(--color-fg)]"
+                  : "text-[var(--color-muted-fg)] hover:bg-[var(--color-muted)] hover:text-[var(--color-fg)]",
+              )}
+            >
+              <Soup className="size-4" />
+            </button>
+            <button
+              type="button"
+              aria-label="Als Reste auf nächsten Tag kopieren"
+              title="Als Reste auf nächsten Tag kopieren"
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                onDuplicateLeftover(meal.id);
+              }}
+              className="inline-flex size-7 items-center justify-center rounded-md text-[var(--color-muted-fg)] hover:bg-[var(--color-muted)] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+            >
+              <CopyPlus className="size-4" />
+            </button>
+          </div>
         </div>
         {/* Move buttons stay vertically stacked, on the far right. */}
         <div className="flex flex-col gap-0.5">
