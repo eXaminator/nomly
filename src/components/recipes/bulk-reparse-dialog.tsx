@@ -16,7 +16,8 @@ import { cn } from "@/lib/cn";
 import { IngredientRow } from "./ingredient-row";
 import { NewIngredientsDialog } from "./new-ingredients-dialog";
 import { parsedIngredientToDraft, type DraftIngredient } from "./types";
-import { ingredientToPayload } from "./payload";
+import { ingredientToPayload, toNumberOrNull } from "./payload";
+import { RecipeIngredientReadLine } from "./ingredient-read-line";
 import type { NewIngredientDefaults } from "@/lib/recipes/types";
 
 type ScanRowSummary = {
@@ -38,29 +39,6 @@ type ScanEntry = {
   proposed: Parameters<typeof parsedIngredientToDraft>[0][];
 };
 type EntryState = { selected: boolean; editing: boolean; draft: DraftIngredient[] };
-
-function fmtQty(q: number | null): string {
-  if (q === null) return "";
-  return String(Math.round(q * 1000) / 1000);
-}
-
-function currentSummary(r: ScanRowSummary): string {
-  const parts = [r.name];
-  if (r.canonicalName && r.canonicalName.toLowerCase() !== r.name.toLowerCase()) {
-    parts[0] = `${r.name} → ${r.canonicalName}`;
-  }
-  const amount = [fmtQty(r.quantity), r.unitLabel].filter(Boolean).join(" ");
-  const tail = [amount, r.notes ?? ""].filter((s) => s && s.length > 0).join(" · Notiz: ");
-  return [parts[0], tail].filter(Boolean).join(" · ");
-}
-
-function draftSummary(d: DraftIngredient): string {
-  const map = d.selectedIngredientId == null ? "neu" : d.canonicalName ?? d.name;
-  const head = map.toLowerCase() === d.name.toLowerCase() ? d.name : `${d.name} → ${map}`;
-  const amount = [d.quantity, d.subUnit?.name ?? d.unit?.name ?? ""].filter(Boolean).join(" ");
-  const tail = [amount, d.notes].filter((s) => s && s.length > 0).join(" · Notiz: ");
-  return [head, tail].filter(Boolean).join(" · ");
-}
 
 export function BulkReparseDialog({
   open,
@@ -362,20 +340,47 @@ export function BulkReparseDialog({
                                     >
                                       Original: „{entry.rawLine}“
                                     </p>
-                                    <div className="mt-1 grid gap-1 text-sm md:grid-cols-2">
-                                      <div className="text-[var(--color-muted-fg)] line-through decoration-[var(--color-border)]">
-                                        {entry.current.map((c, k) => (
-                                          <div key={k} className="truncate">
-                                            {currentSummary(c)}
-                                          </div>
-                                        ))}
+                                    <div className="mt-1 grid gap-3 text-sm md:grid-cols-2">
+                                      <div>
+                                        <div className="mb-0.5 text-xs font-medium uppercase tracking-wide text-[var(--color-muted-fg)]">
+                                          Aktuell
+                                        </div>
+                                        <div className="flex flex-col gap-0.5">
+                                          {entry.current.map((c, k) => (
+                                            <RecipeIngredientReadLine
+                                              key={k}
+                                              quantity={c.quantity}
+                                              unitLabel={c.unitLabel}
+                                              name={c.name}
+                                              canonicalName={c.canonicalName}
+                                              notes={c.notes}
+                                              isOptional={c.isOptional}
+                                              isAlternative={c.isAlternative}
+                                            />
+                                          ))}
+                                        </div>
                                       </div>
                                       <div>
-                                        {st.draft.map((d, k) => (
-                                          <div key={k} className="truncate">
-                                            {draftSummary(d)}
-                                          </div>
-                                        ))}
+                                        <div className="mb-0.5 text-xs font-medium uppercase tracking-wide text-[var(--color-accent)]">
+                                          Neu
+                                        </div>
+                                        <div className="flex flex-col gap-0.5">
+                                          {st.draft.map((d, k) => (
+                                            <RecipeIngredientReadLine
+                                              key={k}
+                                              quantity={toNumberOrNull(d.quantity)}
+                                              unitLabel={
+                                                d.subUnit?.name ?? d.unit?.name ?? null
+                                              }
+                                              name={d.name}
+                                              canonicalName={d.canonicalName}
+                                              notes={d.notes.trim() || null}
+                                              isOptional={d.isOptional}
+                                              isAlternative={d.isAlternative}
+                                              fixedAmount={d.fixedAmount}
+                                            />
+                                          ))}
+                                        </div>
                                       </div>
                                     </div>
                                     <button
