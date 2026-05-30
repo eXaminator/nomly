@@ -244,13 +244,14 @@ export function BulkReparseDialog({
         skipped: number;
       };
       setPendingNew(null);
+      // Re-scan first (it resets the summary), THEN show the result so the
+      // confirmation survives the refresh.
+      await runScan();
       setSummary(
         `${data.updatedGroups} Zutaten in ${data.updatedRecipes} Rezepten aktualisiert` +
           (data.skipped > 0 ? ` (${data.skipped} übersprungen)` : "") +
           ".",
       );
-      // Re-scan so the list reflects what's left.
-      await runScan();
     } catch {
       setError("Anwenden fehlgeschlagen.");
     } finally {
