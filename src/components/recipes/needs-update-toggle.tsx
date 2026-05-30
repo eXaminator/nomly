@@ -15,9 +15,13 @@ import { cn } from "@/lib/cn";
 export function NeedsUpdateToggle({
   recipeId,
   initial,
+  size,
 }: {
   recipeId: number;
   initial: boolean;
+  /** Forwarded to the underlying Button — use "sm" to match adjacent small
+   *  buttons (e.g. in the recipe preview dialog header). */
+  size?: React.ComponentProps<typeof Button>["size"];
 }) {
   const router = useRouter();
   const [needsUpdate, setNeedsUpdate] = React.useState(initial);
@@ -46,6 +50,7 @@ export function NeedsUpdateToggle({
     <Button
       type="button"
       variant="outline"
+      size={size}
       onClick={toggle}
       disabled={saving}
       aria-pressed={needsUpdate}
