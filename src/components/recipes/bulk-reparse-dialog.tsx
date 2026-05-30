@@ -27,12 +27,37 @@ import type { NewIngredientDefaults } from "@/lib/recipes/types";
 function amountStr(q: number | null, unit: string | null): string {
   return `${formatQuantity(q)} ${unit ?? ""}`.replace(/\s+/g, " ").trim();
 }
-function draftMapping(d: DraftIngredient): string {
-  return d.unassigned
+/** Stable identity of a row's ingredient mapping — what the diff compares to
+ *  decide if the mapping CHANGED. A catalog id for matched rows, the sentinel
+ *  "new" for a to-be-created ingredient, null for unassigned. */
+function currentMappingId(c: ScanRowSummary): number | "new" | null {
+  return c.ingredientId;
+}
+function draftMappingId(d: DraftIngredient): number | "new" | null {
+  if (d.unassigned) return null;
+  if (d.selectedIngredientId == null) return "new";
+  return d.selectedIngredientId;
+}
+
+/** Human-readable mapping label — the canonical catalog name, with the matched
+ *  alias in parentheses when it differs from the canonical. */
+function currentMappingLabel(c: ScanRowSummary): string {
+  return c.ingredientId == null
     ? "nicht zugeordnet"
-    : d.selectedIngredientId == null
-      ? "neu"
-      : d.canonicalName ?? d.name;
+    : c.canonicalName ?? c.name;
+}
+function draftMappingLabel(d: DraftIngredient): string {
+  if (d.unassigned) return "nicht zugeordnet";
+  if (d.selectedIngredientId == null) return "neu";
+  // Pull the canonical (and the alias that actually matched) from the selected
+  // candidate; the draft's own `canonicalName` is nulled when it equals the
+  // display span, so it can't be trusted as the canonical on its own.
+  const sel = d.candidates.find((c) => c.ingredientId === d.selectedIngredientId);
+  const canonical = sel?.canonicalName ?? d.canonicalName ?? d.name;
+  const alias = sel?.matchedName;
+  return alias && alias.toLowerCase() !== canonical.toLowerCase()
+    ? `${canonical} (${alias})`
+    : canonical;
 }
 
 /**
@@ -65,7 +90,9 @@ function computeHighlights(
         amountStr(toNumberOrNull(d.quantity), d.subUnit?.name ?? d.unit?.name ?? null),
       name: c.name.trim() !== d.name.trim(),
       notes: (c.notes ?? "").trim() !== d.notes.trim(),
-      mapping: (c.canonicalName ?? "nicht zugeordnet") !== draftMapping(d),
+      // Identity comparison, not label text: "Brauner Zucker" vs the lowercased
+      // source span "brauner Zucker" is the SAME ingredient, not a change.
+      mapping: currentMappingId(c) !== draftMappingId(d),
     };
     cur.push(flags);
     prop.push(flags);
@@ -74,6 +101,7 @@ function computeHighlights(
 }
 
 type ScanRowSummary = {
+  ingredientId: number | null;
   name: string;
   canonicalName: string | null;
   quantity: number | null;
@@ -190,6 +218,37 @@ export function BulkReparseDialog({
           ? { ...s, draft: s.draft.filter((_, j) => j !== rowIdx) }
           : s,
       ),
+    );
+  }
+  /** Keep the row's ORIGINAL display name (instead of the parser's proposed
+   *  alias) and remember it as an alias of the matched ingredient on apply.
+   *  Toggling off reverts the name to the proposed alias. Selects the entry so
+   *  the choice actually gets written. */
+  function toggleOriginalAsAlias(
+    entryIdx: number,
+    rowIdx: number,
+    originalName: string,
+  ) {
+    setStates((prev) =>
+      prev.map((s, idx) => {
+        if (idx !== entryIdx) return s;
+        return {
+          ...s,
+          selected: true,
+          draft: s.draft.map((d, j) => {
+            if (j !== rowIdx) return d;
+            if (d.addAsAlias) {
+              // Undo: restore the parser's proposed alias name (the selected
+              // candidate's finished name).
+              const sel = d.candidates.find(
+                (c) => c.ingredientId === d.selectedIngredientId,
+              );
+              return { ...d, name: sel?.name ?? d.name, addAsAlias: false };
+            }
+            return { ...d, name: originalName, addAsAlias: true };
+          }),
+        };
+      }),
     );
   }
   function toggleRecipe(indices: number[], value: boolean) {
@@ -410,7 +469,7 @@ export function BulkReparseDialog({
                                               notes={c.notes}
                                               isOptional={c.isOptional}
                                               isAlternative={c.isAlternative}
-                                              mappingLabel={c.canonicalName}
+                                              mappingLabel={currentMappingLabel(c)}
                                               highlight={hi.current[k]}
                                               tone="removed"
                                             />
@@ -422,30 +481,62 @@ export function BulkReparseDialog({
                                           Neu
                                         </div>
                                         <div className="flex flex-col gap-0.5">
-                                          {st.draft.map((d, k) => (
-                                            <RecipeIngredientReadLine
-                                              key={k}
-                                              quantity={toNumberOrNull(d.quantity)}
-                                              unitLabel={
-                                                d.subUnit?.name ?? d.unit?.name ?? null
-                                              }
-                                              name={d.name}
-                                              canonicalName={d.canonicalName}
-                                              notes={d.notes.trim() || null}
-                                              isOptional={d.isOptional}
-                                              isAlternative={d.isAlternative}
-                                              fixedAmount={d.fixedAmount}
-                                              highlight={hi.proposed[k]}
-                                              tone="added"
-                                              mappingLabel={
-                                                d.unassigned
-                                                  ? "nicht zugeordnet"
-                                                  : d.selectedIngredientId == null
-                                                    ? "neu"
-                                                    : d.canonicalName ?? d.name
-                                              }
-                                            />
-                                          ))}
+                                          {st.draft.map((d, k) => {
+                                            const cur = entry.current[k];
+                                            const isMatched =
+                                              !d.unassigned &&
+                                              d.selectedIngredientId != null &&
+                                              cur != null;
+                                            // Offer "keep original + alias" when
+                                            // the parser renamed a matched row;
+                                            // keep showing it (as an undo) once
+                                            // chosen.
+                                            const showAlias =
+                                              isMatched &&
+                                              (d.addAsAlias ||
+                                                cur.name.trim() !== d.name.trim());
+                                            return (
+                                              <div
+                                                key={k}
+                                                className="flex flex-col gap-0.5"
+                                              >
+                                                <RecipeIngredientReadLine
+                                                  quantity={toNumberOrNull(d.quantity)}
+                                                  unitLabel={
+                                                    d.subUnit?.name ??
+                                                    d.unit?.name ??
+                                                    null
+                                                  }
+                                                  name={d.name}
+                                                  canonicalName={d.canonicalName}
+                                                  notes={d.notes.trim() || null}
+                                                  isOptional={d.isOptional}
+                                                  isAlternative={d.isAlternative}
+                                                  fixedAmount={d.fixedAmount}
+                                                  highlight={hi.proposed[k]}
+                                                  tone="added"
+                                                  mappingLabel={draftMappingLabel(d)}
+                                                />
+                                                {showAlias ? (
+                                                  <button
+                                                    type="button"
+                                                    className="self-start text-xs text-[var(--color-accent)] hover:underline"
+                                                    onClick={() =>
+                                                      toggleOriginalAsAlias(
+                                                        i,
+                                                        k,
+                                                        cur.name,
+                                                      )
+                                                    }
+                                                  >
+                                                    {d.addAsAlias
+                                                      ? `↩ „${cur.name}“ doch nicht als Alias`
+                                                      : `„${cur.name}“ behalten & als Alias übernehmen`}
+                                                  </button>
+                                                ) : null}
+                                              </div>
+                                            );
+                                          })}
                                         </div>
                                       </div>
                                     </div>

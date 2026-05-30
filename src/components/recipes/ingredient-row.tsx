@@ -14,6 +14,7 @@ import {
   Pencil,
   RefreshCw,
   RotateCw,
+  Tag,
   Trash2,
   Unlock,
 } from "lucide-react";
@@ -451,6 +452,10 @@ export function IngredientRow({
         c.name.toLowerCase() === c.canonicalName.toLowerCase()
           ? null
           : c.canonicalName,
+      // Remember the spelling this pick is REPLACING (keep an import's source
+      // span if we already have one) so the alias toggle can offer it.
+      originalName:
+        value.originalName ?? (value.name.trim() || undefined),
       isOptional: value.isOptional || c.isEquipment,
       // Clicking a regular candidate clears any force-match alias intent and
       // any "Nicht zugeordnet" state.
@@ -482,6 +487,8 @@ export function IngredientRow({
         name,
         selectedIngredientId: pickedIngredientId,
         canonicalName: canonical ?? null,
+        // A fresh name supersedes any remembered original spelling.
+        originalName: undefined,
         pinnedByUser: false,
         addAsAlias: false,
         unassigned: false,
@@ -493,6 +500,8 @@ export function IngredientRow({
       ...value,
       name,
       canonicalName: canonical === undefined ? value.canonicalName : canonical,
+      // Typing redefines the name → drop the remembered original spelling.
+      originalName: undefined,
       importAnnotation: clearAnnotationOn(value.importAnnotation, "ingredient"),
     });
   }
@@ -503,6 +512,7 @@ export function IngredientRow({
       ...value,
       selectedIngredientId: null,
       canonicalName: null,
+      originalName: undefined,
       addAsAlias: false,
       unassigned: false,
       // Deliberate "create new" choice — sticky against re-matching on typing.
@@ -518,6 +528,7 @@ export function IngredientRow({
       ...value,
       selectedIngredientId: null,
       canonicalName: null,
+      originalName: undefined,
       subUnit: null,
       addAsAlias: false,
       unassigned: true,
@@ -542,6 +553,8 @@ export function IngredientRow({
           ? null
           : c.canonicalName,
       selectedIngredientId: c.ingredientId,
+      // Adopting the catalog spelling — no original to remember.
+      originalName: undefined,
       addAsAlias: false,
       unassigned: false,
       // ↻ adopts this candidate's name AND keeps it selected — pin so the
@@ -563,10 +576,53 @@ export function IngredientRow({
       canonicalName:
         value.name.toLowerCase() === canonical.toLowerCase() ? null : canonical,
       addAsAlias,
+      // Force-match keeps the current name as the display + alias intent; any
+      // remembered import-original no longer applies to this manual choice.
+      originalName: undefined,
       unassigned: false,
       // Explicit force-match — sticky against re-matching on typing.
       pinnedByUser: true,
       importAnnotation: clearAnnotationOn(value.importAnnotation, "ingredient"),
+    });
+  }
+
+  /** Toggle "keep my original spelling and remember it as an alias of the
+   *  matched ingredient on save". When the parser substituted the display name
+   *  with the catalog alias (import / pill pick), `originalName` holds the
+   *  user's spelling: turning the toggle ON restores it as the display name
+   *  and flags `addAsAlias`; OFF puts the parser's name back. When there's no
+   *  substituted original (manual entry — the typed text is already the
+   *  display name), it's a plain flag and the name is left untouched.
+   *  `service.ts` inserts the alias (idempotent) on save. */
+  function toggleAlias() {
+    const original = value.originalName?.trim();
+    const sel = serverMatches.find(
+      (m) => m.ingredientId === value.selectedIngredientId,
+    );
+    const canonical = sel?.canonicalName ?? value.canonicalName ?? value.name;
+    const disclose = (display: string): string | null =>
+      display.toLowerCase() === canonical.toLowerCase() ? null : canonical;
+    const showingOriginal = !!original && value.name.trim() === original;
+    if (value.addAsAlias) {
+      // OFF: drop the flag; if we'd swapped in the original, restore the
+      // parser's chosen name (the matched candidate's display, else canonical).
+      const parserName = showingOriginal ? sel?.name ?? canonical : value.name;
+      onChange({
+        ...value,
+        addAsAlias: false,
+        name: parserName,
+        canonicalName: showingOriginal ? disclose(parserName) : value.canonicalName,
+      });
+      return;
+    }
+    // ON: flag it; swap in the original spelling when we have a distinct one.
+    const display = original && original !== value.name ? original : value.name;
+    onChange({
+      ...value,
+      addAsAlias: true,
+      name: display,
+      canonicalName:
+        original && original !== value.name ? disclose(display) : value.canonicalName,
     });
   }
 
@@ -648,6 +704,7 @@ export function IngredientRow({
             candidates={serverMatches}
             selectedIngredientId={value.selectedIngredientId}
             selectedCanonicalName={value.canonicalName}
+            originalName={value.originalName ?? null}
             addAsAlias={value.addAsAlias}
             unassigned={value.unassigned}
             // Staples must resolve to a buyable article.
@@ -657,6 +714,7 @@ export function IngredientRow({
             onSelectUnassigned={selectUnassigned}
             onUseCanonical={useCanonicalInName}
             onForceMatch={forceMatch}
+            onToggleAlias={toggleAlias}
             onEditArticle={setEditingArticleId}
           />
         </div>
@@ -799,6 +857,7 @@ export function IngredientRow({
           candidates={serverMatches}
           selectedIngredientId={value.selectedIngredientId}
           selectedCanonicalName={value.canonicalName}
+          originalName={value.originalName ?? null}
           addAsAlias={value.addAsAlias}
           unassigned={value.unassigned}
           allowUnassigned={true}
@@ -807,6 +866,7 @@ export function IngredientRow({
           onSelectUnassigned={selectUnassigned}
           onUseCanonical={useCanonicalInName}
           onForceMatch={forceMatch}
+          onToggleAlias={toggleAlias}
           onEditArticle={setEditingArticleId}
         />
       </div>
@@ -1064,6 +1124,7 @@ function CandidatePills({
   candidates,
   selectedIngredientId,
   selectedCanonicalName,
+  originalName,
   addAsAlias,
   unassigned,
   allowUnassigned,
@@ -1072,6 +1133,7 @@ function CandidatePills({
   onSelectUnassigned,
   onUseCanonical,
   onForceMatch,
+  onToggleAlias,
   onEditArticle,
 }: {
   name: string;
@@ -1081,6 +1143,10 @@ function CandidatePills({
    *  from the row's typed text. Surfaces on the anchor pill so a force-
    *  matched row shows WHICH ingredient it's pinned to. */
   selectedCanonicalName: string | null;
+  /** The user's original spelling before an auto-match/pill replaced the
+   *  display name (import source span or the text a pill pick overwrote).
+   *  Drives the alias toggle's offered name. Null when there's none. */
+  originalName: string | null;
   addAsAlias: boolean;
   /** The "Nicht zugeordnet" pill is the active selection (free-text row). */
   unassigned: boolean;
@@ -1096,6 +1162,8 @@ function CandidatePills({
     canonical: string,
     addAsAlias: boolean,
   ) => void;
+  /** Flip "remember the display name as an alias of the matched ingredient". */
+  onToggleAlias: () => void;
   onEditArticle: (ingredientId: number) => void;
 }) {
   const trimmed = name.trim();
@@ -1119,6 +1187,27 @@ function CandidatePills({
   const selectedOutOfList =
     selectedIngredientId != null &&
     !candidates.some((c) => c.ingredientId === selectedIngredientId);
+
+  // Alias toggle: offer the user's OWN spelling (the original the parser
+  // replaced, else the current name) as an alias of the matched ingredient.
+  // Shown when matched and that spelling differs from the canonical identity —
+  // or whenever it's already flagged (so it stays togglable / shows "active").
+  const aliasCandidate = (originalName?.trim() || trimmed).trim();
+  const canonicalIdentity = selectedCanonicalName ?? trimmed;
+  const worthAliasing =
+    aliasCandidate.length > 0 &&
+    aliasCandidate.toLowerCase() !== canonicalIdentity.toLowerCase();
+  const aliasToggle =
+    selectedIngredientId != null &&
+    !unassigned &&
+    (addAsAlias || worthAliasing) ? (
+      <AliasToggle
+        name={aliasCandidate}
+        canonicalName={canonicalIdentity}
+        active={addAsAlias}
+        onToggle={onToggleAlias}
+      />
+    ) : null;
 
   return (
     <div className="flex flex-wrap gap-1">
@@ -1171,6 +1260,7 @@ function CandidatePills({
           </button>
         </span>
       ) : null}
+      {aliasToggle}
       <NewPill
         label={trimmed.length > 0 ? `Neu: ${trimmed}` : "Neu"}
         isSelected={isNewSelected}
@@ -1272,6 +1362,46 @@ function CandidatePill({
         <Pencil className="size-3" />
       </button>
     </span>
+  );
+}
+
+/**
+ * Toggle that flags the row's current display name to be saved as an alias of
+ * the matched ingredient. Active = the name will be remembered (so a future
+ * import of the same spelling matches directly and keeps it). Reuses the
+ * dashed-pill look of "Neu"/"Nicht zugeordnet"; fills in when active.
+ */
+function AliasToggle({
+  name,
+  canonicalName,
+  active,
+  onToggle,
+}: {
+  name: string;
+  canonicalName: string;
+  active: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-pressed={active}
+      className={cn(
+        "inline-flex max-w-full items-center gap-1 truncate rounded-full border border-dashed px-2 py-0.5 text-xs transition-colors",
+        active
+          ? "border-[var(--color-accent)] bg-[color-mix(in_srgb,var(--color-accent),var(--color-bg)_75%)] text-[var(--color-fg)]"
+          : "border-[var(--color-border)] text-[var(--color-muted-fg)] hover:bg-[var(--color-muted)]",
+      )}
+      title={
+        active
+          ? `„${name}" wird beim Speichern als Alias von „${canonicalName}" gemerkt. Klicken zum Rückgängigmachen.`
+          : `„${name}" als Alias von „${canonicalName}" merken — künftige Treffer behalten diese Schreibweise.`
+      }
+    >
+      <Tag className="size-3 shrink-0" />
+      {active ? `Alias: „${name}"` : `„${name}" als Alias`}
+    </button>
   );
 }
 

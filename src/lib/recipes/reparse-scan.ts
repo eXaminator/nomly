@@ -133,6 +133,11 @@ export function groupContiguousByRawLine<
 
 /** Compact read-only summary of a current row for the review UI. */
 export type ScanRowSummary = {
+  /** Catalog ingredient id this row resolves to (null = unassigned). The diff
+   *  compares this against the proposed row's id to decide whether the mapping
+   *  actually changed — a label that only differs in casing/alias is NOT a
+   *  change. */
+  ingredientId: number | null;
   name: string;
   canonicalName: string | null;
   quantity: number | null;
@@ -235,6 +240,7 @@ export function scanAllRecipesForReparse(): ReparseScanEntry[] {
       rawLine,
       currentRowIds: group.map((g) => g.id),
       current: group.map((g) => ({
+        ingredientId: g.ingredientId,
         name: g.name ?? "",
         canonicalName: g.canonicalName ?? null,
         quantity: g.quantity,
