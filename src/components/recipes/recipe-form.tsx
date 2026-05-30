@@ -24,6 +24,7 @@ import { PhotoUpload } from "./photo-upload";
 import { SectionEditor } from "./section-editor";
 import { TagInput } from "./tag-input";
 import { hasReparsableRows, reparseAll } from "./reparse";
+import { ingredientToPayload, toNumberOrNull } from "./payload";
 import { cn } from "@/lib/cn";
 import {
   emptyRecipe,
@@ -40,54 +41,6 @@ type Props = {
   recipeId?: number;
   tagSuggestions: string[];
 };
-
-function toNumberOrNull(raw: string): number | null {
-  const v = raw.trim();
-  if (v.length === 0) return null;
-  const n = Number(v.replace(",", "."));
-  return Number.isFinite(n) ? n : null;
-}
-
-function ingredientToPayload(ing: DraftIngredient) {
-  const name = ing.name.trim();
-  if (name.length === 0) return null;
-  // "Nicht zugeordnet": free-text line with no article. Drop the ingredient
-  // link, alias intent and any sub-unit (sub-units are article-scoped); the
-  // server persists ingredient_id NULL with `name` as display_name.
-  const hasSubUnit = ing.subUnit !== null && !ing.unassigned;
-  return {
-    ingredientName: name,
-    // The pill UI determines ingredient identity. When the user explicitly
-    // picked a pill (or the matcher auto-selected one above threshold),
-    // `selectedIngredientId` is set and the server links the row directly,
-    // bypassing name-based resolution.
-    ingredientId: ing.unassigned ? null : ing.selectedIngredientId,
-    unassigned: ing.unassigned,
-    // Only honoured when ingredientId is set; turns the row's display name
-    // into an alias of that ingredient on save (force-match opt-in).
-    addAsAlias: ing.unassigned ? false : ing.addAsAlias,
-    quantity: toNumberOrNull(ing.quantity),
-    // Sub-unit and unit are mutually exclusive; the server enforces it too.
-    unitId: hasSubUnit ? null : ing.unit?.id ?? null,
-    subUnitId: hasSubUnit ? ing.subUnit!.id : null,
-    // Display label the user sees in the picker. Server NULLs this back out
-    // if it matches the canonical unit name, so we don't bloat the DB with
-    // redundant strings — and we don't have to fetch canonicals client-side.
-    // Skipped for sub-units (their own name field is the source of truth).
-    displayUnit: hasSubUnit ? null : ing.unit?.name ?? null,
-    notes: ing.notes.trim() || null,
-    isOptional: ing.isOptional,
-    fixedAmount: ing.fixedAmount,
-    // Round-trip the source line: populated by the importer / clipboard
-    // parser, sticks through edit, surfaces in the row's "Original" hint.
-    rawLine: ing.rawText ?? null,
-    // The server resolves this to a real recipe_ingredient.alternative_for_id
-    // by linking to the most recent primary inserted in the same section.
-    // Service code also re-asserts `isOptional: true` for alternatives — the
-    // client-side toggle on alt rows is locked, so the values agree.
-    isAlternative: ing.isAlternative,
-  };
-}
 
 function buildPayload(draft: DraftRecipe) {
   return {
