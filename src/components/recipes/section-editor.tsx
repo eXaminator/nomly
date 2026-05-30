@@ -33,6 +33,7 @@ import { Label } from "@/components/ui/label";
 import { MarkdownEditor } from "@/components/ui/markdown-editor";
 import { Textarea } from "@/components/ui/textarea";
 import { IngredientRow } from "./ingredient-row";
+import { reparseGroupAt } from "./reparse";
 import {
   emptyAlternative,
   emptyIngredient,
@@ -117,6 +118,13 @@ export function SectionEditor({
     // invariants aligned.
     ings[i] = next.isAlternative ? { ...next, isOptional: true } : next;
     onChange({ ...section, ingredients: ings });
+  }
+
+  /** Re-parse one row from its original source line, replacing it (and any
+   *  alternatives expanded from the same line) with freshly parsed rows. */
+  async function reparseAt(i: number) {
+    const next = await reparseGroupAt(section.ingredients, i);
+    onChange({ ...section, ingredients: next });
   }
 
   function addIngredient() {
@@ -457,6 +465,7 @@ export function SectionEditor({
                   group={g}
                   onChange={setIngredient}
                   onRemove={requestRemove}
+                  onReparse={reparseAt}
                   onAddAlternative={() => addAlternative(g.primaryIdx)}
                   onDemote={
                     canDemote ? () => demoteToAlternative(g.primaryIdx) : undefined
@@ -629,6 +638,7 @@ function IngredientGroup({
   group,
   onChange,
   onRemove,
+  onReparse,
   onAddAlternative,
   onDemote,
   onPromote,
@@ -637,6 +647,7 @@ function IngredientGroup({
   group: IngredientGroupShape;
   onChange: (flatIdx: number, next: DraftIngredient) => void;
   onRemove: (flatIdx: number) => void;
+  onReparse: (flatIdx: number) => void | Promise<void>;
   onAddAlternative: () => void;
   /** Make this primary an alternative of the row immediately above it.
    *  Undefined when the primary is the first row of the section or has
@@ -669,6 +680,7 @@ function IngredientGroup({
         value={group.primary}
         onChange={(next) => onChange(group.primaryIdx, next)}
         onRemove={() => onRemove(group.primaryIdx)}
+        onReparse={() => onReparse(group.primaryIdx)}
         onAddAlternative={onAddAlternative}
         onDemote={onDemote}
         dragAttributes={attributes}
@@ -682,6 +694,7 @@ function IngredientGroup({
             value={alt}
             onChange={(next) => onChange(flatIdx, next)}
             onRemove={() => onRemove(flatIdx)}
+            onReparse={() => onReparse(flatIdx)}
             onPromote={() => onPromote(flatIdx)}
             onDetach={() => onDetach(flatIdx)}
           />

@@ -12,6 +12,7 @@ import {
   Lock,
   Outdent,
   Pencil,
+  RefreshCw,
   RotateCw,
   Trash2,
   Unlock,
@@ -130,6 +131,10 @@ type Props = {
   value: DraftIngredient;
   onChange: (next: DraftIngredient) => void;
   onRemove: () => void;
+  /** Re-parse this row from its original source line (`rawText`), replacing
+   *  it (and any alternatives expanded from the same line) with freshly
+   *  parsed rows. Only wired when the row carries a `rawText`. */
+  onReparse?: () => void | Promise<void>;
   /** Insert a new empty alternative attached to this row's primary group.
    *  Only callable on primary rows — alternatives can't have their own
    *  alternatives. */
@@ -161,6 +166,7 @@ export function IngredientRow({
   value,
   onChange,
   onRemove,
+  onReparse,
   onAddAlternative,
   onDemote,
   onPromote,
@@ -182,6 +188,7 @@ export function IngredientRow({
   // are merged into the unit picker via `searchUnitsAndSubUnits` below so
   // the user can pick Zehe / Zweig / … like any other unit. Debounced so
   // each keystroke doesn't fire a network round-trip.
+  const [reparsing, setReparsing] = React.useState(false);
   const [subUnitOptions, setSubUnitOptions] = React.useState<SubUnitOption[]>([]);
   const subUnitNameRef = React.useRef<string>("");
   React.useEffect(() => {
@@ -712,12 +719,32 @@ export function IngredientRow({
       </p>
     ) : null}
     {value.rawText ? (
-      <p
-        className="truncate text-xs text-[var(--color-muted-fg)]"
-        title={value.rawText}
-      >
-        Original: „{value.rawText}“
-      </p>
+      <div className="flex min-w-0 items-center gap-1">
+        <p
+          className="truncate text-xs text-[var(--color-muted-fg)]"
+          title={value.rawText}
+        >
+          Original: „{value.rawText}“
+        </p>
+        {onReparse ? (
+          <button
+            type="button"
+            onClick={() => {
+              if (reparsing) return;
+              setReparsing(true);
+              void Promise.resolve(onReparse()).finally(() =>
+                setReparsing(false),
+              );
+            }}
+            disabled={reparsing}
+            className="shrink-0 rounded p-0.5 text-[var(--color-muted-fg)] hover:bg-[var(--color-muted)] hover:text-[var(--color-fg)] disabled:opacity-50"
+            title="Aus Originalzeile neu parsen (verwirft manuelle Änderungen dieser Zeile)"
+            aria-label="Aus Originalzeile neu parsen"
+          >
+            <RefreshCw className={cn("size-3", reparsing && "animate-spin")} />
+          </button>
+        ) : null}
+      </div>
     ) : null}
     <div
       className="grid items-start gap-2 grid-cols-[4rem_minmax(0,1fr)_auto_auto_auto_auto_auto] md:grid-cols-[5rem_8rem_minmax(0,1fr)_minmax(0,1fr)_auto_auto_auto_auto_auto]"
