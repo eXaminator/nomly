@@ -54,7 +54,9 @@ function importedToDraft(
     sourceUrl: imported.sourceUrl,
     photoPath: imported.photoPath,
     photoUrl: "",
-    tags: imported.tags,
+    // Source keywords/categories are noisy and don't match our curated tag
+    // set — start with no tags and let the user pick from app-defined ones.
+    tags: [],
     sections: imported.sections.map((s) => ({
       uid: crypto.randomUUID(),
       title: s.title ?? "",

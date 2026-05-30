@@ -1,240 +1,140 @@
 "use client";
 
 import * as React from "react";
-import * as Popover from "@radix-ui/react-popover";
-import { Plus, X } from "lucide-react";
+import { Plus } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/cn";
 
 type Props = {
   value: string[];
   onChange: (next: string[]) => void;
-  /** Existing tag names from the DB; filtered as the user types. */
+  /** All app-defined tag names. Rendered as clickable pills the user toggles
+   *  on/off. */
   suggestions?: string[];
   placeholder?: string;
 };
 
+/**
+ * Tag picker for the recipe form: every app-defined tag is shown as a pill
+ * that toggles membership on click; a small input below lets the user type a
+ * brand-new tag name. Selected-but-not-yet-existing tags are marked "(neu)".
+ * Nothing is persisted here — new tags are created server-side when the recipe
+ * form is submitted (see `resolveTags`).
+ */
 export function TagInput({
   value,
   onChange,
   suggestions = [],
-  placeholder = "Tag eingeben…",
+  placeholder = "Neuen Tag anlegen…",
 }: Props) {
   const [draft, setDraft] = React.useState("");
-  const [open, setOpen] = React.useState(false);
-  const [activeIdx, setActiveIdx] = React.useState(0);
-  const inputRef = React.useRef<HTMLInputElement>(null);
-  const listRef = React.useRef<HTMLUListElement>(null);
+
+  const isSelected = React.useCallback(
+    (tag: string) => value.some((v) => v.toLowerCase() === tag.toLowerCase()),
+    [value],
+  );
+  const isExisting = React.useCallback(
+    (tag: string) =>
+      suggestions.some((s) => s.toLowerCase() === tag.toLowerCase()),
+    [suggestions],
+  );
+
+  // The full pill set: every existing tag, plus any selected new tag the user
+  // typed. Sorted alphabetically and stable, so toggling never reshuffles.
+  const allTags = React.useMemo(() => {
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const t of [...suggestions, ...value]) {
+      const key = t.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(t);
+    }
+    return out.sort((a, b) => a.localeCompare(b, "de"));
+  }, [suggestions, value]);
+
+  function toggle(tag: string) {
+    if (isSelected(tag)) {
+      onChange(value.filter((v) => v.toLowerCase() !== tag.toLowerCase()));
+    } else {
+      onChange([...value, tag]);
+    }
+  }
 
   function addTag(raw: string) {
     const cleaned = raw.trim().replace(/,$/, "").trim();
     if (cleaned.length === 0) return;
-    if (value.some((v) => v.toLowerCase() === cleaned.toLowerCase())) {
-      setDraft("");
-      return;
-    }
-    onChange([...value, cleaned]);
+    // Reuse the existing tag's exact spelling when the typed name matches one
+    // (case-insensitively), so we don't show a near-duplicate pill.
+    const match = [...suggestions, ...value].find(
+      (t) => t.toLowerCase() === cleaned.toLowerCase(),
+    );
+    const name = match ?? cleaned;
+    if (!isSelected(name)) onChange([...value, name]);
     setDraft("");
-    setActiveIdx(0);
   }
-
-  function removeTag(tag: string) {
-    onChange(value.filter((v) => v !== tag));
-  }
-
-  const filtered = React.useMemo(() => {
-    const q = draft.trim().toLowerCase();
-    const taken = new Set(value.map((v) => v.toLowerCase()));
-    const pool = suggestions.filter((s) => !taken.has(s.toLowerCase()));
-    // No query → show the full pool (scrollable). The user explicitly asked
-    // for the whole list on focus.
-    if (q.length === 0) return pool;
-    return pool
-      .filter((s) => s.toLowerCase().includes(q))
-      .sort((a, b) => {
-        const aStarts = a.toLowerCase().startsWith(q) ? 0 : 1;
-        const bStarts = b.toLowerCase().startsWith(q) ? 0 : 1;
-        return aStarts - bStarts || a.localeCompare(b, "de");
-      })
-      .slice(0, 12);
-  }, [draft, suggestions, value]);
-
-  const exactInSuggestions = filtered.some(
-    (s) => s.toLowerCase() === draft.trim().toLowerCase(),
-  );
-  const showCreateRow =
-    draft.trim().length > 0 &&
-    !exactInSuggestions &&
-    !value.some((v) => v.toLowerCase() === draft.trim().toLowerCase());
-
-  const rows = showCreateRow ? filtered.length + 1 : filtered.length;
-  const dropdownVisible = open && rows > 0;
-
-  function commit(idx: number) {
-    if (idx < filtered.length) {
-      addTag(filtered[idx]);
-    } else if (showCreateRow) {
-      addTag(draft);
-    }
-  }
-
-  // Keep the highlighted suggestion in view as the user arrow-keys past
-  // the visible portion of the list.
-  React.useEffect(() => {
-    if (!open) return;
-    const list = listRef.current;
-    if (!list) return;
-    const active = list.children[activeIdx] as HTMLElement | undefined;
-    if (!active) return;
-    const top = active.offsetTop;
-    const bottom = top + active.offsetHeight;
-    if (top < list.scrollTop) list.scrollTop = top;
-    else if (bottom > list.scrollTop + list.clientHeight)
-      list.scrollTop = bottom - list.clientHeight;
-  }, [activeIdx, open, rows]);
 
   function onKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
     if (e.key === "Enter") {
       e.preventDefault();
-      if (dropdownVisible && activeIdx < rows) {
-        commit(activeIdx);
-      } else if (draft.trim().length > 0) {
-        addTag(draft);
-      }
-      return;
-    }
-    if (e.key === "Backspace" && draft.length === 0 && value.length > 0) {
-      removeTag(value[value.length - 1]);
-      return;
-    }
-    if (!dropdownVisible) return;
-    if (e.key === "ArrowDown") {
-      e.preventDefault();
-      setActiveIdx((i) => Math.min(i + 1, rows - 1));
-    } else if (e.key === "ArrowUp") {
-      e.preventDefault();
-      setActiveIdx((i) => Math.max(i - 1, 0));
-    } else if (e.key === "Escape") {
-      e.preventDefault();
-      setOpen(false);
+      addTag(draft);
     }
   }
 
   return (
-    <Popover.Root open={dropdownVisible} onOpenChange={setOpen}>
-      <Popover.Anchor asChild>
-        <div
-          className="flex flex-wrap items-center gap-2 rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-bg)] p-2"
-          onClick={() => inputRef.current?.focus()}
-        >
-          {value.map((tag) => (
-            <span
-              key={tag}
-              className="inline-flex items-center gap-1.5 rounded-full bg-[var(--color-muted)] px-3 py-1 text-xs font-medium text-[var(--color-fg)]"
-            >
-              {tag}
+    <div className="flex flex-col gap-2">
+      {allTags.length > 0 ? (
+        <div className="flex flex-wrap gap-1.5">
+          {allTags.map((tag) => {
+            const selected = isSelected(tag);
+            const isNew = selected && !isExisting(tag);
+            return (
               <button
+                key={tag}
                 type="button"
-                onClick={() => removeTag(tag)}
-                className="text-[var(--color-muted-fg)] hover:text-[var(--color-fg)]"
-                aria-label={`Tag „${tag}" entfernen`}
+                onClick={() => toggle(tag)}
+                aria-pressed={selected}
+                className={cn(
+                  "inline-flex max-w-full items-center gap-1 truncate rounded-full border px-3 py-1 text-xs font-medium transition-colors",
+                  selected
+                    ? "border-[var(--color-accent)] bg-[var(--color-accent)] text-[var(--color-accent-fg)]"
+                    : "border-[var(--color-border)] text-[var(--color-muted-fg)] hover:bg-[var(--color-muted)] hover:text-[var(--color-fg)]",
+                )}
               >
-                <X className="size-3" />
+                {tag}
+                {isNew ? (
+                  <span className="text-[0.65rem] opacity-80">(neu)</span>
+                ) : null}
               </button>
-            </span>
-          ))}
-          <Input
-            ref={inputRef}
-            value={draft}
-            onChange={(e) => {
-              const v = e.target.value;
-              if (v.endsWith(",")) {
-                addTag(v);
-              } else {
-                setDraft(v);
-                setActiveIdx(0);
-                setOpen(true);
-              }
-            }}
-            onFocus={() => setOpen(true)}
-            onKeyDown={onKeyDown}
-            placeholder={value.length === 0 ? placeholder : ""}
-            className="h-8 min-w-[8rem] flex-1 border-0 bg-transparent px-1 shadow-none focus-visible:ring-0"
-          />
+            );
+          })}
         </div>
-      </Popover.Anchor>
-      <Popover.Portal>
-        <Popover.Content
-          align="start"
-          sideOffset={4}
-          onOpenAutoFocus={(e) => e.preventDefault()}
-          className="z-50 w-[var(--radix-popover-trigger-width)] overflow-hidden rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-card)] shadow-lg"
+      ) : null}
+      <div className="flex items-center gap-2">
+        <Input
+          value={draft}
+          onChange={(e) => {
+            const v = e.target.value;
+            // A trailing comma commits the tag, matching the old behaviour.
+            if (v.endsWith(",")) addTag(v);
+            else setDraft(v);
+          }}
+          onKeyDown={onKeyDown}
+          placeholder={placeholder}
+          className="h-9 max-w-xs"
+          aria-label="Neuen Tag anlegen"
+        />
+        <button
+          type="button"
+          onClick={() => addTag(draft)}
+          disabled={draft.trim().length === 0}
+          className="inline-flex shrink-0 items-center gap-1 rounded-[var(--radius)] border border-dashed border-[var(--color-border)] px-2.5 py-1.5 text-xs text-[var(--color-muted-fg)] hover:bg-[var(--color-muted)] hover:text-[var(--color-fg)] disabled:cursor-not-allowed disabled:opacity-50"
+          title="Tag anlegen (wird erst beim Speichern erstellt)"
         >
-          <ul
-            ref={listRef}
-            className="max-h-72 overflow-auto py-1 overscroll-contain"
-            role="listbox"
-            onWheel={(e) => {
-              // Manual wheel handling for the same reason as `SelectSearch`:
-              // when the popover is portaled inside a Radix Dialog/Drawer,
-              // `react-remove-scroll` preventDefaults wheel events outside
-              // the dialog body and the listbox stops scrolling.
-              const el = e.currentTarget;
-              if (el.scrollHeight <= el.clientHeight) return;
-              const atTop = e.deltaY < 0 && el.scrollTop === 0;
-              const atBottom =
-                e.deltaY > 0 &&
-                Math.ceil(el.scrollTop + el.clientHeight) >= el.scrollHeight;
-              if (atTop || atBottom) return;
-              el.scrollTop += e.deltaY;
-              e.preventDefault();
-            }}
-          >
-            {filtered.map((s, idx) => (
-              <li
-                key={s}
-                role="option"
-                aria-selected={idx === activeIdx}
-                onMouseDown={(e) => {
-                  e.preventDefault();
-                  commit(idx);
-                }}
-                onMouseEnter={() => setActiveIdx(idx)}
-                className={cn(
-                  "cursor-pointer truncate px-3 py-2 text-sm",
-                  idx === activeIdx
-                    ? "bg-[var(--color-muted)] text-[var(--color-fg)]"
-                    : "text-[var(--color-fg)] hover:bg-[var(--color-muted)]",
-                )}
-              >
-                {s}
-              </li>
-            ))}
-            {showCreateRow ? (
-              <li
-                role="option"
-                aria-selected={activeIdx === filtered.length}
-                onMouseDown={(e) => {
-                  e.preventDefault();
-                  commit(filtered.length);
-                }}
-                onMouseEnter={() => setActiveIdx(filtered.length)}
-                className={cn(
-                  "flex cursor-pointer items-center gap-2 border-t border-[var(--color-border)] px-3 py-2 text-sm",
-                  activeIdx === filtered.length
-                    ? "bg-[var(--color-muted)]"
-                    : "hover:bg-[var(--color-muted)]",
-                )}
-              >
-                <Plus className="size-4 text-[var(--color-accent)]" />
-                <span className="flex-1 truncate text-[var(--color-fg)]">
-                  „{draft.trim()}“ anlegen
-                </span>
-              </li>
-            ) : null}
-          </ul>
-        </Popover.Content>
-      </Popover.Portal>
-    </Popover.Root>
+          <Plus className="size-3.5" />
+          Anlegen
+        </button>
+      </div>
+    </div>
   );
 }
