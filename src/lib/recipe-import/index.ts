@@ -32,6 +32,7 @@ import {
   findIngredientCandidates,
   MIN_AUTO_MATCH_SCORE,
   tokenizeCandidate,
+  type CandidateToken,
   type IngredientCandidateMatch,
   type IngredientCatalog,
 } from "./matching.ts";
@@ -75,6 +76,11 @@ export type ImportedIngredient = {
   /** Canonical name of the matched ingredient — only set when the typed
    *  name differs from the canonical (i.e. we matched via an alias). */
   canonicalIngredientName: string | null;
+  /** The original source span the matched alias replaced ("Zwiebeln" when the
+   *  display name became the alias "Zwiebel"). Null on the new-ingredient
+   *  path. Lets the import-review UI offer the user's own spelling as the
+   *  alias to remember. */
+  sourceName: string | null;
   notes: string | null;
   /** True when the source line carried an "optional" marker ("opt.",
    *  "Optional:", "evtl.", "nach Belieben", "(optional)" inline, …). */
@@ -117,12 +123,12 @@ export type ImportedCandidateMatch = {
   /** The alias-or-canonical name the matcher hit on. */
   matchedName: string;
   score: number;
-  /** Raw text of candidate tokens NOT covered by this match — e.g. "rote"
-   *  for candidate "Paprikaschote rote" matched against "Paprikaschoten".
-   *  Empty when the match covers everything. The pill UI uses this to move
-   *  uncovered tokens out of the name input and into the notes field when
-   *  the user manually picks a low-confidence match. */
-  uncoveredText: string;
+  /** Finished display name to apply if the user picks this candidate — the
+   *  matched span of the input (first→last covered token). */
+  name: string;
+  /** Finished notes to apply if the user picks this candidate — the input
+   *  tokens outside the span plus the parser's base notes. */
+  notes: string | null;
   /** True when the underlying ingredient is flagged as equipment. The pill
    *  UI / live-match auto-select use this to default the row's
    *  `isOptional` to true when a row resolves to an equipment item,
@@ -617,12 +623,116 @@ export type ParseLookups = {
 };
 
 /**
- * Run the substring matcher against the candidate text (parsed name +
- * comma-tail content joined as whitespace). When matches exist, the top one
- * becomes the row's resolved ingredient and any candidate-tokens it didn't
- * cover are folded back into notes. When nothing matches, fall back to the
- * conservatively-cleaned name (prep-strip / comma-tail extraction) so the
- * new-ingredient row gets a sensible name.
+ * Derive a row's display name + notes from a matched alias. The name is the
+ * matched catalog alias verbatim (`aliasName`) — a curated string, so it's
+ * clean and consistent regardless of how the source was spelled or tokenised
+ * ("extra-virgin olive oil", not "extra virgin …"; "TK Erbsen", not the source
+ * order "Erbsen TK"). Notes are EVERY input token the alias didn't cover —
+ * before, interior ("bell" in a "red bell pepper" hit on "red pepper"), and
+ * after the matched span — plus the parser's base notes (parens / brackets /
+ * usage / range / "to taste"), with the comma-tail content subtracted so
+ * post-comma tokens aren't double-counted.
+ */
+function computeNameAndNotes(
+  parsed: ParsedIngredient,
+  candidate: CandidateToken[],
+  coveredCandidateTokens: number[],
+  aliasName: string,
+): { name: string; notes: string | null; sourceName: string | null } {
+  if (coveredCandidateTokens.length === 0) {
+    return { name: parsed.name, notes: parsed.notes, sourceName: parsed.name };
+  }
+  // The display name is the matched catalog alias verbatim — a curated string,
+  // so it's clean and consistent (no tokenisation artefacts like "extra virgin"
+  // for a "extra-virgin" source). Every input token the alias didn't cover —
+  // leading, interior ("bell" in "red bell pepper" → "red pepper"), or
+  // trailing — falls through to the notes below.
+  const name = aliasName;
+  // The original SOURCE span the alias replaced (first→last covered token,
+  // space-joined; internal commas kept when the alias itself carries one).
+  // Surfaced so the UI can offer "keep my spelling and remember it as an
+  // alias" instead of the parser's substituted name.
+  const lo = Math.min(...coveredCandidateTokens);
+  const hi = Math.max(...coveredCandidateTokens);
+  const keepCommas = aliasName.includes(",");
+  let sourceName = candidate[lo].raw;
+  for (let k = lo + 1; k <= hi; k++) {
+    sourceName +=
+      (keepCommas && candidate[k].precededByComma ? ", " : " ") +
+      candidate[k].raw;
+  }
+  sourceName = sourceName.replace(/\s+/g, " ").trim();
+  // Reassemble notes in SOURCE order:
+  //   leadingNotes (range/size, front)
+  //   → the name area walked left-to-right, emitting the descriptor runs the
+  //     match DIDN'T take and the in-line paren notes at their recorded
+  //     position (so "…peanut butter-no sugar added (crunchy…) see notes" →
+  //     "no sugar added, crunchy…, see notes")
+  //   → post-comma notes (comma-tail + later parens), minus any comma-tail the
+  //     match folded into the name
+  //   → trailingNotes (hoisted brackets / "to taste")
+  const covered = new Set(coveredCandidateTokens);
+  const preCommaCount = candidate.filter((t) => !t.postComma).length;
+  // In-line paren notes grouped by their (clamped) name-token position.
+  const notesAtPos = new Map<number, string[]>();
+  for (const n of parsed.nameAreaNotes) {
+    // Re-tokenise the recorded name prefix the SAME way as the match
+    // candidate so the position lands in candidate-token space (the parser
+    // and the matcher split dashes differently).
+    const pos = Math.min(tokenizeCandidate(n.afterText).length, preCommaCount);
+    const list = notesAtPos.get(pos) ?? [];
+    list.push(n.text);
+    notesAtPos.set(pos, list);
+  }
+  const nameAreaFragments: string[] = [];
+  let buffer: string[] = [];
+  const flush = () => {
+    const run = buffer.join(" ").trim();
+    if (run.length > 0) nameAreaFragments.push(run);
+    buffer = [];
+  };
+  for (let j = 0; j <= preCommaCount; j++) {
+    const atPos = notesAtPos.get(j);
+    if (atPos) {
+      flush();
+      for (const t of atPos) nameAreaFragments.push(t);
+    }
+    if (j === preCommaCount) break;
+    if (covered.has(j)) flush();
+    else buffer.push(candidate[j].raw);
+  }
+  flush();
+  // Comma-tail tokens the match folded into the name → drop from postComma.
+  const coveredCommaTail = candidate
+    .filter((t, i) => t.postComma && covered.has(i))
+    .map((t) => t.raw)
+    .join(" ")
+    .trim();
+  const postComma =
+    coveredCommaTail.length > 0
+      ? subtractCommaTail(parsed.postCommaNotes, coveredCommaTail)
+      : parsed.postCommaNotes;
+  const notes =
+    [
+      ...parsed.leadingNotes,
+      ...nameAreaFragments,
+      postComma ?? "",
+      ...parsed.trailingNotes,
+    ]
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0)
+      .join(", ") || null;
+  return { name, notes, sourceName };
+}
+
+/**
+ * Run the structural matcher against the candidate text (parsed name + the
+ * comma-tail content, joined with a COMMA so the tail is flagged post-comma).
+ * When a match clears the threshold, its matched span becomes the row's
+ * name and everything outside it becomes notes (see {@link computeNameAndNotes}).
+ * When nothing matches, fall back to the conservatively-cleaned name —
+ * prep-strip + comma-tail-identity cleanup, the ONLY place word-lists still
+ * apply — so the new-ingredient row gets a sensible name.
  */
 function resolveIngredientForRow(
   parsed: ParsedIngredient,
@@ -638,6 +748,10 @@ function resolveIngredientForRow(
   ingredientId: number | null;
   match: IngredientMatch;
   canonicalIngredientName: string | null;
+  /** The original source span the matched alias replaced ("Zwiebeln" when the
+   *  alias-name became "Zwiebel"). Null on the new-ingredient path. Lets the
+   *  UI offer the user's own spelling as the alias to remember. */
+  sourceName: string | null;
   candidateMatches: ImportedCandidateMatch[];
   newNameProposals: ImportedNameProposal[];
   /** Defaults attached to the resolved alias entry, if any. */
@@ -649,43 +763,43 @@ function resolveIngredientForRow(
   isEquipment: boolean;
 } {
   const catalog = lookups.ingredientCatalog;
-  // Gather candidates for both the wide-text pass (returns ALL ranked
-  // matches, including below-threshold ones) and the post-cleanup re-match.
-  // The pill UI sees the wide-text list so it can surface low-score
-  // alternatives the auto-pick rejected.
+  // Single matcher pass over the wide text (name + comma-tail joined with a
+  // COMMA, so tail tokens are flagged post-comma and discounted). Returns ALL
+  // ranked matches; the pill UI surfaces the below-threshold ones too.
   let wideMatches: IngredientCandidateMatch[] = [];
   if (catalog && catalog.length > 0) {
     const wideText = [parsed.name, parsed.commaTailText]
       .map((s) => s.trim())
       .filter((s) => s.length > 0)
-      .join(" ");
+      .join(", ");
     if (wideText.length > 0) {
-      const { matches, candidate } = findIngredientCandidates(wideText, catalog);
+      const { matches } = findIngredientCandidates(wideText, catalog);
       wideMatches = matches;
       const top = matches[0];
       if (top && top.score >= autoMatchScoreThreshold) {
-        // Preserve the user's text as the row's displayName rather than
-        // replacing it with the catalog's canonical name. The shopping-list
-        // aggregator keys off `ingredientId` so cross-language merging
-        // ("tomatoes" + "Tomate") still happens, while the recipe stays in
-        // its source language.
-        //
-        // Comma-tail tokens consumed by the match are IDENTITY, not
-        // annotation ("Erbsen, TK" matched against "TK Erbsen" → the TK is
-        // the user's identity, not a side note) — fold them into the
-        // displayName and subtract them from notes. Unmatched comma-tail
-        // tokens stay in notes.
-        const folded = foldMatchedCommaTailIntoName(parsed, candidate, top);
+        // Name = the matched span; everything outside it → notes. The
+        // shopping-list aggregator keys off `ingredientId` so cross-language
+        // merging ("tomatoes" + "Tomate") still happens while the recipe
+        // keeps the user's source spelling for the matched span.
+        const { name, notes, sourceName } = computeNameAndNotes(
+          parsed,
+          top.candidate,
+          top.coveredCandidateTokens,
+          top.aliasName,
+        );
         return {
-          name: folded.name,
-          notes: folded.notes,
+          name,
+          notes,
           ingredientId: top.ingredientId,
           match: "existing",
           canonicalIngredientName:
-            folded.name.toLowerCase() === top.canonicalName.toLowerCase()
+            name.toLowerCase() === top.canonicalName.toLowerCase()
               ? null
               : top.canonicalName,
-          candidateMatches: matches.map(toImportedCandidateMatch),
+          sourceName,
+          candidateMatches: matches.map((m) =>
+            toImportedCandidateMatch(m, parsed),
+          ),
           newNameProposals: [],
           defaultUnit: top.defaultUnit ?? null,
           defaultSubUnit: top.defaultSubUnit ?? null,
@@ -695,20 +809,13 @@ function resolveIngredientForRow(
     }
   }
 
-  // No (strong enough) wide-text hit — try the conservative cleanup and
-  // (gated) re-match. The cleanup-rematch is what makes "frischer Zucker"
-  // still resolve to "Zucker": prep-strip pulls "frischer" out, then the
-  // matcher sees a bare "zucker" candidate which exact-matches above the
-  // threshold. But we only re-match when we have evidence that the user
-  // tagged the extra tokens as "notes":
-  //   - altWithPrepStripped is non-null (real prep was stripped from the
-  //     name area), OR
-  //   - the comma-tail content is ALL prep-like (PREP_LEADING_TOKENS or
-  //     SIZE_MODIFIER_TOKENS — words like "klein", "gehackt", "fein").
-  // For "Paprikapulver, edelsüß" the comma-tail "edelsüß" is neither prep
-  // nor size, so we treat it as part of the user's intended identity and
-  // skip the re-match. Same outcome as the no-comma form: a new
-  // "Paprikapulver edelsüß" ingredient gets created.
+  // Nothing above threshold → create a new ingredient. Word-lists live ONLY
+  // here: prep-strip + comma-tail-identity cleanup produce a tidy new name
+  // ("frischer Spargel" → "Spargel", note "frischer" when Spargel isn't in
+  // the catalog). When the comma-tail content is part of the user's identity
+  // (not all prep-like), fold it back into the new ingredient's NAME so
+  // "Paprikapulver, edelsüß" and "Paprikapulver edelsüß" create the same
+  // ingredient. Otherwise the comma-tail stays as notes.
   const cleaned = pickNameAndNotes(
     rawLine,
     parsed,
@@ -718,54 +825,6 @@ function resolveIngredientForRow(
   const commaTailIsAllPrepLike =
     parsed.commaTailText.trim().length > 0 &&
     isAllPrepLikeText(parsed.commaTailText);
-  const rematchAllowed =
-    parsed.altWithPrepStripped !== null || commaTailIsAllPrepLike;
-  if (
-    rematchAllowed &&
-    catalog &&
-    catalog.length > 0 &&
-    cleaned.name.trim().length > 0
-  ) {
-    const { matches: rematchMatches } = findIngredientCandidates(
-      cleaned.name,
-      catalog,
-    );
-    const top = rematchMatches[0];
-    if (top && top.score >= autoMatchScoreThreshold) {
-      // Use the prep-stripped form as displayName so the row reads cleanly
-      // ("frischer Zucker" → name "Zucker", note "frischer") while still
-      // preserving the user's original input minus the stripped prep.
-      // Canonical name surfaces via `canonicalIngredientName` when it
-      // differs from the cleaned text.
-      return {
-        name: cleaned.name,
-        notes: cleaned.notes,
-        ingredientId: top.ingredientId,
-        match: "existing",
-        canonicalIngredientName:
-          cleaned.name.toLowerCase() === top.canonicalName.toLowerCase()
-            ? null
-            : top.canonicalName,
-        // Surface BOTH the wide-text matches (so low-score alternatives
-        // still appear in the pill UI) and the re-match results.
-        candidateMatches: mergeCandidateLists(
-          rematchMatches.map(toImportedCandidateMatch),
-          wideMatches.map(toImportedCandidateMatch),
-        ),
-        newNameProposals: [],
-        defaultUnit: top.defaultUnit ?? null,
-        defaultSubUnit: top.defaultSubUnit ?? null,
-        isEquipment: top.isEquipment ?? false,
-      };
-    }
-  }
-
-  // Still nothing above threshold — create a new ingredient. When the
-  // comma-tail content is part of the user's identity (not all prep-like),
-  // fold it back into the new ingredient's NAME so "Paprikapulver,
-  // edelsüß" and "Paprikapulver edelsüß" both create the same ingredient
-  // "Paprikapulver edelsüß". Otherwise the comma-tail stays as notes
-  // (existing behaviour for "Tomaten, klein gehackt"-style rows).
   const newName =
     parsed.commaTailText.trim().length > 0 && !commaTailIsAllPrepLike
       ? commaTailGoesAsPrefix(parsed.commaTailText)
@@ -795,7 +854,10 @@ function resolveIngredientForRow(
     ingredientId: null,
     match: "new",
     canonicalIngredientName: null,
-    candidateMatches: wideMatches.map(toImportedCandidateMatch),
+    sourceName: null,
+    candidateMatches: wideMatches.map((m) =>
+      toImportedCandidateMatch(m, parsed),
+    ),
     newNameProposals: proposals,
     defaultUnit: null,
     defaultSubUnit: null,
@@ -805,30 +867,47 @@ function resolveIngredientForRow(
 
 function toImportedCandidateMatch(
   m: IngredientCandidateMatch,
+  parsed: ParsedIngredient,
 ): ImportedCandidateMatch {
+  const { name, notes } = computeNameAndNotes(
+    parsed,
+    m.candidate,
+    m.coveredCandidateTokens,
+    m.aliasName,
+  );
   return {
     ingredientId: m.ingredientId,
     canonicalName: m.canonicalName,
     matchedName: m.aliasName,
     score: m.score,
-    uncoveredText: m.uncoveredText,
+    name,
+    notes,
     isEquipment: m.isEquipment ?? false,
   };
 }
 
+/** Conjunctions that link prep words ("peeled AND deveined") — ignored when
+ *  deciding whether a comma-tail is all prep-like, but kept in the notes. */
+const PREP_CONJUNCTIONS = new Set(["and", "und", "&", "or", "oder"]);
+
 /**
- * True when every token in `text` is a prep-like word (PREP_LEADING_TOKENS
- * or SIZE_MODIFIER_TOKENS — "klein", "gehackt", "fein", …). The
- * cleanup-rematch path uses this to decide whether the comma-tail content
- * is a user-marked note ("Tomaten, klein gehackt") or part of the
- * identity ("Paprikapulver, edelsüß").
+ * True when the meaningful tokens in `text` are ALL prep-like words
+ * (PREP_LEADING_TOKENS or SIZE_MODIFIER_TOKENS — "klein", "gehackt", "fein",
+ * …). Linking conjunctions ("and"/"und") are ignored so "peeled and
+ * deveined" still reads as all-prep. The new-ingredient naming path uses this
+ * to decide whether the comma-tail is a note ("Tomaten, klein gehackt" →
+ * notes) or part of the identity ("Paprikapulver, edelsüß" → name).
  */
 function isAllPrepLikeText(text: string): boolean {
   const tokens = text
     .split(/[\s,;]+/)
+    .map((t) => t.replace(/[.,;]$/, ""))
     .filter((t) => t.length > 0);
-  if (tokens.length === 0) return false;
-  return tokens.every((t) => isPrepLeadingToken(t.replace(/[.,;]$/, "")));
+  const meaningful = tokens.filter(
+    (t) => !PREP_CONJUNCTIONS.has(t.toLowerCase()),
+  );
+  if (meaningful.length === 0) return false;
+  return meaningful.every((t) => isPrepLeadingToken(t));
 }
 
 /**
@@ -855,121 +934,27 @@ function commaTailGoesAsPrefix(commaTailText: string): boolean {
 }
 
 /**
- * Remove the comma-tail substring from a notes string once. Used when the
- * comma-tail content gets folded back into the new-ingredient name, so
- * the same content doesn't also appear as a note. Best-effort verbatim
- * match — when the comma-tail isn't present in the notes string (rare),
- * the notes are left untouched.
+ * Remove the comma-tail run from a notes string once, so content folded into
+ * a new-ingredient name doesn't also linger as a note. Matches the comma-tail
+ * as a whole run between separators; best-effort verbatim (untouched when the
+ * comma-tail isn't present).
  */
 function subtractCommaTail(
   notes: string | null,
   commaTailText: string,
 ): string | null {
-  return replaceCommaTailContent(notes, commaTailText, "");
-}
-
-/**
- * Rewrite the comma-tail run inside a notes string. Used when the matcher
- * consumed PART of the comma-tail (folded those tokens into displayName)
- * but other comma-tail tokens are unmatched and should stay in notes.
- * Passing an empty `replacement` removes the run entirely (same effect as
- * the legacy {@link subtractCommaTail} call).
- */
-function replaceCommaTailContent(
-  notes: string | null,
-  oldCommaTailText: string,
-  replacement: string,
-): string | null {
   if (!notes) return null;
-  const trimmed = oldCommaTailText.trim();
+  const trimmed = commaTailText.trim();
   if (trimmed.length === 0) return notes;
   const re = new RegExp(
     `(^|,\\s*)${trimmed.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\$&")}(?=,\\s*|$)`,
     "i",
   );
-  const repl = replacement.trim();
-  const replaced = notes.replace(re, (_, prefix) =>
-    repl.length > 0 ? `${prefix}${repl}` : "",
-  );
-  const cleaned = replaced.replace(/^,\s*|,\s*$/g, "").trim();
+  const cleaned = notes
+    .replace(re, "")
+    .replace(/^,\s*|,\s*$/g, "")
+    .trim();
   return cleaned.length > 0 ? cleaned : null;
-}
-
-/**
- * When the matcher consumed tokens from the comma-tail (`parsed.commaTailText`),
- * fold those tokens into the displayName — the comma-tail content was
- * identity (e.g. "Erbsen, TK" hitting catalog row "TK Erbsen"), not a side
- * note. Tokens NOT consumed stay in notes.
- *
- * Behaviour:
- *   - No comma-tail OR no comma-tail tokens consumed → return parsed
- *     name/notes unchanged (existing behaviour).
- *   - All comma-tail tokens consumed → keep the user's original comma form
- *     ("Erbsen, TK") as displayName so the row reads exactly like the
- *     source line; strip the comma-tail substring from notes.
- *   - Some but not all consumed → space-join the consumed tokens onto the
- *     name (no comma — there's still a leftover note); rewrite the notes
- *     so only the unmatched comma-tail content remains.
- */
-function foldMatchedCommaTailIntoName(
-  parsed: ParsedIngredient,
-  candidate: ReturnType<typeof tokenizeCandidate>,
-  top: IngredientCandidateMatch,
-): { name: string; notes: string | null } {
-  const commaTail = parsed.commaTailText.trim();
-  if (commaTail.length === 0) {
-    return { name: parsed.name, notes: parsed.notes };
-  }
-  // `wideText` was built as `parsed.name + " " + parsed.commaTailText`, so
-  // candidate token indices ≥ nameTokenCount belong to the comma-tail.
-  const nameTokenCount = tokenizeCandidate(parsed.name).length;
-  const totalCommaTailCount = candidate.length - nameTokenCount;
-  if (totalCommaTailCount <= 0) {
-    return { name: parsed.name, notes: parsed.notes };
-  }
-  const matchedCommaTailIndices = top.coveredCandidateTokens
-    .filter((i) => i >= nameTokenCount)
-    .sort((a, b) => a - b);
-  if (matchedCommaTailIndices.length === 0) {
-    return { name: parsed.name, notes: parsed.notes };
-  }
-  if (matchedCommaTailIndices.length === totalCommaTailCount) {
-    return {
-      name: `${parsed.name}, ${parsed.commaTailText}`,
-      notes: subtractCommaTail(parsed.notes, parsed.commaTailText),
-    };
-  }
-  const matchedSet = new Set(matchedCommaTailIndices);
-  const consumedRaw = matchedCommaTailIndices
-    .map((i) => candidate[i].raw)
-    .join(" ");
-  const leftoverRaw = candidate
-    .slice(nameTokenCount)
-    .filter((_, i) => !matchedSet.has(i + nameTokenCount))
-    .map((t) => t.raw)
-    .join(" ");
-  return {
-    name: `${parsed.name} ${consumedRaw}`,
-    notes: replaceCommaTailContent(
-      parsed.notes,
-      parsed.commaTailText,
-      leftoverRaw,
-    ),
-  };
-}
-
-function mergeCandidateLists(
-  primary: ImportedCandidateMatch[],
-  fallback: ImportedCandidateMatch[],
-): ImportedCandidateMatch[] {
-  const seen = new Set<number>();
-  const out: ImportedCandidateMatch[] = [];
-  for (const m of [...primary, ...fallback]) {
-    if (seen.has(m.ingredientId)) continue;
-    seen.add(m.ingredientId);
-    out.push(m);
-  }
-  return out;
 }
 
 /**
@@ -1187,6 +1172,7 @@ export function parseIngredientLines(
           ingredientId: resolved.ingredientId,
           ingredientMatch: resolved.match,
           canonicalIngredientName: resolved.canonicalIngredientName,
+          sourceName: resolved.sourceName,
           notes: resolved.notes,
           // Equipment-flagged ingredients (Backpapier, Einmachgläser …)
           // default to optional so the user decides per-recipe whether they
@@ -1210,6 +1196,7 @@ export function parseIngredientLines(
       }
     }
   }
+  applyAlternativeInheritance(out);
   return out;
 }
 
@@ -1223,6 +1210,70 @@ function appendAlternativeToNotes(
     : altText.trim();
   if (fragment.length === 0) return;
   target.notes = target.notes ? `${target.notes}, ${fragment}` : fragment;
+}
+
+/**
+ * Copy a primary's amount/unit/notes onto its alternatives at parse time.
+ * Walks the row list as a sequence of groups ([primary, alt, alt, …]; an
+ * alternative always follows its primary). For each group:
+ *   - Amount/unit: an alternative that parsed NEITHER its own quantity NOR
+ *     its own unit inherits both from the primary. One that brought either
+ *     keeps what it parsed ("2 eggs or 3 egg whites" → egg whites stays 3).
+ *     When the primary's unit is an ingredient-scoped sub-unit, only the
+ *     amount carries over — copying a foreign sub-unit id onto a different
+ *     ingredient would be a data smell.
+ *   - Notes: the trailing note of the LAST group member propagates to every
+ *     earlier sibling that has no note of its own ("2 slices bacon or
+ *     pancetta, diced" → both get "diced"). Members with their own note keep
+ *     it.
+ * Mutates the rows in place. Only matched alternatives are rows here —
+ * unmatched ones already folded into the primary's notes upstream.
+ */
+function applyAlternativeInheritance(rows: ImportedIngredient[]): void {
+  let i = 0;
+  while (i < rows.length) {
+    if (rows[i].isAlternative) {
+      // Orphan alternative with no preceding primary (rare) — skip.
+      i += 1;
+      continue;
+    }
+    let hi = i;
+    while (hi + 1 < rows.length && rows[hi + 1].isAlternative) hi += 1;
+    if (hi > i) inheritWithinGroup(rows, i, hi);
+    i = hi + 1;
+  }
+}
+
+function inheritWithinGroup(
+  rows: ImportedIngredient[],
+  lo: number,
+  hi: number,
+): void {
+  const primary = rows[lo];
+  for (let k = lo + 1; k <= hi; k++) {
+    const alt = rows[k];
+    const hasOwnAmount = alt.quantity !== null;
+    const hasOwnUnit = alt.unit !== null || alt.subUnit !== null;
+    if (hasOwnAmount || hasOwnUnit) continue;
+    alt.quantity = primary.quantity;
+    alt.fixedAmount = primary.fixedAmount;
+    if (primary.subUnit) {
+      // Foreign sub-unit — copy the amount only, leave the unit for the alt's
+      // own resolution / the user.
+    } else {
+      alt.unit = primary.unit;
+      alt.unitMatch = primary.unitMatch;
+      alt.rawUnit = primary.rawUnit;
+    }
+  }
+  // Trailing note of the last member → siblings that have none of their own.
+  const sharedNote = rows[hi].notes?.trim();
+  if (sharedNote && sharedNote.length > 0) {
+    for (let k = lo; k < hi; k++) {
+      const cur = rows[k].notes?.trim();
+      if (!cur || cur.length === 0) rows[k].notes = sharedNote;
+    }
+  }
 }
 
 export type ParsedSectionGroup = {
@@ -1339,6 +1390,7 @@ export function parseIngredientLinesIntoSections(
           ingredientId: resolved.ingredientId,
           ingredientMatch: resolved.match,
           canonicalIngredientName: resolved.canonicalIngredientName,
+          sourceName: resolved.sourceName,
           notes: resolved.notes,
           // Mirror parseIngredientLines: equipment items (Backpapier,
           // Einmachgläser …) auto-default to optional. `forceOptional`
@@ -1365,6 +1417,7 @@ export function parseIngredientLinesIntoSections(
   if (groups.length > 1 && groups[0].title === null && groups[0].ingredients.length === 0) {
     groups.shift();
   }
+  for (const g of groups) applyAlternativeInheritance(g.ingredients);
   return groups;
 }
 

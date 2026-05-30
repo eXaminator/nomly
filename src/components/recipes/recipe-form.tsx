@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
-import { Loader2, Plus, Save, Trash2 } from "lucide-react";
+import { Loader2, Plus, RefreshCw, Save, Trash2 } from "lucide-react";
 import {
   DndContext,
   DragOverlay,
@@ -23,6 +23,9 @@ import { NewIngredientsDialog } from "./new-ingredients-dialog";
 import { PhotoUpload } from "./photo-upload";
 import { SectionEditor } from "./section-editor";
 import { TagInput } from "./tag-input";
+import { hasReparsableRows, reparseAll } from "./reparse";
+import { ingredientToPayload, toNumberOrNull } from "./payload";
+import { cn } from "@/lib/cn";
 import {
   emptyRecipe,
   emptySection,
@@ -38,54 +41,6 @@ type Props = {
   recipeId?: number;
   tagSuggestions: string[];
 };
-
-function toNumberOrNull(raw: string): number | null {
-  const v = raw.trim();
-  if (v.length === 0) return null;
-  const n = Number(v.replace(",", "."));
-  return Number.isFinite(n) ? n : null;
-}
-
-function ingredientToPayload(ing: DraftIngredient) {
-  const name = ing.name.trim();
-  if (name.length === 0) return null;
-  // "Nicht zugeordnet": free-text line with no article. Drop the ingredient
-  // link, alias intent and any sub-unit (sub-units are article-scoped); the
-  // server persists ingredient_id NULL with `name` as display_name.
-  const hasSubUnit = ing.subUnit !== null && !ing.unassigned;
-  return {
-    ingredientName: name,
-    // The pill UI determines ingredient identity. When the user explicitly
-    // picked a pill (or the matcher auto-selected one above threshold),
-    // `selectedIngredientId` is set and the server links the row directly,
-    // bypassing name-based resolution.
-    ingredientId: ing.unassigned ? null : ing.selectedIngredientId,
-    unassigned: ing.unassigned,
-    // Only honoured when ingredientId is set; turns the row's display name
-    // into an alias of that ingredient on save (force-match opt-in).
-    addAsAlias: ing.unassigned ? false : ing.addAsAlias,
-    quantity: toNumberOrNull(ing.quantity),
-    // Sub-unit and unit are mutually exclusive; the server enforces it too.
-    unitId: hasSubUnit ? null : ing.unit?.id ?? null,
-    subUnitId: hasSubUnit ? ing.subUnit!.id : null,
-    // Display label the user sees in the picker. Server NULLs this back out
-    // if it matches the canonical unit name, so we don't bloat the DB with
-    // redundant strings — and we don't have to fetch canonicals client-side.
-    // Skipped for sub-units (their own name field is the source of truth).
-    displayUnit: hasSubUnit ? null : ing.unit?.name ?? null,
-    notes: ing.notes.trim() || null,
-    isOptional: ing.isOptional,
-    fixedAmount: ing.fixedAmount,
-    // Round-trip the source line: populated by the importer / clipboard
-    // parser, sticks through edit, surfaces in the row's "Original" hint.
-    rawLine: ing.rawText ?? null,
-    // The server resolves this to a real recipe_ingredient.alternative_for_id
-    // by linking to the most recent primary inserted in the same section.
-    // Service code also re-asserts `isOptional: true` for alternatives — the
-    // client-side toggle on alt rows is locked, so the values agree.
-    isAlternative: ing.isAlternative,
-  };
-}
 
 function buildPayload(draft: DraftRecipe) {
   return {
@@ -112,6 +67,7 @@ export function RecipeForm({ initial, recipeId, tagSuggestions }: Props) {
   const router = useRouter();
   const [draft, setDraft] = React.useState<DraftRecipe>(initial ?? emptyRecipe());
   const [saving, setSaving] = React.useState(false);
+  const [reparsingAll, setReparsingAll] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   // Pending submit waiting on the new-ingredients dialog. When set, the
   // dialog is open and `payload` is the validated draft to ship once the
@@ -125,6 +81,31 @@ export function RecipeForm({ initial, recipeId, tagSuggestions }: Props) {
     const sections = draft.sections.slice();
     sections[i] = next;
     setDraft({ ...draft, sections });
+  }
+
+  const anyReparsable = draft.sections.some((s) =>
+    hasReparsableRows(s.ingredients),
+  );
+
+  /** Re-parse every ingredient that has an original source line, across all
+   *  sections — re-applies the current parser, discarding manual edits to
+   *  those rows. Rows added by hand (no source line) are left as-is. */
+  async function reparseWholeRecipe() {
+    if (reparsingAll) return;
+    setReparsingAll(true);
+    try {
+      const sections = await Promise.all(
+        draft.sections.map(async (s) => ({
+          ...s,
+          ingredients: await reparseAll(s.ingredients),
+        })),
+      );
+      setDraft({ ...draft, sections });
+    } catch {
+      setError("Neu-Parsen fehlgeschlagen.");
+    } finally {
+      setReparsingAll(false);
+    }
   }
 
   function removeSection(i: number) {
@@ -520,10 +501,27 @@ export function RecipeForm({ initial, recipeId, tagSuggestions }: Props) {
       <div className="space-y-4">
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold text-[var(--color-fg)]">Abschnitte</h2>
-          <Button type="button" variant="outline" size="sm" onClick={addSection}>
-            <Plus className="size-4" />
-            Abschnitt hinzufügen
-          </Button>
+          <div className="flex items-center gap-2">
+            {anyReparsable ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={reparseWholeRecipe}
+                disabled={reparsingAll}
+                title="Alle Zutaten aus ihren Originalzeilen neu parsen (verwirft manuelle Änderungen)"
+              >
+                <RefreshCw
+                  className={cn("size-4", reparsingAll && "animate-spin")}
+                />
+                Alle neu parsen
+              </Button>
+            ) : null}
+            <Button type="button" variant="outline" size="sm" onClick={addSection}>
+              <Plus className="size-4" />
+              Abschnitt hinzufügen
+            </Button>
+          </div>
         </div>
         <DndContext
           // Stable `id` keeps @dnd-kit's internal `DndDescribedBy-{n}` ARIA

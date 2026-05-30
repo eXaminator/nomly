@@ -1,0 +1,213 @@
+import { describe, expect, it } from "vitest";
+import {
+  buildReparsedRecipeInput,
+  groupContiguousByRawLine,
+  isLineGroupChanged,
+  type CurrentRow,
+} from "@/lib/recipes/reparse-scan";
+import type { ParsedIngredientResponse } from "@/components/recipes/types";
+import type { RecipeIngredientInput, RecipeView } from "@/lib/recipes/types";
+
+function viewRow(over: Record<string, unknown> = {}) {
+  return {
+    id: 100,
+    ingredientId: 5,
+    ingredientName: "Salz",
+    canonicalIngredientName: null,
+    quantity: 1,
+    unitId: 2,
+    unitName: "g",
+    subUnitId: null,
+    subUnitPerPurchase: null,
+    notes: null,
+    isOptional: false,
+    fixedAmount: false,
+    rawLine: "1 g Salz",
+    isEquipment: false,
+    dietaryClass: null,
+    sortOrder: 0,
+    alternativeForId: null,
+    ...over,
+  };
+}
+function viewWith(ingredients: ReturnType<typeof viewRow>[]): RecipeView {
+  return {
+    id: 1,
+    title: "R",
+    description: null,
+    photoPath: null,
+    sourceUrl: null,
+    servings: 2,
+    prepTimeMin: null,
+    cookTimeMin: null,
+    tags: [],
+    isVegan: null,
+    isVegetarian: null,
+    dietConfidence: "low",
+    needsUpdate: false,
+    createdAt: 0,
+    updatedAt: 0,
+    sections: [
+      { id: 9, title: null, instructions: "", sortOrder: 0, ingredients },
+    ],
+  } as unknown as RecipeView;
+}
+function newRow(over: Partial<RecipeIngredientInput> = {}): RecipeIngredientInput {
+  return {
+    ingredientName: "Meersalz",
+    ingredientId: 5,
+    quantity: 2,
+    unitId: 2,
+    subUnitId: null,
+    displayUnit: null,
+    notes: "grob",
+    isOptional: false,
+    fixedAmount: false,
+    rawLine: "1 g Salz",
+    isAlternative: false,
+    ...over,
+  };
+}
+
+function cur(over: Partial<CurrentRow> = {}): CurrentRow {
+  return {
+    id: 1,
+    ingredientId: 5,
+    name: "Tomate",
+    quantity: 2,
+    unitId: 3,
+    subUnitId: null,
+    notes: null,
+    isOptional: false,
+    alternativeForId: null,
+    ...over,
+  };
+}
+
+function prop(over: Partial<ParsedIngredientResponse> = {}): ParsedIngredientResponse {
+  return {
+    quantity: 2,
+    unit: { id: 3, name: "g" },
+    subUnit: null,
+    unitMatch: "matched",
+    rawUnit: null,
+    name: "Tomate",
+    ingredientId: 5,
+    ingredientMatch: "existing",
+    canonicalIngredientName: null,
+    notes: null,
+    isOptional: false,
+    fixedAmount: false,
+    isAlternative: false,
+    rawText: "2 g Tomate",
+    candidateMatches: [],
+    ...over,
+  };
+}
+
+describe("isLineGroupChanged", () => {
+  it("false when identical", () => {
+    expect(isLineGroupChanged([cur()], [prop()])).toBe(false);
+  });
+  it("true when ingredient mapping differs", () => {
+    expect(isLineGroupChanged([cur({ ingredientId: 5 })], [prop({ ingredientId: 9 })])).toBe(true);
+  });
+  it("true when mapped vs new (null) differs", () => {
+    expect(isLineGroupChanged([cur({ ingredientId: 5 })], [prop({ ingredientId: null })])).toBe(true);
+  });
+  it("true when name differs", () => {
+    expect(isLineGroupChanged([cur({ name: "Tomate" })], [prop({ name: "Tomaten" })])).toBe(true);
+  });
+  it("treats null and empty notes as equal", () => {
+    expect(isLineGroupChanged([cur({ notes: null })], [prop({ notes: "" })])).toBe(false);
+  });
+  it("true when notes differ", () => {
+    expect(isLineGroupChanged([cur({ notes: "fein" })], [prop({ notes: "grob" })])).toBe(true);
+  });
+  it("true when quantity differs, false within epsilon", () => {
+    expect(isLineGroupChanged([cur({ quantity: 2 })], [prop({ quantity: 3 })])).toBe(true);
+    expect(isLineGroupChanged([cur({ quantity: 2 })], [prop({ quantity: 2.0000001 })])).toBe(false);
+  });
+  it("true when unit differs", () => {
+    expect(
+      isLineGroupChanged([cur({ unitId: 3, subUnitId: null })], [prop({ unit: { id: 4, name: "ml" }, subUnit: null })]),
+    ).toBe(true);
+  });
+  it("true when sub-unit differs from unit", () => {
+    expect(
+      isLineGroupChanged(
+        [cur({ unitId: 3, subUnitId: null })],
+        [prop({ unit: null, subUnit: { id: 7, name: "Zehe", perPurchase: 1 } })],
+      ),
+    ).toBe(true);
+  });
+  it("true when optional / alternative flags differ", () => {
+    expect(isLineGroupChanged([cur({ isOptional: false })], [prop({ isOptional: true })])).toBe(true);
+    expect(isLineGroupChanged([cur({ alternativeForId: null })], [prop({ isAlternative: true })])).toBe(true);
+  });
+  it("true when row counts differ", () => {
+    expect(isLineGroupChanged([cur()], [prop(), prop({ name: "Margarine" })])).toBe(true);
+  });
+});
+
+describe("groupContiguousByRawLine", () => {
+  it("groups contiguous same-rawLine rows within a section, skips empty rawLine", () => {
+    const rows = [
+      { sectionId: 1, id: 10, rawLine: "a" },
+      { sectionId: 1, id: 11, rawLine: "a" },
+      { sectionId: 1, id: 12, rawLine: "" },
+      { sectionId: 1, id: 13, rawLine: "b" },
+      { sectionId: 2, id: 14, rawLine: "a" },
+    ];
+    const groups = groupContiguousByRawLine(rows);
+    expect(groups.map((g) => g.map((r) => r.id))).toEqual([[10, 11], [13], [14]]);
+  });
+});
+
+describe("buildReparsedRecipeInput", () => {
+  it("substitutes a group, preserves order + other rows + rawLine", () => {
+    const view = viewWith([
+      viewRow({ id: 100, ingredientName: "Salz", ingredientId: 5, sortOrder: 0 }),
+      viewRow({ id: 101, ingredientName: "Pfeffer", ingredientId: 6, sortOrder: 1, rawLine: "1 g Pfeffer" }),
+    ]);
+    const { input, appliedGroups, skipped } = buildReparsedRecipeInput(view, [
+      { replaceRowIds: [100], rows: [newRow({ ingredientName: "Meersalz", notes: "grob" })] },
+    ]);
+    expect(appliedGroups).toBe(1);
+    expect(skipped).toBe(0);
+    expect(input.sections[0].ingredients.map((x) => x.ingredientName)).toEqual([
+      "Meersalz",
+      "Pfeffer",
+    ]);
+    expect(input.sections[0].ingredients[0].notes).toBe("grob");
+    expect(input.sections[0].ingredients[1].rawLine).toBe("1 g Pfeffer");
+  });
+
+  it("replaces a multi-row group with however many new rows", () => {
+    const view = viewWith([
+      viewRow({ id: 100, ingredientName: "Butter", rawLine: "Butter oder Margarine", sortOrder: 0 }),
+      viewRow({ id: 101, ingredientName: "Margarine", rawLine: "Butter oder Margarine", sortOrder: 1, alternativeForId: 100 }),
+      viewRow({ id: 102, ingredientName: "Mehl", rawLine: "Mehl", sortOrder: 2 }),
+    ]);
+    const { input, appliedGroups } = buildReparsedRecipeInput(view, [
+      { replaceRowIds: [100, 101], rows: [newRow({ ingredientName: "Butter", notes: null })] },
+    ]);
+    expect(appliedGroups).toBe(1);
+    expect(input.sections[0].ingredients.map((x) => x.ingredientName)).toEqual([
+      "Butter",
+      "Mehl",
+    ]);
+  });
+
+  it("counts a replacement with absent ids as skipped, leaves rows intact", () => {
+    const view = viewWith([
+      viewRow({ id: 100, ingredientName: "Salz", sortOrder: 0 }),
+    ]);
+    const { input, appliedGroups, skipped } = buildReparsedRecipeInput(view, [
+      { replaceRowIds: [999], rows: [newRow()] },
+    ]);
+    expect(appliedGroups).toBe(0);
+    expect(skipped).toBe(1);
+    expect(input.sections[0].ingredients.map((x) => x.ingredientName)).toEqual(["Salz"]);
+  });
+})

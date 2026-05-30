@@ -12,7 +12,9 @@ import {
   Lock,
   Outdent,
   Pencil,
+  RefreshCw,
   RotateCw,
+  Tag,
   Trash2,
   Unlock,
 } from "lucide-react";
@@ -102,10 +104,10 @@ type ServerMatch = {
   canonicalName: string;
   matchedName: string;
   score: number;
-  /** Raw text of candidate tokens NOT covered by this match — moved into the
-   *  notes field when the user picks this pill. Empty when the match covers
-   *  every token of the candidate. */
-  uncoveredText: string;
+  /** Finished display name applied on pick — the matched span of the input. */
+  name: string;
+  /** Finished notes applied on pick — the input tokens outside the span. */
+  notes: string | null;
   /** True when the underlying ingredient is flagged as equipment. The pill
    *  click and auto-select rule default `isOptional` to true on first
    *  resolution to equipment — matching the import-time behavior. */
@@ -126,59 +128,14 @@ function isSubUnitPickerId(id: number): boolean {
   return id < 0;
 }
 
-/**
- * Remove each whitespace-separated token in `uncoveredText` from `name`
- * (case-insensitive, first occurrence only per token). Used when the user
- * picks a pill whose match did not cover the full name input — e.g.
- * "Paprikaschote rote" minus "rote" → "Paprikaschote". Punctuation that
- * surrounded the removed token (commas, dashes) is also tidied so the
- * resulting name doesn't read as "Paprikaschote, " or "Paprikaschote -".
- */
-function subtractTokensFromName(name: string, uncoveredText: string): string {
-  const toRemove = uncoveredText
-    .split(/\s+/)
-    .map((t) => t.toLowerCase())
-    .filter((t) => t.length > 0);
-  if (toRemove.length === 0) return name;
-  const parts = name.split(/(\s+|[,;])/u);
-  const remainingToRemove = new Map<string, number>();
-  for (const t of toRemove) {
-    remainingToRemove.set(t, (remainingToRemove.get(t) ?? 0) + 1);
-  }
-  const kept: string[] = [];
-  for (const part of parts) {
-    const lower = part.toLowerCase().replace(/[.,;]+$/, "");
-    const count = remainingToRemove.get(lower);
-    if (count && count > 0) {
-      remainingToRemove.set(lower, count - 1);
-      continue;
-    }
-    kept.push(part);
-  }
-  // Tidy stranded separators: leading/trailing whitespace/punctuation and
-  // double-separators left behind by the removals.
-  return kept
-    .join("")
-    .replace(/\s*[,;]\s*[,;]\s*/g, ", ")
-    .replace(/^[\s,;-]+|[\s,;-]+$/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-/** Append a string to the notes field with a comma separator when both
- *  sides are non-empty. Trims and dedups consecutive separators. */
-function appendToNotes(existing: string, addition: string): string {
-  const a = existing.trim();
-  const b = addition.trim();
-  if (a.length === 0) return b;
-  if (b.length === 0) return a;
-  return `${a}, ${b}`;
-}
-
 type Props = {
   value: DraftIngredient;
   onChange: (next: DraftIngredient) => void;
   onRemove: () => void;
+  /** Re-parse this row from its original source line (`rawText`), replacing
+   *  it (and any alternatives expanded from the same line) with freshly
+   *  parsed rows. Only wired when the row carries a `rawText`. */
+  onReparse?: () => void | Promise<void>;
   /** Insert a new empty alternative attached to this row's primary group.
    *  Only callable on primary rows — alternatives can't have their own
    *  alternatives. */
@@ -210,6 +167,7 @@ export function IngredientRow({
   value,
   onChange,
   onRemove,
+  onReparse,
   onAddAlternative,
   onDemote,
   onPromote,
@@ -231,6 +189,7 @@ export function IngredientRow({
   // are merged into the unit picker via `searchUnitsAndSubUnits` below so
   // the user can pick Zehe / Zweig / … like any other unit. Debounced so
   // each keystroke doesn't fire a network round-trip.
+  const [reparsing, setReparsing] = React.useState(false);
   const [subUnitOptions, setSubUnitOptions] = React.useState<SubUnitOption[]>([]);
   const subUnitNameRef = React.useRef<string>("");
   React.useEffect(() => {
@@ -270,7 +229,8 @@ export function IngredientRow({
           // rather than collapsing both to the canonical.
           matchedName: c.matchedName,
           score: c.score,
-          uncoveredText: c.uncoveredText,
+          name: c.name,
+          notes: c.notes,
           isEquipment: c.isEquipment,
         }));
       }
@@ -290,9 +250,10 @@ export function IngredientRow({
             canonicalName: value.canonicalName ?? value.name,
             matchedName: label,
             score: 999,
-            // Edit-flow synthetic — no live matcher info, treat as fully
-            // covered so the pill click is a no-op on name/notes.
-            uncoveredText: "",
+            // Edit-flow synthetic — carry the row's current name/notes so
+            // clicking this pill is a no-op on name/notes.
+            name: value.name,
+            notes: value.notes,
             // Equipment status is unknown at synth time; the live matcher's
             // first response will fill it in. Defaulting to false here
             // avoids accidentally flipping isOptional on initial render.
@@ -302,6 +263,17 @@ export function IngredientRow({
       }
       return [];
     },
+  );
+  // Text the live matcher runs against. Seeded from the ORIGINAL source line
+  // (`rawText`) so the candidate pills are computed from the full context
+  // (quantity, size, comma-tail — "1 medium tomato, diced" keeps "medium").
+  // It stays fixed when the user clicks between pills (a pill click only
+  // changes name/notes, never this query), so the pills don't drift or drop
+  // notes. It updates ONLY when the user types in the name field — that's the
+  // signal they're redefining the ingredient, so the matcher follows the
+  // typed text from then on.
+  const [matchText, setMatchText] = React.useState(
+    () => value.rawText ?? value.name,
   );
   const onChangeRef = React.useRef(onChange);
   const valueRef = React.useRef(value);
@@ -324,8 +296,8 @@ export function IngredientRow({
   // matcher's narrower view came back.
   const seededNameRef = React.useRef(value.name);
   React.useEffect(() => {
-    const name = value.name.trim();
-    if (name.length < 2) {
+    const text = matchText.trim();
+    if (text.length < 2) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setServerMatches([]);
       return;
@@ -336,7 +308,7 @@ export function IngredientRow({
         const r = await fetch("/api/v1/ingredients/match", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ text: name }),
+          body: JSON.stringify({ text }),
           signal: controller.signal,
         });
         if (!r.ok) return;
@@ -359,10 +331,10 @@ export function IngredientRow({
                 canonicalName: v.canonicalName ?? v.name,
                 matchedName: label,
                 score: 999,
-                // Synthetic pin — name/notes are already in the user's
-                // intended state; treat as fully covered so re-picking
-                // this pill doesn't shuffle text around.
-                uncoveredText: "",
+                // Synthetic pin — carry the row's current name/notes so
+                // re-picking this pill doesn't shuffle text around.
+                name: v.name,
+                notes: v.notes,
                 // Equipment flag isn't surfaced by the synthetic pin path
                 // (the live matcher dropped it). The user already has the
                 // row in their preferred state, so default to false to
@@ -378,11 +350,12 @@ export function IngredientRow({
         // edited the input. Otherwise the row's saved selection stays
         // untouched no matter what the narrower live matcher returns.
         if (hasUserEdited) {
-          const next = applyAutoSelect(v, name, data.matches);
+          const next = applyAutoSelect(v, text, data.matches);
           if (
             next.selectedIngredientId !== v.selectedIngredientId ||
             next.canonicalName !== v.canonicalName ||
-            next.isOptional !== v.isOptional
+            next.isOptional !== v.isOptional ||
+            (next.pinnedByUser ?? false) !== (v.pinnedByUser ?? false)
           ) {
             onChangeRef.current(next);
           }
@@ -395,7 +368,7 @@ export function IngredientRow({
       window.clearTimeout(handle);
       controller.abort();
     };
-  }, [value.name]);
+  }, [matchText]);
 
   /** Combined picker: ingredient's sub-units first (when present), then
    *  global units matching the query. Sub-units get negative synthetic ids;
@@ -458,39 +431,77 @@ export function IngredientRow({
     });
   }
 
-  /** Click on a candidate pill: select that ingredient and delegate any
-   *  tokens the match did NOT cover into the notes field. The row's
-   *  display_name keeps the user's spelling minus the uncovered tokens
+  /** Click on a candidate pill: replace the row's name + notes with the
+   *  candidate's finished values (computed server-side from the matched
+   *  span) and link the ingredient. Pure replace — idempotent, so
+   *  re-clicking or switching pills never accumulates leftover notes
    *  ("Paprikaschote rote" + pick Paprikaschoten → name "Paprikaschote",
-   *  note "rote"); `ingredient_id` links to the picked canonical. When
-   *  uncoveredText is empty the name is preserved verbatim, matching the
-   *  prior behavior for clean covers.
+   *  note "rote"). `ingredient_id` links to the picked canonical.
    *
    *  Equipment-flagged ingredients (Backpapier, Backform, …) default the
    *  row to isOptional=true on first resolution, mirroring the import-time
    *  parser behavior. A user-toggled isOptional=true is left in place;
    *  we never auto-unset. */
   function selectCandidate(c: ServerMatch) {
-    const nextName = c.uncoveredText
-      ? subtractTokensFromName(value.name, c.uncoveredText)
-      : value.name;
-    const nextNotes = c.uncoveredText
-      ? appendToNotes(value.notes, c.uncoveredText)
-      : value.notes;
     onChange({
       ...value,
-      name: nextName,
-      notes: nextNotes,
+      name: c.name,
+      notes: c.notes ?? "",
       selectedIngredientId: c.ingredientId,
       canonicalName:
-        nextName.toLowerCase() === c.canonicalName.toLowerCase()
+        c.name.toLowerCase() === c.canonicalName.toLowerCase()
           ? null
           : c.canonicalName,
+      // Remember the spelling this pick is REPLACING (keep an import's source
+      // span if we already have one) so the alias toggle can offer it.
+      originalName:
+        value.originalName ?? (value.name.trim() || undefined),
       isOptional: value.isOptional || c.isEquipment,
       // Clicking a regular candidate clears any force-match alias intent and
       // any "Nicht zugeordnet" state.
       addAsAlias: false,
       unassigned: false,
+      // Manual pin: from here, typing keeps this selection (sticky).
+      pinnedByUser: true,
+      importAnnotation: clearAnnotationOn(value.importAnnotation, "ingredient"),
+    });
+  }
+
+  /** Name-field change. Two sources, distinguished by `pickedIngredientId`:
+   *   - autocomplete pick (id present): the user chose a specific ingredient
+   *     by name → select it as the new best match and CLEAR any manual pin
+   *     (a fresh name supersedes a prior pill pin).
+   *   - free typing (no id): follow the text; leave any manual pin intact so
+   *     a previously-pinned selection survives editing, while an unpinned row
+   *     re-evaluates to the best match (handled in the live-match effect).
+   *  Either way the matcher query follows the typed/picked text. */
+  function handleNameChange(
+    name: string,
+    canonical?: string | null,
+    pickedIngredientId?: number,
+  ) {
+    setMatchText(name);
+    if (pickedIngredientId !== undefined) {
+      onChange({
+        ...value,
+        name,
+        selectedIngredientId: pickedIngredientId,
+        canonicalName: canonical ?? null,
+        // A fresh name supersedes any remembered original spelling.
+        originalName: undefined,
+        pinnedByUser: false,
+        addAsAlias: false,
+        unassigned: false,
+        importAnnotation: clearAnnotationOn(value.importAnnotation, "ingredient"),
+      });
+      return;
+    }
+    onChange({
+      ...value,
+      name,
+      canonicalName: canonical === undefined ? value.canonicalName : canonical,
+      // Typing redefines the name → drop the remembered original spelling.
+      originalName: undefined,
       importAnnotation: clearAnnotationOn(value.importAnnotation, "ingredient"),
     });
   }
@@ -501,8 +512,11 @@ export function IngredientRow({
       ...value,
       selectedIngredientId: null,
       canonicalName: null,
+      originalName: undefined,
       addAsAlias: false,
       unassigned: false,
+      // Deliberate "create new" choice — sticky against re-matching on typing.
+      pinnedByUser: true,
     });
   }
 
@@ -514,6 +528,7 @@ export function IngredientRow({
       ...value,
       selectedIngredientId: null,
       canonicalName: null,
+      originalName: undefined,
       subUnit: null,
       addAsAlias: false,
       unassigned: true,
@@ -529,6 +544,7 @@ export function IngredientRow({
    *  the text change triggers. */
   function useCanonicalInName(c: ServerMatch) {
     const label = c.matchedName || c.canonicalName;
+    setMatchText(label);
     onChange({
       ...value,
       name: label,
@@ -537,8 +553,13 @@ export function IngredientRow({
           ? null
           : c.canonicalName,
       selectedIngredientId: c.ingredientId,
+      // Adopting the catalog spelling — no original to remember.
+      originalName: undefined,
       addAsAlias: false,
       unassigned: false,
+      // ↻ adopts this candidate's name AND keeps it selected — pin so the
+      // re-match the text change triggers can't override it.
+      pinnedByUser: true,
     });
   }
 
@@ -555,8 +576,53 @@ export function IngredientRow({
       canonicalName:
         value.name.toLowerCase() === canonical.toLowerCase() ? null : canonical,
       addAsAlias,
+      // Force-match keeps the current name as the display + alias intent; any
+      // remembered import-original no longer applies to this manual choice.
+      originalName: undefined,
       unassigned: false,
+      // Explicit force-match — sticky against re-matching on typing.
+      pinnedByUser: true,
       importAnnotation: clearAnnotationOn(value.importAnnotation, "ingredient"),
+    });
+  }
+
+  /** Toggle "keep my original spelling and remember it as an alias of the
+   *  matched ingredient on save". When the parser substituted the display name
+   *  with the catalog alias (import / pill pick), `originalName` holds the
+   *  user's spelling: turning the toggle ON restores it as the display name
+   *  and flags `addAsAlias`; OFF puts the parser's name back. When there's no
+   *  substituted original (manual entry — the typed text is already the
+   *  display name), it's a plain flag and the name is left untouched.
+   *  `service.ts` inserts the alias (idempotent) on save. */
+  function toggleAlias() {
+    const original = value.originalName?.trim();
+    const sel = serverMatches.find(
+      (m) => m.ingredientId === value.selectedIngredientId,
+    );
+    const canonical = sel?.canonicalName ?? value.canonicalName ?? value.name;
+    const disclose = (display: string): string | null =>
+      display.toLowerCase() === canonical.toLowerCase() ? null : canonical;
+    const showingOriginal = !!original && value.name.trim() === original;
+    if (value.addAsAlias) {
+      // OFF: drop the flag; if we'd swapped in the original, restore the
+      // parser's chosen name (the matched candidate's display, else canonical).
+      const parserName = showingOriginal ? sel?.name ?? canonical : value.name;
+      onChange({
+        ...value,
+        addAsAlias: false,
+        name: parserName,
+        canonicalName: showingOriginal ? disclose(parserName) : value.canonicalName,
+      });
+      return;
+    }
+    // ON: flag it; swap in the original spelling when we have a distinct one.
+    const display = original && original !== value.name ? original : value.name;
+    onChange({
+      ...value,
+      addAsAlias: true,
+      name: display,
+      canonicalName:
+        original && original !== value.name ? disclose(display) : value.canonicalName,
     });
   }
 
@@ -609,13 +675,8 @@ export function IngredientRow({
         </div>
         <IngredientNameInput
           value={value.name}
-          onChange={(name, canonical) =>
-            onChange({
-              ...value,
-              name,
-              canonicalName:
-                canonical === undefined ? value.canonicalName : canonical,
-            })
+          onChange={(name, canonical, pickedIngredientId) =>
+            handleNameChange(name, canonical, pickedIngredientId)
           }
           placeholder="Zutat"
           className="col-start-1 col-span-3 row-start-2 md:col-start-3 md:col-span-1 md:row-start-1"
@@ -643,6 +704,7 @@ export function IngredientRow({
             candidates={serverMatches}
             selectedIngredientId={value.selectedIngredientId}
             selectedCanonicalName={value.canonicalName}
+            originalName={value.originalName ?? null}
             addAsAlias={value.addAsAlias}
             unassigned={value.unassigned}
             // Staples must resolve to a buyable article.
@@ -652,6 +714,7 @@ export function IngredientRow({
             onSelectUnassigned={selectUnassigned}
             onUseCanonical={useCanonicalInName}
             onForceMatch={forceMatch}
+            onToggleAlias={toggleAlias}
             onEditArticle={setEditingArticleId}
           />
         </div>
@@ -714,12 +777,32 @@ export function IngredientRow({
       </p>
     ) : null}
     {value.rawText ? (
-      <p
-        className="truncate text-xs text-[var(--color-muted-fg)]"
-        title={value.rawText}
-      >
-        Original: „{value.rawText}“
-      </p>
+      <div className="flex min-w-0 items-center gap-1">
+        <p
+          className="truncate text-xs text-[var(--color-muted-fg)]"
+          title={value.rawText}
+        >
+          Original: „{value.rawText}“
+        </p>
+        {onReparse ? (
+          <button
+            type="button"
+            onClick={() => {
+              if (reparsing) return;
+              setReparsing(true);
+              void Promise.resolve(onReparse()).finally(() =>
+                setReparsing(false),
+              );
+            }}
+            disabled={reparsing}
+            className="shrink-0 rounded p-0.5 text-[var(--color-muted-fg)] hover:bg-[var(--color-muted)] hover:text-[var(--color-fg)] disabled:opacity-50"
+            title="Aus Originalzeile neu parsen (verwirft manuelle Änderungen dieser Zeile)"
+            aria-label="Aus Originalzeile neu parsen"
+          >
+            <RefreshCw className={cn("size-3", reparsing && "animate-spin")} />
+          </button>
+        ) : null}
+      </div>
     ) : null}
     <div
       className="grid items-start gap-2 grid-cols-[4rem_minmax(0,1fr)_auto_auto_auto_auto_auto] md:grid-cols-[5rem_8rem_minmax(0,1fr)_minmax(0,1fr)_auto_auto_auto_auto_auto]"
@@ -750,18 +833,8 @@ export function IngredientRow({
       </div>
       <IngredientNameInput
         value={value.name}
-        onChange={(name, canonical) =>
-          onChange({
-            ...value,
-            name,
-            // When `canonical` is undefined, leave the existing value
-            // alone (the user is still typing in-place); when it's an
-            // explicit `null` the input is telling us to clear it; when
-            // it's a string, an alias was picked.
-            canonicalName:
-              canonical === undefined ? value.canonicalName : canonical,
-            importAnnotation: clearAnnotationOn(value.importAnnotation, "ingredient"),
-          })
+        onChange={(name, canonical, pickedIngredientId) =>
+          handleNameChange(name, canonical, pickedIngredientId)
         }
         placeholder="Zutat"
         className="col-span-5 md:col-span-1 md:col-start-3 md:row-start-1"
@@ -784,6 +857,7 @@ export function IngredientRow({
           candidates={serverMatches}
           selectedIngredientId={value.selectedIngredientId}
           selectedCanonicalName={value.canonicalName}
+          originalName={value.originalName ?? null}
           addAsAlias={value.addAsAlias}
           unassigned={value.unassigned}
           allowUnassigned={true}
@@ -792,6 +866,7 @@ export function IngredientRow({
           onSelectUnassigned={selectUnassigned}
           onUseCanonical={useCanonicalInName}
           onForceMatch={forceMatch}
+          onToggleAlias={toggleAlias}
           onEditArticle={setEditingArticleId}
         />
       </div>
@@ -962,11 +1037,13 @@ function applyAutoSelect(
   // out of article matching, so typing must not silently re-link it — they
   // re-link by clicking a candidate or the "Neu" pill.
   if (current.unassigned) return current;
-  // Rule 1: sticky. We keep the selection but DON'T re-apply the equipment
-  // → isOptional default: the user has had a chance to toggle it manually
-  // since the original resolution, and re-asserting on every keystroke
-  // would clobber that toggle.
-  if (current.selectedIngredientId != null) {
+  // Rule 1: sticky ONLY when the user manually pinned this row (clicked a
+  // candidate pill / force-match / ↻ / "Neu"). A pinned selection survives
+  // typing; we keep it but DON'T re-apply the equipment → isOptional default
+  // (the user may have toggled it since). An UNPINNED row — including an
+  // import auto-resolution — falls through to re-evaluate the best match as
+  // the text changes.
+  if (current.pinnedByUser && current.selectedIngredientId != null) {
     const hit = matches.find(
       (m) => m.ingredientId === current.selectedIngredientId,
     );
@@ -979,7 +1056,7 @@ function applyAutoSelect(
             : hit.canonicalName,
       };
     }
-    // Previous selection vanished — clear and re-evaluate below.
+    // Pinned selection vanished from the results — clear and re-evaluate.
   }
   const trimmedLower = typedName.trim().toLowerCase();
   // Rule 2: exact.
@@ -998,6 +1075,8 @@ function applyAutoSelect(
           : exact.canonicalName,
       isOptional: current.isOptional || exact.isEquipment,
       addAsAlias: false,
+      // Auto-selected from the typed text — no longer a manual pin.
+      pinnedByUser: false,
     };
   }
   // Rule 3: above threshold (matches are already sorted, so matches[0] is top).
@@ -1012,6 +1091,7 @@ function applyAutoSelect(
           : top.canonicalName,
       isOptional: current.isOptional || top.isEquipment,
       addAsAlias: false,
+      pinnedByUser: false,
     };
   }
   // Rule 4: Neu.
@@ -1020,6 +1100,7 @@ function applyAutoSelect(
     selectedIngredientId: null,
     canonicalName: null,
     addAsAlias: false,
+    pinnedByUser: false,
   };
 }
 
@@ -1043,6 +1124,7 @@ function CandidatePills({
   candidates,
   selectedIngredientId,
   selectedCanonicalName,
+  originalName,
   addAsAlias,
   unassigned,
   allowUnassigned,
@@ -1051,6 +1133,7 @@ function CandidatePills({
   onSelectUnassigned,
   onUseCanonical,
   onForceMatch,
+  onToggleAlias,
   onEditArticle,
 }: {
   name: string;
@@ -1060,6 +1143,10 @@ function CandidatePills({
    *  from the row's typed text. Surfaces on the anchor pill so a force-
    *  matched row shows WHICH ingredient it's pinned to. */
   selectedCanonicalName: string | null;
+  /** The user's original spelling before an auto-match/pill replaced the
+   *  display name (import source span or the text a pill pick overwrote).
+   *  Drives the alias toggle's offered name. Null when there's none. */
+  originalName: string | null;
   addAsAlias: boolean;
   /** The "Nicht zugeordnet" pill is the active selection (free-text row). */
   unassigned: boolean;
@@ -1075,6 +1162,8 @@ function CandidatePills({
     canonical: string,
     addAsAlias: boolean,
   ) => void;
+  /** Flip "remember the display name as an alias of the matched ingredient". */
+  onToggleAlias: () => void;
   onEditArticle: (ingredientId: number) => void;
 }) {
   const trimmed = name.trim();
@@ -1098,6 +1187,27 @@ function CandidatePills({
   const selectedOutOfList =
     selectedIngredientId != null &&
     !candidates.some((c) => c.ingredientId === selectedIngredientId);
+
+  // Alias toggle: offer the user's OWN spelling (the original the parser
+  // replaced, else the current name) as an alias of the matched ingredient.
+  // Shown when matched and that spelling differs from the canonical identity —
+  // or whenever it's already flagged (so it stays togglable / shows "active").
+  const aliasCandidate = (originalName?.trim() || trimmed).trim();
+  const canonicalIdentity = selectedCanonicalName ?? trimmed;
+  const worthAliasing =
+    aliasCandidate.length > 0 &&
+    aliasCandidate.toLowerCase() !== canonicalIdentity.toLowerCase();
+  const aliasToggle =
+    selectedIngredientId != null &&
+    !unassigned &&
+    (addAsAlias || worthAliasing) ? (
+      <AliasToggle
+        name={aliasCandidate}
+        canonicalName={canonicalIdentity}
+        active={addAsAlias}
+        onToggle={onToggleAlias}
+      />
+    ) : null;
 
   return (
     <div className="flex flex-wrap gap-1">
@@ -1150,6 +1260,7 @@ function CandidatePills({
           </button>
         </span>
       ) : null}
+      {aliasToggle}
       <NewPill
         label={trimmed.length > 0 ? `Neu: ${trimmed}` : "Neu"}
         isSelected={isNewSelected}
@@ -1251,6 +1362,46 @@ function CandidatePill({
         <Pencil className="size-3" />
       </button>
     </span>
+  );
+}
+
+/**
+ * Toggle that flags the row's current display name to be saved as an alias of
+ * the matched ingredient. Active = the name will be remembered (so a future
+ * import of the same spelling matches directly and keeps it). Reuses the
+ * dashed-pill look of "Neu"/"Nicht zugeordnet"; fills in when active.
+ */
+function AliasToggle({
+  name,
+  canonicalName,
+  active,
+  onToggle,
+}: {
+  name: string;
+  canonicalName: string;
+  active: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-pressed={active}
+      className={cn(
+        "inline-flex max-w-full items-center gap-1 truncate rounded-full border border-dashed px-2 py-0.5 text-xs transition-colors",
+        active
+          ? "border-[var(--color-accent)] bg-[color-mix(in_srgb,var(--color-accent),var(--color-bg)_75%)] text-[var(--color-fg)]"
+          : "border-[var(--color-border)] text-[var(--color-muted-fg)] hover:bg-[var(--color-muted)]",
+      )}
+      title={
+        active
+          ? `„${name}" wird beim Speichern als Alias von „${canonicalName}" gemerkt. Klicken zum Rückgängigmachen.`
+          : `„${name}" als Alias von „${canonicalName}" merken — künftige Treffer behalten diese Schreibweise.`
+      }
+    >
+      <Tag className="size-3 shrink-0" />
+      {active ? `Alias: „${name}"` : `„${name}" als Alias`}
+    </button>
   );
 }
 

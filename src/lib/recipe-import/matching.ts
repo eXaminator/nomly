@@ -1,43 +1,46 @@
 /**
- * Substring-style ingredient matching. Given a candidate text (the name area
- * after quantity / unit / parens have been pulled out), find every catalog
- * entry whose tokens line up as a window inside the candidate's tokens, and
- * rank them.
+ * Structural ingredient matching. Given a candidate text (the name area +
+ * comma-tail), find every catalog entry whose tokens line up as a contiguous
+ * window inside the candidate's tokens, and rank them. Name/notes derivation
+ * (the matched catalog alias becomes the name, every uncovered input token
+ * becomes notes) lives in the parser; this module reports which candidate
+ * tokens a match covered ({@link IngredientCandidateMatch.coveredCandidateTokens}).
+ * It is purely structural — NO prep/descriptor word-lists.
  *
- * Design choices (see also the design discussion in chat / docs):
- *   - Tokenise both sides on whitespace + comma + semicolon + slash + dash.
- *     Commas become whitespace for matching purposes — the longest alias
- *     wins regardless of whether the recipe wrote `Paprikapulver,
- *     rosenscharf` or `Paprikapulver rosenscharf`.
- *   - Each entry token matches a candidate token via exact / prefix / suffix
- *     equality. Prefix/suffix is checked in BOTH directions — `et.startsWith
- *     (wt)` as well as `wt.startsWith(et)` — so the matcher works whether
- *     the catalog or the candidate happens to hold the longer form. No
- *     mid-token substring matching: that kept "Ei" out of "Reis" without
- *     giving up German compound-noun matching like "Brot" in "Vollkornbrot".
- *   - The entry's tokens must form a contiguous window in the candidate.
- *     Permutation within the window is allowed (out-of-order is still a
- *     valid match) but loses the in-order ranking bonus.
- *   - Per-token bonus is length-aware: an exact match scores the same as a
- *     "close inflection" (≥75% length overlap, both tokens ≥4 chars), while
- *     a true fragment (Paprika inside Paprikapulver) gets no bonus and stays
- *     below the auto-match threshold. This is the mechanism that lets
- *     "Paprikaschote" and "Paprikaschoten" merge while keeping "Paprika"
- *     from collapsing "Paprikapulver Rosenscharf".
- *   - The +5 anchor bonus only fires when the entry covers the WHOLE
- *     candidate (window length equals candidate length AND starts at
- *     index 0). Without this, a 1-token entry hitting position 0 of a
- *     2-token candidate ("Paprikapulver" inside "Paprikapulver edelsüß")
- *     would earn enough bonus to clear the auto-merge gate and collapse
- *     distinct products into broader catalog entries.
- *   - The candidate is tokenised TWO ways and the matcher runs over both:
- *     once with dashes as a separator (so "Cherry Tomate" can still align
- *     against a 2-token "Cherry-Tomate" entry) and once with dashes between
- *     letters stripped (so "Paprika-Pulver" can match a 1-token
- *     "Paprikapulver" entry). The best score per ingredient survives across
- *     variants; when both variants tie, alias length breaks the tie.
- *   - Scoring is intentionally tiny — easy to reason about, easy to tweak.
- *     The full breakdown is in {@link scoreMatch} / {@link perTokenBonus}.
+ * Design choices:
+ *   - Gate on LOOKUP coverage, not input coverage. Extra INPUT tokens outside
+ *     the matched window are free (the parser turns them into notes), so
+ *     "Salt divided" still matches "Salt". A catalog entry, by contrast, wants
+ *     (near-)full coverage: unmatched entry tokens are penalised −50 each, so
+ *     a fully-covered shorter entry ("Tomate" for "Tomaten") beats a
+ *     partially-covered longer one ("Cherry Tomate", −50). Identity lives in
+ *     the catalog: seed "Cherry Tomate" as its own entry and it wins by token
+ *     count.
+ *   - "Adjacent window": every INPUT token inside the matched window must
+ *     align to a distinct entry token (no interior input gaps), so the name
+ *     span stays clean. "red bell pepper" therefore does NOT cleanly hit
+ *     "red pepper" — seed "bell pepper" as an alias instead.
+ *   - Each entry token matches via exact / prefix / suffix equality, checked
+ *     in BOTH directions, so the catalog or the candidate may hold the longer
+ *     form. No mid-token substring matching ("Ei" stays out of "Reis").
+ *   - Per-token bonus is length-aware: exact or "close inflection" (≥75%
+ *     length overlap, both ≥4 chars) earns +20; a true fragment ("Paprika"
+ *     inside "Paprikapulver") earns 0 and stays below the gate. This is what
+ *     keeps fragment hits from auto-merging while "Paprikaschote" ↔
+ *     "Paprikaschoten" still merge.
+ *   - Post-comma INPUT tokens score 60 instead of 100 — a comma is a soft
+ *     "this is annotation" signal, so a match staying within the pre-comma
+ *     core ("olive oil") outranks one reaching across the comma to a polluted
+ *     "oil divided" entry.
+ *   - The candidate is tokenised TWO ways: the primary split (dashes split,
+ *     so "Cherry-Tomate" aligns against a 2-token "Cherry-Tomate" entry) and
+ *     a join-dashes variant (intra-letter dashes kept in one token, normalised
+ *     away, so "Paprika-Pulver" aligns against closed "Paprikapulver"). Best
+ *     score per ingredient survives; ties break on alias length. (The display
+ *     name comes from the matched alias, so neither variant's raw spelling
+ *     leaks into it.)
+ *   - Scoring is intentionally tiny — see {@link scoreMatch} /
+ *     {@link perTokenBonus}.
  */
 
 import { normalizeForMatch } from "./ingredient.ts";
@@ -82,11 +85,10 @@ export type IngredientCandidateMatch = {
   defaultSubUnit?: { id: number; name: string; perPurchase: number };
   /** Propagated from the matched {@link CatalogEntry} — see its docstring. */
   isEquipment?: boolean;
-  /** Raw text of the candidate tokens NOT covered by this match — e.g. for
-   *  candidate "Paprikaschote rote" matched against "Paprikaschoten", this
-   *  is "rote". The pill UI uses it to move uncovered tokens into notes
-   *  when the user picks a low-confidence match manually. */
-  uncoveredText: string;
+  /** The exact candidate-token array (variant) this match was scored
+   *  against, so the parser can derive name/notes from the matched span
+   *  (first→last covered token). */
+  candidate: CandidateToken[];
   /** True when this match came in via the catalog row whose `aliasName`
    *  equals its `canonicalName` (i.e. the canonical row itself, not one of
    *  the ingredient's aliases). Acts as a "slight boost" tiebreaker:
@@ -97,25 +99,47 @@ export type IngredientCandidateMatch = {
   isCanonical: boolean;
 };
 
-/** A token of the candidate text — both the normalised form (used for
- *  matching) and the raw text (used for note reconstruction). */
-export type CandidateToken = { raw: string; normalized: string };
+/** A token of the candidate text — normalised (matching), raw (note
+ *  reconstruction), and whether it sits after the first top-level comma.
+ *  Post-comma tokens score fewer points (see {@link scoreMatch}): a comma
+ *  is a soft signal that what follows reads more like an annotation than
+ *  part of the core name. */
+export type CandidateToken = {
+  raw: string;
+  normalized: string;
+  /** True for every token after the first top-level comma (cumulative) —
+   *  drives the post-comma score discount. */
+  postComma: boolean;
+  /** True only for the token IMMEDIATELY following a comma delimiter — lets
+   *  the parser re-insert internal commas in a name when the matched alias
+   *  itself contains one. */
+  precededByComma: boolean;
+};
 
 /**
- * Punctuation that's allowed to split candidate tokens. Commas in
- * particular are treated as whitespace so the substring algorithm sees
- * `"Paprikapulver, rosenscharfes"` and `"Paprikapulver rosenscharfes"` the
- * same way.
+ * Split a candidate into tokens. Commas are dropped as delimiters BUT flip
+ * every following token to `postComma: true` (and mark the immediately-next
+ * token `precededByComma: true`). Other separators (whitespace, semicolon,
+ * slash, dash) split without affecting the comma flags.
  */
-const TOKEN_SPLIT_RE = /[\s,;/\-–—]+/u;
-
 export function tokenizeCandidate(text: string): CandidateToken[] {
   const out: CandidateToken[] = [];
-  for (const raw of text.split(TOKEN_SPLIT_RE)) {
-    if (raw.length === 0) continue;
-    const normalized = normalizeForMatch(raw);
-    if (normalized.length === 0) continue;
-    out.push({ raw, normalized });
+  let postComma = false;
+  let pendingComma = false;
+  // Keep commas as their own pieces so we can flip the flags as we cross them.
+  for (const segment of text.split(/(,)/u)) {
+    if (segment === ",") {
+      postComma = true;
+      pendingComma = true;
+      continue;
+    }
+    for (const raw of segment.split(/[\s;/\-–—]+/u)) {
+      if (raw.length === 0) continue;
+      const normalized = normalizeForMatch(raw);
+      if (normalized.length === 0) continue;
+      out.push({ raw, normalized, postComma, precededByComma: pendingComma });
+      pendingComma = false;
+    }
   }
   return out;
 }
@@ -130,11 +154,31 @@ export function tokenizeCandidate(text: string): CandidateToken[] {
  * which case it can skip the second matcher pass).
  */
 export function tokenizeCandidateJoinDashes(text: string): CandidateToken[] {
-  // Only collapse dashes that sit between two letters — leaves numeric
-  // ranges ("200-300"), whitespace-padded notes dashes ("Salz - nach
-  // Geschmack") and other punctuation patterns untouched.
-  const joined = text.replace(/(\p{L})[-–—](\p{L})/gu, "$1$2");
-  return tokenizeCandidate(joined);
+  // Do NOT split on intra-letter dashes here: keep "Paprika-Pulver" as one
+  // token so it can align against a closed-form catalog entry
+  // ("Paprikapulver"). Only `normalized` drops the dash for matching; `raw` is
+  // retained for note reconstruction (the display name comes from the alias).
+  const out: CandidateToken[] = [];
+  let postComma = false;
+  let pendingComma = false;
+  for (const segment of text.split(/(,)/u)) {
+    if (segment === ",") {
+      postComma = true;
+      pendingComma = true;
+      continue;
+    }
+    // Split on whitespace / semicolon / slash, but not on dashes between
+    // letters. Standalone / padded dashes still separate (handled by the
+    // surrounding whitespace).
+    for (const raw of segment.split(/[\s;/]+/u)) {
+      if (raw.length === 0) continue;
+      const normalized = normalizeForMatch(raw.replace(/(\p{L})[-–—](\p{L})/gu, "$1$2"));
+      if (normalized.length === 0) continue;
+      out.push({ raw, normalized, postComma, precededByComma: pendingComma });
+      pendingComma = false;
+    }
+  }
+  return out;
 }
 
 function sameTokens(a: CandidateToken[], b: CandidateToken[]): boolean {
@@ -145,173 +189,156 @@ function sameTokens(a: CandidateToken[], b: CandidateToken[]): boolean {
   return true;
 }
 
-/**
- * Try every starting position in the candidate. For each one, take a window
- * of size `entry.tokens.length` and check whether the entry tokens form a
- * permutation of the window. The best hit (or null) is returned, with its
- * score and per-token kinds attached.
- */
-function bestMatchForEntry(
-  entry: CatalogEntry,
-  candidate: CandidateToken[],
-): IngredientCandidateMatch | null {
-  if (entry.tokens.length === 0 || candidate.length < entry.tokens.length) {
-    return null;
-  }
-  let best: IngredientCandidateMatch | null = null;
-  for (let start = 0; start + entry.tokens.length <= candidate.length; start++) {
-    const window = candidate.slice(start, start + entry.tokens.length);
-    const aligned = alignEntryToWindow(entry.tokens, window);
-    if (!aligned) continue;
-    const coveredCandidateTokens = aligned.matches.map(
-      (m) => start + m.windowIndex,
-    );
-    const perTokenKinds = aligned.matches.map((m) => m.kind);
-    const inOrder = aligned.matches.every((m, i) => m.windowIndex === i);
-    // The anchor bonus only fires when the entry covers the WHOLE candidate.
-    // A 1-token entry hitting position 0 of a 2-token candidate
-    // ("Paprikapulver" inside "Paprikapulver edelsüß", or "Bio" inside
-    // "Bio-Honig") is a fragment-at-start, not a clean hit — without this
-    // check it would earn the +5 that pushes 1-token exact matches over
-    // the auto-merge threshold and accidentally collapse distinct
-    // products into broader catalog entries.
-    const fullCoverageFromStart =
-      start === 0 && entry.tokens.length === candidate.length;
-    // The "canonical row" is the catalog entry whose aliasName equals its
-    // canonicalName (vs. an alias row with a distinct aliasName). Give it
-    // a tiny +1 boost so it slightly outranks otherwise-equal alias hits
-    // when both belong to the same ingredient OR when two different
-    // ingredients tie on score. +1 is below all other scoring increments
-    // (the smallest is +5) so it can't shift a match across the 135
-    // auto-merge gate on its own — it's purely a tiebreaker in shape.
-    const isCanonical =
-      entry.aliasName.toLowerCase() === entry.canonicalName.toLowerCase();
-    const score =
-      scoreMatch({
-        matches: aligned.matches,
-        inOrder,
-        isFullCoverageFromStart: fullCoverageFromStart,
-      }) + (isCanonical ? 1 : 0);
-    if (!best || score > best.score) {
-      const coveredSet = new Set(coveredCandidateTokens);
-      const uncoveredText = candidate
-        .filter((_, i) => !coveredSet.has(i))
-        .map((t) => t.raw)
-        .join(" ")
-        .trim();
-      best = {
-        ingredientId: entry.ingredientId,
-        canonicalName: entry.canonicalName,
-        aliasName: entry.aliasName,
-        score,
-        coveredCandidateTokens,
-        perTokenKinds,
-        inOrder,
-        defaultUnit: entry.defaultUnit,
-        defaultSubUnit: entry.defaultSubUnit,
-        isEquipment: entry.isEquipment,
-        uncoveredText,
-        isCanonical,
-      };
-    }
-  }
-  return best;
-}
-
-/** Per-token alignment record: keeps both sides' raw strings so the scorer
- *  can compute a length-aware bonus without re-running the matcher. */
+/** Per-aligned-token record: which input (window) token hit which entry
+ *  token, and how. Keeps both raw strings so the scorer can compute a
+ *  length-aware bonus without re-running the matcher. */
 type AlignedTokenMatch = {
   kind: MatchKind;
-  windowIndex: number;
+  windowOffset: number; // index within the window
+  entryIndex: number; // index within entry.tokens
   entryToken: string;
   windowToken: string;
 };
 
 /**
- * Greedy alignment: for each entry token in turn, find the first un-consumed
- * window token that matches (preferring exact > prefix > suffix). Prefix /
- * suffix tests run in both directions — `wt.startsWith(et)` AND
- * `et.startsWith(wt)` — so "Paprikaschoten" (catalog) still hits
- * "Paprikaschote" (candidate). Returns `null` if any entry token can't be
- * matched. This is good enough for the sizes we deal with (entry tokens ≤
- * ~5; window tokens equal in size).
+ * Align EVERY token of a contiguous input window to a DISTINCT entry token,
+ * in input order, greedily preferring exact > prefix > suffix. Prefix /
+ * suffix tests run in both directions (`wt.startsWith(et)` AND
+ * `et.startsWith(wt)`) so the catalog or the candidate may hold the longer
+ * form. Returns null if any window token can't be matched — that means the
+ * window holds an interior input token foreign to this entry, which would
+ * leave a gap in the name, so the window is invalid. Entry tokens left
+ * unconsumed are the "partial coverage" leftover the caller penalises.
  */
-function alignEntryToWindow(
-  entryTokens: string[],
+function alignWindowToEntry(
   window: CandidateToken[],
-): { matches: AlignedTokenMatch[] } | null {
-  const consumed = new Array<boolean>(window.length).fill(false);
+  entryTokens: string[],
+): AlignedTokenMatch[] | null {
+  const consumed = new Array<boolean>(entryTokens.length).fill(false);
   const matches: AlignedTokenMatch[] = [];
-  for (const et of entryTokens) {
+  for (let w = 0; w < window.length; w++) {
+    const wt = window[w].normalized;
     let bestIdx = -1;
+    let bestRank = 99;
     let bestKind: MatchKind | null = null;
-    let bestWt = "";
-    for (let i = 0; i < window.length; i++) {
-      if (consumed[i]) continue;
-      const wt = window[i].normalized;
+    for (let e = 0; e < entryTokens.length; e++) {
+      if (consumed[e]) continue;
+      const et = entryTokens[e];
+      let rank = 99;
+      let kind: MatchKind | null = null;
       if (wt === et) {
-        bestIdx = i;
-        bestKind = "exact";
-        bestWt = wt;
-        break;
+        rank = 0;
+        kind = "exact";
+      } else if (wt.startsWith(et) || et.startsWith(wt)) {
+        rank = 1;
+        kind = "prefix";
+      } else if (wt.endsWith(et) || et.endsWith(wt)) {
+        rank = 2;
+        kind = "suffix";
       }
-      if (wt.startsWith(et) || et.startsWith(wt)) {
-        if (bestKind !== "prefix") {
-          bestIdx = i;
-          bestKind = "prefix";
-          bestWt = wt;
-        }
-        continue;
-      }
-      if ((wt.endsWith(et) || et.endsWith(wt)) && bestKind === null) {
-        bestIdx = i;
-        bestKind = "suffix";
-        bestWt = wt;
+      if (kind !== null && rank < bestRank) {
+        bestRank = rank;
+        bestIdx = e;
+        bestKind = kind;
       }
     }
     if (bestIdx === -1 || bestKind === null) return null;
     consumed[bestIdx] = true;
     matches.push({
       kind: bestKind,
-      windowIndex: bestIdx,
-      entryToken: et,
-      windowToken: bestWt,
+      windowOffset: w,
+      entryIndex: bestIdx,
+      entryToken: entryTokens[bestIdx],
+      windowToken: wt,
     });
   }
-  return { matches };
+  return matches;
 }
 
 /**
- * Tiny weighted score. Each contribution is independent so the weights are
- * easy to tweak without unraveling the algorithm.
+ * Tiny weighted score. The gate is on ENTRY coverage, not input coverage —
+ * extra INPUT tokens outside the window are free (they become notes).
  *
- * - Base coverage: 100 per matched token. Bigger aliases naturally win.
- * - Per-token bonus: see {@link perTokenBonus}. +20 for exact OR close-
- *   inflection-shaped prefix/suffix; 0 for "fragment" prefix/suffix.
- * - In-order bonus: +10 if the entry tokens line up with the window in the
- *   same order (so "Paprikapulver rosenscharf" beats "rosenscharf
- *   Paprikapulver" at equal token count).
- * - Full-coverage anchor bonus: +5 when the entry covers the entire
- *   candidate (window starts at index 0 AND entry token count equals
- *   candidate token count). This is the difference between "the candidate
- *   IS this entry" and "this entry is a fragment of the candidate".
+ * - +100 per matched entry token whose input token is pre-comma, +60 when
+ *   the input token is post-comma (a comma is a soft "this is annotation"
+ *   signal, so a match staying within the pre-comma core outranks one that
+ *   reaches across the comma — e.g. "olive oil" beats "oil divided" for
+ *   "olive oil, divided").
+ * - +20 per matched token that's exact or close-inflection-shaped (see
+ *   {@link perTokenBonus}); 0 for a true fragment.
+ * - +10 when the matched entry indices are strictly increasing (in order).
+ * - −50 per UNMATCHED entry token (partial coverage). A fully-covered
+ *   shorter entry therefore always beats a partially-covered longer one.
  */
-function scoreMatch({
-  matches,
-  inOrder,
-  isFullCoverageFromStart,
-}: {
-  matches: AlignedTokenMatch[];
-  inOrder: boolean;
-  isFullCoverageFromStart: boolean;
-}): number {
-  let s = matches.length * 100;
-  for (const m of matches) {
-    s += perTokenBonus(m.entryToken, m.windowToken);
+function scoreMatch(
+  aligned: AlignedTokenMatch[],
+  window: CandidateToken[],
+  inOrder: boolean,
+  unmatchedEntryCount: number,
+): number {
+  let s = 0;
+  for (const a of aligned) {
+    const base = window[a.windowOffset].postComma ? 60 : 100;
+    s += base + perTokenBonus(a.entryToken, a.windowToken);
   }
   if (inOrder) s += 10;
-  if (isFullCoverageFromStart) s += 5;
+  s -= unmatchedEntryCount * 50;
   return s;
+}
+
+/**
+ * Try every contiguous input window (size 1..min(entry,candidate)). A window
+ * is valid only if every input token in it aligns to a distinct entry token
+ * (no interior input gaps — that's the "adjacent window" rule; "red bell
+ * pepper" doesn't cleanly hit "red pepper", it'd need a "bell pepper" alias).
+ * Entry tokens may be left uncovered (penalised −50 each). The best-scoring
+ * window survives. Its covered candidate tokens tell the parser which input is
+ * "used up" by the alias; the alias becomes the display name and every
+ * uncovered input token becomes notes.
+ */
+function bestMatchForEntry(
+  entry: CatalogEntry,
+  candidate: CandidateToken[],
+): IngredientCandidateMatch | null {
+  const E = entry.tokens;
+  if (E.length === 0 || candidate.length === 0) return null;
+  const maxWin = Math.min(E.length, candidate.length);
+  // The "canonical row" (aliasName === canonicalName) gets a tiny +1 boost so
+  // it slightly outranks otherwise-equal alias hits. +1 is below every other
+  // increment so it can't shift a match across the auto-merge gate on its own.
+  const isCanonical =
+    entry.aliasName.toLowerCase() === entry.canonicalName.toLowerCase();
+  let best: IngredientCandidateMatch | null = null;
+  for (let start = 0; start < candidate.length; start++) {
+    for (let len = 1; start + len <= candidate.length && len <= maxWin; len++) {
+      const window = candidate.slice(start, start + len);
+      const aligned = alignWindowToEntry(window, E);
+      if (!aligned) continue;
+      const inOrder = aligned.every(
+        (a, i) => i === 0 || a.entryIndex > aligned[i - 1].entryIndex,
+      );
+      const unmatchedEntryCount = E.length - aligned.length;
+      const score =
+        scoreMatch(aligned, window, inOrder, unmatchedEntryCount) +
+        (isCanonical ? 1 : 0);
+      if (best && score <= best.score) continue;
+      best = {
+        ingredientId: entry.ingredientId,
+        canonicalName: entry.canonicalName,
+        aliasName: entry.aliasName,
+        score,
+        coveredCandidateTokens: aligned.map((a) => start + a.windowOffset),
+        perTokenKinds: aligned.map((a) => a.kind),
+        inOrder,
+        defaultUnit: entry.defaultUnit,
+        defaultSubUnit: entry.defaultSubUnit,
+        isEquipment: entry.isEquipment,
+        candidate,
+        isCanonical,
+      };
+    }
+  }
+  return best;
 }
 
 /**
@@ -367,8 +394,14 @@ function perTokenBonus(et: string, wt: string): number {
  *
  * Pill UI still surfaces below-threshold matches so the user can opt in
  * manually — the gate is only on auto-pick.
+ *
+ * A single exact (or close-inflection) pre-comma token scores
+ * 100 + 20 + 10 = 130, so the gate sits exactly there: clean single-token
+ * hits auto-pick, prefix fragments ("Paprika" inside "Paprikapulver", 110)
+ * and partial-coverage hits (penalised −50) stay below and only surface as
+ * pills.
  */
-export const MIN_AUTO_MATCH_SCORE = 135;
+export const MIN_AUTO_MATCH_SCORE = 130;
 
 export type FindCandidatesOptions = {
   /** Cap on returned matches. Defaults to 5. */
@@ -382,9 +415,10 @@ export type FindCandidatesOptions = {
  *
  * The candidate text is tokenised twice (see {@link tokenizeCandidateJoinDashes})
  * and the matcher runs over each variant; the per-ingredient dedup keeps the
- * best score across both. The returned `candidate` is the tokenisation that
- * produced the top match — so `uncoveredTokens(candidate, matches[0])` still
- * yields the right leftover tokens regardless of which variant won.
+ * best score across both. Each match carries its own `candidate` token array
+ * (the variant it won in) so the parser can derive name/notes per candidate.
+ * The returned top-level `candidate` is the winning variant, for callers that
+ * want the tokenisation that produced the top match.
  */
 export function findIngredientCandidates(
   candidateText: string,
@@ -443,23 +477,4 @@ export function findIngredientCandidates(
   const matches = sorted.slice(0, limit).map((s) => s.match);
   const candidate = sorted[0]?.variant ?? primary;
   return { matches, candidate };
-}
-
-/**
- * Helper for the parser: given a winning match, return the candidate tokens
- * NOT covered by the match — the parser folds them back into the row's
- * notes alongside any pre-extracted bracket / paren content.
- */
-export function uncoveredTokens(
-  candidate: CandidateToken[],
-  match: IngredientCandidateMatch,
-): CandidateToken[] {
-  const covered = new Set(match.coveredCandidateTokens);
-  return candidate.filter((_, i) => !covered.has(i));
-}
-
-/** Rebuild a "notes" string from the uncovered raw tokens, preserving
- *  the source's spelling. */
-export function tokensToNotes(tokens: CandidateToken[]): string {
-  return tokens.map((t) => t.raw).join(" ").trim();
 }

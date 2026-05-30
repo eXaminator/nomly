@@ -1,0 +1,128 @@
+import type { ReactNode } from "react";
+import { CornerDownRight, Lock } from "lucide-react";
+import { cn } from "@/lib/cn";
+import { IngredientLine } from "@/components/recipes/ingredient-line";
+
+/** Display formatting for an ingredient quantity (de-DE, ≤2 decimals). */
+export function formatQuantity(q: number | null): string {
+  if (q === null) return "";
+  const rounded = Math.round(q * 100) / 100;
+  return new Intl.NumberFormat("de-DE", { maximumFractionDigits: 2 }).format(
+    rounded,
+  );
+}
+
+/** Which fields differ from the other side of a diff — used to color-highlight
+ *  the changed parts. */
+export type LineHighlight = {
+  amount?: boolean;
+  name?: boolean;
+  notes?: boolean;
+  mapping?: boolean;
+};
+
+export type ReadLineProps = {
+  quantity: number | null;
+  unitLabel: string | null;
+  name: string;
+  canonicalName: string | null;
+  notes: string | null;
+  isOptional: boolean;
+  isAlternative: boolean;
+  fixedAmount?: boolean;
+  /** When provided, render an explicit "→ <ingredient>" mapping chip after the
+   *  line so the resolved catalog ingredient is visible (used by the bulk
+   *  re-parse diff to confirm the mapping). Omit for the plain read view. */
+  mappingLabel?: string | null;
+  /** Per-field change flags; the flagged fields get a colored highlight.
+   *  `tone` picks the color: "removed" (old/current side, red) vs "added"
+   *  (new/proposed side, green). */
+  highlight?: LineHighlight;
+  tone?: "removed" | "added";
+};
+
+/**
+ * Read-view formatting of a single recipe ingredient line — the same layout
+ * the recipe detail page uses (mono quantity column, name with canonical
+ * disclosure, " – notes", "(optional)", alternative arrow + "oder"). Pure
+ * presentation: no per-ingredient links / diet markers, so it can be reused
+ * wherever an ingredient line needs to read like the recipe view (e.g. the
+ * bulk re-parse diff).
+ */
+export function RecipeIngredientReadLine({
+  quantity,
+  unitLabel,
+  name,
+  canonicalName,
+  notes,
+  isOptional,
+  isAlternative,
+  fixedAmount = false,
+  mappingLabel,
+  highlight,
+  tone,
+}: ReadLineProps) {
+  // Subtle tint: green for the new/proposed side, red for the old/current side.
+  const hlClass =
+    tone === "added"
+      ? "rounded bg-[color-mix(in_srgb,#22c55e,transparent_75%)] px-0.5"
+      : "rounded bg-[color-mix(in_srgb,#ef4444,transparent_80%)] px-0.5";
+  const mark = (on: boolean | undefined, node: ReactNode) =>
+    on && tone ? <span className={hlClass}>{node}</span> : node;
+  return (
+    <div
+      className={cn(
+        "flex items-start gap-2",
+        (isOptional || isAlternative) && "italic opacity-65",
+      )}
+    >
+      {isAlternative ? (
+        <CornerDownRight
+          className="mt-0.5 size-4 shrink-0 text-[var(--color-muted-fg)]"
+          aria-hidden="true"
+        />
+      ) : null}
+      <span className="inline-flex min-w-12 shrink-0 items-center gap-1 font-mono text-[var(--color-muted-fg)]">
+        {fixedAmount ? (
+          <Lock className="size-3 shrink-0" aria-label="Feste Menge" />
+        ) : null}
+        {mark(
+          highlight?.amount,
+          <span>
+            {formatQuantity(quantity)} {unitLabel ?? ""}
+          </span>,
+        )}
+      </span>
+      <span className="flex-1">
+        {isAlternative ? <span>oder </span> : null}
+        {mark(
+          highlight?.name,
+          <IngredientLine displayName={name} canonicalName={canonicalName} />,
+        )}
+        {notes
+          ? mark(
+              highlight?.notes,
+              <span className="text-[var(--color-muted-fg)]"> – {notes}</span>,
+            )
+          : null}
+        {!isAlternative && isOptional ? (
+          <span className="ml-1 text-xs text-[var(--color-muted-fg)]">
+            (optional)
+          </span>
+        ) : null}
+        {mappingLabel !== undefined ? (
+          <span
+            className={cn(
+              "ml-1 inline-block whitespace-nowrap rounded-full px-1.5 py-0.5 align-middle text-xs not-italic",
+              highlight?.mapping && tone
+                ? hlClass + " text-[var(--color-fg)]"
+                : "bg-[var(--color-muted)] text-[var(--color-muted-fg)]",
+            )}
+          >
+            → {mappingLabel ?? "nicht zugeordnet"}
+          </span>
+        ) : null}
+      </span>
+    </div>
+  );
+}

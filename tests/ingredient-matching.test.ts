@@ -3,8 +3,6 @@ import {
   findIngredientCandidates,
   MIN_AUTO_MATCH_SCORE,
   tokenizeCandidate,
-  tokensToNotes,
-  uncoveredTokens,
   type IngredientCatalog,
 } from "@/lib/recipe-import/matching";
 
@@ -148,16 +146,14 @@ describe("findIngredientCandidates", () => {
   });
 });
 
-describe("uncoveredTokens + tokensToNotes", () => {
-  it("returns the source tokens the match didn't cover", () => {
-    const { matches, candidate } = findIngredientCandidates(
-      "Paprika edelsüß",
-      catalog(),
-    );
+describe("coveredCandidateTokens span", () => {
+  it("reports only the input tokens the match covers", () => {
+    const { matches } = findIngredientCandidates("Paprika edelsüß", catalog());
     const top = matches.find((m) => m.canonicalName === "Paprika");
     expect(top).toBeDefined();
-    const leftover = uncoveredTokens(candidate, top!);
-    expect(tokensToNotes(leftover)).toBe("edelsüß");
+    // "Paprika" covers token 0; "edelsüß" (token 1) is left for notes.
+    expect(top!.coveredCandidateTokens).toEqual([0]);
+    expect(top!.candidate.map((t) => t.raw)).toEqual(["Paprika", "edelsüß"]);
   });
 });
 
@@ -179,14 +175,33 @@ describe("MIN_AUTO_MATCH_SCORE gate", () => {
     expect(matches[0].score).toBeLessThan(MIN_AUTO_MATCH_SCORE);
   });
 
-  it("rejects a not-anchored 1-token exact match (Tomate inside Cherry-Tomate)", () => {
+  it("matches the bare entry when the catalog lacks the specific product (descriptor → notes)", () => {
+    // Structural model: with ONLY a bare "Tomate" entry seeded, "Cherry
+    // Tomate" resolves to Tomate and "Cherry" falls outside the matched span
+    // (→ notes). Identity lives in the catalog: seed "Cherry Tomate" as its
+    // own entry and it wins by token count (see next test).
     const cat: IngredientCatalog = [
       { ingredientId: 1, canonicalName: "Tomate", aliasName: "Tomate", tokens: ["tomate"] },
     ];
-    const { matches } = findIngredientCandidates("Cherry-Tomate", cat);
-    expect(matches).toHaveLength(1);
+    const { matches } = findIngredientCandidates("Cherry Tomate", cat);
     expect(matches[0].canonicalName).toBe("Tomate");
-    expect(matches[0].score).toBeLessThan(MIN_AUTO_MATCH_SCORE);
+    expect(matches[0].coveredCandidateTokens).toEqual([1]); // "Tomate" only
+    expect(matches[0].score).toBeGreaterThanOrEqual(MIN_AUTO_MATCH_SCORE);
+  });
+
+  it("prefers the specific multi-token entry when the catalog has it", () => {
+    const cat: IngredientCatalog = [
+      { ingredientId: 1, canonicalName: "Tomate", aliasName: "Tomate", tokens: ["tomate"] },
+      {
+        ingredientId: 2,
+        canonicalName: "Cherry-Tomate",
+        aliasName: "Cherry-Tomate",
+        tokens: ["cherry", "tomate"],
+      },
+    ];
+    const { matches } = findIngredientCandidates("Cherry Tomate", cat);
+    expect(matches[0].canonicalName).toBe("Cherry-Tomate");
+    expect(matches[0].coveredCandidateTokens).toEqual([0, 1]);
   });
 
   it("accepts an anchored 1-token exact match", () => {
@@ -364,14 +379,16 @@ describe("dual tokenisation — dashes between letters", () => {
     expect(matches[0].score).toBeGreaterThanOrEqual(MIN_AUTO_MATCH_SCORE);
   });
 
-  it("does not collapse Cherry-Tomate into a bare Tomate catalog entry", () => {
+  it("matches the dash-form against a bare Tomate entry (descriptor → notes)", () => {
+    // Dash-form mirror of the structural-flip case: only a bare "Tomate"
+    // entry seeded, so "Cherry-Tomate" resolves to Tomate with "Cherry"
+    // outside the span (→ notes). Seed "Cherry-Tomate" to win by tokens.
     const cat: IngredientCatalog = [
       { ingredientId: 1, canonicalName: "Tomate", aliasName: "Tomate", tokens: ["tomate"] },
     ];
     const { matches } = findIngredientCandidates("Cherry-Tomate", cat);
-    expect(matches).toHaveLength(1);
     expect(matches[0].canonicalName).toBe("Tomate");
-    expect(matches[0].score).toBeLessThan(MIN_AUTO_MATCH_SCORE);
+    expect(matches[0].score).toBeGreaterThanOrEqual(MIN_AUTO_MATCH_SCORE);
   });
 });
 
@@ -382,5 +399,86 @@ describe("tokenizeCandidate", () => {
       "paprikapulver",
       "rosenscharf",
     ]);
+  });
+});
+
+describe("tokenizeCandidate postComma", () => {
+  it("flags every token after the first comma as postComma", () => {
+    const toks = tokenizeCandidate("olive oil, divided");
+    expect(toks.map((t) => t.raw)).toEqual(["olive", "oil", "divided"]);
+    expect(toks.map((t) => t.postComma)).toEqual([false, false, true]);
+  });
+
+  it("treats tokens before any comma as pre-comma", () => {
+    const toks = tokenizeCandidate("chick peas in a can");
+    expect(toks.every((t) => t.postComma === false)).toBe(true);
+  });
+
+  it("still splits on semicolon/slash/dash without flagging postComma", () => {
+    const toks = tokenizeCandidate("salz/pfeffer");
+    expect(toks.map((t) => t.raw)).toEqual(["salz", "pfeffer"]);
+    expect(toks.map((t) => t.postComma)).toEqual([false, false]);
+  });
+});
+
+describe("structural matcher scoring", () => {
+  function entry(id: number, alias: string, canonical = alias) {
+    return {
+      ingredientId: id,
+      canonicalName: canonical,
+      aliasName: alias,
+      tokens: alias.toLowerCase().split(/\s+/),
+    };
+  }
+
+  it("single exact token clears 130 even with extra input tokens", () => {
+    const { matches } = findIngredientCandidates("Salt divided", [
+      entry(1, "Salt"),
+    ]);
+    expect(matches[0].ingredientId).toBe(1);
+    expect(matches[0].score).toBe(131); // 100 + 20 + 10 + 1 canonical
+    expect(matches[0].coveredCandidateTokens).toEqual([0]);
+  });
+
+  it("post-comma discount lets pre-comma 2-token beat a comma-spanning 2-token", () => {
+    const { matches } = findIngredientCandidates("olive oil, divided", [
+      entry(1, "olive oil"),
+      entry(2, "oil divided"), // simulates a polluted catalog row
+    ]);
+    expect(matches[0].ingredientId).toBe(1); // 251 beats 211
+    expect(matches[0].score).toBe(251);
+    expect(matches.find((m) => m.ingredientId === 2)?.score).toBe(211);
+  });
+
+  it("full multi-token contiguous match scores 100/token + bonuses", () => {
+    const { matches } = findIngredientCandidates(
+      "frozen chick peas in a can",
+      [entry(1, "chick peas")],
+    );
+    expect(matches[0].ingredientId).toBe(1);
+    expect(matches[0].score).toBe(251); // 100 + 100 + 20 + 20 + 10 + 1 canonical
+    expect(matches[0].coveredCandidateTokens).toEqual([1, 2]);
+  });
+
+  it("partial lookup coverage is penalised and loses to the shorter full match", () => {
+    const cat = [entry(1, "Tomate"), entry(2, "Cherry Tomate")];
+    const { matches } = findIngredientCandidates("Tomaten", cat);
+    expect(matches[0].ingredientId).toBe(1);
+    expect(matches[0].score).toBe(131);
+    expect(matches.find((m) => m.ingredientId === 2)?.score).toBe(81);
+  });
+
+  it("full coverage of the longer entry wins when the input supports it", () => {
+    const cat = [entry(1, "Tomate"), entry(2, "Cherry Tomate")];
+    const { matches } = findIngredientCandidates("Cherry Tomaten", cat);
+    expect(matches[0].ingredientId).toBe(2);
+    expect(matches[0].score).toBe(251);
+  });
+
+  it("prefix fragments stay below the gate", () => {
+    const { matches } = findIngredientCandidates("Paprikapulver Rosenscharf", [
+      entry(1, "Paprika"),
+    ]);
+    expect(matches[0]?.score ?? 0).toBeLessThan(130);
   });
 });
