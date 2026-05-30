@@ -1,10 +1,73 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildReparsedRecipeInput,
   groupContiguousByRawLine,
   isLineGroupChanged,
   type CurrentRow,
 } from "@/lib/recipes/reparse-scan";
 import type { ParsedIngredientResponse } from "@/components/recipes/types";
+import type { RecipeIngredientInput, RecipeView } from "@/lib/recipes/types";
+
+function viewRow(over: Record<string, unknown> = {}) {
+  return {
+    id: 100,
+    ingredientId: 5,
+    ingredientName: "Salz",
+    canonicalIngredientName: null,
+    quantity: 1,
+    unitId: 2,
+    unitName: "g",
+    subUnitId: null,
+    subUnitPerPurchase: null,
+    notes: null,
+    isOptional: false,
+    fixedAmount: false,
+    rawLine: "1 g Salz",
+    isEquipment: false,
+    dietaryClass: null,
+    sortOrder: 0,
+    alternativeForId: null,
+    ...over,
+  };
+}
+function viewWith(ingredients: ReturnType<typeof viewRow>[]): RecipeView {
+  return {
+    id: 1,
+    title: "R",
+    description: null,
+    photoPath: null,
+    sourceUrl: null,
+    servings: 2,
+    prepTimeMin: null,
+    cookTimeMin: null,
+    tags: [],
+    isVegan: null,
+    isVegetarian: null,
+    dietConfidence: "low",
+    needsUpdate: false,
+    createdAt: 0,
+    updatedAt: 0,
+    sections: [
+      { id: 9, title: null, instructions: "", sortOrder: 0, ingredients },
+    ],
+  } as unknown as RecipeView;
+}
+function newRow(over: Partial<RecipeIngredientInput> = {}): RecipeIngredientInput {
+  return {
+    ingredientName: "Meersalz",
+    ingredientId: 5,
+    quantity: 2,
+    unitId: 2,
+    subUnitId: null,
+    displayUnit: null,
+    notes: "grob",
+    isOptional: false,
+    fixedAmount: false,
+    rawLine: "1 g Salz",
+    isAlternative: false,
+    ...over,
+  };
+}
 
 function cur(over: Partial<CurrentRow> = {}): CurrentRow {
   return {
@@ -100,3 +163,51 @@ describe("groupContiguousByRawLine", () => {
     expect(groups.map((g) => g.map((r) => r.id))).toEqual([[10, 11], [13], [14]]);
   });
 });
+
+describe("buildReparsedRecipeInput", () => {
+  it("substitutes a group, preserves order + other rows + rawLine", () => {
+    const view = viewWith([
+      viewRow({ id: 100, ingredientName: "Salz", ingredientId: 5, sortOrder: 0 }),
+      viewRow({ id: 101, ingredientName: "Pfeffer", ingredientId: 6, sortOrder: 1, rawLine: "1 g Pfeffer" }),
+    ]);
+    const { input, appliedGroups, skipped } = buildReparsedRecipeInput(view, [
+      { replaceRowIds: [100], rows: [newRow({ ingredientName: "Meersalz", notes: "grob" })] },
+    ]);
+    expect(appliedGroups).toBe(1);
+    expect(skipped).toBe(0);
+    expect(input.sections[0].ingredients.map((x) => x.ingredientName)).toEqual([
+      "Meersalz",
+      "Pfeffer",
+    ]);
+    expect(input.sections[0].ingredients[0].notes).toBe("grob");
+    expect(input.sections[0].ingredients[1].rawLine).toBe("1 g Pfeffer");
+  });
+
+  it("replaces a multi-row group with however many new rows", () => {
+    const view = viewWith([
+      viewRow({ id: 100, ingredientName: "Butter", rawLine: "Butter oder Margarine", sortOrder: 0 }),
+      viewRow({ id: 101, ingredientName: "Margarine", rawLine: "Butter oder Margarine", sortOrder: 1, alternativeForId: 100 }),
+      viewRow({ id: 102, ingredientName: "Mehl", rawLine: "Mehl", sortOrder: 2 }),
+    ]);
+    const { input, appliedGroups } = buildReparsedRecipeInput(view, [
+      { replaceRowIds: [100, 101], rows: [newRow({ ingredientName: "Butter", notes: null })] },
+    ]);
+    expect(appliedGroups).toBe(1);
+    expect(input.sections[0].ingredients.map((x) => x.ingredientName)).toEqual([
+      "Butter",
+      "Mehl",
+    ]);
+  });
+
+  it("counts a replacement with absent ids as skipped, leaves rows intact", () => {
+    const view = viewWith([
+      viewRow({ id: 100, ingredientName: "Salz", sortOrder: 0 }),
+    ]);
+    const { input, appliedGroups, skipped } = buildReparsedRecipeInput(view, [
+      { replaceRowIds: [999], rows: [newRow()] },
+    ]);
+    expect(appliedGroups).toBe(0);
+    expect(skipped).toBe(1);
+    expect(input.sections[0].ingredients.map((x) => x.ingredientName)).toEqual(["Salz"]);
+  });
+})

@@ -16,6 +16,11 @@ import {
   parseIngredientLines,
 } from "@/lib/recipe-import";
 import type { ParsedIngredientResponse } from "@/components/recipes/types";
+import type {
+  RecipeIngredientInput,
+  RecipeInput,
+  RecipeView,
+} from "@/lib/recipes/types";
 
 /**
  * Bulk re-parse: scan every recipe's ingredient source lines with the current
@@ -241,4 +246,91 @@ export function scanAllRecipesForReparse(): ReparseScanEntry[] {
     });
   }
   return entries;
+}
+
+/** One line-group replacement: the current rows to drop (by id) and the new
+ *  rows to insert in their place. */
+export type ReparseReplacement = {
+  replaceRowIds: number[];
+  rows: RecipeIngredientInput[];
+};
+
+function viewRowToInput(
+  v: RecipeView["sections"][number]["ingredients"][number],
+): RecipeIngredientInput {
+  const hasSubUnit = v.subUnitId != null;
+  return {
+    ingredientName: v.ingredientName,
+    ingredientId: v.ingredientId,
+    unassigned: v.ingredientId == null,
+    addAsAlias: false,
+    quantity: v.quantity,
+    unitId: hasSubUnit ? null : v.unitId,
+    subUnitId: v.subUnitId,
+    displayUnit: hasSubUnit ? null : v.unitName,
+    notes: v.notes,
+    isOptional: v.isOptional,
+    fixedAmount: v.fixedAmount,
+    rawLine: v.rawLine,
+    isAlternative: v.alternativeForId != null,
+  };
+}
+
+/**
+ * Rebuild a recipe's {@link RecipeInput} from its current {@link RecipeView},
+ * substituting each replacement's row-group (matched by the first present id
+ * in `replaceRowIds`) with the replacement's `rows`, and mapping every other
+ * row through unchanged. Order and sections are preserved; replaced rows keep
+ * their `rawLine` (the caller carries it on the new rows). A replacement whose
+ * ids are all absent from the recipe is counted in `skipped` and ignored.
+ */
+export function buildReparsedRecipeInput(
+  view: RecipeView,
+  replacements: ReparseReplacement[],
+): { input: RecipeInput; appliedGroups: number; skipped: number } {
+  // Map each current row id → the replacement that owns it.
+  const byRowId = new Map<number, ReparseReplacement>();
+  for (const rep of replacements) {
+    for (const id of rep.replaceRowIds) byRowId.set(id, rep);
+  }
+  const applied = new Set<ReparseReplacement>();
+
+  const sections = view.sections.map((section) => {
+    const ingredients: RecipeIngredientInput[] = [];
+    for (const row of section.ingredients) {
+      const rep = byRowId.get(row.id);
+      if (rep) {
+        // First row of this group we encounter → emit the replacement once.
+        if (!applied.has(rep)) {
+          applied.add(rep);
+          for (const r of rep.rows) ingredients.push(r);
+        }
+        // Skip the current row either way (it belongs to a replaced group).
+        continue;
+      }
+      ingredients.push(viewRowToInput(row));
+    }
+    return {
+      title: section.title,
+      instructions: section.instructions,
+      ingredients,
+    };
+  });
+
+  const input: RecipeInput = {
+    title: view.title,
+    description: view.description,
+    servings: view.servings,
+    prepTimeMin: view.prepTimeMin,
+    cookTimeMin: view.cookTimeMin,
+    sourceUrl: view.sourceUrl,
+    photoPath: view.photoPath,
+    tags: view.tags,
+    sections,
+  };
+  return {
+    input,
+    appliedGroups: applied.size,
+    skipped: replacements.length - applied.size,
+  };
 }
