@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { CornerDownRight, Lock } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { IngredientLine } from "@/components/recipes/ingredient-line";
@@ -10,6 +11,15 @@ export function formatQuantity(q: number | null): string {
     rounded,
   );
 }
+
+/** Which fields differ from the other side of a diff — used to color-highlight
+ *  the changed parts. */
+export type LineHighlight = {
+  amount?: boolean;
+  name?: boolean;
+  notes?: boolean;
+  mapping?: boolean;
+};
 
 export type ReadLineProps = {
   quantity: number | null;
@@ -24,6 +34,11 @@ export type ReadLineProps = {
    *  line so the resolved catalog ingredient is visible (used by the bulk
    *  re-parse diff to confirm the mapping). Omit for the plain read view. */
   mappingLabel?: string | null;
+  /** Per-field change flags; the flagged fields get a colored highlight.
+   *  `tone` picks the color: "removed" (old/current side, red) vs "added"
+   *  (new/proposed side, green). */
+  highlight?: LineHighlight;
+  tone?: "removed" | "added";
 };
 
 /**
@@ -44,7 +59,16 @@ export function RecipeIngredientReadLine({
   isAlternative,
   fixedAmount = false,
   mappingLabel,
+  highlight,
+  tone,
 }: ReadLineProps) {
+  // Subtle tint: green for the new/proposed side, red for the old/current side.
+  const hlClass =
+    tone === "added"
+      ? "rounded bg-[color-mix(in_srgb,#22c55e,transparent_75%)] px-0.5"
+      : "rounded bg-[color-mix(in_srgb,#ef4444,transparent_80%)] px-0.5";
+  const mark = (on: boolean | undefined, node: ReactNode) =>
+    on && tone ? <span className={hlClass}>{node}</span> : node;
   return (
     <div
       className={cn(
@@ -62,23 +86,39 @@ export function RecipeIngredientReadLine({
         {fixedAmount ? (
           <Lock className="size-3 shrink-0" aria-label="Feste Menge" />
         ) : null}
-        <span>
-          {formatQuantity(quantity)} {unitLabel ?? ""}
-        </span>
+        {mark(
+          highlight?.amount,
+          <span>
+            {formatQuantity(quantity)} {unitLabel ?? ""}
+          </span>,
+        )}
       </span>
       <span className="flex-1">
         {isAlternative ? <span>oder </span> : null}
-        <IngredientLine displayName={name} canonicalName={canonicalName} />
-        {notes ? (
-          <span className="text-[var(--color-muted-fg)]"> – {notes}</span>
-        ) : null}
+        {mark(
+          highlight?.name,
+          <IngredientLine displayName={name} canonicalName={canonicalName} />,
+        )}
+        {notes
+          ? mark(
+              highlight?.notes,
+              <span className="text-[var(--color-muted-fg)]"> – {notes}</span>,
+            )
+          : null}
         {!isAlternative && isOptional ? (
           <span className="ml-1 text-xs text-[var(--color-muted-fg)]">
             (optional)
           </span>
         ) : null}
         {mappingLabel !== undefined ? (
-          <span className="ml-1 whitespace-nowrap rounded-full bg-[var(--color-muted)] px-1.5 py-0.5 align-middle text-xs not-italic text-[var(--color-muted-fg)]">
+          <span
+            className={cn(
+              "ml-1 inline-block whitespace-nowrap rounded-full px-1.5 py-0.5 align-middle text-xs not-italic",
+              highlight?.mapping && tone
+                ? hlClass + " text-[var(--color-fg)]"
+                : "bg-[var(--color-muted)] text-[var(--color-muted-fg)]",
+            )}
+          >
             → {mappingLabel ?? "nicht zugeordnet"}
           </span>
         ) : null}

@@ -17,8 +17,61 @@ import { IngredientRow } from "./ingredient-row";
 import { NewIngredientsDialog } from "./new-ingredients-dialog";
 import { parsedIngredientToDraft, type DraftIngredient } from "./types";
 import { ingredientToPayload, toNumberOrNull } from "./payload";
-import { RecipeIngredientReadLine } from "./ingredient-read-line";
+import {
+  formatQuantity,
+  RecipeIngredientReadLine,
+  type LineHighlight,
+} from "./ingredient-read-line";
 import type { NewIngredientDefaults } from "@/lib/recipes/types";
+
+function amountStr(q: number | null, unit: string | null): string {
+  return `${formatQuantity(q)} ${unit ?? ""}`.replace(/\s+/g, " ").trim();
+}
+function draftMapping(d: DraftIngredient): string {
+  return d.unassigned
+    ? "nicht zugeordnet"
+    : d.selectedIngredientId == null
+      ? "neu"
+      : d.canonicalName ?? d.name;
+}
+
+/**
+ * Per-field change flags comparing the current rows to the proposed draft
+ * rows of one line-group, aligned by index. Rows present on only one side
+ * (count change) are fully flagged. Used to color-highlight the diff.
+ */
+function computeHighlights(
+  current: ScanRowSummary[],
+  draft: DraftIngredient[],
+): { current: LineHighlight[]; proposed: LineHighlight[] } {
+  const n = Math.max(current.length, draft.length);
+  const cur: LineHighlight[] = [];
+  const prop: LineHighlight[] = [];
+  const ALL: LineHighlight = { amount: true, name: true, notes: true, mapping: true };
+  for (let k = 0; k < n; k++) {
+    const c = current[k];
+    const d = draft[k];
+    if (!c) {
+      prop.push(ALL); // added row
+      continue;
+    }
+    if (!d) {
+      cur.push(ALL); // removed row
+      continue;
+    }
+    const flags: LineHighlight = {
+      amount:
+        amountStr(c.quantity, c.unitLabel) !==
+        amountStr(toNumberOrNull(d.quantity), d.subUnit?.name ?? d.unit?.name ?? null),
+      name: c.name.trim() !== d.name.trim(),
+      notes: (c.notes ?? "").trim() !== d.notes.trim(),
+      mapping: (c.canonicalName ?? "nicht zugeordnet") !== draftMapping(d),
+    };
+    cur.push(flags);
+    prop.push(flags);
+  }
+  return { current: cur, proposed: prop };
+}
 
 type ScanRowSummary = {
   name: string;
@@ -322,6 +375,7 @@ export function BulkReparseDialog({
                           {g.indices.map((i) => {
                             const entry = entries[i];
                             const st = states[i];
+                            const hi = computeHighlights(entry.current, st.draft);
                             return (
                               <div key={i} className="flex flex-col gap-2 px-3 py-2">
                                 <div className="flex items-start gap-2">
@@ -357,6 +411,8 @@ export function BulkReparseDialog({
                                               isOptional={c.isOptional}
                                               isAlternative={c.isAlternative}
                                               mappingLabel={c.canonicalName}
+                                              highlight={hi.current[k]}
+                                              tone="removed"
                                             />
                                           ))}
                                         </div>
@@ -379,6 +435,8 @@ export function BulkReparseDialog({
                                               isOptional={d.isOptional}
                                               isAlternative={d.isAlternative}
                                               fixedAmount={d.fixedAmount}
+                                              highlight={hi.proposed[k]}
+                                              tone="added"
                                               mappingLabel={
                                                 d.unassigned
                                                   ? "nicht zugeordnet"
