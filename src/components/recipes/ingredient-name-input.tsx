@@ -10,9 +10,15 @@ type Hit = { ingredientId: number; name: string; canonicalName?: string };
 
 type Props = {
   value: string;
+  /** Picked ingredient id when the user chose an item from the autocomplete
+   *  popover (vs. free typing). Lets the parent select that item directly. */
   /** Called with the picked / typed name. `canonical` is set when the value
    *  is an alias of a known ingredient (so the parent can render a pill). */
-  onChange: (next: string, canonical?: string | null) => void;
+  onChange: (
+    next: string,
+    canonical?: string | null,
+    pickedIngredientId?: number,
+  ) => void;
   placeholder?: string;
   className?: string;
 };
@@ -82,7 +88,7 @@ export function IngredientNameInput({
       item.canonicalName && item.canonicalName !== item.name
         ? item.canonicalName
         : null;
-    onChange(item.name, canonical);
+    onChange(item.name, canonical, item.ingredientId);
     setOpen(false);
     // Keep focus on the input so the user can keep tabbing.
     inputRef.current?.focus();

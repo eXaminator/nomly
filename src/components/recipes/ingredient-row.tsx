@@ -256,6 +256,17 @@ export function IngredientRow({
       return [];
     },
   );
+  // Text the live matcher runs against. Seeded from the ORIGINAL source line
+  // (`rawText`) so the candidate pills are computed from the full context
+  // (quantity, size, comma-tail — "1 medium tomato, diced" keeps "medium").
+  // It stays fixed when the user clicks between pills (a pill click only
+  // changes name/notes, never this query), so the pills don't drift or drop
+  // notes. It updates ONLY when the user types in the name field — that's the
+  // signal they're redefining the ingredient, so the matcher follows the
+  // typed text from then on.
+  const [matchText, setMatchText] = React.useState(
+    () => value.rawText ?? value.name,
+  );
   const onChangeRef = React.useRef(onChange);
   const valueRef = React.useRef(value);
   React.useEffect(() => {
@@ -277,8 +288,8 @@ export function IngredientRow({
   // matcher's narrower view came back.
   const seededNameRef = React.useRef(value.name);
   React.useEffect(() => {
-    const name = value.name.trim();
-    if (name.length < 2) {
+    const text = matchText.trim();
+    if (text.length < 2) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setServerMatches([]);
       return;
@@ -289,7 +300,7 @@ export function IngredientRow({
         const r = await fetch("/api/v1/ingredients/match", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ text: name }),
+          body: JSON.stringify({ text }),
           signal: controller.signal,
         });
         if (!r.ok) return;
@@ -331,11 +342,12 @@ export function IngredientRow({
         // edited the input. Otherwise the row's saved selection stays
         // untouched no matter what the narrower live matcher returns.
         if (hasUserEdited) {
-          const next = applyAutoSelect(v, name, data.matches);
+          const next = applyAutoSelect(v, text, data.matches);
           if (
             next.selectedIngredientId !== v.selectedIngredientId ||
             next.canonicalName !== v.canonicalName ||
-            next.isOptional !== v.isOptional
+            next.isOptional !== v.isOptional ||
+            (next.pinnedByUser ?? false) !== (v.pinnedByUser ?? false)
           ) {
             onChangeRef.current(next);
           }
@@ -348,7 +360,7 @@ export function IngredientRow({
       window.clearTimeout(handle);
       controller.abort();
     };
-  }, [value.name]);
+  }, [matchText]);
 
   /** Combined picker: ingredient's sub-units first (when present), then
    *  global units matching the query. Sub-units get negative synthetic ids;
@@ -437,6 +449,43 @@ export function IngredientRow({
       // any "Nicht zugeordnet" state.
       addAsAlias: false,
       unassigned: false,
+      // Manual pin: from here, typing keeps this selection (sticky).
+      pinnedByUser: true,
+      importAnnotation: clearAnnotationOn(value.importAnnotation, "ingredient"),
+    });
+  }
+
+  /** Name-field change. Two sources, distinguished by `pickedIngredientId`:
+   *   - autocomplete pick (id present): the user chose a specific ingredient
+   *     by name → select it as the new best match and CLEAR any manual pin
+   *     (a fresh name supersedes a prior pill pin).
+   *   - free typing (no id): follow the text; leave any manual pin intact so
+   *     a previously-pinned selection survives editing, while an unpinned row
+   *     re-evaluates to the best match (handled in the live-match effect).
+   *  Either way the matcher query follows the typed/picked text. */
+  function handleNameChange(
+    name: string,
+    canonical?: string | null,
+    pickedIngredientId?: number,
+  ) {
+    setMatchText(name);
+    if (pickedIngredientId !== undefined) {
+      onChange({
+        ...value,
+        name,
+        selectedIngredientId: pickedIngredientId,
+        canonicalName: canonical ?? null,
+        pinnedByUser: false,
+        addAsAlias: false,
+        unassigned: false,
+        importAnnotation: clearAnnotationOn(value.importAnnotation, "ingredient"),
+      });
+      return;
+    }
+    onChange({
+      ...value,
+      name,
+      canonicalName: canonical === undefined ? value.canonicalName : canonical,
       importAnnotation: clearAnnotationOn(value.importAnnotation, "ingredient"),
     });
   }
@@ -449,6 +498,8 @@ export function IngredientRow({
       canonicalName: null,
       addAsAlias: false,
       unassigned: false,
+      // Deliberate "create new" choice — sticky against re-matching on typing.
+      pinnedByUser: true,
     });
   }
 
@@ -475,6 +526,7 @@ export function IngredientRow({
    *  the text change triggers. */
   function useCanonicalInName(c: ServerMatch) {
     const label = c.matchedName || c.canonicalName;
+    setMatchText(label);
     onChange({
       ...value,
       name: label,
@@ -485,6 +537,9 @@ export function IngredientRow({
       selectedIngredientId: c.ingredientId,
       addAsAlias: false,
       unassigned: false,
+      // ↻ adopts this candidate's name AND keeps it selected — pin so the
+      // re-match the text change triggers can't override it.
+      pinnedByUser: true,
     });
   }
 
@@ -502,6 +557,8 @@ export function IngredientRow({
         value.name.toLowerCase() === canonical.toLowerCase() ? null : canonical,
       addAsAlias,
       unassigned: false,
+      // Explicit force-match — sticky against re-matching on typing.
+      pinnedByUser: true,
       importAnnotation: clearAnnotationOn(value.importAnnotation, "ingredient"),
     });
   }
@@ -555,13 +612,8 @@ export function IngredientRow({
         </div>
         <IngredientNameInput
           value={value.name}
-          onChange={(name, canonical) =>
-            onChange({
-              ...value,
-              name,
-              canonicalName:
-                canonical === undefined ? value.canonicalName : canonical,
-            })
+          onChange={(name, canonical, pickedIngredientId) =>
+            handleNameChange(name, canonical, pickedIngredientId)
           }
           placeholder="Zutat"
           className="col-start-1 col-span-3 row-start-2 md:col-start-3 md:col-span-1 md:row-start-1"
@@ -696,18 +748,8 @@ export function IngredientRow({
       </div>
       <IngredientNameInput
         value={value.name}
-        onChange={(name, canonical) =>
-          onChange({
-            ...value,
-            name,
-            // When `canonical` is undefined, leave the existing value
-            // alone (the user is still typing in-place); when it's an
-            // explicit `null` the input is telling us to clear it; when
-            // it's a string, an alias was picked.
-            canonicalName:
-              canonical === undefined ? value.canonicalName : canonical,
-            importAnnotation: clearAnnotationOn(value.importAnnotation, "ingredient"),
-          })
+        onChange={(name, canonical, pickedIngredientId) =>
+          handleNameChange(name, canonical, pickedIngredientId)
         }
         placeholder="Zutat"
         className="col-span-5 md:col-span-1 md:col-start-3 md:row-start-1"
@@ -908,11 +950,13 @@ function applyAutoSelect(
   // out of article matching, so typing must not silently re-link it — they
   // re-link by clicking a candidate or the "Neu" pill.
   if (current.unassigned) return current;
-  // Rule 1: sticky. We keep the selection but DON'T re-apply the equipment
-  // → isOptional default: the user has had a chance to toggle it manually
-  // since the original resolution, and re-asserting on every keystroke
-  // would clobber that toggle.
-  if (current.selectedIngredientId != null) {
+  // Rule 1: sticky ONLY when the user manually pinned this row (clicked a
+  // candidate pill / force-match / ↻ / "Neu"). A pinned selection survives
+  // typing; we keep it but DON'T re-apply the equipment → isOptional default
+  // (the user may have toggled it since). An UNPINNED row — including an
+  // import auto-resolution — falls through to re-evaluate the best match as
+  // the text changes.
+  if (current.pinnedByUser && current.selectedIngredientId != null) {
     const hit = matches.find(
       (m) => m.ingredientId === current.selectedIngredientId,
     );
@@ -925,7 +969,7 @@ function applyAutoSelect(
             : hit.canonicalName,
       };
     }
-    // Previous selection vanished — clear and re-evaluate below.
+    // Pinned selection vanished from the results — clear and re-evaluate.
   }
   const trimmedLower = typedName.trim().toLowerCase();
   // Rule 2: exact.
@@ -944,6 +988,8 @@ function applyAutoSelect(
           : exact.canonicalName,
       isOptional: current.isOptional || exact.isEquipment,
       addAsAlias: false,
+      // Auto-selected from the typed text — no longer a manual pin.
+      pinnedByUser: false,
     };
   }
   // Rule 3: above threshold (matches are already sorted, so matches[0] is top).
@@ -958,6 +1004,7 @@ function applyAutoSelect(
           : top.canonicalName,
       isOptional: current.isOptional || top.isEquipment,
       addAsAlias: false,
+      pinnedByUser: false,
     };
   }
   // Rule 4: Neu.
@@ -966,6 +1013,7 @@ function applyAutoSelect(
     selectedIngredientId: null,
     canonicalName: null,
     addAsAlias: false,
+    pinnedByUser: false,
   };
 }
 

@@ -103,6 +103,13 @@ export type DraftIngredient = {
    *  `recipe_ingredient.alternative_for_id` linking to the primary's
    *  inserted id. */
   isAlternative: boolean;
+  /** True once the user has manually pinned a specific ingredient via a
+   *  candidate pill / force-match / ↻ / "Neu". While pinned, typing in the
+   *  name field does NOT re-run auto-select (the pin is sticky). Picking a
+   *  different item from the name autocomplete clears the pin and re-selects
+   *  the best match. Import auto-resolution is NOT a pin. UI-only — never
+   *  persisted. */
+  pinnedByUser?: boolean;
 };
 
 export type DraftSection = {
