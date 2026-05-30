@@ -141,11 +141,28 @@ export function tokenizeCandidate(text: string): CandidateToken[] {
  * which case it can skip the second matcher pass).
  */
 export function tokenizeCandidateJoinDashes(text: string): CandidateToken[] {
-  // Only collapse dashes that sit between two letters — leaves numeric
-  // ranges ("200-300"), whitespace-padded notes dashes ("Salz - nach
-  // Geschmack") and other punctuation patterns untouched.
-  const joined = text.replace(/(\p{L})[-–—](\p{L})/gu, "$1$2");
-  return tokenizeCandidate(joined);
+  // Do NOT split on intra-letter dashes here: keep "Paprika-Pulver" as one
+  // token so it can align against a closed-form catalog entry
+  // ("Paprikapulver"). The `raw` keeps the user's dash (so the display name
+  // stays "Paprika-Pulver"); only `normalized` drops the dash for matching.
+  const out: CandidateToken[] = [];
+  let postComma = false;
+  for (const segment of text.split(/(,)/u)) {
+    if (segment === ",") {
+      postComma = true;
+      continue;
+    }
+    // Split on whitespace / semicolon / slash, but not on dashes between
+    // letters. Standalone / padded dashes still separate (handled by the
+    // surrounding whitespace).
+    for (const raw of segment.split(/[\s;/]+/u)) {
+      if (raw.length === 0) continue;
+      const normalized = normalizeForMatch(raw.replace(/(\p{L})[-–—](\p{L})/gu, "$1$2"));
+      if (normalized.length === 0) continue;
+      out.push({ raw, normalized, postComma });
+    }
+  }
+  return out;
 }
 
 function sameTokens(a: CandidateToken[], b: CandidateToken[]): boolean {

@@ -62,13 +62,12 @@ describe("parseIngredientLines — substring matcher + threshold", () => {
     );
     expect(out).toHaveLength(1);
     expect(out[0].ingredientId).toBe(2);
-    // The matcher consumed both the head ("Paprikapulver") and the
-    // comma-tail ("rosenscharfes" matched the "rosenscharf" entry token
-    // by close-inflection prefix), so the comma-tail content is IDENTITY,
-    // not annotation — fold it back into displayName.
-    expect(out[0].name).toBe("Paprikapulver, rosenscharfes");
+    // The 2-token alias covers both "Paprikapulver" (pre-comma) and
+    // "rosenscharfes" (post-comma, close-inflection), so the whole span is
+    // the name. The interior comma is dropped (span tokens space-joined).
+    expect(out[0].name).toBe("Paprikapulver rosenscharfes");
     expect(out[0].ingredientMatch).toBe("existing");
-    // Comma-tail was fully consumed by the match → no leftover in notes.
+    // Whole candidate covered by the match → no leftover in notes.
     expect(out[0].notes).toBeNull();
   });
 
@@ -243,11 +242,10 @@ describe("parseIngredientLines — substring matcher + threshold", () => {
     expect(paprikaMatches[0].matchedName).toBe("Paprika");
   });
 
-  it("exposes uncoveredText on candidate matches so the pill UI can move tokens to notes", () => {
-    // A wide-text match that didn't auto-pick still surfaces as a pill. The
-    // matcher reports which raw candidate tokens the entry did NOT cover so
-    // the pill UI can move them out of the name and into the notes field
-    // when the user picks the pill manually.
+  it("each candidate match carries its own finished name/notes (uncovered tokens → notes)", () => {
+    // A wide-text match that didn't auto-pick still surfaces as a pill,
+    // carrying the name/notes it WOULD apply if picked — the matched span as
+    // the name, the rest as notes. No client-side token subtraction needed.
     const catalog: IngredientCatalog = [
       {
         ingredientId: 5,
@@ -265,9 +263,10 @@ describe("parseIngredientLines — substring matcher + threshold", () => {
       (c) => c.ingredientId === 5,
     );
     expect(knoblauchCandidate).toBeDefined();
-    // "knoblauch" matches "knoblauchzehe" as a prefix-fragment, so the
-    // covered token is "Knoblauchzehe" itself; "rote" stays uncovered.
-    expect(knoblauchCandidate?.uncoveredText).toBe("rote");
+    // "knoblauch" prefix-matches "knoblauchzehe" (the covered span), so the
+    // pill's name is "Knoblauchzehe" and "rote" lands in notes.
+    expect(knoblauchCandidate?.name).toBe("Knoblauchzehe");
+    expect(knoblauchCandidate?.notes).toBe("rote");
   });
 
   it("merges a German plural inflection in the reverse direction (Paprikaschote → catalog Paprikaschoten)", () => {
@@ -358,12 +357,11 @@ describe("parseIngredientLines — substring matcher + threshold", () => {
     expect(secondOut[0].canonicalIngredientName).toBe("Paprikaschote");
   });
 
-  it("does NOT merge 'Paprikapulver edelsüß' (no comma) into bare 'Paprikapulver'", () => {
-    // Regression: Phase A preserved the user's text as displayName. The
-    // wide-text matcher was still happily linking "Paprikapulver edelsüß"
-    // to catalog "Paprikapulver" via 1-token-fragment-at-start (score 135
-    // before the anchor-coverage fix). The fix requires the entry to
-    // cover the full candidate before the anchor +5 fires.
+  it("matches 'Paprikapulver edelsüß' to bare 'Paprikapulver' (edelsüß → notes)", () => {
+    // Structural model: with only the bare "Paprikapulver" seeded, the
+    // descriptor "edelsüß" falls outside the matched span and becomes a
+    // note. To keep "Paprikapulver edelsüß" a distinct product, seed it as
+    // its own catalog entry (2 tokens win by coverage).
     const catalog: IngredientCatalog = [
       {
         ingredientId: 2,
@@ -377,20 +375,13 @@ describe("parseIngredientLines — substring matcher + threshold", () => {
       makeLookups(catalog),
     );
     expect(out).toHaveLength(1);
-    expect(out[0].ingredientId).toBeNull();
-    expect(out[0].ingredientMatch).toBe("new");
-    expect(out[0].name).toBe("Paprikapulver edelsüß");
-    // Paprikapulver is still surfaced as a candidate the user can opt into
-    // via the pill UI.
-    expect(
-      out[0].candidateMatches.some((c) => c.canonicalName === "Paprikapulver"),
-    ).toBe(true);
+    expect(out[0].ingredientId).toBe(2);
+    expect(out[0].ingredientMatch).toBe("existing");
+    expect(out[0].name).toBe("Paprikapulver");
+    expect(out[0].notes).toBe("edelsüß");
   });
 
   it("treats 'Paprikapulver, edelsüß' (with comma) the same way as the no-comma form", () => {
-    // Companion to the above: the comma marks "edelsüß" as a qualifier,
-    // but since it's not a prep-like word the resolver folds it back into
-    // the new ingredient's name so both forms create the same canonical.
     const catalog: IngredientCatalog = [
       {
         ingredientId: 2,
@@ -404,17 +395,16 @@ describe("parseIngredientLines — substring matcher + threshold", () => {
       makeLookups(catalog),
     );
     expect(out).toHaveLength(1);
-    expect(out[0].ingredientId).toBeNull();
-    expect(out[0].ingredientMatch).toBe("new");
-    expect(out[0].name).toBe("Paprikapulver edelsüß");
+    expect(out[0].ingredientId).toBe(2);
+    expect(out[0].ingredientMatch).toBe("existing");
+    expect(out[0].name).toBe("Paprikapulver");
+    expect(out[0].notes).toBe("edelsüß");
   });
 
-  it("URL-import shape: verbatim chefkoch '2 EL Erbsen, TK' line resolves to a new 'TK Erbsen' row", () => {
-    // The exact line from
-    //   https://www.chefkoch.de/rezepte/1984961321880189/Spaghetti-Frank-Sinatra.html
-    // — Erbsen exists in the catalog, but partial-coverage scoring (130)
-    // keeps it below the auto-merge gate. The row should land as a new
-    // ingredient "TK Erbsen", not as a row linked to bare Erbsen.
+  it("'Erbsen, TK' matches bare 'Erbsen' with TK as a note (catalog decides identity)", () => {
+    // Structural model: with only bare "Erbsen", the comma-tail "TK" is
+    // outside the matched span → notes. Seed "TK Erbsen" as its own entry
+    // to keep frozen peas distinct (next test).
     const catalog: IngredientCatalog = [
       {
         ingredientId: 5,
@@ -423,60 +413,18 @@ describe("parseIngredientLines — substring matcher + threshold", () => {
         tokens: ["erbsen"],
       },
     ];
-    const out = parseIngredientLines(
-      // The chefkoch source has "2 EL …" — the test fixture's `makeLookups`
-      // only carries "g" as a unit, so we substitute it. The matcher /
-      // resolver behaviour under test is unit-agnostic.
-      ["2 g Erbsen, TK"],
-      makeLookups(catalog),
-    );
+    const out = parseIngredientLines(["2 g Erbsen, TK"], makeLookups(catalog));
     expect(out).toHaveLength(1);
-    expect(out[0].name).toBe("TK Erbsen");
-    expect(out[0].ingredientId).toBeNull();
-    expect(out[0].ingredientMatch).toBe("new");
-    // Erbsen still appears as a candidate pill so the user can opt in.
-    expect(
-      out[0].candidateMatches.some((c) => c.canonicalName === "Erbsen"),
-    ).toBe(true);
-    // The cleanup proposal that puts edelsüß-style modifiers AFTER the
-    // noun would have produced "Erbsen TK"; the prefix-placement rule
-    // catches the short uppercase abbreviation and flips it.
-    expect(
-      out[0].newNameProposals.find((p) => p.label === "Aufgeräumt")?.name,
-    ).toBe("TK Erbsen");
+    expect(out[0].ingredientId).toBe(5);
+    expect(out[0].ingredientMatch).toBe("existing");
+    expect(out[0].name).toBe("Erbsen");
+    expect(out[0].notes).toBe("TK");
   });
 
-  it("folds a short uppercase comma-tail as a PREFIX (e.g. 'Erbsen, TK' → 'TK Erbsen')", () => {
-    // German recipes use "TK" (Tiefkühl = frozen) as an identity marker
-    // that conventionally goes IN FRONT of the noun. When the user writes
-    // it comma-separated, the resolver still folds it back into the new
-    // ingredient name — but as a prefix, not a suffix.
-    const catalog: IngredientCatalog = [
-      {
-        ingredientId: 7,
-        canonicalName: "Erbsen",
-        aliasName: "Erbsen",
-        tokens: ["erbsen"],
-      },
-    ];
-    const out = parseIngredientLines(
-      ["2 g Erbsen, TK"],
-      makeLookups(catalog),
-    );
-    expect(out).toHaveLength(1);
-    expect(out[0].ingredientId).toBeNull();
-    expect(out[0].ingredientMatch).toBe("new");
-    expect(out[0].name).toBe("TK Erbsen");
-    // Erbsen is still surfaced as a pill candidate so the user can opt in.
-    expect(
-      out[0].candidateMatches.some((c) => c.canonicalName === "Erbsen"),
-    ).toBe(true);
-  });
-
-  it("folds the comma-tail back into displayName when the match consumes it ('Erbsen, TK' → 'Erbsen, TK' with TK Erbsen id)", () => {
-    // The catalog has the canonical "TK Erbsen". The matcher consumes
-    // BOTH "erbsen" (from the head) and "tk" (from the comma-tail), so the
-    // tail is identity — preserve the user's original comma form.
+  it("'Erbsen, TK' wins the 2-token 'TK Erbsen' entry when the catalog has it", () => {
+    // The catalog has the canonical "TK Erbsen". The matcher covers BOTH
+    // "erbsen" (pre-comma) and "tk" (post-comma) → full span is the name.
+    // The interior comma is dropped (span tokens space-joined).
     const catalog: IngredientCatalog = [
       {
         ingredientId: 42,
@@ -485,24 +433,20 @@ describe("parseIngredientLines — substring matcher + threshold", () => {
         tokens: ["tk", "erbsen"],
       },
     ];
-    const out = parseIngredientLines(
-      ["2 g Erbsen, TK"],
-      makeLookups(catalog),
-    );
+    const out = parseIngredientLines(["2 g Erbsen, TK"], makeLookups(catalog));
     expect(out).toHaveLength(1);
     expect(out[0].ingredientId).toBe(42);
-    expect(out[0].name).toBe("Erbsen, TK");
-    // Canonical differs from the displayed text → surface it for the
+    expect(out[0].name).toBe("Erbsen TK");
+    // Canonical differs from the displayed span → surface it for the
     // import-review UI's "kanonisch: …" pill.
     expect(out[0].canonicalIngredientName).toBe("TK Erbsen");
-    // Comma-tail fully consumed → notes should be empty.
+    // Whole candidate covered → no leftover note.
     expect(out[0].notes).toBeNull();
   });
 
-  it("delegates the unmatched comma-tail tokens to notes ('Erbsen, TK, saftig' → name 'Erbsen, TK' + notes 'saftig')", () => {
-    // Partial-match case: "TK" is consumed by the catalog entry, but
-    // "saftig" stays as a user note. The displayName fold is space-joined
-    // (no comma) and the leftover comma-tail token survives in notes.
+  it("leaves unmatched tokens in notes ('Erbsen, TK, saftig' → name 'Erbsen TK' + notes 'saftig')", () => {
+    // "TK" + "erbsen" are covered by the 2-token entry; "saftig" sits after
+    // the span → notes.
     const catalog: IngredientCatalog = [
       {
         ingredientId: 42,
@@ -517,10 +461,7 @@ describe("parseIngredientLines — substring matcher + threshold", () => {
     );
     expect(out).toHaveLength(1);
     expect(out[0].ingredientId).toBe(42);
-    // Only "TK" was in the parser's commaTail (the second comma ends the
-    // run), so the fold consumes the whole commaTail substring — the
-    // displayName picks up the user's original comma form.
-    expect(out[0].name).toBe("Erbsen, TK");
+    expect(out[0].name).toBe("Erbsen TK");
     expect(out[0].notes).toMatch(/saftig/);
   });
 
@@ -548,7 +489,7 @@ describe("parseIngredientLines — substring matcher + threshold", () => {
     expect(out[0].notes).toMatch(/klein gehackt/);
   });
 
-  it("creates a new ingredient when nothing clears the threshold", () => {
+  it("creates a new ingredient when nothing matches at all", () => {
     const catalog: IngredientCatalog = [
       {
         ingredientId: 3,
@@ -557,17 +498,32 @@ describe("parseIngredientLines — substring matcher + threshold", () => {
         tokens: ["tomate"],
       },
     ];
-    const out = parseIngredientLines(
-      ["3 g Cherry-Tomate"],
-      makeLookups(catalog),
-    );
+    const out = parseIngredientLines(["3 g Quinoa"], makeLookups(catalog));
     expect(out).toHaveLength(1);
     expect(out[0].ingredientId).toBeNull();
     expect(out[0].ingredientMatch).toBe("new");
+    expect(out[0].name).toBe("Quinoa");
     expect(out[0].newNameProposals.length).toBeGreaterThan(0);
-    // The weak Tomate match is still surfaced via candidateMatches so the
-    // user can opt in via the pill UI.
-    expect(out[0].candidateMatches.some((c) => c.canonicalName === "Tomate")).toBe(true);
+  });
+
+  it("matches 'Cherry-Tomate' to a bare 'Tomate' entry (Cherry → notes)", () => {
+    // Structural flip: with only bare "Tomate", "Cherry-Tomate" resolves to
+    // Tomate and "Cherry" lands in notes. Seed "Cherry-Tomate" to keep it
+    // distinct (it wins by token coverage).
+    const catalog: IngredientCatalog = [
+      {
+        ingredientId: 3,
+        canonicalName: "Tomate",
+        aliasName: "Tomate",
+        tokens: ["tomate"],
+      },
+    ];
+    const out = parseIngredientLines(["3 g Cherry-Tomate"], makeLookups(catalog));
+    expect(out).toHaveLength(1);
+    expect(out[0].ingredientId).toBe(3);
+    expect(out[0].ingredientMatch).toBe("existing");
+    expect(out[0].name).toBe("Tomate");
+    expect(out[0].notes).toBe("Cherry");
   });
 });
 
@@ -702,7 +658,9 @@ describe("colon-in-name treated as section + listed items", () => {
     expect(out[0].name).toBe("Reis");
     expect(out[0].isOptional).toBe(false);
     expect(out[0].isAlternative).toBe(false);
-    expect(out[1].name).toBe("Naan-Brot");
+    // 2-token catalog entry matched via the dash-split variant → the span is
+    // space-joined ("Naan Brot"); the canonical "Naan-Brot" surfaces separately.
+    expect(out[1].name).toBe("Naan Brot");
     expect(out[1].isOptional).toBe(true);
     expect(out[1].isAlternative).toBe(true);
   });
@@ -1043,5 +1001,51 @@ describe("parseIngredientLines — unmatched alternative fold-back", () => {
     expect(groups[0].ingredients).toHaveLength(1);
     expect(groups[0].ingredients[0].ingredientId).toBe(1);
     expect(groups[0].ingredients[0].notes).toMatch(/oder Stärke/);
+  });
+});
+
+describe("span-based name/notes on auto-pick", () => {
+  function single(line: string, catalog: IngredientCatalog, units: string[] = []) {
+    const out = parseIngredientLines([line], makeLookups(catalog, units));
+    return out[0];
+  }
+  const cat: IngredientCatalog = [
+    { ingredientId: 1, canonicalName: "Salt", aliasName: "Salt", tokens: ["salt"] },
+    { ingredientId: 2, canonicalName: "red wine", aliasName: "red wine", tokens: ["red", "wine"] },
+    { ingredientId: 3, canonicalName: "chick peas", aliasName: "chick peas", tokens: ["chick", "peas"] },
+    { ingredientId: 4, canonicalName: "olive oil", aliasName: "olive oil", tokens: ["olive", "oil"] },
+    { ingredientId: 5, canonicalName: "carrot", aliasName: "carrot", tokens: ["carrot"] },
+  ];
+
+  it("Salt divided → Salt, note divided", () => {
+    const row = single("1 g Salt divided", cat);
+    expect(row.ingredientMatch).toBe("existing");
+    expect(row.name).toBe("Salt");
+    expect(row.notes).toBe("divided");
+  });
+
+  it("carrot, peeled and sliced → carrot, note 'peeled and sliced'", () => {
+    const row = single("1 carrot, peeled and sliced", cat);
+    expect(row.name).toBe("carrot");
+    expect(row.notes).toBe("peeled and sliced");
+  });
+
+  it("dry red wine → red wine, note dry", () => {
+    const row = single("1 g dry red wine", cat);
+    expect(row.name).toBe("red wine");
+    expect(row.notes).toBe("dry");
+  });
+
+  it("frozen chick peas in a can → chick peas, note 'frozen, in a can'", () => {
+    const row = single("1 frozen chick peas in a can", cat);
+    expect(row.name).toBe("chick peas");
+    expect(row.notes).toBe("frozen, in a can");
+  });
+
+  it("each candidate carries its own finished name/notes", () => {
+    const row = single("1 frozen chick peas in a can", cat);
+    const top = row.candidateMatches[0];
+    expect(top.name).toBe("chick peas");
+    expect(top.notes).toBe("frozen, in a can");
   });
 });
