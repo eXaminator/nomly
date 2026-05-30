@@ -1114,6 +1114,7 @@ export function parseIngredientLines(
       }
     }
   }
+  applyAlternativeInheritance(out);
   return out;
 }
 
@@ -1127,6 +1128,70 @@ function appendAlternativeToNotes(
     : altText.trim();
   if (fragment.length === 0) return;
   target.notes = target.notes ? `${target.notes}, ${fragment}` : fragment;
+}
+
+/**
+ * Copy a primary's amount/unit/notes onto its alternatives at parse time.
+ * Walks the row list as a sequence of groups ([primary, alt, alt, …]; an
+ * alternative always follows its primary). For each group:
+ *   - Amount/unit: an alternative that parsed NEITHER its own quantity NOR
+ *     its own unit inherits both from the primary. One that brought either
+ *     keeps what it parsed ("2 eggs or 3 egg whites" → egg whites stays 3).
+ *     When the primary's unit is an ingredient-scoped sub-unit, only the
+ *     amount carries over — copying a foreign sub-unit id onto a different
+ *     ingredient would be a data smell.
+ *   - Notes: the trailing note of the LAST group member propagates to every
+ *     earlier sibling that has no note of its own ("2 slices bacon or
+ *     pancetta, diced" → both get "diced"). Members with their own note keep
+ *     it.
+ * Mutates the rows in place. Only matched alternatives are rows here —
+ * unmatched ones already folded into the primary's notes upstream.
+ */
+function applyAlternativeInheritance(rows: ImportedIngredient[]): void {
+  let i = 0;
+  while (i < rows.length) {
+    if (rows[i].isAlternative) {
+      // Orphan alternative with no preceding primary (rare) — skip.
+      i += 1;
+      continue;
+    }
+    let hi = i;
+    while (hi + 1 < rows.length && rows[hi + 1].isAlternative) hi += 1;
+    if (hi > i) inheritWithinGroup(rows, i, hi);
+    i = hi + 1;
+  }
+}
+
+function inheritWithinGroup(
+  rows: ImportedIngredient[],
+  lo: number,
+  hi: number,
+): void {
+  const primary = rows[lo];
+  for (let k = lo + 1; k <= hi; k++) {
+    const alt = rows[k];
+    const hasOwnAmount = alt.quantity !== null;
+    const hasOwnUnit = alt.unit !== null || alt.subUnit !== null;
+    if (hasOwnAmount || hasOwnUnit) continue;
+    alt.quantity = primary.quantity;
+    alt.fixedAmount = primary.fixedAmount;
+    if (primary.subUnit) {
+      // Foreign sub-unit — copy the amount only, leave the unit for the alt's
+      // own resolution / the user.
+    } else {
+      alt.unit = primary.unit;
+      alt.unitMatch = primary.unitMatch;
+      alt.rawUnit = primary.rawUnit;
+    }
+  }
+  // Trailing note of the last member → siblings that have none of their own.
+  const sharedNote = rows[hi].notes?.trim();
+  if (sharedNote && sharedNote.length > 0) {
+    for (let k = lo; k < hi; k++) {
+      const cur = rows[k].notes?.trim();
+      if (!cur || cur.length === 0) rows[k].notes = sharedNote;
+    }
+  }
 }
 
 export type ParsedSectionGroup = {
@@ -1269,6 +1334,7 @@ export function parseIngredientLinesIntoSections(
   if (groups.length > 1 && groups[0].title === null && groups[0].ingredients.length === 0) {
     groups.shift();
   }
+  for (const g of groups) applyAlternativeInheritance(g.ingredients);
   return groups;
 }
 

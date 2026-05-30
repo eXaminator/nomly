@@ -1049,3 +1049,48 @@ describe("span-based name/notes on auto-pick", () => {
     expect(top.notes).toBe("frozen, in a can");
   });
 });
+
+describe("alternative amount/unit/notes inheritance", () => {
+  function rows(line: string, catalog: IngredientCatalog, units: string[] = []) {
+    return parseIngredientLines([line], makeLookups(catalog, units));
+  }
+  const cat: IngredientCatalog = [
+    { ingredientId: 1, canonicalName: "butter", aliasName: "butter", tokens: ["butter"] },
+    { ingredientId: 2, canonicalName: "margarine", aliasName: "margarine", tokens: ["margarine"] },
+    { ingredientId: 3, canonicalName: "egg", aliasName: "egg", tokens: ["egg"] },
+    { ingredientId: 4, canonicalName: "egg white", aliasName: "egg white", tokens: ["egg", "white"] },
+    { ingredientId: 5, canonicalName: "bacon", aliasName: "bacon", tokens: ["bacon"] },
+    { ingredientId: 6, canonicalName: "pancetta", aliasName: "pancetta", tokens: ["pancetta"] },
+    { ingredientId: 7, canonicalName: "onion", aliasName: "onion", tokens: ["onion"] },
+    { ingredientId: 8, canonicalName: "shallot", aliasName: "shallot", tokens: ["shallot"] },
+  ];
+
+  it("alt with no amount/unit inherits the primary's", () => {
+    const out = rows("200 g butter or margarine", cat);
+    const primary = out[0];
+    const alt = out.find((r) => r.isAlternative)!;
+    expect(alt.quantity).toBe(200);
+    expect(alt.unit?.name).toBe(primary.unit?.name);
+    expect(alt.fixedAmount).toBe(primary.fixedAmount);
+  });
+
+  it("alt that brought its own quantity keeps it", () => {
+    const out = rows("2 eggs or 3 egg whites", cat);
+    const alt = out.find((r) => r.isAlternative)!;
+    expect(alt.quantity).toBe(3);
+  });
+
+  it("trailing note of the last member propagates to siblings without their own", () => {
+    const out = rows("2 g bacon or pancetta, diced", cat);
+    const bacon = out[0];
+    const pancetta = out.find((r) => r.isAlternative)!;
+    expect(pancetta.notes).toBe("diced");
+    expect(bacon.notes).toBe("diced");
+  });
+
+  it("members with their own note keep it (no propagation)", () => {
+    const out = rows("1 onion, finely chopped, or 2 shallots, diced", cat);
+    expect(out[0].notes).toMatch(/finely chopped/);
+    expect(out.find((r) => r.isAlternative)!.notes).toMatch(/diced/);
+  });
+});
