@@ -240,7 +240,7 @@ export function BulkReparseDialog({
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent>
+        <DialogContent className="sm:max-w-5xl sm:max-h-[90vh]">
           <DialogHeader>
             <DialogTitle>Alle Rezepte neu parsen</DialogTitle>
             <DialogDescription>
