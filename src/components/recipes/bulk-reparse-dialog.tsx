@@ -16,6 +16,13 @@ import { cn } from "@/lib/cn";
 import { IngredientRow } from "./ingredient-row";
 import { NewIngredientsDialog } from "./new-ingredients-dialog";
 import { parsedIngredientToDraft, type DraftIngredient } from "./types";
+import {
+  addAlternativeAfter,
+  canDemote,
+  demoteToAlternative,
+  detachAlternative,
+  promoteAlternative,
+} from "./alternatives";
 import { ingredientToPayload, toNumberOrNull } from "./payload";
 import {
   formatQuantity,
@@ -217,6 +224,18 @@ export function BulkReparseDialog({
         idx === entryIdx
           ? { ...s, draft: s.draft.filter((_, j) => j !== rowIdx) }
           : s,
+      ),
+    );
+  }
+  /** Replace an entry's whole draft array via a pure transform — used by the
+   *  alternative-management actions (add / promote / detach / demote). */
+  function mutateDraft(
+    entryIdx: number,
+    fn: (rows: DraftIngredient[]) => DraftIngredient[],
+  ) {
+    setStates((prev) =>
+      prev.map((s, idx) =>
+        idx === entryIdx ? { ...s, draft: fn(s.draft) } : s,
       ),
     );
   }
@@ -557,14 +576,46 @@ export function BulkReparseDialog({
                                   // non-selected candidate pills (which use the
                                   // muted background) stay visible.
                                   <div className="flex flex-col gap-2 rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-bg)] p-3">
-                                    {st.draft.map((d, k) => (
-                                      <IngredientRow
-                                        key={d.uid}
-                                        value={d}
-                                        onChange={(next) => setDraftRow(i, k, next)}
-                                        onRemove={() => removeDraftRow(i, k)}
-                                      />
-                                    ))}
+                                    {st.draft.map((d, k) =>
+                                      d.isAlternative ? (
+                                        <IngredientRow
+                                          key={d.uid}
+                                          value={d}
+                                          onChange={(next) => setDraftRow(i, k, next)}
+                                          onRemove={() => removeDraftRow(i, k)}
+                                          onPromote={() =>
+                                            mutateDraft(i, (rows) =>
+                                              promoteAlternative(rows, k),
+                                            )
+                                          }
+                                          onDetach={() =>
+                                            mutateDraft(i, (rows) =>
+                                              detachAlternative(rows, k),
+                                            )
+                                          }
+                                        />
+                                      ) : (
+                                        <IngredientRow
+                                          key={d.uid}
+                                          value={d}
+                                          onChange={(next) => setDraftRow(i, k, next)}
+                                          onRemove={() => removeDraftRow(i, k)}
+                                          onAddAlternative={() =>
+                                            mutateDraft(i, (rows) =>
+                                              addAlternativeAfter(rows, k),
+                                            )
+                                          }
+                                          onDemote={
+                                            canDemote(st.draft, k)
+                                              ? () =>
+                                                  mutateDraft(i, (rows) =>
+                                                    demoteToAlternative(rows, k),
+                                                  )
+                                              : undefined
+                                          }
+                                        />
+                                      ),
+                                    )}
                                   </div>
                                 ) : null}
                               </div>

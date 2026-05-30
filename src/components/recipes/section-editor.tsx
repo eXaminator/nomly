@@ -35,13 +35,18 @@ import { Textarea } from "@/components/ui/textarea";
 import { IngredientRow } from "./ingredient-row";
 import { reparseGroupAt } from "./reparse";
 import {
-  emptyAlternative,
   emptyIngredient,
   parsedIngredientToDraft,
   type DraftIngredient,
   type DraftSection,
   type ParsedIngredientResponse,
 } from "./types";
+import {
+  addAlternativeAfter,
+  promoteAlternative as applyPromoteAlternative,
+  detachAlternative as applyDetachAlternative,
+  demoteToAlternative as applyDemoteToAlternative,
+} from "./alternatives";
 
 /**
  * Read the clipboard with a short timeout so a hanging permission prompt
@@ -158,11 +163,10 @@ export function SectionEditor({
   }
 
   function addAlternative(afterIdx: number) {
-    const primaryIdx = findPrimaryIndex(afterIdx);
-    const insertAt = lastInGroup(primaryIdx) + 1;
-    const ings = section.ingredients.slice();
-    ings.splice(insertAt, 0, emptyAlternative());
-    onChange({ ...section, ingredients: ings });
+    onChange({
+      ...section,
+      ingredients: addAlternativeAfter(section.ingredients, afterIdx),
+    });
   }
 
   /**
@@ -173,31 +177,10 @@ export function SectionEditor({
    * the alt from the group instead of trading places.
    */
   function promoteAlternative(altIdx: number) {
-    const ings = section.ingredients.slice();
-    const primaryIdx = findPrimaryIndex(altIdx);
-    if (primaryIdx === altIdx) return;
-    const promoted: DraftIngredient = {
-      ...ings[altIdx],
-      isAlternative: false,
-      // The promoted row was forced-optional while it was an alternative;
-      // the new primary inherits the OLD primary's optional status so the
-      // recipe's shape is preserved (a required Tahin/Mandelmus pair stays
-      // required after swap, with Mandelmus now leading).
-      isOptional: ings[primaryIdx].isOptional,
-    };
-    const demoted: DraftIngredient = {
-      ...ings[primaryIdx],
-      isAlternative: true,
-      // Old primary becomes an alternative — alternatives are always
-      // optional. Lock the flag on transition.
-      isOptional: true,
-    };
-    const lastIdx = lastInGroup(primaryIdx);
-    const siblings = ings
-      .slice(primaryIdx + 1, lastIdx + 1)
-      .filter((_, k) => primaryIdx + 1 + k !== altIdx);
-    ings.splice(primaryIdx, lastIdx - primaryIdx + 1, promoted, demoted, ...siblings);
-    onChange({ ...section, ingredients: ings });
+    onChange({
+      ...section,
+      ingredients: applyPromoteAlternative(section.ingredients, altIdx),
+    });
   }
 
   /**
@@ -207,19 +190,10 @@ export function SectionEditor({
    * {@link demoteToAlternative}.
    */
   function detachAlternative(altIdx: number) {
-    const primaryIdx = findPrimaryIndex(altIdx);
-    if (primaryIdx === altIdx) return; // already a primary — no-op
-    const ings = section.ingredients.slice();
-    const lastInOldGroup = lastInGroup(primaryIdx);
-    // Splice the row out at its current position.
-    const [row] = ings.splice(altIdx, 1);
-    // After the splice, the old group's last sibling has shifted left by
-    // one (since altIdx < lastInOldGroup); inserting at `lastInOldGroup`
-    // lands the detached row immediately after that last sibling — i.e.
-    // immediately after the old group ends.
-    const newIdx = lastInOldGroup;
-    ings.splice(newIdx, 0, { ...row, isAlternative: false });
-    onChange({ ...section, ingredients: ings });
+    onChange({
+      ...section,
+      ingredients: applyDetachAlternative(section.ingredients, altIdx),
+    });
   }
 
   /**
@@ -232,13 +206,10 @@ export function SectionEditor({
    *     depth-1 invariant — the user has to detach those first
    */
   function demoteToAlternative(i: number) {
-    if (i === 0) return;
-    const ings = section.ingredients.slice();
-    const row = ings[i];
-    if (row.isAlternative) return;
-    if (lastInGroup(i) !== i) return;
-    ings[i] = { ...row, isAlternative: true, isOptional: true };
-    onChange({ ...section, ingredients: ings });
+    onChange({
+      ...section,
+      ingredients: applyDemoteToAlternative(section.ingredients, i),
+    });
   }
 
   // Confirm dialog for "delete a primary that has alternatives". Holds the
