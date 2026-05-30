@@ -411,6 +411,51 @@ export type FindCandidatesOptions = {
 };
 
 /**
+ * How well a per-ingredient match reproduces the input's SURFACE form. Breaks
+ * ties between an ingredient's canonical row and its aliases so a verbatim,
+ * explicitly-registered alias the user typed wins over the canonical instead of
+ * being shadowed by it:
+ *   - input "Äpfel" keeps alias "Äpfel" (not canonical "Apfel" — both fold to
+ *     "apfel" once diacritics are stripped, so they tie on the structural score)
+ *   - input "Zwiebeln" keeps alias "Zwiebeln" (not the canonical "Zwiebel",
+ *     which only matches as a close-inflection prefix)
+ *
+ *   2 = full, all-exact coverage AND the alias's raw spelling equals the input
+ *   1 = full, all-exact coverage on normalised tokens (diacritics/case folded)
+ *   0 = anything less (prefix/suffix/inflection, or the entry left input over)
+ */
+function surfaceMatchRank(m: IngredientCandidateMatch): number {
+  if (m.coveredCandidateTokens.length !== m.candidate.length) return 0;
+  if (!m.perTokenKinds.every((k) => k === "exact")) return 0;
+  const rawSpan = m.coveredCandidateTokens
+    .map((i) => m.candidate[i].raw)
+    .join(" ")
+    .trim()
+    .toLowerCase();
+  return m.aliasName.trim().toLowerCase() === rawSpan ? 2 : 1;
+}
+
+/**
+ * Pick the better of two matches for the SAME ingredient. Compares on the
+ * score WITHOUT the canonical +1 boost so that boost can't let the canonical
+ * shadow an equally-strong (or stronger) alias the user typed verbatim; the
+ * surface-form rank decides those, with the canonical winning only true ties.
+ */
+function isBetterWithinIngredient(
+  m: IngredientCandidateMatch,
+  existing: IngredientCandidateMatch,
+): boolean {
+  const mBase = m.score - (m.isCanonical ? 1 : 0);
+  const eBase = existing.score - (existing.isCanonical ? 1 : 0);
+  if (mBase !== eBase) return mBase > eBase;
+  const mRank = surfaceMatchRank(m);
+  const eRank = surfaceMatchRank(existing);
+  if (mRank !== eRank) return mRank > eRank;
+  if (m.isCanonical !== existing.isCanonical) return m.isCanonical;
+  return m.aliasName.length > existing.aliasName.length;
+}
+
+/**
  * Run the matcher over the full catalog. Best score per ingredient survives;
  * ties broken by alias-name length (longer first), then by alphabetical
  * order. Returns at most `limit` matches.
@@ -450,15 +495,7 @@ export function findIngredientCandidates(
       const m = bestMatchForEntry(entry, variant);
       if (!m) continue;
       const existing = bestById.get(m.ingredientId);
-      if (
-        !existing ||
-        m.score > existing.match.score ||
-        (m.score === existing.match.score &&
-          m.isCanonical && !existing.match.isCanonical) ||
-        (m.score === existing.match.score &&
-          m.isCanonical === existing.match.isCanonical &&
-          m.aliasName.length > existing.match.aliasName.length)
-      ) {
+      if (!existing || isBetterWithinIngredient(m, existing.match)) {
         bestById.set(m.ingredientId, { match: m, variant });
       }
     }

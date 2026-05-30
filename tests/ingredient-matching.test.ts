@@ -509,3 +509,35 @@ describe("structural matcher scoring", () => {
     expect(matches[0].score).toBeGreaterThanOrEqual(MIN_AUTO_MATCH_SCORE);
   });
 });
+
+describe("a registered alias wins over the canonical it normalizes near", () => {
+  // Diacritics are stripped for matching, so "Äpfel" and "Apfel" both tokenize
+  // to ["apfel"] and tie on the structural score; the canonical's +1 boost
+  // must NOT shadow the verbatim alias. "Zwiebeln" only matches the canonical
+  // "Zwiebel" as a close-inflection prefix, so the exact alias must win there.
+  const cat: IngredientCatalog = [
+    { ingredientId: 1, canonicalName: "Apfel", aliasName: "Apfel", tokens: ["apfel"] },
+    { ingredientId: 1, canonicalName: "Apfel", aliasName: "Äpfel", tokens: ["apfel"] },
+    { ingredientId: 2, canonicalName: "Zwiebel", aliasName: "Zwiebel", tokens: ["zwiebel"] },
+    { ingredientId: 2, canonicalName: "Zwiebel", aliasName: "Zwiebeln", tokens: ["zwiebeln"] },
+  ];
+
+  it("keeps the diacritic alias as the display name (Äpfel, not Apfel)", () => {
+    const { matches } = findIngredientCandidates("Äpfel", cat);
+    expect(matches[0].ingredientId).toBe(1);
+    expect(matches[0].aliasName).toBe("Äpfel");
+    expect(matches[0].score).toBeGreaterThanOrEqual(MIN_AUTO_MATCH_SCORE);
+  });
+
+  it("keeps the plural alias as the display name (Zwiebeln, not Zwiebel)", () => {
+    const { matches } = findIngredientCandidates("Zwiebeln", cat);
+    expect(matches[0].ingredientId).toBe(2);
+    expect(matches[0].aliasName).toBe("Zwiebeln");
+    expect(matches[0].score).toBeGreaterThanOrEqual(MIN_AUTO_MATCH_SCORE);
+  });
+
+  it("still leads with the canonical when the input matches it verbatim", () => {
+    expect(findIngredientCandidates("Apfel", cat).matches[0].aliasName).toBe("Apfel");
+    expect(findIngredientCandidates("Zwiebel", cat).matches[0].aliasName).toBe("Zwiebel");
+  });
+});
