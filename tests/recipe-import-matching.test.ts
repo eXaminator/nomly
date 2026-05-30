@@ -1129,6 +1129,28 @@ describe("alternative amount/unit/notes inheritance", () => {
     expect(out[0].notes).toMatch(/finely chopped/);
     expect(out.find((r) => r.isAlternative)!.notes).toMatch(/diced/);
   });
+
+  it("mirrors the inherited shared note onto the primary's candidate matches", () => {
+    // Picking a candidate from the pill UI replaces the row's notes with the
+    // candidate's own `notes`. The shared prep ("diced") must therefore be
+    // present on the primary's candidates too, or clicking one would drop it.
+    const out = rows("2 g bacon or pancetta, diced", cat);
+    const bacon = out[0];
+    expect(bacon.notes).toBe("diced");
+    expect(bacon.candidateMatches.length).toBeGreaterThan(0);
+    for (const c of bacon.candidateMatches) {
+      expect(c.notes).toMatch(/diced/);
+    }
+  });
+
+  it("does NOT push the shared note onto a sibling that kept its own", () => {
+    const out = rows("1 onion, finely chopped, or 2 shallots, diced", cat);
+    const onion = out[0];
+    // Onion kept "finely chopped" — its candidates must not gain "diced".
+    for (const c of onion.candidateMatches) {
+      expect(c.notes ?? "").not.toMatch(/diced/);
+    }
+  });
 });
 
 describe("internal comma preservation in matched name", () => {

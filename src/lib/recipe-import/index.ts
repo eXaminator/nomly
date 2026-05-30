@@ -1272,9 +1272,35 @@ function inheritWithinGroup(
   if (sharedNote && sharedNote.length > 0) {
     for (let k = lo; k < hi; k++) {
       const cur = rows[k].notes?.trim();
-      if (!cur || cur.length === 0) rows[k].notes = sharedNote;
+      // Only siblings that brought no note of their own inherit the shared
+      // prep — one that kept its own ("1 onion, finely chopped, or 2 shallots,
+      // diced") keeps it on both the row and its candidates.
+      if (cur && cur.length > 0) continue;
+      rows[k].notes = sharedNote;
+      // The shared prep also belongs on each sibling's candidate matches: a
+      // candidate's `notes` is "what this row's notes become if you pick it",
+      // and picking it from the pill UI replaces the row's notes wholesale.
+      // Without mirroring the shared note here, clicking a candidate on the
+      // primary ("button or cremini mushrooms, halved and quartered" → pick
+      // Champignon) would drop the group-shared "halved and quartered".
+      rows[k].candidateMatches = rows[k].candidateMatches.map((c) =>
+        mergeSharedNote(c, sharedNote),
+      );
     }
   }
+}
+
+/** Append the group-shared prep note to a candidate's own notes (dedup-safe),
+ *  so picking it from the pill UI keeps the shared prep instead of replacing
+ *  the row's notes with the candidate's narrower, pre-inheritance value. */
+function mergeSharedNote(
+  c: ImportedCandidateMatch,
+  sharedNote: string,
+): ImportedCandidateMatch {
+  const cur = c.notes?.trim();
+  if (!cur || cur.length === 0) return { ...c, notes: sharedNote };
+  if (cur.toLowerCase().includes(sharedNote.toLowerCase())) return c;
+  return { ...c, notes: `${cur}, ${sharedNote}` };
 }
 
 export type ParsedSectionGroup = {
