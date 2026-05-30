@@ -1,43 +1,44 @@
 /**
- * Substring-style ingredient matching. Given a candidate text (the name area
- * after quantity / unit / parens have been pulled out), find every catalog
- * entry whose tokens line up as a window inside the candidate's tokens, and
- * rank them.
+ * Structural ingredient matching. Given a candidate text (the name area +
+ * comma-tail), find every catalog entry whose tokens line up as a contiguous
+ * window inside the candidate's tokens, and rank them. Name/notes derivation
+ * (the matched span becomes the name, everything outside it becomes notes)
+ * lives in the parser ({@link CandidateToken.coveredCandidateTokens}); this
+ * module is purely structural — NO prep/descriptor word-lists.
  *
- * Design choices (see also the design discussion in chat / docs):
- *   - Tokenise both sides on whitespace + comma + semicolon + slash + dash.
- *     Commas become whitespace for matching purposes — the longest alias
- *     wins regardless of whether the recipe wrote `Paprikapulver,
- *     rosenscharf` or `Paprikapulver rosenscharf`.
- *   - Each entry token matches a candidate token via exact / prefix / suffix
- *     equality. Prefix/suffix is checked in BOTH directions — `et.startsWith
- *     (wt)` as well as `wt.startsWith(et)` — so the matcher works whether
- *     the catalog or the candidate happens to hold the longer form. No
- *     mid-token substring matching: that kept "Ei" out of "Reis" without
- *     giving up German compound-noun matching like "Brot" in "Vollkornbrot".
- *   - The entry's tokens must form a contiguous window in the candidate.
- *     Permutation within the window is allowed (out-of-order is still a
- *     valid match) but loses the in-order ranking bonus.
- *   - Per-token bonus is length-aware: an exact match scores the same as a
- *     "close inflection" (≥75% length overlap, both tokens ≥4 chars), while
- *     a true fragment (Paprika inside Paprikapulver) gets no bonus and stays
- *     below the auto-match threshold. This is the mechanism that lets
- *     "Paprikaschote" and "Paprikaschoten" merge while keeping "Paprika"
- *     from collapsing "Paprikapulver Rosenscharf".
- *   - The +5 anchor bonus only fires when the entry covers the WHOLE
- *     candidate (window length equals candidate length AND starts at
- *     index 0). Without this, a 1-token entry hitting position 0 of a
- *     2-token candidate ("Paprikapulver" inside "Paprikapulver edelsüß")
- *     would earn enough bonus to clear the auto-merge gate and collapse
- *     distinct products into broader catalog entries.
- *   - The candidate is tokenised TWO ways and the matcher runs over both:
- *     once with dashes as a separator (so "Cherry Tomate" can still align
- *     against a 2-token "Cherry-Tomate" entry) and once with dashes between
- *     letters stripped (so "Paprika-Pulver" can match a 1-token
- *     "Paprikapulver" entry). The best score per ingredient survives across
- *     variants; when both variants tie, alias length breaks the tie.
- *   - Scoring is intentionally tiny — easy to reason about, easy to tweak.
- *     The full breakdown is in {@link scoreMatch} / {@link perTokenBonus}.
+ * Design choices:
+ *   - Gate on LOOKUP coverage, not input coverage. Extra INPUT tokens outside
+ *     the matched window are free (the parser turns them into notes), so
+ *     "Salt divided" still matches "Salt". A catalog entry, by contrast, wants
+ *     (near-)full coverage: unmatched entry tokens are penalised −50 each, so
+ *     a fully-covered shorter entry ("Tomate" for "Tomaten") beats a
+ *     partially-covered longer one ("Cherry Tomate", −50). Identity lives in
+ *     the catalog: seed "Cherry Tomate" as its own entry and it wins by token
+ *     count.
+ *   - "Adjacent window": every INPUT token inside the matched window must
+ *     align to a distinct entry token (no interior input gaps), so the name
+ *     span stays clean. "red bell pepper" therefore does NOT cleanly hit
+ *     "red pepper" — seed "bell pepper" as an alias instead.
+ *   - Each entry token matches via exact / prefix / suffix equality, checked
+ *     in BOTH directions, so the catalog or the candidate may hold the longer
+ *     form. No mid-token substring matching ("Ei" stays out of "Reis").
+ *   - Per-token bonus is length-aware: exact or "close inflection" (≥75%
+ *     length overlap, both ≥4 chars) earns +20; a true fragment ("Paprika"
+ *     inside "Paprikapulver") earns 0 and stays below the gate. This is what
+ *     keeps fragment hits from auto-merging while "Paprikaschote" ↔
+ *     "Paprikaschoten" still merge.
+ *   - Post-comma INPUT tokens score 60 instead of 100 — a comma is a soft
+ *     "this is annotation" signal, so a match staying within the pre-comma
+ *     core ("olive oil") outranks one reaching across the comma to a polluted
+ *     "oil divided" entry.
+ *   - The candidate is tokenised TWO ways: the primary split (dashes split,
+ *     so "Cherry-Tomate" aligns against a 2-token "Cherry-Tomate" entry) and
+ *     a join-dashes variant (intra-letter dashes kept in one token, normalised
+ *     away, so "Paprika-Pulver" aligns against closed "Paprikapulver" while
+ *     keeping the user's dash in the display name). Best score per ingredient
+ *     survives; ties break on alias length.
+ *   - Scoring is intentionally tiny — see {@link scoreMatch} /
+ *     {@link perTokenBonus}.
  */
 
 import { normalizeForMatch } from "./ingredient.ts";
