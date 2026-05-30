@@ -1,3 +1,20 @@
+import { asc, eq } from "drizzle-orm";
+import { db } from "@/db";
+import {
+  ingredient,
+  ingredientSubUnit,
+  recipe,
+  recipeIngredient,
+  recipeSection,
+  unit,
+} from "@/db/schema";
+import {
+  buildIngredientCatalog,
+  buildIngredientLookup,
+  buildSubUnitLookup,
+  buildUnitLookup,
+  parseIngredientLines,
+} from "@/lib/recipe-import";
 import type { ParsedIngredientResponse } from "@/components/recipes/types";
 
 /**
@@ -107,4 +124,121 @@ export function groupContiguousByRawLine<
     groups.push(group);
   }
   return groups;
+}
+
+/** Compact read-only summary of a current row for the review UI. */
+export type ScanRowSummary = {
+  name: string;
+  canonicalName: string | null;
+  quantity: number | null;
+  unitLabel: string | null;
+  notes: string | null;
+  isOptional: boolean;
+  isAlternative: boolean;
+};
+
+/** One changed source-line group within a recipe. */
+export type ReparseScanEntry = {
+  recipeId: number;
+  title: string;
+  sectionId: number;
+  rawLine: string;
+  /** recipe_ingredient ids of the current group — the apply target. */
+  currentRowIds: number[];
+  current: ScanRowSummary[];
+  proposed: ParsedIngredientResponse[];
+};
+
+/**
+ * Scan every recipe. For each contiguous source-line group, re-parse the line
+ * with the current parser and keep only groups whose output differs from the
+ * stored rows. One DB read for all ingredient rows; parsing is in-process.
+ */
+export function scanAllRecipesForReparse(): ReparseScanEntry[] {
+  const lookups = {
+    units: buildUnitLookup(),
+    ingredients: buildIngredientLookup(),
+    ingredientCatalog: buildIngredientCatalog(),
+    subUnits: buildSubUnitLookup(),
+  };
+  const rows = db
+    .select({
+      recipeId: recipe.id,
+      title: recipe.title,
+      sectionId: recipeSection.id,
+      sectionSort: recipeSection.sortOrder,
+      id: recipeIngredient.id,
+      sortOrder: recipeIngredient.sortOrder,
+      ingredientId: recipeIngredient.ingredientId,
+      name: recipeIngredient.displayName,
+      canonicalName: ingredient.name,
+      quantity: recipeIngredient.quantity,
+      unitId: recipeIngredient.unitId,
+      unitName: unit.name,
+      subUnitId: recipeIngredient.subUnitId,
+      subUnitName: ingredientSubUnit.name,
+      notes: recipeIngredient.notes,
+      isOptional: recipeIngredient.isOptional,
+      alternativeForId: recipeIngredient.alternativeForId,
+      rawLine: recipeIngredient.rawLine,
+    })
+    .from(recipeIngredient)
+    .innerJoin(recipeSection, eq(recipeSection.id, recipeIngredient.sectionId))
+    .innerJoin(recipe, eq(recipe.id, recipeSection.recipeId))
+    .leftJoin(ingredient, eq(ingredient.id, recipeIngredient.ingredientId))
+    .leftJoin(unit, eq(unit.id, recipeIngredient.unitId))
+    .leftJoin(
+      ingredientSubUnit,
+      eq(ingredientSubUnit.id, recipeIngredient.subUnitId),
+    )
+    .orderBy(
+      asc(recipe.id),
+      asc(recipeSection.sortOrder),
+      asc(recipeSection.id),
+      asc(recipeIngredient.sortOrder),
+    )
+    .all();
+
+  const entries: ReparseScanEntry[] = [];
+  for (const group of groupContiguousByRawLine(rows)) {
+    const head = group[0];
+    const rawLine = (head.rawLine ?? "").trim();
+    const current: CurrentRow[] = group.map((g) => ({
+      id: g.id,
+      ingredientId: g.ingredientId,
+      name: g.name ?? "",
+      quantity: g.quantity,
+      unitId: g.unitId,
+      subUnitId: g.subUnitId,
+      notes: g.notes,
+      isOptional: g.isOptional,
+      alternativeForId: g.alternativeForId,
+    }));
+    const proposed = parseIngredientLines(
+      [rawLine],
+      lookups,
+    ) as unknown as ParsedIngredientResponse[];
+    // A line that now reads as noise (no rows) shouldn't propose deleting a
+    // real ingredient — skip it (mirrors the per-row re-parse guard).
+    if (proposed.length === 0) continue;
+    if (!isLineGroupChanged(current, proposed)) continue;
+    entries.push({
+      recipeId: head.recipeId,
+      title: head.title,
+      sectionId: head.sectionId,
+      rawLine,
+      currentRowIds: group.map((g) => g.id),
+      current: group.map((g) => ({
+        name: g.name ?? "",
+        canonicalName: g.canonicalName ?? null,
+        quantity: g.quantity,
+        unitLabel: g.subUnitName ?? g.unitName ?? null,
+        notes: g.notes,
+        isOptional: g.isOptional,
+        isAlternative: g.alternativeForId != null,
+      })),
+      proposed,
+    });
+  }
+  return entries;
 }
