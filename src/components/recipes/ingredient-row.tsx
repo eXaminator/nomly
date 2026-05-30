@@ -31,7 +31,7 @@ import {
 } from "@/components/ui/select-search";
 import { cn } from "@/lib/cn";
 import { IngredientNameInput } from "./ingredient-name-input";
-import type { DraftIngredient, ImportAnnotation } from "./types";
+import { liveMatchQuery, type DraftIngredient, type ImportAnnotation } from "./types";
 import { ForceMatchPopover } from "./force-match-popover";
 
 /**
@@ -264,17 +264,15 @@ export function IngredientRow({
       return [];
     },
   );
-  // Text the live matcher runs against. Seeded from the ORIGINAL source line
-  // (`rawText`) so the candidate pills are computed from the full context
-  // (quantity, size, comma-tail — "1 medium tomato, diced" keeps "medium").
+  // Text the live matcher runs against — see {@link liveMatchQuery} for how a
+  // row's query is chosen (primary: full source line for context; alternative:
+  // its own fragment, so it doesn't inherit the primary's candidates).
   // It stays fixed when the user clicks between pills (a pill click only
   // changes name/notes, never this query), so the pills don't drift or drop
   // notes. It updates ONLY when the user types in the name field — that's the
   // signal they're redefining the ingredient, so the matcher follows the
   // typed text from then on.
-  const [matchText, setMatchText] = React.useState(
-    () => value.rawText ?? value.name,
-  );
+  const [matchText, setMatchText] = React.useState(() => liveMatchQuery(value));
   const onChangeRef = React.useRef(onChange);
   const valueRef = React.useRef(value);
   React.useEffect(() => {

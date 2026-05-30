@@ -119,6 +119,31 @@ export type DraftIngredient = {
   pinnedByUser?: boolean;
 };
 
+/**
+ * The text the live ingredient matcher (`/api/v1/ingredients/match`) should
+ * run against for a row.
+ *
+ * Primary rows query their full source line (`rawText`) so the matcher sees
+ * the whole context — quantity, size, comma-tail ("1 medium tomato, diced"
+ * keeps "medium" out of the name). Alternative rows must NOT: their `rawText`
+ * is the entire "X or Y" line they were split from, and `/match` only returns
+ * the FIRST parsed row's candidates. Querying that full line surfaces the
+ * PRIMARY's matches, so the alternative's own ingredient falls out of the pill
+ * list — the UI then pins it via the bare-canonical fallback, dropping the
+ * matched alias (e.g. "Hähnchenkeule" instead of "Hähnchenkeule (drumstick)").
+ * Query the alternative's own fragment instead: its original source span,
+ * falling back to its display name.
+ */
+export function liveMatchQuery(
+  value: Pick<
+    DraftIngredient,
+    "isAlternative" | "rawText" | "name" | "originalName"
+  >,
+): string {
+  if (value.isAlternative) return value.originalName ?? value.name;
+  return value.rawText ?? value.name;
+}
+
 export type DraftSection = {
   uid: string;
   title: string;
