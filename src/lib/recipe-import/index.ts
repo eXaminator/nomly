@@ -31,6 +31,7 @@ import {
 import {
   findIngredientCandidates,
   MIN_AUTO_MATCH_SCORE,
+  tokenizeCandidate,
   type CandidateToken,
   type IngredientCandidateMatch,
   type IngredientCatalog,
@@ -648,38 +649,63 @@ function computeNameAndNotes(
     name += sep + candidate[k].raw;
   }
   name = name.replace(/\s+/g, " ").trim();
-  // Notes are assembled in SOURCE order:
-  //   1. name-area descriptors BEFORE the matched span (e.g. "dry" in "dry
-  //      red wine") — these live in the name area, not in parsed.notes.
-  //   2. name-area descriptors AFTER the span (e.g. "divided" in "salt
-  //      divided", "in a can" in "frozen chick peas in a can").
-  //   3. `baseNotes` = parsed.notes (comma-tail + parens/size/range, already
-  //      in source order) MINUS only the comma-tail tokens the match folded
-  //      into the name. Uncovered comma-tail content keeps its place.
-  // Only NAME-AREA tokens (pre-comma) are pulled from the candidate here;
-  // comma-tail tokens already live in parsed.notes, so we never re-add them.
+  // Reassemble notes in SOURCE order:
+  //   leadingNotes (range/size, front)
+  //   → the name area walked left-to-right, emitting the descriptor runs the
+  //     match DIDN'T take and the in-line paren notes at their recorded
+  //     position (so "…peanut butter-no sugar added (crunchy…) see notes" →
+  //     "no sugar added, crunchy…, see notes")
+  //   → post-comma notes (comma-tail + later parens), minus any comma-tail the
+  //     match folded into the name
+  //   → trailingNotes (hoisted brackets / "to taste")
   const covered = new Set(coveredCandidateTokens);
-  const beforeNote = candidate
-    .filter((t, i) => !t.postComma && i < lo)
-    .map((t) => t.raw)
-    .join(" ")
-    .trim();
-  const afterNote = candidate
-    .filter((t, i) => !t.postComma && i > hi)
-    .map((t) => t.raw)
-    .join(" ")
-    .trim();
+  const preCommaCount = candidate.filter((t) => !t.postComma).length;
+  // In-line paren notes grouped by their (clamped) name-token position.
+  const notesAtPos = new Map<number, string[]>();
+  for (const n of parsed.nameAreaNotes) {
+    // Re-tokenise the recorded name prefix the SAME way as the match
+    // candidate so the position lands in candidate-token space (the parser
+    // and the matcher split dashes differently).
+    const pos = Math.min(tokenizeCandidate(n.afterText).length, preCommaCount);
+    const list = notesAtPos.get(pos) ?? [];
+    list.push(n.text);
+    notesAtPos.set(pos, list);
+  }
+  const nameAreaFragments: string[] = [];
+  let buffer: string[] = [];
+  const flush = () => {
+    const run = buffer.join(" ").trim();
+    if (run.length > 0) nameAreaFragments.push(run);
+    buffer = [];
+  };
+  for (let j = 0; j <= preCommaCount; j++) {
+    const atPos = notesAtPos.get(j);
+    if (atPos) {
+      flush();
+      for (const t of atPos) nameAreaFragments.push(t);
+    }
+    if (j === preCommaCount) break;
+    if (covered.has(j)) flush();
+    else buffer.push(candidate[j].raw);
+  }
+  flush();
+  // Comma-tail tokens the match folded into the name → drop from postComma.
   const coveredCommaTail = candidate
     .filter((t, i) => t.postComma && covered.has(i))
     .map((t) => t.raw)
     .join(" ")
     .trim();
-  const baseNotes =
+  const postComma =
     coveredCommaTail.length > 0
-      ? subtractCommaTail(parsed.notes, coveredCommaTail)
-      : parsed.notes;
+      ? subtractCommaTail(parsed.postCommaNotes, coveredCommaTail)
+      : parsed.postCommaNotes;
   const notes =
-    [beforeNote, afterNote, baseNotes ?? ""]
+    [
+      ...parsed.leadingNotes,
+      ...nameAreaFragments,
+      postComma ?? "",
+      ...parsed.trailingNotes,
+    ]
       .map((s) => s.trim())
       .filter((s) => s.length > 0)
       .join(", ") || null;

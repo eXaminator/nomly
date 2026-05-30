@@ -69,7 +69,7 @@ const parse = (raw: string) => parseIngredientString(raw, TEST_UNITS);
 
 describe("parseIngredientString", () => {
   it("splits qty + unit + name", () => {
-    expect(parse("500 g Hackfleisch")).toEqual({
+    expect(parse("500 g Hackfleisch")).toMatchObject({
       quantity: 500,
       unitName: "g",
       name: "Hackfleisch",
@@ -80,7 +80,7 @@ describe("parseIngredientString", () => {
     });
   });
   it("separates notes after a comma", () => {
-    expect(parse("200 g Speck, gewürfelt")).toEqual({
+    expect(parse("200 g Speck, gewürfelt")).toMatchObject({
       quantity: 200,
       unitName: "g",
       name: "Speck",
@@ -91,7 +91,7 @@ describe("parseIngredientString", () => {
     });
   });
   it("handles German decimals", () => {
-    expect(parse("0,5 l Sahne")).toEqual({
+    expect(parse("0,5 l Sahne")).toMatchObject({
       quantity: 0.5,
       unitName: "l",
       name: "Sahne",
@@ -109,7 +109,7 @@ describe("parseIngredientString", () => {
     expect(r.name).toBe("Mehl");
   });
   it("handles unicode fraction glyphs", () => {
-    expect(parse("½ TL Salz")).toEqual({
+    expect(parse("½ TL Salz")).toMatchObject({
       quantity: 0.5,
       unitName: "TL",
       name: "Salz",
@@ -120,7 +120,7 @@ describe("parseIngredientString", () => {
     });
   });
   it("strips leading 'ca.'", () => {
-    expect(parse("ca. 300 ml Brühe")).toEqual({
+    expect(parse("ca. 300 ml Brühe")).toMatchObject({
       quantity: 300,
       unitName: "ml",
       name: "Brühe",
@@ -131,7 +131,7 @@ describe("parseIngredientString", () => {
     });
   });
   it("uses the max of a range and records the range in notes", () => {
-    expect(parse("100-200 g Käse")).toEqual({
+    expect(parse("100-200 g Käse")).toMatchObject({
       quantity: 200,
       unitName: "g",
       name: "Käse",
@@ -156,7 +156,7 @@ describe("parseIngredientString", () => {
     expect(r.notes).toMatch(/1-1,5/);
   });
   it("leaves unitless ingredients alone", () => {
-    expect(parse("3 Eier")).toEqual({
+    expect(parse("3 Eier")).toMatchObject({
       quantity: 3,
       unitName: null,
       name: "Eier",
@@ -167,7 +167,7 @@ describe("parseIngredientString", () => {
     });
   });
   it("treats 'nach Geschmack' as a note", () => {
-    expect(parse("Salz nach Geschmack")).toEqual({
+    expect(parse("Salz nach Geschmack")).toMatchObject({
       quantity: null,
       unitName: null,
       name: "Salz",
@@ -178,7 +178,7 @@ describe("parseIngredientString", () => {
     });
   });
   it("accepts a DB-added alias like 'Pck.' without parser changes", () => {
-    expect(parse("1 Pck. Blätterteig")).toEqual({
+    expect(parse("1 Pck. Blätterteig")).toMatchObject({
       quantity: 1,
       unitName: "Pck",
       name: "Blätterteig",

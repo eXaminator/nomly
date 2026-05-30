@@ -55,6 +55,30 @@ export type ParsedIngredient = {
    *   - else: use this alternative
    */
   altWithPrepStripped: { name: string; notes: string | null } | null;
+  /**
+   * Note fragments split out so the matched path can reassemble notes in the
+   * SOURCE order of the original line:
+   *   - `leadingNotes`: range / size / secondary-amount notes that sit with
+   *     the quantity at the front ("2-3", "groß").
+   *   - `nameAreaNotes`: parenthetical notes that appeared INSIDE the name
+   *     area, each tagged with `afterText` = the name-area prefix that
+   *     preceded it ("…peanut butter-no sugar added (crunchy…)" →
+   *     { afterText: "…peanut butter-no sugar added", text: "crunchy…" }).
+   *     Stored as text (not a token index) so the matched path can re-tokenise
+   *     it the SAME way as the match candidate — the parser and the matcher
+   *     split dashes differently, so a raw index would drift.
+   *   - `postCommaNotes`: notes after the first top-level comma (the
+   *     comma-tail + any parens/usage after it), already in source order.
+   *   - `trailingNotes`: notes hoisted out of position by preprocess
+   *     (brackets, "to taste", optional-parens) — appended last.
+   *   - `nameTokenCount`: number of tokens in the final name area, so the
+   *     matcher's covered indices can be mapped back to name positions.
+   */
+  leadingNotes: string[];
+  nameAreaNotes: { afterText: string; text: string }[];
+  postCommaNotes: string;
+  trailingNotes: string[];
+  nameTokenCount: number;
 };
 
 /**
@@ -827,6 +851,11 @@ export function parseIngredientString(
       notes,
       isOptional,
       altWithPrepStripped: null,
+      leadingNotes: [],
+      nameAreaNotes: [],
+      postCommaNotes: "",
+      trailingNotes: [...capturedNotes],
+      nameTokenCount: 0,
     };
   }
   const tokens = tokenize(cleaned);
@@ -975,17 +1004,26 @@ export function parseIngredientString(
   // "Paprikapulver rosenscharf" alias hit — without also grabbing
   // parens-captured or USAGE_PREFIX content.
   const commaTailTokens: string[] = [];
+  // Parens that appear INSIDE the name area (before any top-level comma) are
+  // recorded positionally so the matched path can slot them back between the
+  // right name tokens. Parens after the comma stay in `noteTokens`.
+  const nameAreaNotes: { afterText: string; text: string }[] = [];
+  let parenBuf: string[] = [];
+  let parenInNameArea = false;
   let inNotes = false;
   let inCommaTail = false;
   let parenDepth = 0;
   for (const t of tokens) {
     if (t === "(") {
-      // When the parens block follows a non-empty stretch of notes,
-      // emit a comma so the reader sees them as separate phrases:
-      //   "Paprikaschote, rote (fein gehackt)" → notes "rote, fein gehackt"
-      // instead of "rote fein gehackt".
-      if (parenDepth === 0 && inNotes && noteTokens.length > 0) {
-        noteTokens.push(",");
+      if (parenDepth === 0) {
+        parenInNameArea = !inNotes;
+        // When the parens block follows a non-empty stretch of notes,
+        // emit a comma so the reader sees them as separate phrases:
+        //   "Paprikaschote, rote (fein gehackt)" → notes "rote, fein gehackt"
+        // instead of "rote fein gehackt".
+        if (!parenInNameArea && inNotes && noteTokens.length > 0) {
+          noteTokens.push(",");
+        }
       }
       parenDepth += 1;
       // Entering a parens block ends any active comma-tail run.
@@ -994,10 +1032,27 @@ export function parseIngredientString(
     }
     if (t === ")") {
       parenDepth = Math.max(0, parenDepth - 1);
+      if (parenDepth === 0 && parenInNameArea) {
+        const txt = parenBuf
+          .join(" ")
+          .replace(/[()]/g, "")
+          .replace(/\s+/g, " ")
+          // Tidy spaces around an internal comma/semicolon ("Rolle , TK" →
+          // "Rolle, TK"), matching the noteBody normalization.
+          .replace(/\s*([,;])\s*/g, "$1 ")
+          .replace(/^[\s,;]+|[\s,;]+$/g, "")
+          .trim();
+        if (txt.length > 0) {
+          nameAreaNotes.push({ afterText: nameTokens.join(" "), text: txt });
+        }
+        parenBuf = [];
+        parenInNameArea = false;
+      }
       continue;
     }
     if (parenDepth > 0) {
-      noteTokens.push(t);
+      if (parenInNameArea) parenBuf.push(t);
+      else noteTokens.push(t);
       continue;
     }
     const lower = t.toLowerCase();
@@ -1162,13 +1217,27 @@ export function parseIngredientString(
       .replace(/^[\s,;]+|[\s,;]+$/g, "")
       .trim();
   const sizeNote = sizeModifiers.join(" ").trim();
-  // Order fragments by where they sit in the source line so notes keep their
-  // relative place: leading quantity/size, then in-line parens/secondary
-  // amounts, then the trailing comma-tail / usage phrase. Each fragment is a
-  // separate comma-separated part. e.g. "1/2 pound (225g) large shrimp,
-  // peeled and deveined" → "large, 225 g, peeled and deveined".
+  // Source-ordered note fragments. `leadingNotes` sit with the quantity at
+  // the front; `nameAreaNotes` are in-line parens at their name-area position;
+  // `noteBody` is the post-comma tail; `capturedNotes` (preprocess-hoisted
+  // brackets / "to taste") trail. The matched path re-interleaves these with
+  // the name-area descriptors the matcher didn't take (see computeNameAndNotes);
+  // here we join them in occurrence order for the new-ingredient / fallback
+  // case. e.g. "1/2 pound (225g) large shrimp, peeled and deveined" →
+  // "large, 225 g, peeled and deveined".
+  const leadingNotes = [sizeNote, ...rangeNotes, ...secondaryAmounts]
+    .map((p) => p.trim())
+    .filter((p) => p.length > 0);
+  const trailingNotes = capturedNotes
+    .map((p) => p.trim())
+    .filter((p) => p.length > 0);
   const notes =
-    [sizeNote, ...rangeNotes, ...secondaryAmounts, ...capturedNotes, noteBody]
+    [
+      ...leadingNotes,
+      ...nameAreaNotes.map((n) => n.text),
+      noteBody,
+      ...trailingNotes,
+    ]
       .map((p) => p.trim())
       .filter((p) => p.length > 0)
       .join(", ") || null;
@@ -1213,6 +1282,7 @@ export function parseIngredientString(
         sizeNote,
         ...rangeNotes,
         ...secondaryAmounts,
+        ...nameAreaNotes.map((n) => n.text),
         stripNote,
         noteBody,
         ...capturedNotes,
@@ -1231,6 +1301,11 @@ export function parseIngredientString(
     notes,
     isOptional,
     altWithPrepStripped,
+    leadingNotes,
+    nameAreaNotes,
+    postCommaNotes: noteBody,
+    trailingNotes,
+    nameTokenCount: nameTokens.length,
   };
 }
 

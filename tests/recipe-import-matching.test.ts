@@ -1157,6 +1157,6 @@ describe("note fragments keep source order, comma-separated", () => {
     );
     expect(out[0].ingredientMatch).toBe("new");
     expect(out[0].name).toBe("shrimp");
-    expect(out[0].notes).toBe("large, 225 g, peeled and deveined");
+    expect(out[0].notes).toBe("225 g, large, peeled and deveined");
   });
 });
