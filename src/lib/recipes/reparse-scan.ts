@@ -102,17 +102,40 @@ export function isLineGroupChanged(
 /**
  * Split rows (already ordered by recipe → section → sortOrder) into the
  * contiguous runs that share a non-empty `rawLine` within the same section.
- * Rows with an empty `rawLine` are dropped (nothing to re-parse). A run breaks
- * on a section change or a different `rawLine`.
+ * A run breaks on a section change or a different `rawLine`.
+ *
+ * A row with an empty `rawLine` that is an alternative (`alternativeForId`
+ * pointing into the run directly above it) is a manually-added alternative —
+ * it carries no source line because the user created it in the editor, not by
+ * parsing text. It's absorbed into its primary's group so the reparse dialog
+ * can show and preserve it. Any other empty-`rawLine` row (no alternative
+ * linkage) is dropped — there's nothing to re-parse.
  */
 export function groupContiguousByRawLine<
-  T extends { sectionId: number; rawLine: string | null },
+  T extends {
+    sectionId: number;
+    rawLine: string | null;
+    id?: number;
+    alternativeForId?: number | null;
+  },
 >(rows: readonly T[]): T[][] {
   const groups: T[][] = [];
   let i = 0;
   while (i < rows.length) {
     const raw = (rows[i].rawLine ?? "").trim();
     if (raw.length === 0) {
+      // Manually-added alternative: attach to the group of the primary it
+      // links to (which sits immediately above it in sort order).
+      const last = groups[groups.length - 1];
+      const altFor = rows[i].alternativeForId;
+      if (
+        last &&
+        altFor != null &&
+        last[0].sectionId === rows[i].sectionId &&
+        last.some((r) => r.id === altFor)
+      ) {
+        last.push(rows[i]);
+      }
       i += 1;
       continue;
     }
@@ -158,6 +181,48 @@ export type ReparseScanEntry = {
   current: ScanRowSummary[];
   proposed: ParsedIngredientResponse[];
 };
+
+/**
+ * Build the `proposed` representation of a manually-added alternative. It has
+ * no source line to re-parse, so it's mirrored straight from its stored row
+ * and carried through the diff/apply unchanged. `rawText` stays undefined so
+ * it re-persists as a manual alternative (empty rawLine) on the next scan,
+ * making the round-trip stable.
+ */
+function carriedAlternativeToProposed(g: {
+  ingredientId: number | null;
+  name: string | null;
+  canonicalName: string | null;
+  quantity: number | null;
+  unitId: number | null;
+  unitName: string | null;
+  displayUnit: string | null;
+  subUnitId: number | null;
+  subUnitName: string | null;
+  notes: string | null;
+}): ParsedIngredientResponse {
+  return {
+    quantity: g.quantity,
+    unit:
+      g.unitId != null
+        ? { id: g.unitId, name: g.displayUnit ?? g.unitName ?? "" }
+        : null,
+    subUnit:
+      g.subUnitId != null
+        ? { id: g.subUnitId, name: g.subUnitName ?? "", perPurchase: 1 }
+        : null,
+    unitMatch: "matched",
+    rawUnit: null,
+    name: g.name ?? "",
+    ingredientId: g.ingredientId,
+    ingredientMatch: g.ingredientId != null ? "existing" : "new",
+    canonicalIngredientName: g.canonicalName ?? null,
+    notes: g.notes,
+    isOptional: true,
+    isAlternative: true,
+    fixedAmount: g.quantity == null,
+  };
+}
 
 /**
  * Scan every recipe. For each contiguous source-line group, re-parse the line
@@ -225,13 +290,30 @@ export function scanAllRecipesForReparse(): ReparseScanEntry[] {
       isOptional: g.isOptional,
       alternativeForId: g.alternativeForId,
     }));
-    const proposed = parseIngredientLines(
+    const proposedDerived = parseIngredientLines(
       [rawLine],
       lookups,
     ) as unknown as ParsedIngredientResponse[];
     // A line that now reads as noise (no rows) shouldn't propose deleting a
     // real ingredient — skip it (mirrors the per-row re-parse guard).
-    if (proposed.length === 0) continue;
+    if (proposedDerived.length === 0) continue;
+    // Manually-added alternatives (absorbed into the group above, empty
+    // rawLine) aren't reproduced by re-parsing the source line, so carry them
+    // through unchanged: append them to BOTH sides. They then match in the
+    // diff (no spurious change) and are re-inserted on apply instead of being
+    // dropped — "preserve across reparse". Skip any whose ingredient the
+    // re-parse now produces on its own (the parser caught up to what the user
+    // added by hand) so we neither duplicate the row nor flag a phantom diff.
+    const derivedIds = new Set(
+      proposedDerived
+        .map((p) => p.ingredientId)
+        .filter((id): id is number => id != null),
+    );
+    const carried = group
+      .filter((g) => (g.rawLine ?? "").trim().length === 0)
+      .filter((g) => g.ingredientId == null || !derivedIds.has(g.ingredientId))
+      .map(carriedAlternativeToProposed);
+    const proposed = [...proposedDerived, ...carried];
     if (!isLineGroupChanged(current, proposed)) continue;
     entries.push({
       recipeId: head.recipeId,

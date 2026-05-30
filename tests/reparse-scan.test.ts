@@ -162,6 +162,27 @@ describe("groupContiguousByRawLine", () => {
     const groups = groupContiguousByRawLine(rows);
     expect(groups.map((g) => g.map((r) => r.id))).toEqual([[10, 11], [13], [14]]);
   });
+
+  it("absorbs a manually-added alternative (empty rawLine, alternativeForId) into its primary's group", () => {
+    const rows = [
+      { sectionId: 1, id: 10, rawLine: "100 ml Gemüsebrühe", alternativeForId: null },
+      // Manually-added alternative of row 10: no source line, links to 10.
+      { sectionId: 1, id: 11, rawLine: "", alternativeForId: 10 },
+      { sectionId: 1, id: 12, rawLine: "1 g Salz", alternativeForId: null },
+    ];
+    const groups = groupContiguousByRawLine(rows);
+    expect(groups.map((g) => g.map((r) => r.id))).toEqual([[10, 11], [12]]);
+  });
+
+  it("drops an empty-rawLine row that is NOT an alternative", () => {
+    const rows = [
+      { sectionId: 1, id: 10, rawLine: "a", alternativeForId: null },
+      { sectionId: 1, id: 11, rawLine: "", alternativeForId: null },
+    ];
+    expect(groupContiguousByRawLine(rows).map((g) => g.map((r) => r.id))).toEqual([
+      [10],
+    ]);
+  });
 });
 
 describe("buildReparsedRecipeInput", () => {

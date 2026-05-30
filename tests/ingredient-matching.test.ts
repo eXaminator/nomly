@@ -306,6 +306,24 @@ describe("bidirectional matching + length-aware bonus", () => {
     expect(matches[0].canonicalName).toBe("Paprikapulver");
     expect(matches[0].score).toBeLessThan(MIN_AUTO_MATCH_SCORE);
   });
+
+  it("a 2-char stopword does not prefix/suffix-match a long entry token", () => {
+    // "to" must NOT suffix-match "risotto" ("risotto".endsWith("to")). Without
+    // the 3-char fragment floor, "rice to" fully covers "risotto rice" (220)
+    // and beats the exact "rice" (130). The floor keeps "rice" the winner.
+    const cat: IngredientCatalog = [
+      { ingredientId: 1, canonicalName: "rice", aliasName: "rice", tokens: ["rice"] },
+      {
+        ingredientId: 2,
+        canonicalName: "risotto rice",
+        aliasName: "risotto rice",
+        tokens: ["risotto", "rice"],
+      },
+    ];
+    expect(
+      findIngredientCandidates("rice to serve", cat).matches[0].ingredientId,
+    ).toBe(1);
+  });
 });
 
 describe("dual tokenisation — dashes between letters", () => {
@@ -564,5 +582,18 @@ describe("a registered alias wins over the canonical it normalizes near", () => 
   it("still leads with the canonical when the input matches it verbatim", () => {
     expect(findIngredientCandidates("Apfel", cat).matches[0].aliasName).toBe("Apfel");
     expect(findIngredientCandidates("Zwiebel", cat).matches[0].aliasName).toBe("Zwiebel");
+  });
+
+  it("keeps the plural alias even when the query carries leading qty/unit tokens", () => {
+    // The live matcher queries the FULL source line, so the ingredient only
+    // covers the last token. The verbatim-alias preference must survive the
+    // un-covered qty/unit extras — otherwise the within-ingredient tie falls
+    // back to the canonical ("Zwiebel" / "Mandel") and drops the plural.
+    expect(
+      findIngredientCandidates("2 Esslöffel Zwiebeln", cat).matches[0].aliasName,
+    ).toBe("Zwiebeln");
+    expect(
+      findIngredientCandidates("200 g Äpfel", cat).matches[0].aliasName,
+    ).toBe("Äpfel");
   });
 });

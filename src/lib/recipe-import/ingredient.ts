@@ -1895,6 +1895,30 @@ function findOrSeparator(
 }
 
 /**
+ * Split a line on EVERY top-level " oder " / " or " / " / " separator into its
+ * segments, recording the connector word that preceded each (null for the
+ * first). Separators inside parens/brackets are skipped (handled by
+ * {@link findOrSeparator}). "A oder B oder C" → [{A,null},{B,oder},{C,oder}].
+ */
+function splitOrChain(
+  text: string,
+): { text: string; connector: string | null }[] {
+  const segments: { text: string; connector: string | null }[] = [];
+  let rest = text;
+  let connector: string | null = null;
+  for (;;) {
+    const sep = findOrSeparator(rest);
+    if (!sep) {
+      segments.push({ text: rest.trim(), connector });
+      return segments;
+    }
+    segments.push({ text: rest.slice(0, sep.index).trim(), connector });
+    connector = sep.word;
+    rest = rest.slice(sep.index + sep.length);
+  }
+}
+
+/**
  * Returns true when `pre` (the text BEFORE an "oder"/"or" separator) carries
  * no head noun of its own — it's a quantity plus bare descriptor(s). In that
  * case the descriptors share the head noun that lives on the POST side, so
@@ -1969,11 +1993,14 @@ export function expandIngredientLine(rawLine: string): ExpandedIngredientRow[] {
   }
 
   // 3. Inline parens alternative. Matches a trailing "(Alternativ: …)".
+  //    The content may itself list several options ("(Alternativ Honig oder
+  //    Zucker)") — split it into one alternative row per item so each gets
+  //    matched/folded on its own.
   const parensAlt = PARENS_ALTERNATIV_RE.exec(body);
   if (parensAlt) {
     const primary = body.slice(0, parensAlt.index).trim();
     const altLeader = parensAlt[1];
-    const altText = parensAlt[2].trim();
+    const altItems = splitColonListItems(parensAlt[2].trim());
     const rows: ExpandedIngredientRow[] = [];
     if (primary.length > 0) {
       rows.push({
@@ -1985,20 +2012,26 @@ export function expandIngredientLine(rawLine: string): ExpandedIngredientRow[] {
         alternativeConnector: null,
       });
     }
-    if (altText.length > 0) {
-      const hasPrimary = primary.length > 0;
+    altItems.forEach((item, idx) => {
+      // With a primary, every parenthetical item is an alternative to it.
+      // Without one, a bare "(Alternativ: X)" emits its first item as a
+      // standalone optional row and any further items as alternatives to it.
+      const isAlt = primary.length > 0 || idx > 0;
       rows.push({
         kind: "ingredient",
-        text: altText,
+        text: item,
         rawText: original,
         forceOptional: true,
-        // Only flag as alternative when there IS a primary; a bare
-        // "(Alternativ: X)" with no preceding text emits a single
-        // standalone optional row.
-        isAlternative: hasPrimary,
-        alternativeConnector: hasPrimary ? `${altLeader}:` : null,
+        isAlternative: isAlt,
+        // The first alternative carries the "Alternativ" leader; further items
+        // (from "A oder B" inside the parens) connect with "oder".
+        alternativeConnector: !isAlt
+          ? null
+          : idx === 0 && primary.length > 0
+            ? `${altLeader}:`
+            : "oder",
       });
-    }
+    });
     return rows;
   }
 
@@ -2012,16 +2045,37 @@ export function expandIngredientLine(rawLine: string): ExpandedIngredientRow[] {
       .map((p) => p.trim())
       .filter((p) => p.length > 0);
     if (parts.length >= 2) {
-      return parts.map((part, idx) => ({
-        kind: "ingredient" as const,
-        text: part,
-        rawText: original,
-        // Primary keeps the baseOptional status from any outer Optional:
-        // wrapper. Alternatives are always optional.
-        forceOptional: baseOptional || idx > 0,
-        isAlternative: idx > 0,
-        alternativeConnector: idx > 0 ? connector : null,
-      }));
+      const rows: ExpandedIngredientRow[] = [];
+      parts.forEach((part, idx) => {
+        if (idx === 0) {
+          // Primary keeps the baseOptional status from any outer Optional:
+          // wrapper.
+          rows.push({
+            kind: "ingredient",
+            text: part,
+            rawText: original,
+            forceOptional: baseOptional,
+            isAlternative: false,
+            alternativeConnector: null,
+          });
+          return;
+        }
+        // Each alternative part may itself list several options
+        // ("alternativ: Honig oder Zucker") — split into one row per item.
+        // Alternatives are always optional; the first item carries the
+        // "alternativ" leader, further "A oder B" items connect with "oder".
+        splitColonListItems(part).forEach((item, itemIdx) => {
+          rows.push({
+            kind: "ingredient",
+            text: item,
+            rawText: original,
+            forceOptional: true,
+            isAlternative: true,
+            alternativeConnector: itemIdx === 0 ? connector : "oder",
+          });
+        });
+      });
+      return rows;
     }
   }
 
@@ -2064,49 +2118,36 @@ export function expandIngredientLine(rawLine: string): ExpandedIngredientRow[] {
   }
 
   // 6. " oder " / " or " / " / " / " o. " inline alternative separator.
-  //    Splits into primary + optional alternative when the post-separator
-  //    part looks like an ingredient (not just a modifier).
+  //    Splits the WHOLE chain into a primary + one optional alternative per
+  //    further option, so "A oder B oder C" emits A primary + B alt + C alt
+  //    (consistent with the parens / "alternativ:" forms above). An option
+  //    the catalog doesn't recognise folds back into the primary's notes
+  //    downstream, so over-splitting prose is self-correcting.
   //
-  //    Guards:
-  //      - pre-sep must not end with "-" (preserves compound stems like
+  //    Guards (checked on the primary — the first segment):
+  //      - must not end with "-" (preserves compound stems like
   //        "Weizen- oder Dinkelmehl" — those are first stitched together
   //        by preprocessAlternatives in the Familywall opt-in).
-  //      - pre-sep must carry its own head noun (preserves "6 dried or
-  //        fresh shiitake mushrooms" — "6 dried" is headless, so "dried"/
-  //        "fresh" share the post's "shiitake mushrooms"). See
+  //      - must carry its own head noun (preserves "6 dried or fresh
+  //        shiitake mushrooms" — "6 dried" is headless, so "dried"/"fresh"
+  //        share the post's "shiitake mushrooms"). See
   //        {@link preIsHeadlessModifier}.
-  //
-  //    Only the FIRST separator is consumed. Chains like
-  //    "A oder B oder C" emit A primary + B alt; the trailing "oder C"
-  //    stays in B's text and is parsed normally.
-  const orSep = findOrSeparator(body);
-  if (orSep) {
-    const pre = body.slice(0, orSep.index).trim();
-    const post = body.slice(orSep.index + orSep.length).trim();
+  if (findOrSeparator(body)) {
+    const segments = splitOrChain(body);
+    const primary = segments[0];
     if (
-      pre.length > 0 &&
-      post.length > 0 &&
-      !pre.endsWith("-") &&
-      !preIsHeadlessModifier(pre)
+      segments.every((s) => s.text.length > 0) &&
+      !primary.text.endsWith("-") &&
+      !preIsHeadlessModifier(primary.text)
     ) {
-      return [
-        {
-          kind: "ingredient" as const,
-          text: pre,
-          rawText: original,
-          forceOptional: baseOptional,
-          isAlternative: false,
-          alternativeConnector: null,
-        },
-        {
-          kind: "ingredient" as const,
-          text: post,
-          rawText: original,
-          forceOptional: true,
-          isAlternative: true,
-          alternativeConnector: orSep.word,
-        },
-      ];
+      return segments.map((seg, idx) => ({
+        kind: "ingredient" as const,
+        text: seg.text,
+        rawText: original,
+        forceOptional: idx === 0 ? baseOptional : true,
+        isAlternative: idx > 0,
+        alternativeConnector: idx > 0 ? seg.connector : null,
+      }));
     }
   }
 

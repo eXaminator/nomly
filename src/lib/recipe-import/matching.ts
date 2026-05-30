@@ -230,13 +230,19 @@ function alignWindowToEntry(
       const et = entryTokens[e];
       let rank = 99;
       let kind: MatchKind | null = null;
+      // Non-exact (prefix/suffix) alignment requires the SHORTER token to be
+      // at least 3 chars. Without this floor a 2-char stopword tail-matches a
+      // long entry token — "to" suffix-matches "risotto", covering the whole
+      // "risotto rice" entry so "rice to serve" mis-resolves to it instead of
+      // plain "rice". Exact matches are exempt (any length).
+      const okFragment = Math.min(wt.length, et.length) >= 3;
       if (wt === et) {
         rank = 0;
         kind = "exact";
-      } else if (wt.startsWith(et) || et.startsWith(wt)) {
+      } else if (okFragment && (wt.startsWith(et) || et.startsWith(wt))) {
         rank = 1;
         kind = "prefix";
-      } else if (wt.endsWith(et) || et.endsWith(wt)) {
+      } else if (okFragment && (wt.endsWith(et) || et.endsWith(wt))) {
         rank = 2;
         kind = "suffix";
       }
@@ -430,12 +436,19 @@ export type FindCandidatesOptions = {
  *   - input "Zwiebeln" keeps alias "Zwiebeln" (not the canonical "Zwiebel",
  *     which only matches as a close-inflection prefix)
  *
- *   2 = full, all-exact coverage AND the alias's raw spelling equals the input
- *   1 = full, all-exact coverage on normalised tokens (diacritics/case folded)
- *   0 = anything less (prefix/suffix/inflection, or the entry left input over)
+ *   2 = all-exact coverage AND the alias's raw spelling equals the matched span
+ *   1 = all-exact coverage on normalised tokens (diacritics/case folded)
+ *   0 = anything less (a prefix/suffix/inflection on any covered token)
+ *
+ * Ranking looks at the COVERED span, not the whole candidate. A live-match
+ * query carries the full source line ("2 Esslöffel Mandeln"); the ingredient
+ * only covers "Mandeln", so requiring full-candidate coverage here would zero
+ * the rank for both the canonical ("Mandel", prefix) and the verbatim alias
+ * ("Mandeln", exact), handing the within-ingredient tie to the canonical and
+ * dropping the plural the user actually typed. The leading qty/unit tokens are
+ * equal for both rows, so they can't decide between them.
  */
 function surfaceMatchRank(m: IngredientCandidateMatch): number {
-  if (m.coveredCandidateTokens.length !== m.candidate.length) return 0;
   if (!m.perTokenKinds.every((k) => k === "exact")) return 0;
   const rawSpan = m.coveredCandidateTokens
     .map((i) => m.candidate[i].raw)

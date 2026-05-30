@@ -661,6 +661,44 @@ describe("colon-in-name treated as section + listed items", () => {
     expect(out[1].isAlternative).toBe(true);
   });
 
+  it("'(Alternativ A oder B)' in parens yields one alternative row per option", () => {
+    const catalog: IngredientCatalog = [
+      { ingredientId: 1, canonicalName: "Ahornsirup", aliasName: "Ahornsirup", tokens: ["ahornsirup"] },
+      { ingredientId: 2, canonicalName: "Honig", aliasName: "Honig", tokens: ["honig"] },
+      { ingredientId: 3, canonicalName: "Zucker", aliasName: "Zucker", tokens: ["zucker"] },
+    ];
+    const out = parseIngredientLines(
+      ["2 EL Ahornsirup (Alternativ Honig oder Zucker)"],
+      makeLookups(catalog, ["EL"]),
+    );
+    expect(out).toHaveLength(3);
+    expect(out[0].ingredientId).toBe(1);
+    expect(out[0].isAlternative).toBe(false);
+    expect(out[1].ingredientId).toBe(2);
+    expect(out[1].isAlternative).toBe(true);
+    expect(out[2].ingredientId).toBe(3);
+    expect(out[2].isAlternative).toBe(true);
+  });
+
+  it("'alternativ: A oder B' separator yields one alternative row per option", () => {
+    const catalog: IngredientCatalog = [
+      { ingredientId: 1, canonicalName: "Tahin", aliasName: "Tahin", tokens: ["tahin"] },
+      { ingredientId: 2, canonicalName: "Honig", aliasName: "Honig", tokens: ["honig"] },
+      { ingredientId: 3, canonicalName: "Zucker", aliasName: "Zucker", tokens: ["zucker"] },
+    ];
+    const out = parseIngredientLines(
+      ["1 g Tahin alternativ: Honig oder Zucker"],
+      makeLookups(catalog),
+    );
+    expect(out).toHaveLength(3);
+    expect(out[0].ingredientId).toBe(1);
+    expect(out[0].isAlternative).toBe(false);
+    expect(out[1].ingredientId).toBe(2);
+    expect(out[1].isAlternative).toBe(true);
+    expect(out[2].ingredientId).toBe(3);
+    expect(out[2].isAlternative).toBe(true);
+  });
+
   it("'(alternativ X)' in parens WITHOUT a colon still adds X as an optional alternative", () => {
     const catalog: IngredientCatalog = [
       { ingredientId: 20, canonicalName: "Honig", aliasName: "Honig", tokens: ["honig"] },
@@ -781,6 +819,21 @@ describe("colon-in-name treated as section + listed items", () => {
       expect(out[1].isAlternative, raw).toBe(true);
       expect(out[1].isOptional, raw).toBe(true);
     }
+  });
+
+  it("'or'/'oder' splits the WHOLE chain into one alternative per option", () => {
+    const catalog: IngredientCatalog = [
+      { ingredientId: 1, canonicalName: "Zucker", aliasName: "Zucker", tokens: ["zucker"] },
+      { ingredientId: 2, canonicalName: "Honig", aliasName: "Honig", tokens: ["honig"] },
+      { ingredientId: 3, canonicalName: "Sirup", aliasName: "Sirup", tokens: ["sirup"] },
+    ];
+    const out = parseIngredientLines(
+      ["1 g Zucker oder Honig oder Sirup"],
+      makeLookups(catalog),
+    );
+    expect(out).toHaveLength(3);
+    expect(out.map((o) => o.name)).toEqual(["Zucker", "Honig", "Sirup"]);
+    expect(out.map((o) => o.isAlternative)).toEqual([false, true, true]);
   });
 
   it("'or'/'oder' does NOT split when post-separator starts with a descriptor (modifier, not alternative)", () => {
