@@ -611,7 +611,16 @@ function preprocess(raw: string): {
     return " ";
   });
 
-  // Capture and strip case-insensitive "to taste" / "nach Geschmack" phrases.
+  // Capture and strip case-insensitive "to taste" / "nach Geschmack" phrases —
+  // but ONLY when they're not inside a parenthetical. "(more or less to taste)"
+  // should stay one verbatim note ("more or less to taste"), handled by the
+  // inline parens path, not split into "to taste" + "more or less". Mask
+  // paren spans before the scan and restore them after.
+  const protectedParens: string[] = [];
+  text = text.replace(/\([^()]*\)/g, (m) => {
+    protectedParens.push(m);
+    return `${protectedParens.length - 1}`;
+  });
   for (const phrase of TO_TASTE_PHRASES) {
     const re = new RegExp(
       `(?:[-–—,]\\s*)?\\b${escapeRegExp(phrase)}\\b`,
@@ -621,6 +630,12 @@ function preprocess(raw: string): {
       capturedNotes.push(phrase);
       text = text.replace(re, " ");
     }
+  }
+  if (protectedParens.length > 0) {
+    text = text.replace(
+      /(\d+)/g,
+      (_, i: string) => protectedParens[Number(i)],
+    );
   }
 
   // Drop stray "*" anywhere (often used as a formatting marker by recipe

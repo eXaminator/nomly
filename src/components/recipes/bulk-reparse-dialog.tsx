@@ -356,6 +356,7 @@ export function BulkReparseDialog({
                                               notes={c.notes}
                                               isOptional={c.isOptional}
                                               isAlternative={c.isAlternative}
+                                              mappingLabel={c.canonicalName}
                                             />
                                           ))}
                                         </div>
@@ -378,6 +379,13 @@ export function BulkReparseDialog({
                                               isOptional={d.isOptional}
                                               isAlternative={d.isAlternative}
                                               fixedAmount={d.fixedAmount}
+                                              mappingLabel={
+                                                d.unassigned
+                                                  ? "nicht zugeordnet"
+                                                  : d.selectedIngredientId == null
+                                                    ? "neu"
+                                                    : d.canonicalName ?? d.name
+                                              }
                                             />
                                           ))}
                                         </div>

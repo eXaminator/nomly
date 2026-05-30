@@ -20,6 +20,10 @@ export type ReadLineProps = {
   isOptional: boolean;
   isAlternative: boolean;
   fixedAmount?: boolean;
+  /** When provided, render an explicit "→ <ingredient>" mapping chip after the
+   *  line so the resolved catalog ingredient is visible (used by the bulk
+   *  re-parse diff to confirm the mapping). Omit for the plain read view. */
+  mappingLabel?: string | null;
 };
 
 /**
@@ -39,6 +43,7 @@ export function RecipeIngredientReadLine({
   isOptional,
   isAlternative,
   fixedAmount = false,
+  mappingLabel,
 }: ReadLineProps) {
   return (
     <div
@@ -70,6 +75,11 @@ export function RecipeIngredientReadLine({
         {!isAlternative && isOptional ? (
           <span className="ml-1 text-xs text-[var(--color-muted-fg)]">
             (optional)
+          </span>
+        ) : null}
+        {mappingLabel !== undefined ? (
+          <span className="ml-1 whitespace-nowrap rounded-full bg-[var(--color-muted)] px-1.5 py-0.5 align-middle text-xs not-italic text-[var(--color-muted-fg)]">
+            → {mappingLabel ?? "nicht zugeordnet"}
           </span>
         ) : null}
       </span>

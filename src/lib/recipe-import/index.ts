@@ -648,24 +648,38 @@ function computeNameAndNotes(
     name += sep + candidate[k].raw;
   }
   name = name.replace(/\s+/g, " ").trim();
-  const before = candidate
-    .slice(0, lo)
+  // Notes are assembled in SOURCE order:
+  //   1. name-area descriptors BEFORE the matched span (e.g. "dry" in "dry
+  //      red wine") — these live in the name area, not in parsed.notes.
+  //   2. name-area descriptors AFTER the span (e.g. "divided" in "salt
+  //      divided", "in a can" in "frozen chick peas in a can").
+  //   3. `baseNotes` = parsed.notes (comma-tail + parens/size/range, already
+  //      in source order) MINUS only the comma-tail tokens the match folded
+  //      into the name. Uncovered comma-tail content keeps its place.
+  // Only NAME-AREA tokens (pre-comma) are pulled from the candidate here;
+  // comma-tail tokens already live in parsed.notes, so we never re-add them.
+  const covered = new Set(coveredCandidateTokens);
+  const beforeNote = candidate
+    .filter((t, i) => !t.postComma && i < lo)
     .map((t) => t.raw)
     .join(" ")
     .trim();
-  const after = candidate
-    .slice(hi + 1)
+  const afterNote = candidate
+    .filter((t, i) => !t.postComma && i > hi)
     .map((t) => t.raw)
     .join(" ")
     .trim();
-  // `baseNotes` holds the parser's pre-extracted fragments (range, size,
-  // secondary amounts, parens) — these originate at/before the name in the
-  // source, so they lead. Then the span's leftover tokens in source order:
-  // `before` (descriptors ahead of the matched name) then `after`. Every
-  // fragment is comma-separated.
-  const baseNotes = subtractCommaTail(parsed.notes, parsed.commaTailText);
+  const coveredCommaTail = candidate
+    .filter((t, i) => t.postComma && covered.has(i))
+    .map((t) => t.raw)
+    .join(" ")
+    .trim();
+  const baseNotes =
+    coveredCommaTail.length > 0
+      ? subtractCommaTail(parsed.notes, coveredCommaTail)
+      : parsed.notes;
   const notes =
-    [baseNotes ?? "", before, after]
+    [beforeNote, afterNote, baseNotes ?? ""]
       .map((s) => s.trim())
       .filter((s) => s.length > 0)
       .join(", ") || null;
