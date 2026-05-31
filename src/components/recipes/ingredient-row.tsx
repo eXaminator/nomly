@@ -76,24 +76,6 @@ async function loadDefaultUnits(): Promise<SelectSearchItem[]> {
   return searchUnits("");
 }
 
-type SubUnitOption = { id: number; name: string };
-
-async function loadIngredientSubUnits(name: string): Promise<SubUnitOption[]> {
-  const trimmed = name.trim();
-  if (trimmed.length === 0) return [];
-  const r = await fetch("/api/v1/ingredients/sub-units", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ name: trimmed }),
-  });
-  if (!r.ok) return [];
-  const data = (await r.json()) as {
-    ingredientId: number | null;
-    subUnits: SubUnitOption[];
-  };
-  return data.subUnits;
-}
-
 /**
  * Server-side candidate match. Already sorted by `score desc → matchedName
  * length desc → alphabetical` — the UI renders pills in this order without
@@ -113,20 +95,6 @@ export type ServerMatch = {
    *  resolution to equipment — matching the import-time behavior. */
   isEquipment: boolean;
 };
-
-/**
- * Synthetic id used inside the unit picker so global units and ingredient
- * sub-units can share `SelectSearchItem.id: number`. Positive ids are
- * global unit row ids (unit.id is always > 0); negative ids encode a
- * sub-unit by `-(subUnit.id)`. Sub-unit row ids are always > 0 too, so the
- * sign uniquely distinguishes the kinds without a separate field.
- */
-function subUnitPickerId(subUnitId: number): number {
-  return -subUnitId;
-}
-function isSubUnitPickerId(id: number): boolean {
-  return id < 0;
-}
 
 type Props = {
   value: DraftIngredient;
@@ -184,32 +152,7 @@ export function IngredientRow({
     null,
   );
 
-  // Whenever the ingredient name settles (canonicalName is set OR the typed
-  // name matches an existing row), fetch that ingredient's sub-units. They
-  // are merged into the unit picker via `searchUnitsAndSubUnits` below so
-  // the user can pick Zehe / Zweig / … like any other unit. Debounced so
-  // each keystroke doesn't fire a network round-trip.
   const [reparsing, setReparsing] = React.useState(false);
-  const [subUnitOptions, setSubUnitOptions] = React.useState<SubUnitOption[]>([]);
-  const subUnitNameRef = React.useRef<string>("");
-  React.useEffect(() => {
-    const name = value.canonicalName ?? value.name;
-    if (name === subUnitNameRef.current) return;
-    subUnitNameRef.current = name;
-    const handle = window.setTimeout(() => {
-      void loadIngredientSubUnits(name).then((opts) => {
-        if (subUnitNameRef.current === name) setSubUnitOptions(opts);
-      });
-    }, 200);
-    return () => window.clearTimeout(handle);
-  }, [value.name, value.canonicalName]);
-
-  // Stable ref so the picker's `search` callback can read the freshest
-  // sub-unit list without forcing the SelectSearch effect to re-fire.
-  const subUnitOptionsRef = React.useRef(subUnitOptions);
-  React.useEffect(() => {
-    subUnitOptionsRef.current = subUnitOptions;
-  });
 
   // Live candidate matches for the typed text. Debounced + abortable so a
   // slow response from "tom" can't overwrite the result for "tomatoes".
@@ -368,63 +311,14 @@ export function IngredientRow({
     };
   }, [matchText]);
 
-  /** Combined picker: ingredient's sub-units first (when present), then
-   *  global units matching the query. Sub-units get negative synthetic ids;
-   *  the onChange handler decodes them. */
-  const searchUnitsAndSubUnits = React.useCallback(
-    async (q: string): Promise<SelectSearchItem[]> => {
-      const lower = q.trim().toLowerCase();
-      const subItems: SelectSearchItem[] = subUnitOptionsRef.current
-        .filter(
-          (s) => lower.length === 0 || s.name.toLowerCase().includes(lower),
-        )
-        .map((s) => ({ id: subUnitPickerId(s.id), name: s.name }));
-      const globalUnits = await searchUnits(q);
-      return [...subItems, ...globalUnits];
-    },
-    [],
-  );
-
-  /** Build the items shown in the picker before the user starts typing.
-   *  Sub-units always lead so a freshly-resolved ingredient (Knoblauch,
-   *  Petersilie, …) surfaces "Zehe" / "Zweig" right away. */
-  const defaultItemsCombined = React.useMemo<SelectSearchItem[]>(() => {
-    const subItems = subUnitOptions.map((s) => ({
-      id: subUnitPickerId(s.id),
-      name: s.name,
-    }));
-    return [...subItems, ...defaultUnits];
-  }, [defaultUnits, subUnitOptions]);
-
-  /** Whichever side (unit / sub-unit) is currently set becomes the picker's
-   *  selected value. */
-  const pickerValue: SelectSearchItem | null = value.subUnit
-    ? { id: subUnitPickerId(value.subUnit.id), name: value.subUnit.name }
-    : value.unit;
+  /** Global-unit picker. Former ingredient sub-units are now global units, so
+   *  they surface here like any other unit. */
+  const pickerValue: SelectSearchItem | null = value.unit;
 
   function onPickUnit(picked: SelectSearchItem | null) {
-    if (!picked) {
-      onChange({
-        ...value,
-        unit: null,
-        subUnit: null,
-        importAnnotation: clearAnnotationOn(value.importAnnotation, "unit"),
-      });
-      return;
-    }
-    if (isSubUnitPickerId(picked.id)) {
-      onChange({
-        ...value,
-        unit: null,
-        subUnit: { id: -picked.id, name: picked.name },
-        importAnnotation: clearAnnotationOn(value.importAnnotation, "unit"),
-      });
-      return;
-    }
     onChange({
       ...value,
-      unit: { id: picked.id, name: picked.name },
-      subUnit: null,
+      unit: picked ? { id: picked.id, name: picked.name } : null,
       importAnnotation: clearAnnotationOn(value.importAnnotation, "unit"),
     });
   }
@@ -520,14 +414,13 @@ export function IngredientRow({
 
   /** Click on the synthetic "Nicht zugeordnet" pill: row becomes free text
    *  not linked to any article. Clears the ingredient link, the canonical
-   *  badge, any sub-unit (article-scoped) and force-match alias intent. */
+   *  badge and force-match alias intent. */
   function selectUnassigned() {
     onChange({
       ...value,
       selectedIngredientId: null,
       canonicalName: null,
       originalName: undefined,
-      subUnit: null,
       addAsAlias: false,
       unassigned: true,
       importAnnotation: clearAnnotationOn(value.importAnnotation, "ingredient"),
@@ -664,8 +557,8 @@ export function IngredientRow({
           <SelectSearch
             value={pickerValue}
             onChange={onPickUnit}
-            search={searchUnitsAndSubUnits}
-            defaultItems={defaultItemsCombined}
+            search={searchUnits}
+            defaultItems={defaultUnits}
             placeholder="Einheit"
             onCreate={createUnit}
             createLabelPrefix="als Einheit anlegen"
@@ -821,8 +714,8 @@ export function IngredientRow({
         <SelectSearch
           value={pickerValue}
           onChange={onPickUnit}
-          search={searchUnitsAndSubUnits}
-          defaultItems={defaultItemsCombined}
+          search={searchUnits}
+          defaultItems={defaultUnits}
           placeholder="Einheit"
           onCreate={createUnit}
           createLabelPrefix="als Einheit anlegen"

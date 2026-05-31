@@ -17,12 +17,8 @@ export type RefBreakdown = Record<string, number>;
 export type RecipeIngredientUsage = {
   /** null when the row had no parsed quantity ("Salz nach Geschmack"). */
   quantity: number | null;
-  /** Canonical unit name (e.g. "g", "EL"). Null when the row resolved to a
-   *  sub-unit or carried no unit. */
+  /** Canonical unit name (e.g. "g", "EL"). Null when the row carried no unit. */
   unitName: string | null;
-  /** Ingredient-scoped sub-unit name when the row uses one (e.g. "Zehe"
-   *  for Knoblauch). Mutually exclusive with {@link unitName}. */
-  subUnitName: string | null;
   /** Override spelling when the source said e.g. "Tasse" but the row
    *  resolved to canonical unit "Cup". */
   displayUnit: string | null;

@@ -67,7 +67,6 @@ export function addStapleGroupToList(groupId: number): AddStapleGroupResult {
           stapleGroupItemId: entry.id,
           contributedQuantity: entry.quantity,
           contributedUnitId: entry.unitId,
-          contributedSubUnitId: entry.subUnitId,
         })
         .run();
 

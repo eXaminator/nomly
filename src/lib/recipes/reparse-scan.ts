@@ -2,7 +2,6 @@ import { asc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import {
   ingredient,
-  ingredientSubUnit,
   recipe,
   recipeIngredient,
   recipeSection,
@@ -11,7 +10,6 @@ import {
 import {
   buildIngredientCatalog,
   buildIngredientLookup,
-  buildSubUnitLookup,
   buildUnitLookup,
   parseIngredientLines,
 } from "@/lib/recipe-import";
@@ -37,7 +35,6 @@ export type CurrentRow = {
   name: string;
   quantity: number | null;
   unitId: number | null;
-  subUnitId: number | null;
   notes: string | null;
   isOptional: boolean;
   alternativeForId: number | null;
@@ -62,7 +59,6 @@ function currentKey(r: CurrentRow): string {
     r.name.trim(),
     normNotes(r.notes),
     r.unitId ?? null,
-    r.subUnitId ?? null,
     r.isOptional,
     r.alternativeForId != null,
   ]);
@@ -76,7 +72,6 @@ function proposedKey(p: ParsedIngredientResponse): string {
     p.name.trim(),
     normNotes(p.notes),
     p.unit?.id ?? null,
-    p.subUnit?.id ?? null,
     p.isOptional ?? false,
     p.isAlternative ?? false,
   ]);
@@ -85,7 +80,7 @@ function proposedKey(p: ParsedIngredientResponse): string {
 /**
  * True when the freshly parsed rows differ from the current rows on any
  * meaningful field — ingredient mapping, display name, notes, quantity,
- * unit / sub-unit, optional flag, alternative flag — or in row count.
+ * unit, optional flag, alternative flag — or in row count.
  */
 export function isLineGroupChanged(
   current: CurrentRow[],
@@ -197,8 +192,6 @@ function carriedAlternativeToProposed(g: {
   unitId: number | null;
   unitName: string | null;
   displayUnit: string | null;
-  subUnitId: number | null;
-  subUnitName: string | null;
   notes: string | null;
 }): ParsedIngredientResponse {
   return {
@@ -206,10 +199,6 @@ function carriedAlternativeToProposed(g: {
     unit:
       g.unitId != null
         ? { id: g.unitId, name: g.displayUnit ?? g.unitName ?? "" }
-        : null,
-    subUnit:
-      g.subUnitId != null
-        ? { id: g.subUnitId, name: g.subUnitName ?? "" }
         : null,
     unitMatch: "matched",
     rawUnit: null,
@@ -276,7 +265,6 @@ export function scanAllRecipesForReparse(): ReparseScanEntry[] {
     units: buildUnitLookup(),
     ingredients: buildIngredientLookup(),
     ingredientCatalog: buildIngredientCatalog(),
-    subUnits: buildSubUnitLookup(),
   };
   const rows = db
     .select({
@@ -293,8 +281,6 @@ export function scanAllRecipesForReparse(): ReparseScanEntry[] {
       unitId: recipeIngredient.unitId,
       unitName: unit.name,
       displayUnit: recipeIngredient.displayUnit,
-      subUnitId: recipeIngredient.subUnitId,
-      subUnitName: ingredientSubUnit.name,
       notes: recipeIngredient.notes,
       isOptional: recipeIngredient.isOptional,
       alternativeForId: recipeIngredient.alternativeForId,
@@ -305,10 +291,6 @@ export function scanAllRecipesForReparse(): ReparseScanEntry[] {
     .innerJoin(recipe, eq(recipe.id, recipeSection.recipeId))
     .leftJoin(ingredient, eq(ingredient.id, recipeIngredient.ingredientId))
     .leftJoin(unit, eq(unit.id, recipeIngredient.unitId))
-    .leftJoin(
-      ingredientSubUnit,
-      eq(ingredientSubUnit.id, recipeIngredient.subUnitId),
-    )
     .orderBy(
       asc(recipe.id),
       asc(recipeSection.sortOrder),
@@ -327,7 +309,6 @@ export function scanAllRecipesForReparse(): ReparseScanEntry[] {
       name: g.name ?? "",
       quantity: g.quantity,
       unitId: g.unitId,
-      subUnitId: g.subUnitId,
       notes: g.notes,
       isOptional: g.isOptional,
       alternativeForId: g.alternativeForId,
@@ -366,9 +347,8 @@ export function scanAllRecipesForReparse(): ReparseScanEntry[] {
         name: g.name ?? "",
         canonicalName: g.canonicalName ?? null,
         quantity: g.quantity,
-        // Match the recipe read view: display_unit, then the canonical unit
-        // name, then the sub-unit name.
-        unitLabel: g.displayUnit ?? g.unitName ?? g.subUnitName ?? null,
+        // Match the recipe read view: display_unit, then the canonical unit name.
+        unitLabel: g.displayUnit ?? g.unitName ?? null,
         notes: g.notes,
         isOptional: g.isOptional,
         isAlternative: g.alternativeForId != null,
@@ -389,16 +369,14 @@ export type ReparseReplacement = {
 function viewRowToInput(
   v: RecipeView["sections"][number]["ingredients"][number],
 ): RecipeIngredientInput {
-  const hasSubUnit = v.subUnitId != null;
   return {
     ingredientName: v.ingredientName,
     ingredientId: v.ingredientId,
     unassigned: v.ingredientId == null,
     addAsAlias: false,
     quantity: v.quantity,
-    unitId: hasSubUnit ? null : v.unitId,
-    subUnitId: v.subUnitId,
-    displayUnit: hasSubUnit ? null : v.unitName,
+    unitId: v.unitId,
+    displayUnit: v.unitName,
     notes: v.notes,
     isOptional: v.isOptional,
     fixedAmount: v.fixedAmount,

@@ -2,7 +2,6 @@ import { asc, eq, inArray } from "drizzle-orm";
 
 import { db } from "../../../db/index.ts";
 import {
-  ingredientSubUnit,
   recipe,
   recipeIngredient,
   recipeSection,
@@ -41,7 +40,6 @@ export function linkedRecipesForIngredients(
       recipeTitle: recipe.title,
       quantity: recipeIngredient.quantity,
       unitName: unit.name,
-      subUnitName: ingredientSubUnit.name,
       displayUnit: recipeIngredient.displayUnit,
       displayName: recipeIngredient.displayName,
       notes: recipeIngredient.notes,
@@ -56,10 +54,6 @@ export function linkedRecipesForIngredients(
     )
     .innerJoin(recipe, eq(recipe.id, recipeSection.recipeId))
     .leftJoin(unit, eq(unit.id, recipeIngredient.unitId))
-    .leftJoin(
-      ingredientSubUnit,
-      eq(ingredientSubUnit.id, recipeIngredient.subUnitId),
-    )
     .where(inArray(recipeIngredient.ingredientId, ingredientIds))
     .orderBy(asc(recipe.title))
     .all();
@@ -73,7 +67,6 @@ export function linkedRecipesForIngredients(
     const usage: RecipeIngredientUsage = {
       quantity: r.quantity,
       unitName: r.unitName,
-      subUnitName: r.subUnitName,
       displayUnit: r.displayUnit,
       displayName: r.displayName,
       notes: r.notes,

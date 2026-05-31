@@ -9,7 +9,6 @@ const ingredientSchema = z
     unassigned: z.boolean().default(false),
     quantity: z.number().nullable(),
     unitId: z.number().int().positive().nullable(),
-    subUnitId: z.number().int().positive().nullable().default(null),
     displayUnit: z.string().nullable().default(null),
     notes: z.string().nullable(),
     isOptional: z.boolean().default(false),
@@ -17,15 +16,9 @@ const ingredientSchema = z
     rawLine: z.string().nullable().default(null),
     isAlternative: z.boolean().default(false),
   })
-  .refine((v) => !(v.unitId != null && v.subUnitId != null), {
-    message: "unitId und subUnitId schließen sich gegenseitig aus.",
-    path: ["subUnitId"],
-  })
-  // An unassigned line has no article, so it can carry neither an ingredient
-  // link nor an article-scoped sub-unit.
-  .refine((v) => !(v.unassigned && (v.ingredientId != null || v.subUnitId != null)), {
-    message:
-      "Eine nicht zugeordnete Zutat darf weder ingredientId noch subUnitId tragen.",
+  // An unassigned line has no article, so it can't carry an ingredient link.
+  .refine((v) => !(v.unassigned && v.ingredientId != null), {
+    message: "Eine nicht zugeordnete Zutat darf keine ingredientId tragen.",
     path: ["unassigned"],
   });
 

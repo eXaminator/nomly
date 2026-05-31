@@ -18,15 +18,11 @@ export type RecipeIngredientInput = {
   /** "Nicht zugeordnet": the row is free text that doesn't map to any
    *  article. The server persists `ingredient_id` NULL (no article looked up
    *  or created) with the text in `display_name`, and the line never reaches
-   *  a shopping list. Forces `ingredientId` and `subUnitId` to null.
+   *  a shopping list. Forces `ingredientId` to null.
    *  Defaults to false. */
   unassigned?: boolean;
   quantity: number | null;
   unitId: number | null;
-  /** Ingredient-scoped sub-unit reference. Mutually exclusive with
-   *  `unitId`: when set, `unitId` must be null and the quantity is in this
-   *  sub-unit. */
-  subUnitId: number | null;
   /** Display override for the unit — used when the user picked / typed an
    *  alias ("Tasse") for a canonical unit ("Cup"). NULL = render the
    *  canonical unit name as before. */
@@ -146,19 +142,16 @@ export type RecipeIngredientView = {
   canonicalIngredientName: string | null;
   quantity: number | null;
   unitId: number | null;
-  /** display_unit OR unit.name fallback OR sub-unit name (coalesced
-   *  server-side, in that order of preference). This is the *raw* matched
-   *  label as stored — the recipe editor round-trips it. For display, prefer
-   *  {@link unitLabel}, which applies the configured plural by amount. */
+  /** display_unit OR unit.name fallback (coalesced server-side, in that order
+   *  of preference). This is the *raw* matched label as stored — the recipe
+   *  editor round-trips it. For display, prefer {@link unitLabel}, which
+   *  applies the configured plural by amount. */
   unitName: string | null;
-  /** The label to *show* for this line: the matched unit/alias/sub-unit
-   *  rendered in its singular or plural form depending on {@link quantity}
-   *  (plural for any amount other than 1, when one is configured). Falls back
-   *  to the singular / raw spelling when no plural applies. */
+  /** The label to *show* for this line: the matched unit/alias rendered in
+   *  its singular or plural form depending on {@link quantity} (plural for any
+   *  amount other than 1, when one is configured). Falls back to the singular
+   *  / raw spelling when no plural applies. */
   unitLabel: string | null;
-  /** Set when the row was saved with an ingredient sub-unit instead of a
-   *  global unit. */
-  subUnitId: number | null;
   notes: string | null;
   isOptional: boolean;
   /** When true, this quantity is constant — meal-plan portion changes do not

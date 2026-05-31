@@ -94,7 +94,7 @@ function computeHighlights(
     const flags: LineHighlight = {
       amount:
         amountStr(c.quantity, c.unitLabel) !==
-        amountStr(toNumberOrNull(d.quantity), d.subUnit?.name ?? d.unit?.name ?? null),
+        amountStr(toNumberOrNull(d.quantity), d.unit?.name ?? null),
       name: c.name.trim() !== d.name.trim(),
       notes: (c.notes ?? "").trim() !== d.notes.trim(),
       // Identity comparison, not label text: "Brauner Zucker" vs the lowercased
@@ -521,11 +521,7 @@ export function BulkReparseDialog({
                                               >
                                                 <RecipeIngredientReadLine
                                                   quantity={toNumberOrNull(d.quantity)}
-                                                  unitLabel={
-                                                    d.subUnit?.name ??
-                                                    d.unit?.name ??
-                                                    null
-                                                  }
+                                                  unitLabel={d.unit?.name ?? null}
                                                   name={d.name}
                                                   canonicalName={d.canonicalName}
                                                   notes={d.notes.trim() || null}

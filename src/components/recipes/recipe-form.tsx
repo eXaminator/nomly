@@ -602,7 +602,7 @@ export function RecipeForm({ initial, recipeId, tagSuggestions }: Props) {
  * (which doesn't surface an in-place placeholder for items it doesn't own).
  */
 function IngredientDragPreview({ ingredient }: { ingredient: DraftIngredient }) {
-  const unit = ingredient.subUnit?.name ?? ingredient.unit?.name ?? "";
+  const unit = ingredient.unit?.name ?? "";
   const quantity = ingredient.quantity.trim();
   const lead = [quantity, unit].filter(Boolean).join(" ");
   const name = ingredient.name.trim() || ingredient.canonicalName || "Zutat";

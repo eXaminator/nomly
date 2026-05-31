@@ -21,12 +21,6 @@ export type ImportAnnotation = {
   rawUnit: string | null;
 };
 
-export type DraftSubUnit = {
-  /** ingredient_sub_unit.id from the resolved ingredient. */
-  id: number;
-  name: string;
-};
-
 export type DraftIngredientCandidate = {
   ingredientId: number;
   /** Canonical name of the matched ingredient (the underlying identity). */
@@ -79,16 +73,12 @@ export type DraftIngredient = {
   addAsAlias: boolean;
   /** "Nicht zugeordnet" pill: the row is free text not linked to any article.
    *  Mutually exclusive with a selected/new ingredient — picking this pill
-   *  clears `selectedIngredientId`, `canonicalName` and `subUnit`. Saved as
+   *  clears `selectedIngredientId` and `canonicalName`. Saved as
    *  `unassigned: true` (server persists `ingredient_id` NULL) and the line
    *  never reaches a shopping list. */
   unassigned: boolean;
   quantity: string;
   unit: ComboboxItem | null;
-  /** Set when the parser or the user picked an ingredient-scoped sub-unit
-   *  ("Zehe" for Knoblauch). Mutually exclusive with `unit` — the form picks
-   *  whichever is set when rendering. */
-  subUnit: DraftSubUnit | null;
   notes: string;
   /** When true, the row renders dimmed/italic in the read view and is skipped
    *  by the shopping-list builder. Edited via a per-row toggle. */
@@ -175,9 +165,6 @@ export type DraftRecipe = {
 export type ParsedIngredientResponse = {
   quantity: number | null;
   unit: { id: number; name: string } | null;
-  /** Set when the parser resolved an ingredient-scoped sub-unit instead of a
-   *  global unit. Mutually exclusive with `unit`. */
-  subUnit: { id: number; name: string } | null;
   unitMatch: "matched" | "defaulted" | "unresolved" | "empty";
   rawUnit: string | null;
   name: string;
@@ -270,7 +257,6 @@ export function parsedIngredientToDraft(
       i.unit && unitDisplayName !== null
         ? { id: i.unit.id, name: unitDisplayName }
         : null,
-    subUnit: i.subUnit ? { id: i.subUnit.id, name: i.subUnit.name } : null,
     notes: i.notes ?? "",
     isOptional: i.isOptional ?? false,
     fixedAmount: i.fixedAmount ?? false,
@@ -308,7 +294,6 @@ export function emptyIngredient(): DraftIngredient {
     unassigned: false,
     quantity: "",
     unit: null,
-    subUnit: null,
     notes: "",
     isOptional: false,
     fixedAmount: false,
@@ -374,7 +359,6 @@ export function emptyRecipe(): DraftRecipe {
             unassigned: false,
             quantity: "",
             unit: null,
-            subUnit: null,
             notes: "",
             isOptional: false,
             fixedAmount: false,

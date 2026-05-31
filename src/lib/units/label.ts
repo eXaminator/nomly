@@ -1,11 +1,10 @@
 /**
- * Singular/plural display logic for units, aliases, and sub-units.
+ * Singular/plural display logic for units and their aliases.
  *
  * The rule across the app: a configured plural is used for any amount *other
  * than 1*; amount 1 (and a missing amount) uses the singular. The label shown
  * for a recipe line is whichever label was *matched* during import — the
- * canonical unit, one of its aliases, or an ingredient sub-unit — so each can
- * carry its own plural.
+ * canonical unit or one of its aliases — so each can carry its own plural.
  *
  * This module is pure (no DB) so it can be unit-tested and reused by both the
  * recipe read view and the shopping-list display.
@@ -40,24 +39,20 @@ function matchesForm(form: LabelForm, token: string): boolean {
  * Resolve the unit label to show for a recipe line, honouring the matched
  * label's own singular/plural.
  *
- * - A sub-unit (when present) always wins and is pluralized by amount.
- * - Otherwise the label is the canonical unit, unless `displayUnit` names a
- *   specific alias (or the canonical) — then that matched label drives both
- *   forms, so the amount picks singular vs plural even if `displayUnit`
- *   preserved the opposite spelling.
+ * - The label is the canonical unit, unless `displayUnit` names a specific
+ *   alias (or the canonical) — then that matched label drives both forms, so
+ *   the amount picks singular vs plural even if `displayUnit` preserved the
+ *   opposite spelling.
  * - A `displayUnit` that matches no known label is free text and is shown
  *   verbatim (never pluralized — we don't know its forms).
- * - Returns null when the line has no unit, sub-unit, or displayUnit at all.
+ * - Returns null when the line has no unit or displayUnit at all.
  */
 export function resolveUnitLabel(opts: {
   unit: UnitLabelInfo | null;
-  subUnit: LabelForm | null;
   displayUnit: string | null;
   quantity: number | null;
 }): string | null {
-  const { unit, subUnit, displayUnit, quantity } = opts;
-
-  if (subUnit) return pluralizeLabel(subUnit, quantity);
+  const { unit, displayUnit, quantity } = opts;
 
   if (unit) {
     if (!displayUnit) return pluralizeLabel(unit, quantity);

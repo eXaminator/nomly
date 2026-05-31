@@ -8,7 +8,6 @@ import {
   tag,
   ingredient as ingredientTable,
   ingredientAlias as ingredientAliasTable,
-  ingredientSubUnit as ingredientSubUnitTable,
   unit as unitTable,
   unitAlias as unitAliasTable,
 } from "../../db/schema.ts";
@@ -249,17 +248,11 @@ function writeSections(
           // so it survives the round-trip on the recipe view + edit page.
           displayName: trimmedName,
           quantity: ing.quantity,
-          unitId: ing.subUnitId != null ? null : ing.unitId,
-          subUnitId: ing.subUnitId ?? null,
+          unitId: ing.unitId,
           // Same alias-preservation as displayName, but for units. Stored
           // only when it differs from the canonical unit name — keeps a
           // unit rename in Stammdaten flowing through to existing recipes.
-          // Skipped when the row resolved to a sub-unit (whose name is the
-          // source of truth on its own).
-          displayUnit:
-            ing.subUnitId != null
-              ? null
-              : resolveDisplayUnit(tx, ing.unitId, ing.displayUnit),
+          displayUnit: resolveDisplayUnit(tx, ing.unitId, ing.displayUnit),
           notes: ing.notes,
           // Alternatives are always optional, regardless of what the
           // caller sent. Mirrors the parser's `forceOptional` invariant.
@@ -365,9 +358,6 @@ export function getRecipe(id: number): RecipeView | null {
     canonicalUnitName: string | null;
     unitPlural: string | null;
     displayUnit: string | null;
-    subUnitId: number | null;
-    subUnitName: string | null;
-    subUnitPlural: string | null;
     notes: string | null;
     isOptional: boolean;
     fixedAmount: boolean;
@@ -393,19 +383,13 @@ export function getRecipe(id: number): RecipeView | null {
             canonicalIngredientName: ingredientTable.name,
             quantity: recipeIngredient.quantity,
             unitId: recipeIngredient.unitId,
-            // Render order: display_unit override → sub-unit name → canonical
-            // unit name. Sub-units win over the unit join because the row
-            // can't have both set anyway (the writer keeps unit_id NULL
-            // whenever sub_unit_id is non-NULL).
+            // Render order: display_unit override → canonical unit name.
             unitName: sql<
               string | null
-            >`coalesce(${recipeIngredient.displayUnit}, ${ingredientSubUnitTable.name}, ${unitTable.name})`,
+            >`coalesce(${recipeIngredient.displayUnit}, ${unitTable.name})`,
             canonicalUnitName: unitTable.name,
             unitPlural: unitTable.plural,
             displayUnit: recipeIngredient.displayUnit,
-            subUnitId: recipeIngredient.subUnitId,
-            subUnitName: ingredientSubUnitTable.name,
-            subUnitPlural: ingredientSubUnitTable.plural,
             notes: recipeIngredient.notes,
             isOptional: recipeIngredient.isOptional,
             fixedAmount: recipeIngredient.fixedAmount,
@@ -417,10 +401,6 @@ export function getRecipe(id: number): RecipeView | null {
           })
           .from(recipeIngredient)
           .leftJoin(unitTable, eq(unitTable.id, recipeIngredient.unitId))
-          .leftJoin(
-            ingredientSubUnitTable,
-            eq(ingredientSubUnitTable.id, recipeIngredient.subUnitId),
-          )
           // LEFT join so "Nicht zugeordnet" lines (ingredient_id NULL) survive;
           // their canonical name / dietary class / equipment flag come back
           // NULL and are handled in the mapping below.
@@ -463,10 +443,6 @@ export function getRecipe(id: number): RecipeView | null {
               plural: i.unitPlural,
               aliases: aliasesByUnit.get(i.unitId) ?? [],
             }
-          : null,
-      subUnit:
-        i.subUnitId != null && i.subUnitName != null
-          ? { name: i.subUnitName, plural: i.subUnitPlural }
           : null,
       displayUnit: i.displayUnit,
       quantity: i.quantity,
@@ -521,7 +497,6 @@ export function getRecipe(id: number): RecipeView | null {
           unitId: i.unitId,
           unitName: i.unitName,
           unitLabel: unitLabelFor(i),
-          subUnitId: i.subUnitId,
           notes: i.notes,
           isOptional: i.isOptional,
           fixedAmount: i.fixedAmount,

@@ -18,18 +18,16 @@ export function ingredientToPayload(ing: DraftIngredient) {
   const name = ing.name.trim();
   if (name.length === 0) return null;
   // "Nicht zugeordnet": free-text line with no article. Drop the ingredient
-  // link, alias intent and any sub-unit (sub-units are article-scoped); the
-  // server persists ingredient_id NULL with `name` as display_name.
-  const hasSubUnit = ing.subUnit !== null && !ing.unassigned;
+  // link and alias intent; the server persists ingredient_id NULL with `name`
+  // as display_name.
   return {
     ingredientName: name,
     ingredientId: ing.unassigned ? null : ing.selectedIngredientId,
     unassigned: ing.unassigned,
     addAsAlias: ing.unassigned ? false : ing.addAsAlias,
     quantity: toNumberOrNull(ing.quantity),
-    unitId: hasSubUnit ? null : ing.unit?.id ?? null,
-    subUnitId: hasSubUnit ? ing.subUnit!.id : null,
-    displayUnit: hasSubUnit ? null : ing.unit?.name ?? null,
+    unitId: ing.unit?.id ?? null,
+    displayUnit: ing.unit?.name ?? null,
     notes: ing.notes.trim() || null,
     isOptional: ing.isOptional,
     fixedAmount: ing.fixedAmount,

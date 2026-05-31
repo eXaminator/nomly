@@ -29,7 +29,6 @@ type RecipeIngredientRow = {
   ingredientId: number;
   quantity: number | null;
   unitId: number | null;
-  subUnitId: number | null;
   notes: string | null;
   fixedAmount: boolean;
 };
@@ -46,7 +45,6 @@ type ContributionLine = {
   recipeIngredientId: number;
   ingredientId: number;
   unitId: number | null;
-  subUnitId: number | null;
   contributedQuantity: number | null;
 };
 
@@ -112,7 +110,6 @@ function applyAdd(tx: Tx, selection: AddMealsSelection[]): AddMealsResult {
         recipeIngredientId: r.id,
         ingredientId: r.ingredientId,
         unitId: r.unitId,
-        subUnitId: r.subUnitId,
         contributedQuantity: qty,
       });
     }
@@ -148,7 +145,6 @@ function applyAdd(tx: Tx, selection: AddMealsSelection[]): AddMealsResult {
           recipeIngredientId: c.recipeIngredientId,
           contributedQuantity: c.contributedQuantity,
           contributedUnitId: c.unitId,
-          contributedSubUnitId: c.subUnitId,
         })
         .run();
     }
@@ -191,7 +187,6 @@ function loadRecipeIngredients(
       ingredientId: recipeIngredient.ingredientId,
       quantity: recipeIngredient.quantity,
       unitId: recipeIngredient.unitId,
-      subUnitId: recipeIngredient.subUnitId,
       notes: recipeIngredient.notes,
       fixedAmount: recipeIngredient.fixedAmount,
     })

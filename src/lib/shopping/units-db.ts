@@ -3,6 +3,24 @@ import { db } from "../../db/index.ts";
 import { unit } from "../../db/schema.ts";
 import type { Dimension, UnitRow } from "./format.ts";
 
+/** Every unit row, keyed by id. The table is small (a few dozen rows) and the
+ *  conversion engine needs the full set so it can promote g→kg / ml→l and walk
+ *  any per-ingredient edge regardless of which units the contributions used. */
+export function loadAllUnits(): Map<number, UnitRow> {
+  const rows = db
+    .select({
+      id: unit.id,
+      name: unit.name,
+      plural: unit.plural,
+      dimension: unit.dimension,
+      baseUnitId: unit.baseUnitId,
+      factor: unit.factor,
+    })
+    .from(unit)
+    .all();
+  return new Map(rows.map((r) => [r.id, r as UnitRow]));
+}
+
 export function loadUnitsById(ids: number[]): Map<number, UnitRow> {
   if (ids.length === 0) return new Map();
   const rows = db

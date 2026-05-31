@@ -3,7 +3,6 @@ import { db } from "../../db/index.ts";
 import {
   ingredient,
   ingredientAlias,
-  ingredientSubUnit,
   unit,
   unitAlias,
 } from "../../db/schema.ts";
@@ -50,21 +49,12 @@ export type UnitMatch =
   /** neither a parsed unit nor a sensible default (e.g. "Salz nach Geschmack") */
   | "empty";
 
-export type SubUnitRef = {
-  id: number;
-  name: string;
-};
-
 export type ImportedIngredient = {
   quantity: number | null;
-  /** Best-effort resolved unit. `id` null when we couldn't match anything OR
-   *  when the row resolved to a sub-unit (see {@link subUnit}); the UI uses
-   *  {@link unitMatch} + {@link rawUnit} to render appropriately. */
+  /** Best-effort resolved (global) unit. `id` null when we couldn't match
+   *  anything; the UI uses {@link unitMatch} + {@link rawUnit} to render
+   *  appropriately. */
   unit: { id: number; name: string } | null;
-  /** Set when the parser resolved the row to an ingredient-scoped sub-unit
-   *  ("Zehe" for Knoblauch). Mutually exclusive with `unit` — when this is
-   *  populated, `unit` is null. */
-  subUnit: SubUnitRef | null;
   unitMatch: UnitMatch;
   /** The unit token the parser saw, when we couldn't resolve it. */
   rawUnit: string | null;
@@ -287,62 +277,11 @@ export type IngredientLookupHit = {
   id: number;
   canonicalName: string;
   /** Per-alias default global unit. Used when the parser hits the alias with
-   *  no explicit unit and no default sub-unit is configured. Rarely set. */
+   *  no explicit unit. Since sub-units became global units, an alias like
+   *  "Knoblauchzehe" simply defaults to the "Zehe" unit here. */
   defaultUnit?: { id: number; name: string };
-  /** Per-alias default sub-unit (e.g. "Knoblauchzehe" → sub-unit "Zehe").
-   *  Wins over `defaultUnit` when both are set on the same alias. */
-  defaultSubUnit?: SubUnitRef;
 };
 export type IngredientLookup = Map<string, IngredientLookupHit>;
-
-/**
- * Per-ingredient sub-units, keyed by ingredient id. The parser uses the
- * second-level map (name token → sub-unit ref) to resolve "Zehen Knoblauch"
- * once the ingredient is known.
- */
-export type SubUnitLookup = Map<number, Map<string, SubUnitRef>>;
-
-export function buildSubUnitLookup(): SubUnitLookup {
-  const lookup: SubUnitLookup = new Map();
-  const rows = db
-    .select({
-      id: ingredientSubUnit.id,
-      ingredientId: ingredientSubUnit.ingredientId,
-      name: ingredientSubUnit.name,
-      plural: ingredientSubUnit.plural,
-    })
-    .from(ingredientSubUnit)
-    .all();
-  for (const r of rows) {
-    const byName = lookup.get(r.ingredientId) ?? new Map<string, SubUnitRef>();
-    const ref: SubUnitRef = {
-      id: r.id,
-      name: r.name,
-    };
-    // Sub-units match on their singular plus their configured plural only —
-    // no runtime suffix guessing. Existing rows were backfilled with the old
-    // suffix rule (see migration 0026); new ones rely on the plural field.
-    byName.set(r.name.toLowerCase(), ref);
-    if (r.plural) byName.set(r.plural.toLowerCase(), ref);
-    lookup.set(r.ingredientId, byName);
-  }
-  return lookup;
-}
-
-/**
- * Flat set of every sub-unit token across all ingredients. Used to extend
- * the parser's tokenisation alphabet so "Zehen" in "12 Zehen Knoblauch" is
- * pulled out as a unit token (it can't match a global unit anymore — Zehe
- * is no longer one — but the parser still needs to recognise it before
- * ingredient resolution can attach it to Knoblauch's sub-unit).
- */
-export function subUnitTokenSet(lookup: SubUnitLookup): Set<string> {
-  const out = new Set<string>();
-  for (const byName of lookup.values()) {
-    for (const key of byName.keys()) out.add(key);
-  }
-  return out;
-}
 
 /**
  * Walk every canonical ingredient + every alias row and emit one
@@ -360,15 +299,9 @@ export function buildIngredientCatalog(): IngredientCatalog {
       isEquipment: ingredient.isEquipment,
       defaultUnitId: ingredient.defaultUnitId,
       defaultUnitName: unit.name,
-      defaultSubUnitId: ingredient.defaultSubUnitId,
-      defaultSubUnitName: ingredientSubUnit.name,
     })
     .from(ingredient)
     .leftJoin(unit, eq(unit.id, ingredient.defaultUnitId))
-    .leftJoin(
-      ingredientSubUnit,
-      eq(ingredientSubUnit.id, ingredient.defaultSubUnitId),
-    )
     .all();
   for (const i of canonicals) {
     out.push({
@@ -379,13 +312,6 @@ export function buildIngredientCatalog(): IngredientCatalog {
       defaultUnit:
         i.defaultUnitId != null && i.defaultUnitName != null
           ? { id: i.defaultUnitId, name: i.defaultUnitName }
-          : undefined,
-      defaultSubUnit:
-        i.defaultSubUnitId != null && i.defaultSubUnitName != null
-          ? {
-              id: i.defaultSubUnitId,
-              name: i.defaultSubUnitName,
-            }
           : undefined,
       isEquipment: i.isEquipment || undefined,
     });
@@ -398,16 +324,10 @@ export function buildIngredientCatalog(): IngredientCatalog {
       aliasName: ingredientAlias.name,
       defaultUnitId: ingredientAlias.defaultUnitId,
       defaultUnitName: unit.name,
-      defaultSubUnitId: ingredientAlias.defaultSubUnitId,
-      defaultSubUnitName: ingredientSubUnit.name,
     })
     .from(ingredientAlias)
     .innerJoin(ingredient, eq(ingredient.id, ingredientAlias.ingredientId))
     .leftJoin(unit, eq(unit.id, ingredientAlias.defaultUnitId))
-    .leftJoin(
-      ingredientSubUnit,
-      eq(ingredientSubUnit.id, ingredientAlias.defaultSubUnitId),
-    )
     .all();
   for (const a of aliases) {
     out.push({
@@ -418,13 +338,6 @@ export function buildIngredientCatalog(): IngredientCatalog {
       defaultUnit:
         a.defaultUnitId != null && a.defaultUnitName != null
           ? { id: a.defaultUnitId, name: a.defaultUnitName }
-          : undefined,
-      defaultSubUnit:
-        a.defaultSubUnitId != null && a.defaultSubUnitName != null
-          ? {
-              id: a.defaultSubUnitId,
-              name: a.defaultSubUnitName,
-            }
           : undefined,
       isEquipment: a.isEquipment || undefined,
     });
@@ -440,15 +353,9 @@ export function buildIngredientLookup(): IngredientLookup {
       name: ingredient.name,
       defaultUnitId: ingredient.defaultUnitId,
       defaultUnitName: unit.name,
-      defaultSubUnitId: ingredient.defaultSubUnitId,
-      defaultSubUnitName: ingredientSubUnit.name,
     })
     .from(ingredient)
     .leftJoin(unit, eq(unit.id, ingredient.defaultUnitId))
-    .leftJoin(
-      ingredientSubUnit,
-      eq(ingredientSubUnit.id, ingredient.defaultSubUnitId),
-    )
     .all();
   // Two keys per row: the lowercase form AND the diacritic-stripped form.
   // The stripped form lets "Möhre" / "Moehre"-style inputs match the same
@@ -466,13 +373,6 @@ export function buildIngredientLookup(): IngredientLookup {
         i.defaultUnitId != null && i.defaultUnitName != null
           ? { id: i.defaultUnitId, name: i.defaultUnitName }
           : undefined,
-      defaultSubUnit:
-        i.defaultSubUnitId != null && i.defaultSubUnitName != null
-          ? {
-              id: i.defaultSubUnitId,
-              name: i.defaultSubUnitName,
-            }
-          : undefined,
     };
     add(i.name.toLowerCase(), hit);
     add(normalizeForMatch(i.name), hit);
@@ -484,16 +384,10 @@ export function buildIngredientLookup(): IngredientLookup {
       aliasName: ingredientAlias.name,
       defaultUnitId: ingredientAlias.defaultUnitId,
       defaultUnitName: unit.name,
-      defaultSubUnitId: ingredientAlias.defaultSubUnitId,
-      defaultSubUnitName: ingredientSubUnit.name,
     })
     .from(ingredientAlias)
     .innerJoin(ingredient, eq(ingredient.id, ingredientAlias.ingredientId))
     .leftJoin(unit, eq(unit.id, ingredientAlias.defaultUnitId))
-    .leftJoin(
-      ingredientSubUnit,
-      eq(ingredientSubUnit.id, ingredientAlias.defaultSubUnitId),
-    )
     .all();
   for (const a of aliases) {
     const hit: IngredientLookupHit = {
@@ -502,13 +396,6 @@ export function buildIngredientLookup(): IngredientLookup {
       defaultUnit:
         a.defaultUnitId != null && a.defaultUnitName != null
           ? { id: a.defaultUnitId, name: a.defaultUnitName }
-          : undefined,
-      defaultSubUnit:
-        a.defaultSubUnitId != null && a.defaultSubUnitName != null
-          ? {
-              id: a.defaultSubUnitId,
-              name: a.defaultSubUnitName,
-            }
           : undefined,
     };
     add(a.aliasName.toLowerCase(), hit);
@@ -525,7 +412,6 @@ export function resolveIngredientName(
   match: IngredientMatch;
   canonicalName: string | null;
   defaultUnit: { id: number; name: string } | null;
-  defaultSubUnit: SubUnitRef | null;
 } {
   const trimmed = rawName.trim();
   const key = trimmed.toLowerCase();
@@ -538,7 +424,6 @@ export function resolveIngredientName(
       match: "new",
       canonicalName: null,
       defaultUnit: null,
-      defaultSubUnit: null,
     };
   const canonicalName =
     hit.canonicalName.toLowerCase() === key ? null : hit.canonicalName;
@@ -547,7 +432,6 @@ export function resolveIngredientName(
     match: "existing",
     canonicalName,
     defaultUnit: hit.defaultUnit ?? null,
-    defaultSubUnit: hit.defaultSubUnit ?? null,
   };
 }
 
@@ -605,7 +489,6 @@ export type ParseLookups = {
    *  backward compatibility — callers that don't provide it get the old
    *  exact-lookup behaviour. */
   ingredientCatalog?: IngredientCatalog;
-  subUnits: SubUnitLookup;
 };
 
 /**
@@ -740,9 +623,8 @@ function resolveIngredientForRow(
   sourceName: string | null;
   candidateMatches: ImportedCandidateMatch[];
   newNameProposals: ImportedNameProposal[];
-  /** Defaults attached to the resolved alias entry, if any. */
+  /** Default unit attached to the resolved alias entry, if any. */
   defaultUnit: { id: number; name: string } | null;
-  defaultSubUnit: SubUnitRef | null;
   /** True when the matched ingredient is flagged as equipment — the caller
    *  ORs this into the row's `isOptional` so equipment items default to
    *  optional on every recipe row. */
@@ -788,7 +670,6 @@ function resolveIngredientForRow(
           ),
           newNameProposals: [],
           defaultUnit: top.defaultUnit ?? null,
-          defaultSubUnit: top.defaultSubUnit ?? null,
           isEquipment: top.isEquipment ?? false,
         };
       }
@@ -846,7 +727,6 @@ function resolveIngredientForRow(
     ),
     newNameProposals: proposals,
     defaultUnit: null,
-    defaultSubUnit: null,
     isEquipment: false,
   };
 }
@@ -944,78 +824,43 @@ function subtractCommaTail(
 }
 
 /**
- * Decide between an initial global-unit resolution and an ingredient-scoped
- * sub-unit, based on whatever context the parser pulled together. Order of
- * precedence:
- *   1. The unit token resolved to a real global unit ("g", "EL")            → unit
- *   2. A unit token existed and matches one of the resolved ingredient's
- *      sub-units                                                            → sub-unit
- *   3. No unit token, but the ingredient was matched via an alias that
- *      defines a default sub-unit ("Knoblauchzehe")                         → sub-unit
- *   4. Initial global-unit fallback (Stück for "3 Eier")                    → unit
+ * Apply an alias/ingredient default unit on top of the initial global-unit
+ * resolution. Order of precedence:
+ *   1. The unit token resolved to a real global unit ("g", "EL", "Zehe")    → unit
+ *   2. No (or unmatched) unit token, but the ingredient was matched via an
+ *      entry that defines a default unit ("Knoblauchzehe" → Zehe)           → default
+ *   3. Initial fallback (Stück for "3 Eier", or unresolved/empty)
+ *
+ * Since the former ingredient sub-units are now global units, a token like
+ * "Zehe" already resolves in step 1 via {@link resolveUnit}; the default-unit
+ * branch only fills in when the line carried no usable unit token of its own.
  */
 function pickFinalUnit(
   initial: ResolveUnitResult,
-  rawUnitToken: string | null,
-  ingredientId: number | null,
-  subUnits: SubUnitLookup,
-  aliasDefaultSubUnit: SubUnitRef | null,
   aliasDefaultUnit: { id: number; name: string } | null,
 ): {
   resolved: { id: number; name: string } | null;
-  subUnit: SubUnitRef | null;
   match: UnitMatch;
   rawUnit: string | null;
 } {
   if (initial.match === "matched") {
     return {
       resolved: initial.resolved,
-      subUnit: null,
       match: initial.match,
       rawUnit: initial.rawUnit,
     };
   }
   if (
-    (initial.match === "unresolved" || initial.match === "defaulted") &&
-    rawUnitToken &&
-    ingredientId != null
+    (initial.match === "defaulted" || initial.match === "empty") &&
+    aliasDefaultUnit
   ) {
-    const byName = subUnits.get(ingredientId);
-    const sub = byName?.get(rawUnitToken.toLowerCase());
-    if (sub) {
-      return {
-        resolved: null,
-        subUnit: sub,
-        match: "matched",
-        rawUnit: null,
-      };
-    }
-  }
-  if (initial.match === "defaulted" || initial.match === "empty") {
-    // Alias defaults supply a *resolved* unit — we shouldn't surface the
-    // "Standard: Stück" badge on top of it. Treat the alias hit as a clean
-    // match so the import-review UI shows the picked unit / sub-unit as the
-    // actual selection.
-    if (aliasDefaultSubUnit) {
-      return {
-        resolved: null,
-        subUnit: aliasDefaultSubUnit,
-        match: "matched",
-        rawUnit: null,
-      };
-    }
-    if (aliasDefaultUnit) {
-      return {
-        resolved: aliasDefaultUnit,
-        subUnit: null,
-        match: "matched",
-        rawUnit: null,
-      };
-    }
+    // An alias/ingredient default supplies a *resolved* unit — treat it as a
+    // clean match so the import-review UI shows the picked unit as the actual
+    // selection rather than a "Standard: Stück" badge on top of it.
+    return { resolved: aliasDefaultUnit, match: "matched", rawUnit: null };
   }
   return {
     resolved: initial.resolved,
-    subUnit: null,
     match: initial.match,
     rawUnit: initial.rawUnit,
   };
@@ -1055,7 +900,6 @@ export function parseIngredientLines(
 ): ImportedIngredient[] {
   const knownUnitTokens = new Set<string>([
     ...lookups.units.byNameOrAlias.keys(),
-    ...subUnitTokenSet(lookups.subUnits),
   ]);
   const knownIngredientKeys = new Set(lookups.ingredients.keys());
   const splitOpts = {
@@ -1140,18 +984,10 @@ export function parseIngredientLines(
           );
           continue;
         }
-        const final = pickFinalUnit(
-          initialUnit,
-          parsed.unitName,
-          resolved.ingredientId,
-          lookups.subUnits,
-          resolved.defaultSubUnit,
-          resolved.defaultUnit,
-        );
+        const final = pickFinalUnit(initialUnit, resolved.defaultUnit);
         out.push({
           quantity: parsed.quantity,
           unit: final.resolved,
-          subUnit: final.subUnit,
           unitMatch: final.match,
           rawUnit: final.rawUnit,
           name: resolved.name,
@@ -1205,9 +1041,6 @@ function appendAlternativeToNotes(
  *   - Amount/unit: an alternative that parsed NEITHER its own quantity NOR
  *     its own unit inherits both from the primary. One that brought either
  *     keeps what it parsed ("2 eggs or 3 egg whites" → egg whites stays 3).
- *     When the primary's unit is an ingredient-scoped sub-unit, only the
- *     amount carries over — copying a foreign sub-unit id onto a different
- *     ingredient would be a data smell.
  *   - Notes: the trailing note of the LAST group member propagates to every
  *     earlier sibling that has no note of its own ("2 slices bacon or
  *     pancetta, diced" → both get "diced"). Members with their own note keep
@@ -1239,18 +1072,13 @@ function inheritWithinGroup(
   for (let k = lo + 1; k <= hi; k++) {
     const alt = rows[k];
     const hasOwnAmount = alt.quantity !== null;
-    const hasOwnUnit = alt.unit !== null || alt.subUnit !== null;
+    const hasOwnUnit = alt.unit !== null;
     if (hasOwnAmount || hasOwnUnit) continue;
     alt.quantity = primary.quantity;
     alt.fixedAmount = primary.fixedAmount;
-    if (primary.subUnit) {
-      // Foreign sub-unit — copy the amount only, leave the unit for the alt's
-      // own resolution / the user.
-    } else {
-      alt.unit = primary.unit;
-      alt.unitMatch = primary.unitMatch;
-      alt.rawUnit = primary.rawUnit;
-    }
+    alt.unit = primary.unit;
+    alt.unitMatch = primary.unitMatch;
+    alt.rawUnit = primary.rawUnit;
   }
   // Trailing note of the last member → siblings that have none of their own.
   const sharedNote = rows[hi].notes?.trim();
@@ -1308,7 +1136,6 @@ export function parseIngredientLinesIntoSections(
 ): ParsedSectionGroup[] {
   const knownUnitTokens = new Set<string>([
     ...lookups.units.byNameOrAlias.keys(),
-    ...subUnitTokenSet(lookups.subUnits),
   ]);
   const knownIngredientKeys = new Set(lookups.ingredients.keys());
   const splitOpts = {
@@ -1384,18 +1211,10 @@ export function parseIngredientLinesIntoSections(
           );
           continue;
         }
-        const final = pickFinalUnit(
-          initialUnit,
-          parsed.unitName,
-          resolved.ingredientId,
-          lookups.subUnits,
-          resolved.defaultSubUnit,
-          resolved.defaultUnit,
-        );
+        const final = pickFinalUnit(initialUnit, resolved.defaultUnit);
         currentGroup.ingredients.push({
           quantity: parsed.quantity,
           unit: final.resolved,
-          subUnit: final.subUnit,
           unitMatch: final.match,
           rawUnit: final.rawUnit,
           name: resolved.name,
@@ -1640,7 +1459,6 @@ export async function importRecipeFromUrl(
   const unitLookup = buildUnitLookup();
   const ingredientLookup = buildIngredientLookup();
   const ingredientCatalog = buildIngredientCatalog();
-  const subUnitLookup = buildSubUnitLookup();
 
   // Section-aware: ingredients and instructions both get split on shared
   // section headers ("Für den Teig:", "FÜR DIE FÜLLUNG"). Matching titles
@@ -1651,7 +1469,6 @@ export async function importRecipeFromUrl(
     units: unitLookup,
     ingredients: ingredientLookup,
     ingredientCatalog,
-    subUnits: subUnitLookup,
   });
   const instructionGroups = parseInstructionsIntoSections(
     asStringList(recipe.recipeInstructions),
