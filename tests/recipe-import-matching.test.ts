@@ -1314,4 +1314,44 @@ describe("note fragments keep source order, comma-separated", () => {
     expect(out[0].name).toBe("shrimp");
     expect(out[0].notes).toBe("225 g, large, peeled and deveined");
   });
+
+  it("unit-compound alias: '3 Knoblauchzehen' → 3 Zehe Knoblauch (not …Knoblauchzehen)", () => {
+    const catalog: IngredientCatalog = [
+      {
+        ingredientId: 5,
+        canonicalName: "Knoblauch",
+        aliasName: "Knoblauchzehen",
+        tokens: ["knoblauchzehen"],
+        defaultUnit: { id: 99, name: "Zehe", plural: "Zehen" },
+      },
+    ];
+    const out = parseIngredientLines(["3 Knoblauchzehen"], makeLookups(catalog));
+    expect(out).toHaveLength(1);
+    expect(out[0].ingredientId).toBe(5);
+    expect(out[0].quantity).toBe(3);
+    // Unit came from the alias default; the redundant unit-noun is dropped from
+    // the display name so the row reads "3 Zehe Knoblauch".
+    expect(out[0].unit?.id).toBe(99);
+    expect(out[0].name).toBe("Knoblauch");
+    expect(out[0].canonicalIngredientName).toBeNull();
+  });
+
+  it("a descriptor alias with a default unit keeps its full name (no false strip)", () => {
+    const catalog: IngredientCatalog = [
+      {
+        ingredientId: 7,
+        canonicalName: "Olivenöl",
+        aliasName: "Olivenöl extra virgin",
+        tokens: ["olivenol", "extra", "virgin"],
+        defaultUnit: { id: 3, name: "ml", plural: null },
+      },
+    ];
+    const out = parseIngredientLines(
+      ["Olivenöl extra virgin"],
+      makeLookups(catalog),
+    );
+    expect(out[0].ingredientId).toBe(7);
+    // "extra virgin" is a descriptor, not the unit → the name is preserved.
+    expect(out[0].name).toBe("Olivenöl extra virgin");
+  });
 });

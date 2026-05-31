@@ -299,6 +299,7 @@ export function buildIngredientCatalog(): IngredientCatalog {
       isEquipment: ingredient.isEquipment,
       defaultUnitId: ingredient.defaultUnitId,
       defaultUnitName: unit.name,
+      defaultUnitPlural: unit.plural,
     })
     .from(ingredient)
     .leftJoin(unit, eq(unit.id, ingredient.defaultUnitId))
@@ -311,7 +312,7 @@ export function buildIngredientCatalog(): IngredientCatalog {
       tokens: tokenizeEntryNameForCatalog(i.name),
       defaultUnit:
         i.defaultUnitId != null && i.defaultUnitName != null
-          ? { id: i.defaultUnitId, name: i.defaultUnitName }
+          ? { id: i.defaultUnitId, name: i.defaultUnitName, plural: i.defaultUnitPlural }
           : undefined,
       isEquipment: i.isEquipment || undefined,
     });
@@ -324,6 +325,7 @@ export function buildIngredientCatalog(): IngredientCatalog {
       aliasName: ingredientAlias.name,
       defaultUnitId: ingredientAlias.defaultUnitId,
       defaultUnitName: unit.name,
+      defaultUnitPlural: unit.plural,
     })
     .from(ingredientAlias)
     .innerJoin(ingredient, eq(ingredient.id, ingredientAlias.ingredientId))
@@ -337,7 +339,7 @@ export function buildIngredientCatalog(): IngredientCatalog {
       tokens: tokenizeEntryNameForCatalog(a.aliasName),
       defaultUnit:
         a.defaultUnitId != null && a.defaultUnitName != null
-          ? { id: a.defaultUnitId, name: a.defaultUnitName }
+          ? { id: a.defaultUnitId, name: a.defaultUnitName, plural: a.defaultUnitPlural }
           : undefined,
       isEquipment: a.isEquipment || undefined,
     });
@@ -624,7 +626,7 @@ function resolveIngredientForRow(
   candidateMatches: ImportedCandidateMatch[];
   newNameProposals: ImportedNameProposal[];
   /** Default unit attached to the resolved alias entry, if any. */
-  defaultUnit: { id: number; name: string } | null;
+  defaultUnit: { id: number; name: string; plural?: string | null } | null;
   /** True when the matched ingredient is flagged as equipment — the caller
    *  ORs this into the row's `isOptional` so equipment items default to
    *  optional on every recipe row. */
@@ -655,15 +657,31 @@ function resolveIngredientForRow(
           top.coveredCandidateTokens,
           top.aliasName,
         );
+        let displayName = name;
+        let canonical =
+          name.toLowerCase() === top.canonicalName.toLowerCase()
+            ? null
+            : top.canonicalName;
+        // Unit-compound alias redundancy: when the row carried no explicit unit
+        // (so the alias's default unit drives it) and the matched alias is
+        // exactly "canonical + unit" ("Knoblauchzehen" = "Knoblauch" + "Zehen"),
+        // display the canonical name — the line reads "3 Zehen Knoblauch", not
+        // "3 Zehen Knoblauchzehen". The unit is already shown separately.
+        if (
+          parsed.unitName == null &&
+          canonical &&
+          top.defaultUnit &&
+          isUnitCompoundOfCanonical(name, top.canonicalName, top.defaultUnit)
+        ) {
+          displayName = top.canonicalName;
+          canonical = null;
+        }
         return {
-          name,
+          name: displayName,
           notes,
           ingredientId: top.ingredientId,
           match: "existing",
-          canonicalIngredientName:
-            name.toLowerCase() === top.canonicalName.toLowerCase()
-              ? null
-              : top.canonicalName,
+          canonicalIngredientName: canonical,
           sourceName,
           candidateMatches: matches.map((m) =>
             toImportedCandidateMatch(m, parsed),
@@ -750,6 +768,36 @@ function toImportedCandidateMatch(
     notes,
     isEquipment: m.isEquipment ?? false,
   };
+}
+
+/** Alphanumeric-only normalized form, for matching German compounds whether
+ *  written solid ("Knoblauchzehe") or spaced ("Knoblauch Zehe"). */
+function compactForMatch(s: string): string {
+  return normalizeForMatch(s).replace(/[^a-z0-9]/g, "");
+}
+
+/**
+ * True when `aliasName` is exactly the canonical name plus the unit's name or
+ * plural — i.e. a "unit-noun compound" alias like "Knoblauchzehe(n)" for
+ * canonical "Knoblauch" + unit "Zehe"/"Zehen". Order-agnostic so both
+ * canonical-first ("Knoblauchzehe") and unit-first compounds match. Used to
+ * suppress the redundant unit in the display name.
+ */
+function isUnitCompoundOfCanonical(
+  aliasName: string,
+  canonicalName: string,
+  unit: { name: string; plural?: string | null },
+): boolean {
+  const aliasC = compactForMatch(aliasName);
+  const canonC = compactForMatch(canonicalName);
+  if (canonC.length === 0 || aliasC.length <= canonC.length) return false;
+  for (const form of [unit.name, unit.plural]) {
+    if (!form) continue;
+    const f = compactForMatch(form);
+    if (f.length === 0) continue;
+    if (aliasC === canonC + f || aliasC === f + canonC) return true;
+  }
+  return false;
 }
 
 /** Conjunctions that link prep words ("peeled AND deveined") — ignored when
