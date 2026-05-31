@@ -18,8 +18,6 @@ function viewRow(over: Record<string, unknown> = {}) {
     quantity: 1,
     unitId: 2,
     unitName: "g",
-    subUnitId: null,
-    subUnitPerPurchase: null,
     notes: null,
     isOptional: false,
     fixedAmount: false,
@@ -59,7 +57,6 @@ function newRow(over: Partial<RecipeIngredientInput> = {}): RecipeIngredientInpu
     ingredientId: 5,
     quantity: 2,
     unitId: 2,
-    subUnitId: null,
     displayUnit: null,
     notes: "grob",
     isOptional: false,
@@ -77,7 +74,6 @@ function cur(over: Partial<CurrentRow> = {}): CurrentRow {
     name: "Tomate",
     quantity: 2,
     unitId: 3,
-    subUnitId: null,
     notes: null,
     isOptional: false,
     alternativeForId: null,
@@ -89,7 +85,6 @@ function prop(over: Partial<ParsedIngredientResponse> = {}): ParsedIngredientRes
   return {
     quantity: 2,
     unit: { id: 3, name: "g" },
-    subUnit: null,
     unitMatch: "matched",
     rawUnit: null,
     name: "Tomate",
@@ -131,14 +126,14 @@ describe("isLineGroupChanged", () => {
   });
   it("true when unit differs", () => {
     expect(
-      isLineGroupChanged([cur({ unitId: 3, subUnitId: null })], [prop({ unit: { id: 4, name: "ml" }, subUnit: null })]),
+      isLineGroupChanged([cur({ unitId: 3 })], [prop({ unit: { id: 4, name: "ml" } })]),
     ).toBe(true);
   });
-  it("true when sub-unit differs from unit", () => {
+  it("true when the unit changes to a (promoted count) unit", () => {
     expect(
       isLineGroupChanged(
-        [cur({ unitId: 3, subUnitId: null })],
-        [prop({ unit: null, subUnit: { id: 7, name: "Zehe" } })],
+        [cur({ unitId: 3 })],
+        [prop({ unit: { id: 7, name: "Zehe" } })],
       ),
     ).toBe(true);
   });

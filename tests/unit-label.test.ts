@@ -40,47 +40,26 @@ describe("pluralizeLabel", () => {
   });
 });
 
-describe("resolveUnitLabel — sub-units", () => {
-  it("pluralizes the sub-unit by amount", () => {
-    expect(
-      resolveUnitLabel({
-        unit: null,
-        subUnit: { name: "Zehe", plural: "Zehen" },
-        displayUnit: null,
-        quantity: 3,
-      }),
-    ).toBe("Zehen");
-    expect(
-      resolveUnitLabel({
-        unit: null,
-        subUnit: { name: "Zehe", plural: "Zehen" },
-        displayUnit: null,
-        quantity: 1,
-      }),
-    ).toBe("Zehe");
-  });
-});
-
 describe("resolveUnitLabel — canonical unit", () => {
   it("uses the canonical plural when no displayUnit override is present", () => {
     expect(
-      resolveUnitLabel({ unit: dose, subUnit: null, displayUnit: null, quantity: 3 }),
+      resolveUnitLabel({ unit: dose, displayUnit: null, quantity: 3 }),
     ).toBe("Dosen");
     expect(
-      resolveUnitLabel({ unit: dose, subUnit: null, displayUnit: null, quantity: 1 }),
+      resolveUnitLabel({ unit: dose, displayUnit: null, quantity: 1 }),
     ).toBe("Dose");
   });
 
   it("pluralizes a displayUnit that equals the canonical singular", () => {
     expect(
-      resolveUnitLabel({ unit: dose, subUnit: null, displayUnit: "Dose", quantity: 4 }),
+      resolveUnitLabel({ unit: dose, displayUnit: "Dose", quantity: 4 }),
     ).toBe("Dosen");
   });
 
   it("renders the singular for a displayUnit stored as the canonical plural", () => {
     // Import preserved "Dosen" verbatim, but the amount is 1 → singular wins.
     expect(
-      resolveUnitLabel({ unit: dose, subUnit: null, displayUnit: "Dosen", quantity: 1 }),
+      resolveUnitLabel({ unit: dose, displayUnit: "Dosen", quantity: 1 }),
     ).toBe("Dose");
   });
 });
@@ -90,7 +69,7 @@ describe("resolveUnitLabel — matched alias drives display", () => {
     expect(
       resolveUnitLabel({
         unit: el,
-        subUnit: null,
+       
         displayUnit: "tablespoon",
         quantity: 3,
       }),
@@ -101,7 +80,7 @@ describe("resolveUnitLabel — matched alias drives display", () => {
     expect(
       resolveUnitLabel({
         unit: el,
-        subUnit: null,
+       
         displayUnit: "tablespoons",
         quantity: 1,
       }),
@@ -110,7 +89,7 @@ describe("resolveUnitLabel — matched alias drives display", () => {
 
   it("falls back to the alias singular when that alias has no plural", () => {
     expect(
-      resolveUnitLabel({ unit: dose, subUnit: null, displayUnit: "tin", quantity: 6 }),
+      resolveUnitLabel({ unit: dose, displayUnit: "tin", quantity: 6 }),
     ).toBe("tin");
   });
 });
@@ -118,19 +97,19 @@ describe("resolveUnitLabel — matched alias drives display", () => {
 describe("resolveUnitLabel — fallbacks", () => {
   it("shows unresolvable free text verbatim regardless of amount", () => {
     expect(
-      resolveUnitLabel({ unit: dose, subUnit: null, displayUnit: "Schuss", quantity: 5 }),
+      resolveUnitLabel({ unit: dose, displayUnit: "Schuss", quantity: 5 }),
     ).toBe("Schuss");
   });
 
   it("returns null when there is no unit, sub-unit, or displayUnit", () => {
     expect(
-      resolveUnitLabel({ unit: null, subUnit: null, displayUnit: null, quantity: 2 }),
+      resolveUnitLabel({ unit: null, displayUnit: null, quantity: 2 }),
     ).toBeNull();
   });
 
   it("matching is case-insensitive", () => {
     expect(
-      resolveUnitLabel({ unit: dose, subUnit: null, displayUnit: "dose", quantity: 2 }),
+      resolveUnitLabel({ unit: dose, displayUnit: "dose", quantity: 2 }),
     ).toBe("Dosen");
   });
 });

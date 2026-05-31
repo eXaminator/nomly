@@ -11,7 +11,6 @@ import {
   parseIngredientLinesIntoSections,
   type IngredientLookup,
   type ParseLookups,
-  type SubUnitLookup,
   type UnitLookup,
 } from "@/lib/recipe-import";
 import type { IngredientCatalog } from "@/lib/recipe-import/matching";
@@ -36,8 +35,7 @@ function makeLookups(
       canonicalName: entry.canonicalName,
     });
   }
-  const subUnits: SubUnitLookup = new Map();
-  return { units, ingredients, ingredientCatalog: catalog, subUnits };
+  return { units, ingredients, ingredientCatalog: catalog };
 }
 
 describe("parseIngredientLines — substring matcher + threshold", () => {

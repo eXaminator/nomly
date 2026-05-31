@@ -9,7 +9,6 @@ import {
 import type {
   IngredientLookup,
   ParseLookups,
-  SubUnitLookup,
   UnitLookup,
 } from "@/lib/recipe-import/index";
 import type { FamilywallRawRecipe } from "@/lib/familywall/types";
@@ -36,8 +35,7 @@ function makeLookups(): ParseLookups {
     ["zwiebel", { id: 11, canonicalName: "Zwiebel" }],
     ["onion", { id: 11, canonicalName: "Zwiebel" }],
   ]);
-  const subUnits: SubUnitLookup = new Map();
-  return { units, ingredients, subUnits };
+  return { units, ingredients };
 }
 
 function makeRaw(over: Partial<FamilywallRawRecipe> = {}): FamilywallRawRecipe {

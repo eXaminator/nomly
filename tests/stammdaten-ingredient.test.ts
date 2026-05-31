@@ -126,24 +126,47 @@ describe("ingredient stammdaten service", () => {
       ).toThrow(/bereits vergeben/);
     });
 
-    it("persists a canonical-name default sub-unit and reads it back", async () => {
-      const { service } = await loadModules();
+    it("persists a default unit + per-ingredient conversion and reads them back", async () => {
+      const { db, schema, service } = await loadModules();
+      const [stueck] = db
+        .insert(schema.unit)
+        .values({ name: "Stück", dimension: "count", factor: 1 })
+        .returning()
+        .all();
+      const [zehe] = db
+        .insert(schema.unit)
+        .values({ name: "Zehe", dimension: "count", factor: 1 })
+        .returning()
+        .all();
       const created = service.createIngredient({
-        name: "Gemüsestäbchen",
+        name: "Knoblauch",
         aliases: [],
-        subUnits: [{ name: "Stäbchen" }],
-        // Index 0 → the "Stäbchen" sub-unit written above.
-        defaultSubUnitIndex: 0,
+        // 1 Stück = 10 Zehen, rounded up to whole packs on aggregation.
+        conversions: [
+          {
+            fromUnitId: stueck.id,
+            toUnitId: zehe.id,
+            factor: 10,
+            isContainer: true,
+          },
+        ],
+        defaultUnitId: zehe.id,
         defaultCategoryId: null,
         excludeFromShoppingList: false,
         dietaryClass: "vegan",
       });
-      const subUnitId = created.subUnits.find((s) => s.name === "Stäbchen")!.id;
-      expect(created.defaultSubUnitId).toBe(subUnitId);
-      expect(created.defaultUnitId).toBeNull();
+      expect(created.defaultUnitId).toBe(zehe.id);
+      expect(created.conversions).toHaveLength(1);
+      expect(created.conversions[0]).toMatchObject({
+        fromUnitId: stueck.id,
+        toUnitId: zehe.id,
+        factor: 10,
+        isContainer: true,
+      });
 
       const detail = service.getIngredientDetail(created.id)!;
-      expect(detail.defaultSubUnitId).toBe(subUnitId);
+      expect(detail.defaultUnitId).toBe(zehe.id);
+      expect(detail.conversions[0]?.toUnitName).toBe("Zehe");
     });
 
     it("update can swap aliases and rename", async () => {

@@ -26,7 +26,7 @@ let zeheId = 0;
 
 beforeAll(async () => {
   const { db } = await import("@/db");
-  const { unit, unitAlias, ingredient, ingredientSubUnit } = await import("@/db/schema");
+  const { unit, unitAlias, ingredient } = await import("@/db/schema");
 
   const [dose] = db
     .insert(unit)
@@ -36,18 +36,20 @@ beforeAll(async () => {
   doseId = dose.id;
   db.insert(unitAlias).values({ unitId: dose.id, name: "can", plural: "cans" }).run();
 
+  // Former sub-units are global units now: "Zehe" is a plain count unit.
+  const [zehe] = db
+    .insert(unit)
+    .values({ name: "Zehe", plural: "Zehen", dimension: "count" })
+    .returning()
+    .all();
+  zeheId = zehe.id;
+
   const [knoblauch] = db
     .insert(ingredient)
     .values({ name: "Knoblauch" })
     .returning()
     .all();
   knoblauchId = knoblauch.id;
-  const [zehe] = db
-    .insert(ingredientSubUnit)
-    .values({ ingredientId: knoblauch.id, name: "Zehe", plural: "Zehen" })
-    .returning()
-    .all();
-  zeheId = zehe.id;
 });
 
 async function makeRecipe(line: {
@@ -55,7 +57,6 @@ async function makeRecipe(line: {
   ingredientId: number | null;
   quantity: number;
   unitId: number | null;
-  subUnitId: number | null;
   displayUnit: string | null;
 }): Promise<number> {
   const { createRecipe } = await import("@/lib/recipes/service");
@@ -98,7 +99,6 @@ describe("recipe read view — plural display", () => {
       ingredientId: null,
       quantity: 3,
       unitId: doseId,
-      subUnitId: null,
       displayUnit: null,
     });
     expect(await labelOf(id)).toBe("Dosen");
@@ -110,7 +110,6 @@ describe("recipe read view — plural display", () => {
       ingredientId: null,
       quantity: 1,
       unitId: doseId,
-      subUnitId: null,
       displayUnit: null,
     });
     expect(await labelOf(id)).toBe("Dose");
@@ -122,19 +121,17 @@ describe("recipe read view — plural display", () => {
       ingredientId: null,
       quantity: 2,
       unitId: doseId,
-      subUnitId: null,
       displayUnit: "can",
     });
     expect(await labelOf(id)).toBe("cans");
   });
 
-  it("pluralizes a sub-unit by amount", async () => {
+  it("pluralizes a (promoted) count unit by amount", async () => {
     const id = await makeRecipe({
       ingredientName: "Knoblauch",
       ingredientId: knoblauchId,
       quantity: 4,
-      unitId: null,
-      subUnitId: zeheId,
+      unitId: zeheId,
       displayUnit: null,
     });
     expect(await labelOf(id)).toBe("Zehen");

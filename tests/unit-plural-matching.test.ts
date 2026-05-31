@@ -20,11 +20,9 @@ afterAll(() => {
   rmSync(tempDir, { recursive: true, force: true });
 });
 
-let knoblauchId = 0;
-
 beforeAll(async () => {
   const { db } = await import("@/db");
-  const { unit, unitAlias, ingredient, ingredientSubUnit } = await import("@/db/schema");
+  const { unit, unitAlias } = await import("@/db/schema");
 
   const [dose] = db
     .insert(unit)
@@ -33,16 +31,6 @@ beforeAll(async () => {
     .all();
   db.insert(unitAlias)
     .values({ unitId: dose.id, name: "can", plural: "cans" })
-    .run();
-
-  const [knoblauch] = db
-    .insert(ingredient)
-    .values({ name: "Knoblauch" })
-    .returning()
-    .all();
-  knoblauchId = knoblauch.id;
-  db.insert(ingredientSubUnit)
-    .values({ ingredientId: knoblauch.id, name: "Zehe", plural: "Zehen" })
     .run();
 });
 
@@ -68,15 +56,5 @@ describe("buildUnitLookup — plurals", () => {
     const lookup = buildUnitLookup();
     expect(lookup.byNameOrAlias.get("can")?.name).toBe("Dose");
     expect(lookup.byNameOrAlias.get("cans")?.name).toBe("Dose");
-  });
-});
-
-describe("buildSubUnitLookup — plurals", () => {
-  it("matches the sub-unit singular and configured plural, but not a guessed suffix", async () => {
-    const { buildSubUnitLookup } = await import("@/lib/recipe-import");
-    const lookup = buildSubUnitLookup();
-    const byName = lookup.get(knoblauchId);
-    expect(byName?.get("zehe")?.id).toBeDefined();
-    expect(byName?.get("zehen")?.id).toBe(byName?.get("zehe")?.id);
   });
 });

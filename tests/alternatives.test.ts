@@ -27,7 +27,6 @@ function row(
     unassigned: false,
     quantity: "",
     unit: null,
-    subUnit: null,
     notes: "",
     isOptional,
     fixedAmount: false,

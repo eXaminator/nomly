@@ -128,11 +128,9 @@ describe("runFamilywallCatalogSeed", () => {
     expect(backpapier?.isEquipment).toBe(true);
   });
 
-  it("inserts sub-units and the sub-unit-aliased ingredient_alias rows", async () => {
+  it("promotes sub-units to global units and links the compound-noun aliases", async () => {
     const { db } = await import("@/db");
-    const { ingredient, ingredientAlias, ingredientSubUnit } = await import(
-      "@/db/schema"
-    );
+    const { ingredient, ingredientAlias, unit } = await import("@/db/schema");
     const { sql, eq, and } = await import("drizzle-orm");
 
     const apfel = db
@@ -142,23 +140,22 @@ describe("runFamilywallCatalogSeed", () => {
       .get();
     expect(apfel).toBeDefined();
 
-    const subUnits = db
-      .select()
-      .from(ingredientSubUnit)
-      .where(eq(ingredientSubUnit.ingredientId, apfel!.id))
-      .all();
-    expect(subUnits.find((s) => s.name === "Scheibe")).toBeDefined();
-    // Apfel has no purchase unit in the catalog, so its Scheibe sub-unit is
-    // standalone (no parent) after seeding.
-    expect(subUnits.find((s) => s.name === "Scheibe")?.parentUnitId).toBeNull();
+    // The former "Scheibe" sub-unit is a global count unit now.
+    const scheibe = db
+      .select({ id: unit.id })
+      .from(unit)
+      .where(sql`name = ${"Scheibe"}`)
+      .get();
+    expect(scheibe).toBeDefined();
 
+    // Compound-noun aliases point at the promoted unit via default_unit_id.
     const scheibeAliases = db
-      .select({ name: ingredientAlias.name })
+      .select({ name: ingredientAlias.name, defaultUnitId: ingredientAlias.defaultUnitId })
       .from(ingredientAlias)
       .where(
         and(
           eq(ingredientAlias.ingredientId, apfel!.id),
-          sql`${ingredientAlias.defaultSubUnitId} is not null`,
+          eq(ingredientAlias.defaultUnitId, scheibe!.id),
         ),
       )
       .all();
