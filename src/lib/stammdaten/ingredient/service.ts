@@ -38,6 +38,7 @@ export type AliasUnitDefault = {
 export type SubUnitItem = {
   id: number;
   name: string;
+  plural: string | null;
   perPurchase: number;
 };
 
@@ -86,7 +87,7 @@ export type IngredientUpsertInput = {
   }>;
   /** Sub-units to write (replaces all existing rows for this ingredient).
    *  Order matters: `aliasUnitDefaults.subUnitIndex` indexes into this array. */
-  subUnits?: Array<{ name: string; perPurchase: number }>;
+  subUnits?: Array<{ name: string; plural?: string | null; perPurchase: number }>;
   /** Canonical-name parser default. `defaultSubUnitIndex` indexes into
    *  `subUnits` (same mechanism as `aliasUnitDefaults.subUnitIndex`); takes
    *  precedence over `defaultUnitId` when set. Both omitted/null clears it. */
@@ -242,6 +243,7 @@ function loadSubUnits(ids: number[]): Map<number, SubUnitItem[]> {
       id: ingredientSubUnit.id,
       ingredientId: ingredientSubUnit.ingredientId,
       name: ingredientSubUnit.name,
+      plural: ingredientSubUnit.plural,
       perPurchase: ingredientSubUnit.perPurchase,
     })
     .from(ingredientSubUnit)
@@ -253,6 +255,7 @@ function loadSubUnits(ids: number[]): Map<number, SubUnitItem[]> {
     list.push({
       id: row.id,
       name: row.name,
+      plural: row.plural,
       perPurchase: row.perPurchase,
     });
     out.set(row.ingredientId, list);
@@ -492,7 +495,7 @@ export function createIngredient(input: IngredientUpsertInput): IngredientDetail
 function writeSubUnits(
   tx: Tx,
   ingredientId: number,
-  subUnits: Array<{ name: string; perPurchase: number }>,
+  subUnits: Array<{ name: string; plural?: string | null; perPurchase: number }>,
 ): number[] {
   tx.delete(ingredientSubUnit)
     .where(eq(ingredientSubUnit.ingredientId, ingredientId))
@@ -508,13 +511,14 @@ function writeSubUnits(
       continue;
     }
     seen.add(key);
+    const plural = su.plural?.trim() ? su.plural.trim() : null;
     const perPurchase =
       Number.isFinite(su.perPurchase) && su.perPurchase > 0
         ? su.perPurchase
         : 1;
     const inserted = tx
       .insert(ingredientSubUnit)
-      .values({ ingredientId, name, perPurchase })
+      .values({ ingredientId, name, plural, perPurchase })
       .returning({ id: ingredientSubUnit.id })
       .all();
     out.push(inserted[0].id);

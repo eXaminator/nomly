@@ -51,6 +51,13 @@ export const recipeSection = sqliteTable(
 export const unit = sqliteTable("unit", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   name: text("name").notNull().unique(),
+  /**
+   * Optional explicit plural of the canonical name ("Dose" → "Dosen"). When
+   * set, it is matched against ingredient text alongside the singular and used
+   * for display whenever the amount is not exactly 1. NULL = no plural; the
+   * singular is shown for every amount.
+   */
+  plural: text("plural"),
   dimension: text("dimension", { enum: ["mass", "volume", "count"] }).notNull(),
   baseUnitId: integer("base_unit_id").references((): AnySQLiteColumn => unit.id, {
     onDelete: "set null",
@@ -75,6 +82,12 @@ export const unitAlias = sqliteTable("unit_alias", {
     .notNull()
     .references(() => unit.id, { onDelete: "cascade" }),
   name: text("name").notNull().unique(),
+  /**
+   * Optional explicit plural of this alias ("tablespoon" → "tablespoons").
+   * Matched against ingredient text alongside the singular; when this alias is
+   * the matched label, its plural is shown for any amount other than 1.
+   */
+  plural: text("plural"),
 });
 
 export const category = sqliteTable("category", {
@@ -187,6 +200,12 @@ export const ingredientSubUnit = sqliteTable(
      *  ingredient-locally — the same name on a different ingredient is a
      *  different row, with its own per_purchase value. */
     name: text("name").notNull(),
+    /**
+     * Optional explicit plural of the sub-unit ("Zehe" → "Zehen"). Matched
+     * against ingredient text alongside the singular and shown for any amount
+     * other than 1. NULL = no plural; the singular is shown for every amount.
+     */
+    plural: text("plural"),
     /**
      * How many sub-units make one purchase unit. For Knoblauch:Zehe this is
      * 10 (10 Zehen per Stück). Stored as the multiplier the shopping-list

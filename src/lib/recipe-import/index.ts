@@ -197,6 +197,7 @@ export function buildUnitLookup(): UnitLookup {
     .select({
       id: unit.id,
       name: unit.name,
+      plural: unit.plural,
       isContainer: unit.isContainer,
     })
     .from(unit)
@@ -211,6 +212,13 @@ export function buildUnitLookup(): UnitLookup {
     byNameOrAlias.set(lower, entry);
     byCanonicalName.set(lower, entry);
     if (u.isContainer) containerTokens.add(lower);
+    // A configured plural ("Dose" → "Dosen") is matchable too, but never
+    // overwrites a singular already claimed by another unit/alias.
+    if (u.plural) {
+      const pl = u.plural.toLowerCase();
+      if (!byNameOrAlias.has(pl)) byNameOrAlias.set(pl, entry);
+      if (u.isContainer) containerTokens.add(pl);
+    }
   }
   const aliases = db
     .select({
@@ -218,20 +226,23 @@ export function buildUnitLookup(): UnitLookup {
       canonicalName: unit.name,
       isContainer: unit.isContainer,
       aliasName: unitAlias.name,
+      aliasPlural: unitAlias.plural,
     })
     .from(unitAlias)
     .innerJoin(unit, eq(unit.id, unitAlias.unitId))
     .all();
   for (const a of aliases) {
-    const key = a.aliasName.toLowerCase();
-    if (!byNameOrAlias.has(key)) {
-      byNameOrAlias.set(key, {
-        id: a.id,
-        name: a.canonicalName,
-        isContainer: a.isContainer,
-      });
+    const entry: UnitLookupEntry = {
+      id: a.id,
+      name: a.canonicalName,
+      isContainer: a.isContainer,
+    };
+    for (const token of [a.aliasName, a.aliasPlural]) {
+      if (!token) continue;
+      const key = token.toLowerCase();
+      if (!byNameOrAlias.has(key)) byNameOrAlias.set(key, entry);
+      if (a.isContainer) containerTokens.add(key);
     }
-    if (a.isContainer) containerTokens.add(key);
   }
   return { byNameOrAlias, byCanonicalName, containerTokens };
 }
@@ -299,6 +310,7 @@ export function buildSubUnitLookup(): SubUnitLookup {
       id: ingredientSubUnit.id,
       ingredientId: ingredientSubUnit.ingredientId,
       name: ingredientSubUnit.name,
+      plural: ingredientSubUnit.plural,
       perPurchase: ingredientSubUnit.perPurchase,
     })
     .from(ingredientSubUnit)
@@ -310,15 +322,11 @@ export function buildSubUnitLookup(): SubUnitLookup {
       name: r.name,
       perPurchase: r.perPurchase,
     };
+    // Sub-units match on their singular plus their configured plural only —
+    // no runtime suffix guessing. Existing rows were backfilled with the old
+    // suffix rule (see migration 0026); new ones rely on the plural field.
     byName.set(r.name.toLowerCase(), ref);
-    // Catch the most common German plural ("Zehe" / "Zehen", "Zweig" /
-    // "Zweige") without forcing a full alias table on sub-units.
-    byName.set(`${r.name.toLowerCase()}n`, ref);
-    if (r.name.endsWith("e")) {
-      byName.set(`${r.name.toLowerCase()}n`, ref);
-    } else {
-      byName.set(`${r.name.toLowerCase()}e`, ref);
-    }
+    if (r.plural) byName.set(r.plural.toLowerCase(), ref);
     lookup.set(r.ingredientId, byName);
   }
   return lookup;

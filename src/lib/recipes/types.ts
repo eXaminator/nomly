@@ -147,8 +147,15 @@ export type RecipeIngredientView = {
   quantity: number | null;
   unitId: number | null;
   /** display_unit OR unit.name fallback OR sub-unit name (coalesced
-   *  server-side, in that order of preference). */
+   *  server-side, in that order of preference). This is the *raw* matched
+   *  label as stored — the recipe editor round-trips it. For display, prefer
+   *  {@link unitLabel}, which applies the configured plural by amount. */
   unitName: string | null;
+  /** The label to *show* for this line: the matched unit/alias/sub-unit
+   *  rendered in its singular or plural form depending on {@link quantity}
+   *  (plural for any amount other than 1, when one is configured). Falls back
+   *  to the singular / raw spelling when no plural applies. */
+  unitLabel: string | null;
   /** Set when the row was saved with an ingredient sub-unit instead of a
    *  global unit. Surfaced for downstream conversion (shopping-list rollup). */
   subUnitId: number | null;

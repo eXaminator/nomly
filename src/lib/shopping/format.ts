@@ -3,6 +3,8 @@ export type Dimension = "mass" | "volume" | "count";
 export type UnitRow = {
   id: number;
   name: string;
+  /** Optional plural of {@link name}; shown for amounts other than 1. */
+  plural: string | null;
   dimension: Dimension;
   baseUnitId: number | null;
   factor: number;

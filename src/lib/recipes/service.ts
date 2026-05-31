@@ -10,7 +10,9 @@ import {
   ingredientAlias as ingredientAliasTable,
   ingredientSubUnit as ingredientSubUnitTable,
   unit as unitTable,
+  unitAlias as unitAliasTable,
 } from "../../db/schema.ts";
+import { resolveUnitLabel, type LabelForm } from "../units/label.ts";
 import type { RecipeDiet } from "./diet.ts";
 import type {
   RecipeInput,
@@ -360,7 +362,12 @@ export function getRecipe(id: number): RecipeView | null {
     quantity: number | null;
     unitId: number | null;
     unitName: string | null;
+    canonicalUnitName: string | null;
+    unitPlural: string | null;
+    displayUnit: string | null;
     subUnitId: number | null;
+    subUnitName: string | null;
+    subUnitPlural: string | null;
     subUnitPerPurchase: number | null;
     notes: string | null;
     isOptional: boolean;
@@ -394,7 +401,12 @@ export function getRecipe(id: number): RecipeView | null {
             unitName: sql<
               string | null
             >`coalesce(${recipeIngredient.displayUnit}, ${ingredientSubUnitTable.name}, ${unitTable.name})`,
+            canonicalUnitName: unitTable.name,
+            unitPlural: unitTable.plural,
+            displayUnit: recipeIngredient.displayUnit,
             subUnitId: recipeIngredient.subUnitId,
+            subUnitName: ingredientSubUnitTable.name,
+            subUnitPlural: ingredientSubUnitTable.plural,
             subUnitPerPurchase: ingredientSubUnitTable.perPurchase,
             notes: recipeIngredient.notes,
             isOptional: recipeIngredient.isOptional,
@@ -420,6 +432,47 @@ export function getRecipe(id: number): RecipeView | null {
           )
           .where(inArray(recipeIngredient.sectionId, sectionIds))
           .all();
+
+  // Aliases (with their plurals) for every unit referenced by this recipe, so
+  // the display label can honour the *matched* alias's plural rather than only
+  // the canonical's. Keyed by unit id.
+  const recipeUnitIds = [
+    ...new Set(ingredients.map((i) => i.unitId).filter((id): id is number => id != null)),
+  ];
+  const aliasesByUnit = new Map<number, LabelForm[]>();
+  if (recipeUnitIds.length > 0) {
+    const aliasRows = db
+      .select({
+        unitId: unitAliasTable.unitId,
+        name: unitAliasTable.name,
+        plural: unitAliasTable.plural,
+      })
+      .from(unitAliasTable)
+      .where(inArray(unitAliasTable.unitId, recipeUnitIds))
+      .all();
+    for (const a of aliasRows) {
+      const list = aliasesByUnit.get(a.unitId) ?? [];
+      list.push({ name: a.name, plural: a.plural });
+      aliasesByUnit.set(a.unitId, list);
+    }
+  }
+  const unitLabelFor = (i: IngredientRow): string | null =>
+    resolveUnitLabel({
+      unit:
+        i.unitId != null && i.canonicalUnitName != null
+          ? {
+              name: i.canonicalUnitName,
+              plural: i.unitPlural,
+              aliases: aliasesByUnit.get(i.unitId) ?? [],
+            }
+          : null,
+      subUnit:
+        i.subUnitId != null && i.subUnitName != null
+          ? { name: i.subUnitName, plural: i.subUnitPlural }
+          : null,
+      displayUnit: i.displayUnit,
+      quantity: i.quantity,
+    });
 
   const tags = db
     .select({ name: tag.name })
@@ -469,6 +522,7 @@ export function getRecipe(id: number): RecipeView | null {
           quantity: i.quantity,
           unitId: i.unitId,
           unitName: i.unitName,
+          unitLabel: unitLabelFor(i),
           subUnitId: i.subUnitId,
           subUnitPerPurchase: i.subUnitPerPurchase,
           notes: i.notes,

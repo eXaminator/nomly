@@ -9,6 +9,7 @@ export function loadUnitsById(ids: number[]): Map<number, UnitRow> {
     .select({
       id: unit.id,
       name: unit.name,
+      plural: unit.plural,
       dimension: unit.dimension,
       baseUnitId: unit.baseUnitId,
       factor: unit.factor,
@@ -24,6 +25,7 @@ export function loadUnit(id: number): UnitRow | null {
     .select({
       id: unit.id,
       name: unit.name,
+      plural: unit.plural,
       dimension: unit.dimension,
       baseUnitId: unit.baseUnitId,
       factor: unit.factor,
@@ -39,6 +41,7 @@ export function loadUnitsByDimension(dimension: Dimension): UnitRow[] {
     .select({
       id: unit.id,
       name: unit.name,
+      plural: unit.plural,
       dimension: unit.dimension,
       baseUnitId: unit.baseUnitId,
       factor: unit.factor,

@@ -9,12 +9,23 @@ import type { UnitRow } from "@/lib/shopping/format";
 const PACKUNG: UnitRow = {
   id: 1,
   name: "Packung",
+  plural: "Packungen",
   dimension: "count",
   baseUnitId: null,
   factor: 1,
 };
-const STAEBCHEN: SubUnitRef = { id: 10, name: "Stäbchen", perPurchase: 16 };
-const SCHEIBEN: SubUnitRef = { id: 11, name: "Scheiben", perPurchase: 8 };
+const STAEBCHEN: SubUnitRef = {
+  id: 10,
+  name: "Stäbchen",
+  plural: "Stäbchen",
+  perPurchase: 16,
+};
+const SCHEIBEN: SubUnitRef = {
+  id: 11,
+  name: "Scheibe",
+  plural: "Scheiben",
+  perPurchase: 8,
+};
 
 describe("rollupPurchaseTrack", () => {
   it("sums one sub-unit and rounds up to whole purchase units", () => {
@@ -28,8 +39,14 @@ describe("rollupPurchaseTrack", () => {
     );
     expect(rolled.quantity).toBe(2);
     expect(rolled.unitId).toBe(PACKUNG.id);
-    expect(rolled.unitName).toBe("Packung");
+    expect(rolled.unitName).toBe("Packungen");
     expect(rolled.dimension).toBe("count");
+  });
+
+  it("shows the purchase-unit singular when the rollup is exactly 1", () => {
+    const rolled = rollupPurchaseTrack([{ quantity: 1, subUnit: null }], PACKUNG);
+    expect(rolled.quantity).toBe(1);
+    expect(rolled.unitName).toBe("Packung");
   });
 
   it("does not bump on an exact multiple", () => {

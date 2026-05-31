@@ -23,7 +23,12 @@ export type Dimension = "mass" | "volume" | "count";
 export type UnitListItem = {
   id: number;
   name: string;
+  /** Optional plural of the canonical name; null = none. */
+  plural: string | null;
   aliases: string[];
+  /** Per-alias plural, keyed by the alias name. Only aliases that have a
+   *  plural configured appear here. */
+  aliasPlurals: Record<string, string>;
   dimension: Dimension;
   baseUnitId: number | null;
   baseUnitName: string | null;
@@ -34,7 +39,11 @@ export type UnitListItem = {
 
 export type UnitUpsertInput = {
   name: string;
+  /** Optional canonical plural; omitted/empty/null = no plural. */
+  plural?: string | null;
   aliases: string[];
+  /** Optional per-alias plural, keyed by alias name. */
+  aliasPlurals?: Record<string, string>;
   dimension: Dimension;
   baseUnitId: number | null;
   factor: number;
@@ -50,21 +59,39 @@ export class UnitStammdatenError extends Error {
   }
 }
 
-function loadAliasesGrouped(ids: number[]): Map<number, string[]> {
-  const out = new Map<number, string[]>();
+type AliasRow = { name: string; plural: string | null };
+
+function loadAliasesGrouped(ids: number[]): Map<number, AliasRow[]> {
+  const out = new Map<number, AliasRow[]>();
   if (ids.length === 0) return out;
   const rows = db
-    .select({ unitId: unitAlias.unitId, name: unitAlias.name })
+    .select({
+      unitId: unitAlias.unitId,
+      name: unitAlias.name,
+      plural: unitAlias.plural,
+    })
     .from(unitAlias)
     .where(inArray(unitAlias.unitId, ids))
     .orderBy(asc(unitAlias.name))
     .all();
   for (const row of rows) {
     const list = out.get(row.unitId) ?? [];
-    list.push(row.name);
+    list.push({ name: row.name, plural: row.plural });
     out.set(row.unitId, list);
   }
   return out;
+}
+
+/** Split a unit's alias rows into the flat name list and the
+ *  name → plural map the list/detail views expose. */
+function aliasViews(rows: AliasRow[]): {
+  aliases: string[];
+  aliasPlurals: Record<string, string>;
+} {
+  const aliases = rows.map((r) => r.name);
+  const aliasPlurals: Record<string, string> = {};
+  for (const r of rows) if (r.plural) aliasPlurals[r.name] = r.plural;
+  return { aliases, aliasPlurals };
 }
 
 function loadRecipeRefCounts(ids: number[]): Map<number, number> {
@@ -98,6 +125,7 @@ function loadUnitsBase(query?: string) {
       .select({
         id: unit.id,
         name: unit.name,
+        plural: unit.plural,
         dimension: unit.dimension,
         baseUnitId: unit.baseUnitId,
         factor: unit.factor,
@@ -116,6 +144,7 @@ function loadUnitsBase(query?: string) {
     .select({
       id: unit.id,
       name: unit.name,
+      plural: unit.plural,
       dimension: unit.dimension,
       baseUnitId: unit.baseUnitId,
       factor: unit.factor,
@@ -154,7 +183,8 @@ export function listUnitsManaged(query?: string): UnitListItem[] {
   return base.map((row) => ({
     id: row.id,
     name: row.name,
-    aliases: aliases.get(row.id) ?? [],
+    plural: row.plural,
+    ...aliasViews(aliases.get(row.id) ?? []),
     dimension: row.dimension,
     baseUnitId: row.baseUnitId,
     baseUnitName:
@@ -175,7 +205,8 @@ export function getUnitDetail(id: number): UnitListItem | null {
   return {
     id: row.id,
     name: row.name,
-    aliases: aliases.get(row.id) ?? [],
+    plural: row.plural,
+    ...aliasViews(aliases.get(row.id) ?? []),
     dimension: row.dimension,
     baseUnitId: row.baseUnitId,
     baseUnitName:
@@ -189,7 +220,13 @@ export function getUnitDetail(id: number): UnitListItem | null {
 function validateInput(
   input: UnitUpsertInput,
   excludeId?: number,
-): { name: string; aliases: string[] } {
+): {
+  name: string;
+  plural: string | null;
+  aliases: string[];
+  /** Cleaned alias name → plural, keyed by the *cleaned* alias spelling. */
+  aliasPlurals: Map<string, string>;
+} {
   const nameError = validateName(input.name);
   if (nameError) throw new UnitStammdatenError(nameError);
   const cleanedName = normalizeName(input.name);
@@ -265,16 +302,36 @@ function validateInput(
     }
   }
 
-  return { name: cleanedName, aliases: cleanedAliases };
+  // Plurals are extra matchable spellings, not new identities, so they don't
+  // get the strict collision treatment names/aliases do — the matcher inserts
+  // them insert-if-absent and a duplicate simply never shadows an existing
+  // token. We only normalise here (trim, drop empties).
+  const plural = input.plural?.trim() ? input.plural.trim() : null;
+
+  // Re-key the incoming alias→plural map onto the *cleaned* alias spellings,
+  // matching case-insensitively so a plural sticks to its alias after dedupe.
+  const incoming = new Map<string, string>();
+  for (const [key, value] of Object.entries(input.aliasPlurals ?? {})) {
+    const v = value?.trim();
+    if (v) incoming.set(key.trim().toLowerCase(), v);
+  }
+  const aliasPlurals = new Map<string, string>();
+  for (const alias of cleanedAliases) {
+    const v = incoming.get(alias.toLowerCase());
+    if (v) aliasPlurals.set(alias, v);
+  }
+
+  return { name: cleanedName, plural, aliases: cleanedAliases, aliasPlurals };
 }
 
 export function createUnit(input: UnitUpsertInput): UnitListItem {
-  const { name, aliases } = validateInput(input);
+  const { name, plural, aliases, aliasPlurals } = validateInput(input);
   const id = db.transaction((tx) => {
     const inserted = tx
       .insert(unit)
       .values({
         name,
+        plural,
         dimension: input.dimension,
         baseUnitId: input.baseUnitId ?? null,
         factor: input.factor,
@@ -285,7 +342,13 @@ export function createUnit(input: UnitUpsertInput): UnitListItem {
     const newId = inserted[0].id;
     if (aliases.length > 0) {
       tx.insert(unitAlias)
-        .values(aliases.map((name) => ({ unitId: newId, name })))
+        .values(
+          aliases.map((name) => ({
+            unitId: newId,
+            name,
+            plural: aliasPlurals.get(name) ?? null,
+          })),
+        )
         .run();
     }
     return newId;
@@ -306,12 +369,13 @@ export function updateUnit(id: number, input: UnitUpsertInput): UnitListItem {
     );
   }
 
-  const { name, aliases } = validateInput(input, id);
+  const { name, plural, aliases, aliasPlurals } = validateInput(input, id);
 
   db.transaction((tx) => {
     tx.update(unit)
       .set({
         name,
+        plural,
         baseUnitId: input.baseUnitId ?? null,
         factor: input.factor,
         isContainer: input.isContainer,
@@ -321,7 +385,13 @@ export function updateUnit(id: number, input: UnitUpsertInput): UnitListItem {
     tx.delete(unitAlias).where(eq(unitAlias.unitId, id)).run();
     if (aliases.length > 0) {
       tx.insert(unitAlias)
-        .values(aliases.map((name) => ({ unitId: id, name })))
+        .values(
+          aliases.map((name) => ({
+            unitId: id,
+            name,
+            plural: aliasPlurals.get(name) ?? null,
+          })),
+        )
         .run();
     }
   });

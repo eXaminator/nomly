@@ -23,6 +23,7 @@ const aliasDefaultSchema = z
 
 const subUnitSchema = z.object({
   name: z.string().min(1),
+  plural: z.string().nullable().default(null),
   perPurchase: z.number().positive().default(1),
 });
 

@@ -26,7 +26,13 @@ const STAMMDATEN_LINKS: Array<{
     href: "/einstellungen/einheiten",
     title: "Einheiten",
     description:
-      "Maßeinheiten mit Aliasen, Dimension und Faktor zu ihrer Basis-Einheit.",
+      "Maßeinheiten mit Aliasen, Plural, Dimension und Faktor zu ihrer Basis-Einheit.",
+  },
+  {
+    href: "/einstellungen/untereinheiten",
+    title: "Untereinheiten",
+    description:
+      "Zutat-spezifische Untereinheiten (Zehe, Zweig, Scheibe) — Name, Plural und Menge pro Einkaufseinheit.",
   },
   {
     href: "/einstellungen/kategorien",

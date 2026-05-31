@@ -9,7 +9,9 @@ import {
 
 const upsertSchema = z.object({
   name: z.string().min(1),
+  plural: z.string().nullable().default(null),
   aliases: z.array(z.string()).default([]),
+  aliasPlurals: z.record(z.string(), z.string()).default({}),
   dimension: z.enum(["mass", "volume", "count"]),
   baseUnitId: z.number().int().positive().nullable(),
   factor: z.number().positive(),

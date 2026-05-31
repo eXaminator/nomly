@@ -23,6 +23,7 @@ import {
   type NameCandidate,
 } from "./byName.ts";
 import type { Dimension, UnitRow } from "./format.ts";
+import { pluralizeLabel } from "../units/label.ts";
 import { sweepCheckedItems } from "./sweeper.ts";
 import { loadUnitsByDimension } from "./units-db.ts";
 import {
@@ -156,9 +157,11 @@ export function listShoppingItems(
         recipeIngredientId: shoppingItemSource.recipeIngredientId,
         contributedQuantity: shoppingItemSource.contributedQuantity,
         contributedUnit: unit.name,
+        contributedUnitPlural: unit.plural,
         contributedUnitId: shoppingItemSource.contributedUnitId,
         contributedSubUnitId: shoppingItemSource.contributedSubUnitId,
         contributedSubUnit: ingredientSubUnit.name,
+        contributedSubUnitPlural: ingredientSubUnit.plural,
         recipeNotes: recipeIngredient.notes,
       })
       .from(shoppingItemSource)
@@ -186,10 +189,20 @@ export function listShoppingItems(
         recipeTitle: s.recipeTitle,
         recipeIngredientId: s.recipeIngredientId,
         contributedQuantity: s.contributedQuantity,
-        contributedUnit: s.contributedUnit,
+        contributedUnit: s.contributedUnit
+          ? pluralizeLabel(
+              { name: s.contributedUnit, plural: s.contributedUnitPlural },
+              s.contributedQuantity,
+            )
+          : s.contributedUnit,
         contributedUnitId: s.contributedUnitId,
         contributedSubUnitId: s.contributedSubUnitId,
-        contributedSubUnit: s.contributedSubUnit,
+        contributedSubUnit: s.contributedSubUnit
+          ? pluralizeLabel(
+              { name: s.contributedSubUnit, plural: s.contributedSubUnitPlural },
+              s.contributedQuantity,
+            )
+          : s.contributedSubUnit,
         recipeNotes: s.recipeNotes,
       });
       sourcesByItem.set(s.itemId, arr);
@@ -207,8 +220,10 @@ export function listShoppingItems(
         contributedQuantity: shoppingItemStapleSource.contributedQuantity,
         contributedUnitId: shoppingItemStapleSource.contributedUnitId,
         contributedUnit: unit.name,
+        contributedUnitPlural: unit.plural,
         contributedSubUnitId: shoppingItemStapleSource.contributedSubUnitId,
         contributedSubUnit: ingredientSubUnit.name,
+        contributedSubUnitPlural: ingredientSubUnit.plural,
       })
       .from(shoppingItemStapleSource)
       .innerJoin(
@@ -231,9 +246,19 @@ export function listShoppingItems(
         stapleGroupName: r.stapleGroupName,
         contributedQuantity: r.contributedQuantity,
         contributedUnitId: r.contributedUnitId,
-        contributedUnit: r.contributedUnit,
+        contributedUnit: r.contributedUnit
+          ? pluralizeLabel(
+              { name: r.contributedUnit, plural: r.contributedUnitPlural },
+              r.contributedQuantity,
+            )
+          : r.contributedUnit,
         contributedSubUnitId: r.contributedSubUnitId,
-        contributedSubUnit: r.contributedSubUnit,
+        contributedSubUnit: r.contributedSubUnit
+          ? pluralizeLabel(
+              { name: r.contributedSubUnit, plural: r.contributedSubUnitPlural },
+              r.contributedQuantity,
+            )
+          : r.contributedSubUnit,
       });
       stapleSourcesByItem.set(r.itemId, arr);
     }
@@ -256,6 +281,7 @@ export function listShoppingItems(
         quantity: shoppingItemAmount.quantity,
         unitId: shoppingItemAmount.unitId,
         unitName: unit.name,
+        unitPlural: unit.plural,
         dimension: shoppingItemAmount.dimension,
       })
       .from(shoppingItemAmount)
@@ -269,7 +295,9 @@ export function listShoppingItems(
         itemId: r.itemId,
         quantity: r.quantity,
         unitId: r.unitId,
-        unitName: r.unitName,
+        unitName: r.unitName
+          ? pluralizeLabel({ name: r.unitName, plural: r.unitPlural }, r.quantity)
+          : r.unitName,
         dimension: r.dimension as AmountDimension,
       });
       manualsByItem.set(r.itemId, arr);
@@ -319,13 +347,19 @@ export function listShoppingItems(
       .select({
         id: ingredientSubUnit.id,
         name: ingredientSubUnit.name,
+        plural: ingredientSubUnit.plural,
         perPurchase: ingredientSubUnit.perPurchase,
       })
       .from(ingredientSubUnit)
       .where(inArray(ingredientSubUnit.id, Array.from(allSubUnitIds)))
       .all();
     for (const r of rows)
-      subUnitsById.set(r.id, { id: r.id, name: r.name, perPurchase: r.perPurchase });
+      subUnitsById.set(r.id, {
+        id: r.id,
+        name: r.name,
+        plural: r.plural,
+        perPurchase: r.perPurchase,
+      });
   }
 
   const ingredientIds = baseRows.map((r) => r.refId as number);
@@ -562,7 +596,7 @@ function computeSourcesSum(
     return {
       quantity: null,
       unitId: u?.id ?? null,
-      unitName: u?.name ?? null,
+      unitName: u ? pluralizeLabel(u, null) : null,
       dimension: dim,
     };
   }
@@ -595,10 +629,11 @@ function computeSourcesSum(
     }
     if (promoted) chosen = promoted;
   }
+  const quantity = round3(baseTotal / chosen.factor);
   return {
-    quantity: round3(baseTotal / chosen.factor),
+    quantity,
     unitId: chosen.id,
-    unitName: chosen.name,
+    unitName: pluralizeLabel(chosen, quantity),
     dimension: dim,
   };
 }

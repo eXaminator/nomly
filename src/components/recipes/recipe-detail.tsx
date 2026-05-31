@@ -221,7 +221,7 @@ export function RecipeDetail({
                 <FixedAmountMarker fixed={ing.fixedAmount} />
                 <DietMarker kind={ing.isEquipment ? null : ing.dietaryClass} />
                 <span className="inline-flex min-w-12 shrink-0 items-center font-mono text-[var(--color-muted-fg)]">
-                  {formatQuantity(ing.quantity)} {ing.unitName ?? ""}
+                  {formatQuantity(ing.quantity)} {ing.unitLabel ?? ""}
                 </span>
                 <span className="flex-1">
                   <IngredientLine

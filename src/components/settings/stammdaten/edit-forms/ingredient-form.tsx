@@ -29,7 +29,12 @@ export type IngredientItem = {
     subUnitId: number | null;
     unitName: string;
   }>;
-  subUnits: Array<{ id: number; name: string; perPurchase: number }>;
+  subUnits: Array<{
+    id: number;
+    name: string;
+    plural: string | null;
+    perPurchase: number;
+  }>;
   /** Canonical-name parser default (mirrors aliasUnitDefaults). Exactly one of
    *  defaultUnitId / defaultSubUnitId is set, or both null. */
   defaultUnitId: number | null;
@@ -61,6 +66,7 @@ type SubUnitDraft = {
   tempKey: string;
   existingId?: number;
   name: string;
+  plural: string;
   perPurchase: number;
 };
 
@@ -107,6 +113,7 @@ export function IngredientForm({
         tempKey: `existing-${s.id}`,
         existingId: s.id,
         name: s.name,
+        plural: s.plural ?? "",
         perPurchase: s.perPurchase,
       })),
   );
@@ -233,6 +240,7 @@ export function IngredientForm({
       .filter((su) => su.name.trim().length > 0)
       .map((su) => ({
         name: su.name.trim(),
+        plural: su.plural.trim() ? su.plural.trim() : null,
         perPurchase:
           Number.isFinite(su.perPurchase) && su.perPurchase > 0
             ? su.perPurchase
@@ -367,13 +375,13 @@ export function IngredientForm({
   function addSubUnit() {
     setSubUnits((prev) => [
       ...prev,
-      { tempKey: `new-${crypto.randomUUID()}`, name: "", perPurchase: 1 },
+      { tempKey: `new-${crypto.randomUUID()}`, name: "", plural: "", perPurchase: 1 },
     ]);
   }
 
   function updateSubUnit(
     tempKey: string,
-    partial: Partial<Pick<SubUnitDraft, "name" | "perPurchase">>,
+    partial: Partial<Pick<SubUnitDraft, "name" | "plural" | "perPurchase">>,
   ) {
     setSubUnits((prev) =>
       prev.map((su) => (su.tempKey === tempKey ? { ...su, ...partial } : su)),
@@ -511,7 +519,7 @@ export function IngredientForm({
             {subUnits.map((su) => (
               <li
                 key={su.tempKey}
-                className="grid grid-cols-[1fr_8rem_auto] items-center gap-2 px-3 py-2"
+                className="grid grid-cols-[1fr_1fr_8rem_auto] items-center gap-2 px-3 py-2"
               >
                 <Input
                   value={su.name}
@@ -520,6 +528,14 @@ export function IngredientForm({
                   }
                   placeholder="z. B. Zehe"
                   aria-label="Name der Teil-Einheit"
+                />
+                <Input
+                  value={su.plural}
+                  onChange={(e) =>
+                    updateSubUnit(su.tempKey, { plural: e.target.value })
+                  }
+                  placeholder="Plural (z. B. Zehen)"
+                  aria-label="Plural der Teil-Einheit"
                 />
                 <NumberInput
                   value={su.perPurchase}

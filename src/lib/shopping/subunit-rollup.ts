@@ -1,7 +1,14 @@
 import type { Dimension, UnitRow } from "./format.ts";
+import { pluralizeLabel } from "../units/label.ts";
 
 /** An ingredient sub-unit with its purchase-unit conversion factor. */
-export type SubUnitRef = { id: number; name: string; perPurchase: number };
+export type SubUnitRef = {
+  id: number;
+  name: string;
+  /** Optional plural of {@link name}; shown for amounts other than 1. */
+  plural: string | null;
+  perPurchase: number;
+};
 
 /** A single contribution feeding the purchase-unit rollup. `subUnit` set →
  *  expressed in that sub-unit; `subUnit` null → already in the purchase unit. */
@@ -47,10 +54,11 @@ export function rollupPurchaseTrack(
       sum += c.quantity;
     }
   }
+  const quantity = anyKnown ? ceilPurchase(sum) : null;
   return {
-    quantity: anyKnown ? ceilPurchase(sum) : null,
+    quantity,
     unitId: purchaseUnit.id,
-    unitName: purchaseUnit.name,
+    unitName: pluralizeLabel(purchaseUnit, quantity),
     dimension: purchaseUnit.dimension,
   };
 }
@@ -63,12 +71,15 @@ export function rollupPurchaseTrack(
 export function groupSubUnitTotals(
   contribs: Array<{ quantity: number | null; subUnit: SubUnitRef }>,
 ): SubUnitTotal[] {
-  const acc = new Map<number, { name: string; sum: number; anyKnown: boolean }>();
+  const acc = new Map<
+    number,
+    { name: string; plural: string | null; sum: number; anyKnown: boolean }
+  >();
   const order: number[] = [];
   for (const c of contribs) {
     let entry = acc.get(c.subUnit.id);
     if (!entry) {
-      entry = { name: c.subUnit.name, sum: 0, anyKnown: false };
+      entry = { name: c.subUnit.name, plural: c.subUnit.plural, sum: 0, anyKnown: false };
       acc.set(c.subUnit.id, entry);
       order.push(c.subUnit.id);
     }
@@ -79,10 +90,11 @@ export function groupSubUnitTotals(
   }
   return order.map((id) => {
     const entry = acc.get(id)!;
+    const quantity = entry.anyKnown ? round3(entry.sum) : null;
     return {
-      quantity: entry.anyKnown ? round3(entry.sum) : null,
+      quantity,
       subUnitId: id,
-      subUnitName: entry.name,
+      subUnitName: pluralizeLabel({ name: entry.name, plural: entry.plural }, quantity),
     };
   });
 }

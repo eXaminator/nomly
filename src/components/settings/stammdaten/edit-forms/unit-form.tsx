@@ -17,7 +17,9 @@ export type Dimension = "mass" | "volume" | "count";
 export type UnitItem = {
   id: number;
   name: string;
+  plural: string | null;
   aliases: string[];
+  aliasPlurals: Record<string, string>;
   dimension: Dimension;
   baseUnitId: number | null;
   baseUnitName: string | null;
@@ -36,7 +38,11 @@ export function UnitForm({ item, onPayloadChange }: EditFormProps<UnitItem>) {
   const isEdit = item != null;
 
   const [name, setName] = React.useState(item?.name ?? "");
+  const [plural, setPlural] = React.useState(item?.plural ?? "");
   const [aliases, setAliases] = React.useState<string[]>(item?.aliases ?? []);
+  const [aliasPlurals, setAliasPlurals] = React.useState<Record<string, string>>(
+    item?.aliasPlurals ?? {},
+  );
   const [dimension, setDimension] = React.useState<Dimension>(
     item?.dimension ?? "mass",
   );
@@ -61,10 +67,18 @@ export function UnitForm({ item, onPayloadChange }: EditFormProps<UnitItem>) {
     const factor = Number(factorText.replace(",", "."));
     const valid =
       trimmed.length > 0 && Number.isFinite(factor) && factor > 0;
+    // Only send plurals for aliases that still exist, trimmed.
+    const aliasPluralsPayload: Record<string, string> = {};
+    for (const a of aliases) {
+      const v = aliasPlurals[a]?.trim();
+      if (v) aliasPluralsPayload[a] = v;
+    }
     onPayloadChange(
       {
         name: trimmed,
+        plural: plural.trim() ? plural.trim() : null,
         aliases,
+        aliasPlurals: aliasPluralsPayload,
         dimension,
         baseUnitId: baseUnit?.id ?? null,
         factor: Number.isFinite(factor) ? factor : 0,
@@ -72,7 +86,17 @@ export function UnitForm({ item, onPayloadChange }: EditFormProps<UnitItem>) {
       },
       valid,
     );
-  }, [name, aliases, dimension, baseUnit, factorText, isContainer, onPayloadChange]);
+  }, [
+    name,
+    plural,
+    aliases,
+    aliasPlurals,
+    dimension,
+    baseUnit,
+    factorText,
+    isContainer,
+    onPayloadChange,
+  ]);
 
   async function searchBaseUnits(q: string) {
     const res = await fetch(
@@ -105,9 +129,47 @@ export function UnitForm({ item, onPayloadChange }: EditFormProps<UnitItem>) {
       </div>
 
       <div className="flex flex-col gap-2">
+        <Label htmlFor="unit-plural">Plural (optional)</Label>
+        <Input
+          id="unit-plural"
+          value={plural}
+          onChange={(e) => setPlural(e.target.value)}
+          placeholder={name.trim() ? `z. B. ${name.trim()}…` : "z. B. Dosen"}
+        />
+        <p className="text-xs text-[var(--color-muted-fg)]">
+          Wird beim Import zusätzlich erkannt und bei jeder Menge außer 1
+          angezeigt. Leer lassen, wenn die Einheit keine Pluralform hat (g, ml,
+          EL …).
+        </p>
+      </div>
+
+      <div className="flex flex-col gap-2">
         <Label>Aliase</Label>
         <AliasChipEditor value={aliases} onChange={setAliases} canonicalName={name} />
       </div>
+
+      {aliases.length > 0 && (
+        <div className="flex flex-col gap-2">
+          <Label>Plural-Formen der Aliase (optional)</Label>
+          <div className="flex flex-col gap-2">
+            {aliases.map((alias) => (
+              <div key={alias} className="grid grid-cols-[1fr_1fr] items-center gap-2">
+                <span className="truncate text-sm text-[var(--color-muted-fg)]">
+                  {alias}
+                </span>
+                <Input
+                  aria-label={`Plural für ${alias}`}
+                  value={aliasPlurals[alias] ?? ""}
+                  placeholder="Plural"
+                  onChange={(e) =>
+                    setAliasPlurals((prev) => ({ ...prev, [alias]: e.target.value }))
+                  }
+                />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="flex flex-col gap-2">
         <Label>Dimension</Label>
