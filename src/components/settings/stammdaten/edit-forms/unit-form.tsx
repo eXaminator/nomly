@@ -25,6 +25,7 @@ export type UnitItem = {
   baseUnitName: string | null;
   factor: number;
   isContainer: boolean;
+  isNounUnit: boolean;
   recipeRefCount: number;
 };
 
@@ -60,6 +61,9 @@ export function UnitForm({ item, onPayloadChange }: EditFormProps<UnitItem>) {
   const [isContainer, setIsContainer] = React.useState<boolean>(
     item?.isContainer ?? false,
   );
+  const [isNounUnit, setIsNounUnit] = React.useState<boolean>(
+    item?.isNounUnit ?? false,
+  );
 
 
   React.useEffect(() => {
@@ -83,6 +87,7 @@ export function UnitForm({ item, onPayloadChange }: EditFormProps<UnitItem>) {
         baseUnitId: baseUnit?.id ?? null,
         factor: Number.isFinite(factor) ? factor : 0,
         isContainer,
+        isNounUnit,
       },
       valid,
     );
@@ -95,6 +100,7 @@ export function UnitForm({ item, onPayloadChange }: EditFormProps<UnitItem>) {
     baseUnit,
     factorText,
     isContainer,
+    isNounUnit,
     onPayloadChange,
   ]);
 
@@ -256,6 +262,23 @@ export function UnitForm({ item, onPayloadChange }: EditFormProps<UnitItem>) {
         <Switch
           checked={isContainer}
           onCheckedChange={(v) => setIsContainer(Boolean(v))}
+        />
+      </div>
+
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <Label>Mengen-Substantiv</Label>
+          <p className="text-xs text-[var(--color-muted-fg)]">
+            Aktivieren für Einheiten, die eine Stückzahl eines Artikels
+            benennen (Zehe, Stange, Bund, Scheibe …). Wenn ein Alias diese
+            Einheit als Standard hat und sie im Namen steckt
+            („Knoblauchzehen“), schreibt der Import die Einheit nicht doppelt:
+            „3&nbsp;Zehen Knoblauch“ statt „3&nbsp;Zehen Knoblauchzehen“.
+          </p>
+        </div>
+        <Switch
+          checked={isNounUnit}
+          onCheckedChange={(v) => setIsNounUnit(Boolean(v))}
         />
       </div>
 

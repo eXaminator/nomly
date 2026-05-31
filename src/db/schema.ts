@@ -74,6 +74,18 @@ export const unit = sqliteTable("unit", {
   isContainer: integer("is_container", { mode: "boolean" })
     .notNull()
     .default(false),
+  /**
+   * Set on units that are "quantity nouns" of an ingredient — Zehe, Stange,
+   * Bund, Scheibe, Zweig, Blatt … (the sub-unit side of container
+   * conversions). When such a unit is the applied default of a matched alias
+   * AND that alias name embeds the unit ("Knoblauchzehen"), the parser strips
+   * the unit from the *alias* display name (keeping its language) so the row
+   * reads "3 Zehen Knoblauch" instead of "3 Zehen Knoblauchzehen". Dimensional
+   * units (g, ml, …) leave this false so names are never mangled.
+   */
+  isNounUnit: integer("is_noun_unit", { mode: "boolean" })
+    .notNull()
+    .default(false),
 });
 
 export const unitAlias = sqliteTable("unit_alias", {

@@ -29,6 +29,7 @@ function makeLookups(): ParseLookups {
       ["cup", { id: 4, name: "Cup", isContainer: false }],
     ]),
     containerTokens: new Set(),
+    nounUnitFormsById: new Map(),
   };
   const ingredients: IngredientLookup = new Map([
     ["mehl", { id: 10, canonicalName: "Mehl" }],

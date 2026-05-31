@@ -37,6 +37,10 @@ export type UnitListItem = {
   baseUnitName: string | null;
   factor: number;
   isContainer: boolean;
+  /** "Quantity noun" unit (Zehe, Stange, Bund …). When such a unit is the
+   *  applied default of a matched alias that embeds it, the parser strips the
+   *  unit from the alias display name ("Knoblauchzehen" → "Knoblauch"). */
+  isNounUnit: boolean;
   recipeRefCount: number;
 };
 
@@ -51,6 +55,7 @@ export type UnitUpsertInput = {
   baseUnitId: number | null;
   factor: number;
   isContainer: boolean;
+  isNounUnit?: boolean;
 };
 
 export class UnitStammdatenError extends Error {
@@ -133,6 +138,7 @@ function loadUnitsBase(query?: string) {
         baseUnitId: unit.baseUnitId,
         factor: unit.factor,
         isContainer: unit.isContainer,
+        isNounUnit: unit.isNounUnit,
       })
       .from(unit)
       .orderBy(sql`unaccent(${unit.name})`)
@@ -152,6 +158,7 @@ function loadUnitsBase(query?: string) {
       baseUnitId: unit.baseUnitId,
       factor: unit.factor,
       isContainer: unit.isContainer,
+      isNounUnit: unit.isNounUnit,
     })
     .from(unit)
     .where(
@@ -194,6 +201,7 @@ export function listUnitsManaged(query?: string): UnitListItem[] {
       row.baseUnitId != null ? baseUnitNames.get(row.baseUnitId) ?? null : null,
     factor: row.factor,
     isContainer: row.isContainer,
+    isNounUnit: row.isNounUnit,
     recipeRefCount: recipeCounts.get(row.id) ?? 0,
   }));
 }
@@ -216,6 +224,7 @@ export function getUnitDetail(id: number): UnitListItem | null {
       row.baseUnitId != null ? baseUnitNames.get(row.baseUnitId) ?? null : null,
     factor: row.factor,
     isContainer: row.isContainer,
+    isNounUnit: row.isNounUnit,
     recipeRefCount: recipeCounts.get(row.id) ?? 0,
   };
 }
@@ -339,6 +348,7 @@ export function createUnit(input: UnitUpsertInput): UnitListItem {
         baseUnitId: input.baseUnitId ?? null,
         factor: input.factor,
         isContainer: input.isContainer,
+        isNounUnit: input.isNounUnit ?? false,
       })
       .returning({ id: unit.id })
       .all();
@@ -382,6 +392,7 @@ export function updateUnit(id: number, input: UnitUpsertInput): UnitListItem {
         baseUnitId: input.baseUnitId ?? null,
         factor: input.factor,
         isContainer: input.isContainer,
+        isNounUnit: input.isNounUnit ?? false,
       })
       .where(eq(unit.id, id))
       .run();

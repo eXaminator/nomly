@@ -176,18 +176,39 @@ export type UnitLookup = {
    * and prep-word stripping when a container is present.
    */
   containerTokens: Set<string>;
+  /**
+   * For each unit flagged `is_noun_unit` (Zehe, Stange, …): all its lowercased
+   * surface forms (canonical name + plural + alias names + alias plurals),
+   * longest-first. The parser strips one of these from a matched alias's
+   * display name when that unit is the applied default — turning
+   * "Knoblauchzehen" into "Knoblauch" (and an English "garlic cloves" alias
+   * into "garlic"), keeping the alias's own language.
+   */
+  nounUnitFormsById: Map<number, string[]>;
 };
 
 export function buildUnitLookup(): UnitLookup {
   const byNameOrAlias = new Map<string, UnitLookupEntry>();
   const byCanonicalName = new Map<string, UnitLookupEntry>();
   const containerTokens = new Set<string>();
+  // Surface forms per noun-unit id, accumulated as we see names/aliases.
+  const nounUnitIds = new Set<number>();
+  const formsById = new Map<number, Set<string>>();
+  const addForm = (id: number, token: string | null) => {
+    if (!token) return;
+    const key = token.toLowerCase();
+    if (key.length === 0) return;
+    const set = formsById.get(id) ?? new Set<string>();
+    set.add(key);
+    formsById.set(id, set);
+  };
   const canonical = db
     .select({
       id: unit.id,
       name: unit.name,
       plural: unit.plural,
       isContainer: unit.isContainer,
+      isNounUnit: unit.isNounUnit,
     })
     .from(unit)
     .all();
@@ -201,6 +222,11 @@ export function buildUnitLookup(): UnitLookup {
     byNameOrAlias.set(lower, entry);
     byCanonicalName.set(lower, entry);
     if (u.isContainer) containerTokens.add(lower);
+    if (u.isNounUnit) {
+      nounUnitIds.add(u.id);
+      addForm(u.id, u.name);
+      addForm(u.id, u.plural);
+    }
     // A configured plural ("Dose" → "Dosen") is matchable too, but never
     // overwrites a singular already claimed by another unit/alias.
     if (u.plural) {
@@ -214,6 +240,7 @@ export function buildUnitLookup(): UnitLookup {
       id: unit.id,
       canonicalName: unit.name,
       isContainer: unit.isContainer,
+      isNounUnit: unit.isNounUnit,
       aliasName: unitAlias.name,
       aliasPlural: unitAlias.plural,
     })
@@ -231,9 +258,16 @@ export function buildUnitLookup(): UnitLookup {
       const key = token.toLowerCase();
       if (!byNameOrAlias.has(key)) byNameOrAlias.set(key, entry);
       if (a.isContainer) containerTokens.add(key);
+      if (a.isNounUnit) addForm(a.id, token);
     }
   }
-  return { byNameOrAlias, byCanonicalName, containerTokens };
+  // Longest-first so "zehen" strips before "zehe".
+  const nounUnitFormsById = new Map<number, string[]>();
+  for (const id of nounUnitIds) {
+    const forms = [...(formsById.get(id) ?? [])].sort((x, y) => y.length - x.length);
+    if (forms.length > 0) nounUnitFormsById.set(id, forms);
+  }
+  return { byNameOrAlias, byCanonicalName, containerTokens, nounUnitFormsById };
 }
 
 export type ResolveUnitResult = {
@@ -299,7 +333,6 @@ export function buildIngredientCatalog(): IngredientCatalog {
       isEquipment: ingredient.isEquipment,
       defaultUnitId: ingredient.defaultUnitId,
       defaultUnitName: unit.name,
-      defaultUnitPlural: unit.plural,
     })
     .from(ingredient)
     .leftJoin(unit, eq(unit.id, ingredient.defaultUnitId))
@@ -312,7 +345,7 @@ export function buildIngredientCatalog(): IngredientCatalog {
       tokens: tokenizeEntryNameForCatalog(i.name),
       defaultUnit:
         i.defaultUnitId != null && i.defaultUnitName != null
-          ? { id: i.defaultUnitId, name: i.defaultUnitName, plural: i.defaultUnitPlural }
+          ? { id: i.defaultUnitId, name: i.defaultUnitName }
           : undefined,
       isEquipment: i.isEquipment || undefined,
     });
@@ -325,7 +358,6 @@ export function buildIngredientCatalog(): IngredientCatalog {
       aliasName: ingredientAlias.name,
       defaultUnitId: ingredientAlias.defaultUnitId,
       defaultUnitName: unit.name,
-      defaultUnitPlural: unit.plural,
     })
     .from(ingredientAlias)
     .innerJoin(ingredient, eq(ingredient.id, ingredientAlias.ingredientId))
@@ -339,7 +371,7 @@ export function buildIngredientCatalog(): IngredientCatalog {
       tokens: tokenizeEntryNameForCatalog(a.aliasName),
       defaultUnit:
         a.defaultUnitId != null && a.defaultUnitName != null
-          ? { id: a.defaultUnitId, name: a.defaultUnitName, plural: a.defaultUnitPlural }
+          ? { id: a.defaultUnitId, name: a.defaultUnitName }
           : undefined,
       isEquipment: a.isEquipment || undefined,
     });
@@ -626,7 +658,7 @@ function resolveIngredientForRow(
   candidateMatches: ImportedCandidateMatch[];
   newNameProposals: ImportedNameProposal[];
   /** Default unit attached to the resolved alias entry, if any. */
-  defaultUnit: { id: number; name: string; plural?: string | null } | null;
+  defaultUnit: { id: number; name: string } | null;
   /** True when the matched ingredient is flagged as equipment — the caller
    *  ORs this into the row's `isOptional` so equipment items default to
    *  optional on every recipe row. */
@@ -663,18 +695,23 @@ function resolveIngredientForRow(
             ? null
             : top.canonicalName;
         // Unit-compound alias redundancy: when the row carried no explicit unit
-        // (so the alias's default unit drives it) and the matched alias is
-        // exactly "canonical + unit" ("Knoblauchzehen" = "Knoblauch" + "Zehen"),
-        // display the canonical name — the line reads "3 Zehen Knoblauch", not
-        // "3 Zehen Knoblauchzehen". The unit is already shown separately.
-        if (
-          parsed.unitName == null &&
-          canonical &&
-          top.defaultUnit &&
-          isUnitCompoundOfCanonical(name, top.canonicalName, top.defaultUnit)
-        ) {
-          displayName = top.canonicalName;
-          canonical = null;
+        // (so the alias's default unit drives it) and that unit is a flagged
+        // "noun unit" embedded in the alias name, strip it from the alias —
+        // "Knoblauchzehen" → "Knoblauch", "garlic cloves" → "garlic" — so the
+        // line reads "3 Zehen Knoblauch" not "3 Zehen Knoblauchzehen". Stripping
+        // the *alias* (not substituting the canonical) keeps its language.
+        if (parsed.unitName == null && top.defaultUnit) {
+          const stripped = stripNounUnitFromName(
+            displayName,
+            lookups.units.nounUnitFormsById.get(top.defaultUnit.id),
+          );
+          if (stripped !== null) {
+            displayName = stripped;
+            canonical =
+              stripped.toLowerCase() === top.canonicalName.toLowerCase()
+                ? null
+                : top.canonicalName;
+          }
         }
         return {
           name: displayName,
@@ -770,34 +807,30 @@ function toImportedCandidateMatch(
   };
 }
 
-/** Alphanumeric-only normalized form, for matching German compounds whether
- *  written solid ("Knoblauchzehe") or spaced ("Knoblauch Zehe"). */
-function compactForMatch(s: string): string {
-  return normalizeForMatch(s).replace(/[^a-z0-9]/g, "");
-}
-
 /**
- * True when `aliasName` is exactly the canonical name plus the unit's name or
- * plural — i.e. a "unit-noun compound" alias like "Knoblauchzehe(n)" for
- * canonical "Knoblauch" + unit "Zehe"/"Zehen". Order-agnostic so both
- * canonical-first ("Knoblauchzehe") and unit-first compounds match. Used to
- * suppress the redundant unit in the display name.
+ * When the matched alias name ends with one of the (noun) unit's surface forms,
+ * return the alias minus that form (trailing separators trimmed) — e.g.
+ * "Knoblauchzehen" − "zehen" → "Knoblauch", "garlic cloves" − "cloves" →
+ * "garlic". Returns null when there's nothing to strip or it would empty the
+ * name, so the caller keeps the alias verbatim. `forms` is empty/undefined for
+ * non-noun units, so this is a no-op for g/ml/… and never mangles a name.
  */
-function isUnitCompoundOfCanonical(
+function stripNounUnitFromName(
   aliasName: string,
-  canonicalName: string,
-  unit: { name: string; plural?: string | null },
-): boolean {
-  const aliasC = compactForMatch(aliasName);
-  const canonC = compactForMatch(canonicalName);
-  if (canonC.length === 0 || aliasC.length <= canonC.length) return false;
-  for (const form of [unit.name, unit.plural]) {
-    if (!form) continue;
-    const f = compactForMatch(form);
-    if (f.length === 0) continue;
-    if (aliasC === canonC + f || aliasC === f + canonC) return true;
+  forms: string[] | undefined,
+): string | null {
+  if (!forms || forms.length === 0) return null;
+  const lower = aliasName.toLowerCase();
+  for (const form of forms) {
+    if (lower.length > form.length && lower.endsWith(form)) {
+      const stripped = aliasName
+        .slice(0, aliasName.length - form.length)
+        .replace(/[\s,;.·\-]+$/u, "")
+        .trim();
+      if (stripped.length > 0) return stripped;
+    }
   }
-  return false;
+  return null;
 }
 
 /** Conjunctions that link prep words ("peeled AND deveined") — ignored when
