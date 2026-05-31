@@ -144,11 +144,11 @@ function EditItemDialogBody({
   const [note, setNote] = React.useState(item.note ?? "");
   const [saving, setSaving] = React.useState(false);
 
-  // Default unit for a freshly-added row: pick the first unit that's
-  // already present on this item (sources first, then manual amounts).
-  // If nothing on the item has a unit, fall back to "Stück" via the lazy
-  // lookup below. Cheap loop — the item never has many rows, so we just
-  // recompute each render rather than fight the memoization lint rule.
+  // Default unit for a freshly-added row: pick the first unit already present
+  // on this item (sources first, then manual amounts) so a new amount stays in
+  // the same dimension. When the item carries no unit yet, fall back to the
+  // article's own default unit (which itself resolves to "Stück" when the
+  // article has none). Cheap loop — the item never has many rows.
   let itemDefaultUnit: ComboboxItem | null = null;
   for (const s of item.sources) {
     if (s.contributedUnitId != null && s.contributedUnit) {
@@ -165,43 +165,12 @@ function EditItemDialogBody({
     }
   }
 
-  const [stueckFallback, setStueckFallback] = React.useState<ComboboxItem | null>(
-    null,
-  );
-  React.useEffect(() => {
-    // Only fetch the fallback when the item itself has no usable unit AND
-    // the user actually opens a new row.
-    if (itemDefaultUnit != null) return;
-    if (pendingNew.length === 0 || stueckFallback != null) return;
-    let cancelled = false;
-    void (async () => {
-      try {
-        const res = await fetch(
-          `/api/v1/units?q=${encodeURIComponent("Stück")}`,
-          { cache: "no-store" },
-        );
-        if (!res.ok) return;
-        const data = (await res.json()) as {
-          items: Array<{ id: number; name: string }>;
-        };
-        const hit = data.items.find((u) => u.name === "Stück") ?? data.items[0];
-        if (!cancelled && hit) {
-          const found = { id: hit.id, name: hit.name };
-          setStueckFallback(found);
-          setPendingNew((prev) =>
-            prev.map((p) => (p.unit == null ? { ...p, unit: found } : p)),
-          );
-        }
-      } catch {
-        // Best-effort default.
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [itemDefaultUnit, pendingNew, stueckFallback]);
+  const articleDefaultUnit: ComboboxItem | null =
+    item.defaultUnitId != null && item.defaultUnitName
+      ? { id: item.defaultUnitId, name: item.defaultUnitName }
+      : null;
 
-  const defaultUnit = itemDefaultUnit ?? stueckFallback;
+  const defaultUnit = itemDefaultUnit ?? articleDefaultUnit;
 
   const nextTempIdRef = React.useRef(1);
 

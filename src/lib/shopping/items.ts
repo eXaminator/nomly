@@ -21,6 +21,7 @@ import {
   resolveByName,
   type NameCandidate,
 } from "./byName.ts";
+import { getStueckUnit } from "./default-unit.ts";
 import type { Dimension } from "./format.ts";
 import { pluralizeLabel } from "../units/label.ts";
 import { sweepCheckedItems } from "./sweeper.ts";
@@ -110,6 +111,11 @@ export type ShoppingItemView = {
   stapleSources: ShoppingItemStapleSourceView[];
   /** Individual user-added manual amounts (additive on top of sources). */
   manualAmounts: ShoppingItemManualAmount[];
+  /** The linked article's default unit (own default unit with its display
+   *  spelling, else the generic "Stück" fallback). Seeds the unit pickers for
+   *  new manual amounts and the "Auf Lager" stock line. */
+  defaultUnitId: number | null;
+  defaultUnitName: string | null;
 };
 
 export function listShoppingItems(
@@ -133,10 +139,14 @@ export function listShoppingItems(
       version: shoppingItem.version,
       createdAt: shoppingItem.createdAt,
       updatedAt: shoppingItem.updatedAt,
+      defaultUnitId: ingredient.defaultUnitId,
+      defaultUnitDisplay: ingredient.defaultUnitDisplay,
+      defaultUnitName: unit.name,
     })
     .from(shoppingItem)
     .innerJoin(ingredient, eq(ingredient.id, shoppingItem.ingredientId))
     .leftJoin(category, eq(category.id, shoppingItem.categoryId))
+    .leftJoin(unit, eq(unit.id, ingredient.defaultUnitId))
     .all();
 
   const baseRows = ingredientRows.map((r) => ({
@@ -306,6 +316,7 @@ export function listShoppingItems(
     }
   }
 
+  const stueck = getStueckUnit();
   const all: ShoppingItemView[] = baseRows.map((r) => {
     const sources = sourcesByItem.get(r.id) ?? [];
     const stapleSources = stapleSourcesByItem.get(r.id) ?? [];
@@ -364,6 +375,10 @@ export function listShoppingItems(
         unitName: m.unitName,
         dimension: m.dimension,
       })),
+      defaultUnitId: r.defaultUnitId ?? stueck.unitId,
+      defaultUnitName: r.defaultUnitId != null
+        ? (r.defaultUnitDisplay ?? r.defaultUnitName)
+        : stueck.unitName,
     };
   });
 
@@ -1205,6 +1220,11 @@ export type AutocompleteHit = {
   matchedAlias?: string;
   /** The article's default category name, for display in pickers/pills. */
   categoryName?: string | null;
+  /** Resolved default unit for a manual add — the article's own default unit
+   *  (with its display spelling) or the generic "Stück" fallback. Never null
+   *  unless even "Stück" is missing from the catalogue. */
+  defaultUnitId?: number | null;
+  defaultUnitName?: string | null;
 };
 
 const ESCAPE_LIKE = (s: string) => s.replace(/[%_]/g, "\\$&");
@@ -1226,20 +1246,41 @@ export function autocompleteItems(rawQuery: string): AutocompleteHit[] {
     hits.push(h);
   };
 
+  // Resolved once: the "Stück" fallback for articles with no own default unit.
+  const stueck = getStueckUnit();
+  const resolveDefaultUnit = (
+    defaultUnitId: number | null,
+    defaultUnitDisplay: string | null,
+    unitName: string | null,
+  ): { defaultUnitId: number | null; defaultUnitName: string | null } =>
+    defaultUnitId != null
+      ? { defaultUnitId, defaultUnitName: defaultUnitDisplay ?? unitName }
+      : { defaultUnitId: stueck.unitId, defaultUnitName: stueck.unitName };
+
   const ing = db
     .select({
       id: ingredient.id,
       name: ingredient.name,
       categoryName: category.name,
+      defaultUnitId: ingredient.defaultUnitId,
+      defaultUnitDisplay: ingredient.defaultUnitDisplay,
+      defaultUnitName: unit.name,
     })
     .from(ingredient)
     .leftJoin(category, eq(category.id, ingredient.defaultCategoryId))
+    .leftJoin(unit, eq(unit.id, ingredient.defaultUnitId))
     .where(sql`unaccent(${ingredient.name}) LIKE ${pattern}`)
     .orderBy(asc(ingredient.name))
     .limit(20)
     .all();
   for (const r of ing)
-    push({ kind: "ingredient", id: r.id, name: r.name, categoryName: r.categoryName });
+    push({
+      kind: "ingredient",
+      id: r.id,
+      name: r.name,
+      categoryName: r.categoryName,
+      ...resolveDefaultUnit(r.defaultUnitId, r.defaultUnitDisplay, r.defaultUnitName),
+    });
 
   const ingA = db
     .select({
@@ -1247,10 +1288,14 @@ export function autocompleteItems(rawQuery: string): AutocompleteHit[] {
       name: ingredient.name,
       alias: ingredientAlias.name,
       categoryName: category.name,
+      defaultUnitId: ingredient.defaultUnitId,
+      defaultUnitDisplay: ingredient.defaultUnitDisplay,
+      defaultUnitName: unit.name,
     })
     .from(ingredientAlias)
     .innerJoin(ingredient, eq(ingredient.id, ingredientAlias.ingredientId))
     .leftJoin(category, eq(category.id, ingredient.defaultCategoryId))
+    .leftJoin(unit, eq(unit.id, ingredient.defaultUnitId))
     .where(sql`unaccent(${ingredientAlias.name}) LIKE ${pattern}`)
     .orderBy(asc(ingredientAlias.name))
     .limit(20)
@@ -1262,6 +1307,7 @@ export function autocompleteItems(rawQuery: string): AutocompleteHit[] {
       name: r.name,
       matchedAlias: r.alias,
       categoryName: r.categoryName,
+      ...resolveDefaultUnit(r.defaultUnitId, r.defaultUnitDisplay, r.defaultUnitName),
     });
 
   return hits.slice(0, 20);

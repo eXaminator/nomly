@@ -397,6 +397,38 @@ describe("shopping merge-on-add", () => {
     expect(tomate?.sources[0].recipeNotes).toBe("fein gehackt");
   });
 
+  it("resolves the manual-add default unit: article default, else Stück", async () => {
+    const { db } = await import("@/db");
+    const { ingredient, unit } = await import("@/db/schema");
+    const { eq } = await import("drizzle-orm");
+    const {
+      resolveDefaultUnitForIngredient,
+      getStueckUnit,
+    } = await import("@/lib/shopping/default-unit");
+
+    // No "Stück" yet → no fallback for an article without a default unit.
+    expect(getStueckUnit().unitId).toBeNull();
+    expect(resolveDefaultUnitForIngredient(ctx.ingredientIds.salz).unitId).toBeNull();
+
+    // Article with an explicit default unit returns that unit.
+    db.update(ingredient)
+      .set({ defaultUnitId: ctx.unitIds.g })
+      .where(eq(ingredient.id, ctx.ingredientIds.tomate))
+      .run();
+    const tomate = resolveDefaultUnitForIngredient(ctx.ingredientIds.tomate);
+    expect(tomate.unitId).toBe(ctx.unitIds.g);
+    expect(tomate.unitName).toBe("g");
+
+    // With "Stück" seeded, an article without its own default falls back to it.
+    const stueckId = db
+      .insert(unit)
+      .values({ name: "Stück", dimension: "count", baseUnitId: null, factor: 1 })
+      .returning({ id: unit.id })
+      .all()[0].id;
+    expect(getStueckUnit().unitId).toBe(stueckId);
+    expect(resolveDefaultUnitForIngredient(ctx.ingredientIds.salz).unitId).toBe(stueckId);
+  });
+
   it("exposes the planned meal's note on every source from that meal", async () => {
     const { db } = await import("@/db");
     const { mealPlan } = await import("@/db/schema");

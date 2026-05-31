@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { Button } from "@/components/ui/button";
+import { Combobox, type ComboboxItem } from "@/components/ui/combobox";
 import {
   Dialog,
   DialogBody,
@@ -26,9 +27,24 @@ type Props = {
   onAdded: () => void;
 };
 
+async function searchUnits(query: string): Promise<ComboboxItem[]> {
+  const res = await fetch(`/api/v1/units?q=${encodeURIComponent(query)}`, {
+    cache: "no-store",
+  });
+  if (!res.ok) return [];
+  const data = (await res.json()) as { items: Array<{ id: number; name: string }> };
+  return data.items.map((u) => ({ id: u.id, name: u.name }));
+}
+
 export function AddItemDialog({ open, onClose, onAdded }: Props) {
   const [query, setQuery] = React.useState("");
   const [quantity, setQuantity] = React.useState("1");
+  const [unit, setUnit] = React.useState<ComboboxItem | null>(null);
+  // The user picked a unit by hand — stop auto-defaulting it from the article.
+  const [unitTouched, setUnitTouched] = React.useState(false);
+  const [stueckFallback, setStueckFallback] = React.useState<ComboboxItem | null>(
+    null,
+  );
   const [hits, setHits] = React.useState<AutocompleteHit[]>([]);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -39,11 +55,28 @@ export function AddItemDialog({ open, onClose, onAdded }: Props) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setQuery("");
       setQuantity("1");
+      setUnit(null);
+      setUnitTouched(false);
       setHits([]);
       setError(null);
       setCreateOpen(false);
     }
   }, [open]);
+
+  // Fetch the generic "Stück" fallback once per open — used for brand-new
+  // articles (which have no own default unit) and when no hit is selected yet.
+  React.useEffect(() => {
+    if (!open || stueckFallback != null) return;
+    let cancelled = false;
+    void (async () => {
+      const units = await searchUnits("Stück");
+      const hit = units.find((u) => u.name === "Stück") ?? units[0] ?? null;
+      if (!cancelled && hit) setStueckFallback(hit);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, stueckFallback]);
 
   function parsedQuantity(): number | null {
     const trimmed = quantity.trim().replace(",", ".");
@@ -52,6 +85,7 @@ export function AddItemDialog({ open, onClose, onAdded }: Props) {
     return Number.isFinite(n) && n > 0 ? n : null;
   }
 
+  const reqCounter = React.useRef(0);
   React.useEffect(() => {
     if (!open) return;
     if (query.trim().length === 0) {
@@ -71,14 +105,39 @@ export function AddItemDialog({ open, onClose, onAdded }: Props) {
     return () => clearTimeout(handle);
   }, [query, open]);
 
-  const reqCounter = React.useRef(0);
+  // Keep the unit field defaulted to the top hit's article default until the
+  // user touches it. Falls back to "Stück" when there are no hits.
+  React.useEffect(() => {
+    if (unitTouched) return;
+    const top = hits[0];
+    if (top?.defaultUnitId != null && top.defaultUnitName) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setUnit({ id: top.defaultUnitId, name: top.defaultUnitName });
+    } else if (stueckFallback) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setUnit(stueckFallback);
+    }
+  }, [hits, unitTouched, stueckFallback]);
+
+  /** The unit to persist when adding `hit`: the user's manual choice wins,
+   *  otherwise the article's own default (or the Stück fallback). */
+  function effectiveUnitFor(hit: AutocompleteHit | null): ComboboxItem | null {
+    if (unitTouched) return unit;
+    if (hit?.defaultUnitId != null && hit.defaultUnitName) {
+      return { id: hit.defaultUnitId, name: hit.defaultUnitName };
+    }
+    return stueckFallback;
+  }
 
   async function pickExisting(hit: AutocompleteHit) {
     setBusy(true);
     setError(null);
-    const qty = parsedQuantity();
     try {
-      await addItem({ ingredientId: hit.id, quantity: qty });
+      await addItem({
+        ingredientId: hit.id,
+        quantity: parsedQuantity(),
+        unitId: effectiveUnitFor(hit)?.id ?? null,
+      });
       onAdded();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Fehler");
@@ -88,8 +147,7 @@ export function AddItemDialog({ open, onClose, onAdded }: Props) {
   }
 
   function openCreateDialog() {
-    const trimmed = query.trim();
-    if (trimmed.length === 0) return;
+    if (query.trim().length === 0) return;
     setCreateOpen(true);
   }
 
@@ -98,7 +156,12 @@ export function AddItemDialog({ open, onClose, onAdded }: Props) {
     setBusy(true);
     setError(null);
     try {
-      await addItem({ ingredientId: article.id, quantity: parsedQuantity() });
+      await addItem({
+        ingredientId: article.id,
+        quantity: parsedQuantity(),
+        // New articles have no own default unit yet → Stück (unless overridden).
+        unitId: (unitTouched ? unit : stueckFallback)?.id ?? null,
+      });
       onAdded();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Fehler");
@@ -139,7 +202,7 @@ export function AddItemDialog({ open, onClose, onAdded }: Props) {
                 }}
               />
             </div>
-            <div className="flex flex-col gap-2 sm:w-24">
+            <div className="flex flex-col gap-2 sm:w-20">
               <Label htmlFor="add-quantity">Menge</Label>
               <Input
                 id="add-quantity"
@@ -148,6 +211,18 @@ export function AddItemDialog({ open, onClose, onAdded }: Props) {
                 value={quantity}
                 onChange={(e) => setQuantity(e.target.value)}
                 placeholder="1"
+              />
+            </div>
+            <div className="flex flex-col gap-2 sm:w-28">
+              <Label>Einheit</Label>
+              <Combobox
+                value={unit}
+                onChange={(u) => {
+                  setUnit(u);
+                  setUnitTouched(true);
+                }}
+                search={searchUnits}
+                placeholder="Einheit"
               />
             </div>
           </div>

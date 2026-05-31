@@ -23,6 +23,8 @@ function makeItem(overrides: Partial<ShoppingItemView> = {}): ShoppingItemView {
     sources: [],
     stapleSources: [],
     manualAmounts: [],
+    defaultUnitId: null,
+    defaultUnitName: null,
     ...overrides,
   };
 }
