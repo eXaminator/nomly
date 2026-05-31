@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { ChevronDown, ExternalLink, Loader2, Lock } from "lucide-react";
+import { ChevronDown, ExternalLink, Loader2, Lock, Pencil } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { isOptionalIngredient } from "@/lib/recipes/optional";
 
@@ -113,6 +113,36 @@ export function ImpactSection({ entityKind, id, initial }: ImpactSectionProps) {
                 )}
               </ul>
 
+              {data.linkedIngredients && data.linkedIngredients.length > 0 && (
+                <div className="border-t border-[var(--color-border)] pt-3">
+                  <p className="mb-2 text-xs font-medium uppercase tracking-wider text-[var(--color-muted-fg)]">
+                    Artikel mit Umrechnungen
+                  </p>
+                  <ul className="flex flex-col gap-2">
+                    {data.linkedIngredients.map((ing) => (
+                      <li key={ing.id}>
+                        <Link
+                          href={`/einstellungen/zutaten?edit=${ing.id}`}
+                          className="inline-flex items-center gap-1 text-[var(--color-accent)] hover:underline"
+                        >
+                          {ing.name}
+                          <Pencil className="size-3" />
+                        </Link>
+                        <ul className="mt-1 ml-3 flex flex-col gap-0.5 text-xs text-[var(--color-muted-fg)]">
+                          {ing.conversions.map((c, i) => (
+                            <li key={i}>
+                              1 {c.fromUnitName} = {formatQuantity(c.factor)}{" "}
+                              {c.toUnitName}
+                              {c.isContainer ? " (Gebinde)" : ""}
+                            </li>
+                          ))}
+                        </ul>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
               {data.linkedRecipes && data.linkedRecipes.length > 0 && (
                 <div className="border-t border-[var(--color-border)] pt-3">
                   <p className="mb-2 text-xs font-medium uppercase tracking-wider text-[var(--color-muted-fg)]">
@@ -158,32 +188,6 @@ export function ImpactSection({ entityKind, id, initial }: ImpactSectionProps) {
                       </p>
                     );
                   })()}
-                </div>
-              )}
-
-              {data.linkedIngredients && data.linkedIngredients.length > 0 && (
-                <div className="border-t border-[var(--color-border)] pt-3">
-                  <p className="mb-2 text-xs font-medium uppercase tracking-wider text-[var(--color-muted-fg)]">
-                    Artikel mit Umrechnungen
-                  </p>
-                  <ul className="flex flex-col gap-2">
-                    {data.linkedIngredients.map((ing) => (
-                      <li key={ing.id}>
-                        <span className="font-medium text-[var(--color-fg)]">
-                          {ing.name}
-                        </span>
-                        <ul className="mt-1 ml-3 flex flex-col gap-0.5 text-xs text-[var(--color-muted-fg)]">
-                          {ing.conversions.map((c, i) => (
-                            <li key={i}>
-                              1 {c.fromUnitName} = {formatQuantity(c.factor)}{" "}
-                              {c.toUnitName}
-                              {c.isContainer ? " (Gebinde)" : ""}
-                            </li>
-                          ))}
-                        </ul>
-                      </li>
-                    ))}
-                  </ul>
                 </div>
               )}
             </div>

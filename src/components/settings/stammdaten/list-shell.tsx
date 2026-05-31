@@ -240,6 +240,30 @@ export function ListShell<TItem>({
     setDrawerValid(false);
     setDrawerError(null);
   }, []);
+
+  // Deep link: `?edit=<id>` opens that row's edit drawer on load, then strips
+  // the param so a refresh / drawer-close doesn't reopen it. Lets other views
+  // (e.g. a unit's "Verwendung" list) link straight into an article's editor.
+  const handledEditParam = React.useRef(false);
+  React.useEffect(() => {
+    if (handledEditParam.current) return;
+    const raw = new URLSearchParams(window.location.search).get("edit");
+    const editId = raw != null ? Number(raw) : NaN;
+    if (!Number.isFinite(editId)) return;
+    const target = items.find((i) => idOf(i) === editId);
+    if (!target) return;
+    handledEditParam.current = true;
+    // Opening the drawer from a one-shot deep link is exactly the
+    // "synchronize with an external system (the URL)" case the rule allows.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    openEdit(target);
+    // Strip the param via history (not router.replace) so we don't trigger a
+    // soft navigation that would remount this component and close the drawer.
+    const url = new URL(window.location.href);
+    url.searchParams.delete("edit");
+    window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+  }, [items, idOf, openEdit]);
+
   function closeDrawer() {
     setDrawer(null);
     setDrawerPayload(null);
