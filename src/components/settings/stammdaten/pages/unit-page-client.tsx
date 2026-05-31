@@ -24,7 +24,17 @@ const columns: ColumnDef<UnitItem>[] = [
   {
     key: "name",
     header: "Name",
-    cell: (item) => <span className="font-medium">{item.name}</span>,
+    cell: (item) => (
+      <span className="font-medium">
+        {item.name}
+        {item.plural && (
+          <span className="font-normal text-[var(--color-muted-fg)]">
+            {" "}
+            / {item.plural}
+          </span>
+        )}
+      </span>
+    ),
   },
   {
     key: "aliases",
@@ -36,11 +46,14 @@ const columns: ColumnDef<UnitItem>[] = [
       const rest = item.aliases.length - visible.length;
       return (
         <span className="flex flex-wrap gap-1">
-          {visible.map((a) => (
-            <Badge key={a} variant="outline">
-              {a}
-            </Badge>
-          ))}
+          {visible.map((a) => {
+            const plural = item.aliasPlurals[a];
+            return (
+              <Badge key={a} variant="outline">
+                {plural ? `${a} / ${plural}` : a}
+              </Badge>
+            );
+          })}
           {rest > 0 && <Badge variant="outline">+{rest}</Badge>}
         </span>
       );

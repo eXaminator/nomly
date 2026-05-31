@@ -175,7 +175,6 @@ export function SubUnitPageClient({
               <tr>
                 <th className="px-3 py-2 font-medium">Zutat</th>
                 <th className="px-3 py-2 font-medium">Untereinheit</th>
-                <th className="px-3 py-2 font-medium">Plural</th>
                 <th className="px-3 py-2 font-medium">pro Einkauf</th>
                 <th className="px-3 py-2 font-medium">Verwendung</th>
               </tr>
@@ -190,12 +189,13 @@ export function SubUnitPageClient({
                   <td className="px-3 py-2 text-[var(--color-muted-fg)]">
                     {item.ingredientName}
                   </td>
-                  <td className="px-3 py-2 font-medium">{item.name}</td>
-                  <td className="px-3 py-2">
-                    {item.plural ? (
-                      item.plural
-                    ) : (
-                      <span className="text-[var(--color-muted-fg)]">—</span>
+                  <td className="px-3 py-2 font-medium">
+                    {item.name}
+                    {item.plural && (
+                      <span className="font-normal text-[var(--color-muted-fg)]">
+                        {" "}
+                        / {item.plural}
+                      </span>
                     )}
                   </td>
                   <td className="px-3 py-2 tabular-nums">{item.perPurchase}</td>
