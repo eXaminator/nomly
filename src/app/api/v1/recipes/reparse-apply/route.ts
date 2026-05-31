@@ -14,7 +14,6 @@ const rowSchema = z.object({
   unassigned: z.boolean().optional(),
   quantity: z.number().nullable(),
   unitId: z.number().int().nullable(),
-  subUnitId: z.number().int().nullable(),
   displayUnit: z.string().nullable(),
   notes: z.string().nullable(),
   isOptional: z.boolean(),
