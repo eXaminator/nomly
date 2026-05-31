@@ -47,7 +47,10 @@ describe("runFamilywallCatalogSeed", () => {
     // becomes a canonical row on first seed. No rename / merge steps.
     expect(firstRunCounts.inserted).toBeGreaterThan(700);
     expect(firstRunCounts.aliasesAdded).toBeGreaterThan(1000);
-    expect(firstRunCounts.subUnitsAdded).toBeGreaterThan(15);
+    // subUnitsAdded now counts container conversions (catalog entries whose
+    // promoted sub-unit has a resolvable purchaseUnit, e.g. "1 Stück = N Zehen").
+    // Standalone former sub-units no longer add a row here.
+    expect(firstRunCounts.subUnitsAdded).toBeGreaterThan(5);
     expect(firstRunCounts.subUnitAliasesAdded).toBeGreaterThan(40);
   });
 

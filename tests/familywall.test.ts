@@ -73,7 +73,6 @@ describe("transformFamilywallRecipe", () => {
       ingredientId: null,
       quantity: 500,
       unitId: 1, // g
-      subUnitId: null,
       displayUnit: null,
       notes: null,
       isOptional: false,
