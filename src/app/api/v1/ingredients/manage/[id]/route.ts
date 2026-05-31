@@ -14,6 +14,7 @@ import {
 const aliasDefaultSchema = z.object({
   aliasName: z.string().min(1),
   unitId: z.number().int().positive().nullable().default(null),
+  unitDisplay: z.string().nullable().default(null),
 });
 
 const conversionSchema = z.object({
@@ -30,6 +31,7 @@ const updateSchema = z.object({
   aliasDisplayNames: z.record(z.string(), z.string()).default({}),
   conversions: z.array(conversionSchema).default([]),
   defaultUnitId: z.number().int().positive().nullable().default(null),
+  defaultUnitDisplay: z.string().nullable().default(null),
   defaultCategoryId: z.number().int().positive().nullable(),
   excludeFromShoppingList: z.boolean(),
   dietaryClass: z.enum(["vegan", "vegetarian", "meat"]).nullable(),

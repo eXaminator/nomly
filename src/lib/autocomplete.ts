@@ -160,6 +160,85 @@ export function searchUnits(query: string): AutocompleteHit[] {
 }
 
 /**
+ * An option for an alias-aware unit picker. Each canonical unit AND each unit
+ * alias is its own selectable row: `name` is the spelling shown/picked,
+ * `unitId` is the real unit it resolves to, and `id` is a unique option id
+ * (the unit id for canonical rows, the negated `unit_alias.id` for aliases) so
+ * the picker can list "Zehe" and its alias "clove" side by side. `detail`
+ * carries the canonical name on alias rows for context.
+ */
+export type UnitPickerHit = {
+  id: number;
+  name: string;
+  detail?: string;
+  unitId: number;
+};
+
+/** Alias-aware unit search: canonical names + every alias as a distinct,
+ *  pickable option. Lets the caller offer e.g. "clove" (alias of Zehe). */
+export function searchUnitsWithAliases(query: string): UnitPickerHit[] {
+  const q = norm(query);
+  if (q.length === 0) return [];
+  const pattern = buildLikePattern(unaccent(q));
+  const canonical = db
+    .select({ id: unit.id, name: unit.name })
+    .from(unit)
+    .where(sql`unaccent(${unit.name}) LIKE ${pattern}`)
+    .orderBy(asc(unit.name))
+    .limit(LIMIT)
+    .all()
+    .map((u) => ({ id: u.id, name: u.name, unitId: u.id }));
+  const aliasRows = db
+    .select({
+      aliasId: unitAlias.id,
+      aliasName: unitAlias.name,
+      unitId: unit.id,
+      canonicalName: unit.name,
+    })
+    .from(unitAlias)
+    .innerJoin(unit, eq(unit.id, unitAlias.unitId))
+    .where(sql`unaccent(${unitAlias.name}) LIKE ${pattern}`)
+    .orderBy(asc(unitAlias.name))
+    .limit(LIMIT)
+    .all()
+    .map((a) => ({
+      id: -a.aliasId,
+      name: a.aliasName,
+      detail: a.canonicalName,
+      unitId: a.unitId,
+    }));
+  return [...canonical, ...aliasRows];
+}
+
+/** Empty-query listing for the alias-aware picker: most-used canonical units
+ *  first, then every alias (alphabetical). */
+export function listUnitsWithAliases(): UnitPickerHit[] {
+  const canonical = listUnitsByUsage().map((u) => ({
+    id: u.id,
+    name: u.name,
+    unitId: u.id,
+  }));
+  const aliasRows = db
+    .select({
+      aliasId: unitAlias.id,
+      aliasName: unitAlias.name,
+      unitId: unit.id,
+      canonicalName: unit.name,
+    })
+    .from(unitAlias)
+    .innerJoin(unit, eq(unit.id, unitAlias.unitId))
+    .orderBy(asc(unitAlias.name))
+    .all()
+    .map((a) => ({
+      id: -a.aliasId,
+      name: a.aliasName,
+      detail: a.canonicalName,
+      unitId: a.unitId,
+    }));
+  return [...canonical, ...aliasRows];
+}
+
+/**
  * Returns every unit ordered by how often it appears in
  * `recipe_ingredient` (descending), name as a tiebreaker. Used to seed the
  * unit picker so the most-used units bubble to the top.

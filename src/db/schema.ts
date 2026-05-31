@@ -119,6 +119,13 @@ export const ingredient = sqliteTable("ingredient", {
   defaultUnitId: integer("default_unit_id").references(() => unit.id, {
     onDelete: "set null",
   }),
+  /**
+   * Optional display spelling for {@link defaultUnitId} — a unit alias the user
+   * picked instead of the canonical (e.g. "clove" for unit "Zehe"). When the
+   * canonical-name default unit is applied, the recipe row's display_unit gets
+   * this spelling. NULL = show the canonical unit name.
+   */
+  defaultUnitDisplay: text("default_unit_display"),
   excludeFromShoppingList: integer("exclude_from_shopping_list", { mode: "boolean" })
     .notNull()
     .default(false),
@@ -162,6 +169,13 @@ export const ingredientAlias = sqliteTable("ingredient_alias", {
   defaultUnitId: integer("default_unit_id").references(() => unit.id, {
     onDelete: "set null",
   }),
+  /**
+   * Optional display spelling for {@link defaultUnitId} — a unit alias picked
+   * instead of the canonical (e.g. "clove" for "Zehe"). Applied as the recipe
+   * row's display_unit when this alias's default unit drives the row. NULL =
+   * canonical unit name.
+   */
+  defaultUnitDisplay: text("default_unit_display"),
   /**
    * Optional rename applied when a recipe line matches THIS alias: the row's
    * display name becomes this instead of the alias text. Lets a unit-compound

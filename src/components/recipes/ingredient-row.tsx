@@ -30,6 +30,10 @@ import {
   type SelectSearchItem,
 } from "@/components/ui/select-search";
 import { cn } from "@/lib/cn";
+import {
+  searchUnitsWithAliases,
+  resolveUnitPick,
+} from "@/components/units/unit-picker";
 import { IngredientNameInput } from "./ingredient-name-input";
 import { liveMatchQuery, type DraftIngredient, type ImportAnnotation } from "./types";
 import { ForceMatchPopover } from "./force-match-popover";
@@ -42,19 +46,9 @@ import { ForceMatchPopover } from "./force-match-popover";
  */
 const MIN_AUTO_MATCH_SCORE = 135;
 
-async function searchUnits(q: string): Promise<SelectSearchItem[]> {
-  const r = await fetch(`/api/v1/units?q=${encodeURIComponent(q)}`);
-  if (!r.ok) return [];
-  const data = (await r.json()) as {
-    items: Array<{ id: number; name: string; matchedAlias?: string }>;
-  };
-  return data.items.map((i) => ({
-    id: i.id,
-    name: i.name,
-    detail:
-      i.matchedAlias && i.matchedAlias !== i.name ? `≈ ${i.matchedAlias}` : undefined,
-  }));
-}
+// Alias-aware: lists each unit alias (e.g. "clove") as its own option so a
+// recipe line can be set to that spelling; the pick collapses to the real unit.
+const searchUnits = searchUnitsWithAliases;
 
 async function createUnit(name: string): Promise<SelectSearchItem> {
   // Inline-created units default to dimension="count" since the import form
@@ -318,7 +312,9 @@ export function IngredientRow({
   function onPickUnit(picked: SelectSearchItem | null) {
     onChange({
       ...value,
-      unit: picked ? { id: picked.id, name: picked.name } : null,
+      // Collapse an alias pick to the real unit id while keeping the chosen
+      // spelling as the display name → the row shows e.g. "clove".
+      unit: resolveUnitPick(picked),
       importAnnotation: clearAnnotationOn(value.importAnnotation, "unit"),
     });
   }

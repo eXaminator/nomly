@@ -169,6 +169,38 @@ describe("ingredient stammdaten service", () => {
       expect(detail.conversions[0]?.toUnitName).toBe("Zehe");
     });
 
+    it("persists a default-unit display spelling (alias of the unit)", async () => {
+      const { db, schema, service } = await loadModules();
+      const [zehe] = db
+        .insert(schema.unit)
+        .values({ name: "ZeheDisp", dimension: "count", factor: 1 })
+        .returning()
+        .all();
+      const created = service.createIngredient({
+        name: "KnoblauchDisp",
+        aliases: ["garlicDisp"],
+        // The alias defaults to ZeheDisp but should DISPLAY "clove".
+        aliasUnitDefaults: [
+          { aliasName: "garlicDisp", unitId: zehe.id, unitDisplay: "clove" },
+        ],
+        // The canonical default keeps the canonical spelling.
+        defaultUnitId: zehe.id,
+        defaultUnitDisplay: "ZeheDisp",
+        defaultCategoryId: null,
+        excludeFromShoppingList: false,
+        dietaryClass: "vegan",
+      });
+      const detail = service.getIngredientDetail(created.id)!;
+      const garlic = detail.aliasUnitDefaults.find(
+        (d) => d.aliasName === "garlicDisp",
+      );
+      expect(garlic?.unitId).toBe(zehe.id);
+      // unitName surfaces the chosen spelling so the picker shows "clove".
+      expect(garlic?.unitName).toBe("clove");
+      expect(detail.defaultUnitId).toBe(zehe.id);
+      expect(detail.defaultUnitName).toBe("ZeheDisp");
+    });
+
     it("update can swap aliases and rename", async () => {
       const { service } = await loadModules();
       const id = service.listIngredients().find((r) => r.name === "Tomate")!.id;

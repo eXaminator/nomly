@@ -225,6 +225,13 @@
       "when": 1780253404472,
       "tag": "0031_foamy_stranger",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "6",
+      "when": 1780255938894,
+      "tag": "0032_hard_the_twelve",
+      "breakpoints": true
     }
   ]
 }

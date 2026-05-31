@@ -11,6 +11,10 @@ import { SelectSearch } from "@/components/ui/select-search";
 import { Switch } from "@/components/ui/switch";
 import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/cn";
+import {
+  searchUnitsWithAliases as searchUnits,
+  resolveUnitPick,
+} from "@/components/units/unit-picker";
 
 import { ImpactSection } from "../impact-section";
 import { findAliasCollisions } from "../alias-collisions";
@@ -191,6 +195,7 @@ export function IngredientForm({
     const aliasUnitDefaultsPayload: Array<{
       aliasName: string;
       unitId: number;
+      unitDisplay: string;
     }> = [];
     const aliasDisplayNamesPayload: Record<string, string> = {};
     for (const alias of aliases) {
@@ -200,6 +205,8 @@ export function IngredientForm({
         aliasUnitDefaultsPayload.push({
           aliasName,
           unitId: alias.defaultUnit.id,
+          // The picked spelling (a unit alias like "clove", or the canonical).
+          unitDisplay: alias.defaultUnit.name,
         });
       }
       const display = alias.displayName.trim();
@@ -213,6 +220,7 @@ export function IngredientForm({
         aliasDisplayNames: aliasDisplayNamesPayload,
         conversions: conversionsPayload,
         defaultUnitId: canonicalDefault?.id ?? null,
+        defaultUnitDisplay: canonicalDefault?.name ?? null,
         defaultCategoryId: category?.id ?? null,
         excludeFromShoppingList,
         isEquipment,
@@ -240,15 +248,6 @@ export function IngredientForm({
 
   async function searchCategories(q: string) {
     const res = await fetch(`/api/v1/categories?q=${encodeURIComponent(q)}`);
-    if (!res.ok) return [];
-    const body = (await res.json()) as {
-      items: Array<{ id: number; name: string }>;
-    };
-    return body.items;
-  }
-
-  async function searchUnits(q: string) {
-    const res = await fetch(`/api/v1/units?q=${encodeURIComponent(q)}`);
     if (!res.ok) return [];
     const body = (await res.json()) as {
       items: Array<{ id: number; name: string }>;
@@ -331,7 +330,9 @@ export function IngredientForm({
                   <div className="min-w-0 flex-1">
                     <SelectSearch
                       value={c.from}
-                      onChange={(p) => updateConversion(c.key, { from: p })}
+                      onChange={(p) =>
+                        updateConversion(c.key, { from: resolveUnitPick(p) })
+                      }
                       search={searchUnits}
                       placeholder="von Einheit"
                     />
@@ -353,7 +354,9 @@ export function IngredientForm({
                   <div className="min-w-0 flex-1">
                     <SelectSearch
                       value={c.to}
-                      onChange={(p) => updateConversion(c.key, { to: p })}
+                      onChange={(p) =>
+                        updateConversion(c.key, { to: resolveUnitPick(p) })
+                      }
                       search={searchUnits}
                       placeholder="nach Einheit"
                     />
@@ -401,7 +404,7 @@ export function IngredientForm({
         </p>
         <SelectSearch
           value={canonicalDefault}
-          onChange={setCanonicalDefault}
+          onChange={(p) => setCanonicalDefault(resolveUnitPick(p))}
           search={searchUnits}
           placeholder="Default-Einheit…"
         />
@@ -440,7 +443,9 @@ export function IngredientForm({
                     <SelectSearch
                       value={alias.defaultUnit}
                       onChange={(picked) =>
-                        updateAlias(alias.key, { defaultUnit: picked })
+                        updateAlias(alias.key, {
+                          defaultUnit: resolveUnitPick(picked),
+                        })
                       }
                       search={searchUnits}
                       placeholder="Default-Einheit…"

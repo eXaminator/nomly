@@ -299,6 +299,7 @@ export function buildIngredientCatalog(): IngredientCatalog {
       isEquipment: ingredient.isEquipment,
       defaultUnitId: ingredient.defaultUnitId,
       defaultUnitName: unit.name,
+      defaultUnitDisplay: ingredient.defaultUnitDisplay,
     })
     .from(ingredient)
     .leftJoin(unit, eq(unit.id, ingredient.defaultUnitId))
@@ -309,9 +310,11 @@ export function buildIngredientCatalog(): IngredientCatalog {
       canonicalName: i.name,
       aliasName: i.name,
       tokens: tokenizeEntryNameForCatalog(i.name),
+      // Default unit's display = the chosen spelling (a unit alias like
+      // "clove") when set, else the canonical unit name.
       defaultUnit:
         i.defaultUnitId != null && i.defaultUnitName != null
-          ? { id: i.defaultUnitId, name: i.defaultUnitName }
+          ? { id: i.defaultUnitId, name: i.defaultUnitDisplay ?? i.defaultUnitName }
           : undefined,
       isEquipment: i.isEquipment || undefined,
     });
@@ -325,6 +328,7 @@ export function buildIngredientCatalog(): IngredientCatalog {
       aliasDisplayName: ingredientAlias.displayName,
       defaultUnitId: ingredientAlias.defaultUnitId,
       defaultUnitName: unit.name,
+      defaultUnitDisplay: ingredientAlias.defaultUnitDisplay,
     })
     .from(ingredientAlias)
     .innerJoin(ingredient, eq(ingredient.id, ingredientAlias.ingredientId))
@@ -338,7 +342,7 @@ export function buildIngredientCatalog(): IngredientCatalog {
       tokens: tokenizeEntryNameForCatalog(a.aliasName),
       defaultUnit:
         a.defaultUnitId != null && a.defaultUnitName != null
-          ? { id: a.defaultUnitId, name: a.defaultUnitName }
+          ? { id: a.defaultUnitId, name: a.defaultUnitDisplay ?? a.defaultUnitName }
           : undefined,
       displayName: a.aliasDisplayName ?? undefined,
       isEquipment: a.isEquipment || undefined,
@@ -355,6 +359,7 @@ export function buildIngredientLookup(): IngredientLookup {
       name: ingredient.name,
       defaultUnitId: ingredient.defaultUnitId,
       defaultUnitName: unit.name,
+      defaultUnitDisplay: ingredient.defaultUnitDisplay,
     })
     .from(ingredient)
     .leftJoin(unit, eq(unit.id, ingredient.defaultUnitId))
@@ -373,7 +378,7 @@ export function buildIngredientLookup(): IngredientLookup {
       canonicalName: i.name,
       defaultUnit:
         i.defaultUnitId != null && i.defaultUnitName != null
-          ? { id: i.defaultUnitId, name: i.defaultUnitName }
+          ? { id: i.defaultUnitId, name: i.defaultUnitDisplay ?? i.defaultUnitName }
           : undefined,
     };
     add(i.name.toLowerCase(), hit);
@@ -386,6 +391,7 @@ export function buildIngredientLookup(): IngredientLookup {
       aliasName: ingredientAlias.name,
       defaultUnitId: ingredientAlias.defaultUnitId,
       defaultUnitName: unit.name,
+      defaultUnitDisplay: ingredientAlias.defaultUnitDisplay,
     })
     .from(ingredientAlias)
     .innerJoin(ingredient, eq(ingredient.id, ingredientAlias.ingredientId))
@@ -397,7 +403,7 @@ export function buildIngredientLookup(): IngredientLookup {
       canonicalName: a.canonicalName,
       defaultUnit:
         a.defaultUnitId != null && a.defaultUnitName != null
-          ? { id: a.defaultUnitId, name: a.defaultUnitName }
+          ? { id: a.defaultUnitId, name: a.defaultUnitDisplay ?? a.defaultUnitName }
           : undefined,
     };
     add(a.aliasName.toLowerCase(), hit);

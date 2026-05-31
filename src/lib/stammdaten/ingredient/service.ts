@@ -86,6 +86,8 @@ export type IngredientUpsertInput = {
   aliasUnitDefaults?: Array<{
     aliasName: string;
     unitId?: number | null;
+    /** Display spelling for the default unit (a unit alias like "clove"). */
+    unitDisplay?: string | null;
   }>;
   /** Optional per-alias display rename, keyed by alias name. Entries
    *  referencing a missing alias (or with an empty value) are dropped. */
@@ -100,6 +102,8 @@ export type IngredientUpsertInput = {
   }>;
   /** Canonical-name parser default unit. Null/omitted clears it. */
   defaultUnitId?: number | null;
+  /** Display spelling for the canonical-name default unit (a unit alias). */
+  defaultUnitDisplay?: string | null;
   defaultCategoryId: number | null;
   excludeFromShoppingList: boolean;
   isEquipment?: boolean;
@@ -125,6 +129,7 @@ function selectIngredientWithJoinedData(query?: string) {
       defaultCategoryId: ingredient.defaultCategoryId,
       defaultCategoryName: categoryTable.name,
       defaultUnitId: ingredient.defaultUnitId,
+      defaultUnitDisplay: ingredient.defaultUnitDisplay,
       excludeFromShoppingList: ingredient.excludeFromShoppingList,
       isEquipment: ingredient.isEquipment,
       dietaryClass: ingredient.dietaryClass,
@@ -188,6 +193,7 @@ function loadAliasUnitDefaults(
       aliasName: ingredientAlias.name,
       unitId: ingredientAlias.defaultUnitId,
       unitName: unitTable.name,
+      unitDisplay: ingredientAlias.defaultUnitDisplay,
     })
     .from(ingredientAlias)
     .innerJoin(unitTable, eq(unitTable.id, ingredientAlias.defaultUnitId))
@@ -199,7 +205,8 @@ function loadAliasUnitDefaults(
     list.push({
       aliasName: row.aliasName,
       unitId: row.unitId,
-      unitName: row.unitName,
+      // Show the chosen spelling (a unit alias like "clove") when set.
+      unitName: row.unitDisplay ?? row.unitName,
     });
     out.set(row.ingredientId, list);
   }
@@ -323,7 +330,8 @@ export function listIngredients(query?: string): IngredientListItem[] {
     conversions: conversions.get(row.id) ?? [],
     defaultUnitId: row.defaultUnitId,
     defaultUnitName:
-      row.defaultUnitId != null ? unitNames.get(row.defaultUnitId) ?? null : null,
+      row.defaultUnitDisplay ??
+      (row.defaultUnitId != null ? unitNames.get(row.defaultUnitId) ?? null : null),
     defaultCategoryId: row.defaultCategoryId,
     defaultCategoryName: row.defaultCategoryName,
     excludeFromShoppingList: row.excludeFromShoppingList,
@@ -347,6 +355,7 @@ function listIngredientsByIds(ids: number[]): IngredientListItem[] {
       defaultCategoryId: ingredient.defaultCategoryId,
       defaultCategoryName: categoryTable.name,
       defaultUnitId: ingredient.defaultUnitId,
+      defaultUnitDisplay: ingredient.defaultUnitDisplay,
       excludeFromShoppingList: ingredient.excludeFromShoppingList,
       isEquipment: ingredient.isEquipment,
       dietaryClass: ingredient.dietaryClass,
@@ -370,7 +379,8 @@ function listIngredientsByIds(ids: number[]): IngredientListItem[] {
     conversions: conversions.get(row.id) ?? [],
     defaultUnitId: row.defaultUnitId,
     defaultUnitName:
-      row.defaultUnitId != null ? unitNames.get(row.defaultUnitId) ?? null : null,
+      row.defaultUnitDisplay ??
+      (row.defaultUnitId != null ? unitNames.get(row.defaultUnitId) ?? null : null),
     defaultCategoryId: row.defaultCategoryId,
     defaultCategoryName: row.defaultCategoryName,
     excludeFromShoppingList: row.excludeFromShoppingList,
@@ -447,6 +457,7 @@ export function createIngredient(input: IngredientUpsertInput): IngredientDetail
         name,
         defaultCategoryId: input.defaultCategoryId ?? null,
         defaultUnitId: input.defaultUnitId ?? null,
+        defaultUnitDisplay: input.defaultUnitDisplay?.trim() || null,
         excludeFromShoppingList: input.excludeFromShoppingList,
         isEquipment: input.isEquipment ?? false,
         dietaryClass: input.dietaryClass,
@@ -460,12 +471,16 @@ export function createIngredient(input: IngredientUpsertInput): IngredientDetail
       const displayByAlias = mapAliasDisplayNames(input.aliasDisplayNames, aliases);
       tx.insert(ingredientAlias)
         .values(
-          aliases.map((aliasName) => ({
-            ingredientId: newId,
-            name: aliasName,
-            defaultUnitId: defaultsByAlias.get(aliasName.toLowerCase()) ?? null,
-            displayName: displayByAlias.get(aliasName.toLowerCase()) ?? null,
-          })),
+          aliases.map((aliasName) => {
+            const def = defaultsByAlias.get(aliasName.toLowerCase());
+            return {
+              ingredientId: newId,
+              name: aliasName,
+              defaultUnitId: def?.unitId ?? null,
+              defaultUnitDisplay: def?.display ?? null,
+              displayName: displayByAlias.get(aliasName.toLowerCase()) ?? null,
+            };
+          }),
         )
         .run();
     }
@@ -519,20 +534,23 @@ function writeConversions(
 }
 
 /**
- * Build a lookup of `aliasNameLower → unitId` from the upsert input. Keeps only
- * entries whose `aliasName` survived the alias dedupe pass and carries a unit.
+ * Build a lookup of `aliasNameLower → { unitId, display }` from the upsert
+ * input. Keeps only entries whose `aliasName` survived the dedupe pass and
+ * carry a unit. `display` is the chosen spelling (a unit alias) or null.
  */
 function mapAliasDefaults(
   defaults: IngredientUpsertInput["aliasUnitDefaults"],
   aliases: string[],
-): Map<string, number> {
-  const out = new Map<string, number>();
+): Map<string, { unitId: number; display: string | null }> {
+  const out = new Map<string, { unitId: number; display: string | null }>();
   if (!defaults) return out;
   const aliasLower = new Set(aliases.map((a) => a.toLowerCase()));
   for (const d of defaults) {
     const key = d.aliasName.trim().toLowerCase();
     if (!aliasLower.has(key)) continue;
-    if (d.unitId != null) out.set(key, d.unitId);
+    if (d.unitId != null) {
+      out.set(key, { unitId: d.unitId, display: d.unitDisplay?.trim() || null });
+    }
   }
   return out;
 }
@@ -581,6 +599,7 @@ export function updateIngredient(
         name,
         defaultCategoryId: input.defaultCategoryId ?? null,
         defaultUnitId: input.defaultUnitId ?? null,
+        defaultUnitDisplay: input.defaultUnitDisplay?.trim() || null,
         excludeFromShoppingList: input.excludeFromShoppingList,
         isEquipment: input.isEquipment ?? false,
         dietaryClass: input.dietaryClass,
@@ -597,12 +616,16 @@ export function updateIngredient(
       const displayByAlias = mapAliasDisplayNames(input.aliasDisplayNames, aliases);
       tx.insert(ingredientAlias)
         .values(
-          aliases.map((aliasName) => ({
-            ingredientId: id,
-            name: aliasName,
-            defaultUnitId: defaultsByAlias.get(aliasName.toLowerCase()) ?? null,
-            displayName: displayByAlias.get(aliasName.toLowerCase()) ?? null,
-          })),
+          aliases.map((aliasName) => {
+            const def = defaultsByAlias.get(aliasName.toLowerCase());
+            return {
+              ingredientId: id,
+              name: aliasName,
+              defaultUnitId: def?.unitId ?? null,
+              defaultUnitDisplay: def?.display ?? null,
+              displayName: displayByAlias.get(aliasName.toLowerCase()) ?? null,
+            };
+          }),
         )
         .run();
     }

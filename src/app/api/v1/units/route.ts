@@ -3,7 +3,9 @@ import { z } from "zod";
 import {
   createUnit,
   listUnitsByUsage,
+  listUnitsWithAliases,
   searchUnits,
+  searchUnitsWithAliases,
 } from "@/lib/autocomplete";
 
 const createSchema = z.object({
@@ -12,11 +14,19 @@ const createSchema = z.object({
 });
 
 export async function GET(request: Request) {
-  const q = new URL(request.url).searchParams.get("q") ?? "";
+  const url = new URL(request.url);
+  const q = url.searchParams.get("q") ?? "";
+  const empty = q.trim().length === 0;
+  // `aliases=1` returns each unit alias as its own pickable option (carrying
+  // its real `unitId`) so a picker can offer "clove" alongside "Zehe".
+  if (url.searchParams.get("aliases") === "1") {
+    const items = empty ? listUnitsWithAliases() : searchUnitsWithAliases(q);
+    return NextResponse.json({ items });
+  }
   // No query → return every unit sorted by how often it shows up in recipes
   // (with name as the alphabetical tiebreaker), so the most-used ones float
   // to the top of the picker. Query → fall back to LIKE-based search.
-  const items = q.trim().length === 0 ? listUnitsByUsage() : searchUnits(q);
+  const items = empty ? listUnitsByUsage() : searchUnits(q);
   return NextResponse.json({ items });
 }
 
