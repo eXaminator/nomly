@@ -416,6 +416,35 @@ export const shoppingItemAmount = sqliteTable(
   (t) => [index("shopping_item_amount_item_idx").on(t.itemId)],
 );
 
+/**
+ * The "Auf Lager" (in‑stock) line of a shopping item — at most one row per
+ * item (unique on `item_id`). The aggregator treats it as a *subtraction*:
+ * the quantity is converted to the matching connected component's base unit
+ * and removed from the summed total before containerization, clamped at zero.
+ * Stock whose unit shares no component with a positive contribution is stored
+ * and displayed as a position but has no effect on the total.
+ */
+export const shoppingItemStock = sqliteTable(
+  "shopping_item_stock",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    itemId: integer("item_id")
+      .notNull()
+      .references(() => shoppingItem.id, { onDelete: "cascade" }),
+    quantity: real("quantity"),
+    unitId: integer("unit_id").references(() => unit.id, { onDelete: "set null" }),
+    /**
+     * Persisted (not derived) so the aggregator can group without a unit join.
+     * Must match `unit.dimension` when `unit_id` is set, else "none".
+     */
+    dimension: text("dimension", {
+      enum: ["mass", "volume", "count", "none"],
+    }).notNull(),
+    updatedAt: integer("updated_at").notNull().default(now),
+  },
+  (t) => [uniqueIndex("shopping_item_stock_item_unique").on(t.itemId)],
+);
+
 export const shoppingItemSource = sqliteTable(
   "shopping_item_source",
   {

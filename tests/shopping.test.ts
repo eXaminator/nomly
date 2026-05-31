@@ -526,6 +526,94 @@ describe("shopping merge-on-add", () => {
   });
 });
 
+describe("shopping stock (Auf Lager)", () => {
+  let ctx: Ctx;
+
+  beforeEach(async () => {
+    ctx = await seed();
+    const { previewMeals } = await import("@/lib/shopping/preview");
+    const { addMealsToList } = await import("@/lib/shopping/merge");
+    const meals = previewMeals("2026-05-23", 1);
+    addMealsToList([
+      {
+        mealPlanId: ctx.mealPlanId,
+        ingredients: meals[0].sections
+          .flatMap((s) => s.ingredients)
+          .map((i) => ({ recipeIngredientId: i.recipeIngredientId })),
+      },
+    ]);
+  });
+
+  async function tomateItem() {
+    const { listShoppingItems } = await import("@/lib/shopping/items");
+    const item = listShoppingItems().find((i) => i.name === "Tomate");
+    if (!item) throw new Error("Tomate missing");
+    return item;
+  }
+
+  // Mass total expressed in grams (the engine promotes 1000 g → 1 kg, so we
+  // normalise back via the unit factor to assert in a single unit).
+  function massGrams(item: Awaited<ReturnType<typeof tomateItem>>): number | null {
+    const line = item.amounts.find((a) => a.dimension === "mass");
+    if (!line || line.quantity == null) return null;
+    const factor = line.unitId === ctx.unitIds.kg ? 1000 : 1;
+    return line.quantity * factor;
+  }
+
+  it("subtracts the stock amount from the matching-dimension total", async () => {
+    const { setItemStock } = await import("@/lib/shopping/items");
+    const before = await tomateItem();
+    // 500 g scaled 4/2 = 1000 g (shown as 1 kg).
+    expect(massGrams(before)).toBe(1000);
+
+    setItemStock(before.id, { quantity: 300, unitId: ctx.unitIds.g });
+    const after = await tomateItem();
+    expect(massGrams(after)).toBe(700);
+    expect(after.stock).toMatchObject({ quantity: 300, unitId: ctx.unitIds.g });
+  });
+
+  it("clamps the total at zero when stock covers everything", async () => {
+    const { setItemStock } = await import("@/lib/shopping/items");
+    const item = await tomateItem();
+    setItemStock(item.id, { quantity: 5, unitId: ctx.unitIds.kg });
+    const after = await tomateItem();
+    expect(massGrams(after)).toBe(0);
+  });
+
+  it("ignores stock in a non-matching dimension", async () => {
+    const { setItemStock } = await import("@/lib/shopping/items");
+    const item = await tomateItem();
+    setItemStock(item.id, { quantity: 2, unitId: ctx.unitIds.stk });
+    const after = await tomateItem();
+    expect(massGrams(after)).toBe(1000);
+    expect(after.stock).toMatchObject({ quantity: 2, unitId: ctx.unitIds.stk });
+  });
+
+  it("clears the stock row", async () => {
+    const { setItemStock, clearItemStock } = await import("@/lib/shopping/items");
+    const item = await tomateItem();
+    setItemStock(item.id, { quantity: 300, unitId: ctx.unitIds.g });
+    clearItemStock(item.id);
+    const after = await tomateItem();
+    expect(after.stock).toBeNull();
+    expect(massGrams(after)).toBe(1000);
+  });
+
+  it("applies a batch and clears entries with a null quantity", async () => {
+    const { setStockBatch, setItemStock } = await import("@/lib/shopping/items");
+    const item = await tomateItem();
+    setItemStock(item.id, { quantity: 300, unitId: ctx.unitIds.g });
+    // null quantity clears it again.
+    setStockBatch([{ itemId: item.id, quantity: null, unitId: null }]);
+    expect((await tomateItem()).stock).toBeNull();
+
+    setStockBatch([{ itemId: item.id, quantity: 250, unitId: ctx.unitIds.g }]);
+    const after = await tomateItem();
+    expect(after.stock).toMatchObject({ quantity: 250 });
+    expect(massGrams(after)).toBe(750);
+  });
+});
+
 describe("portion changes re-scale source contributions", () => {
   let ctx: Ctx;
 

@@ -159,3 +159,96 @@ describe("aggregateContributions", () => {
     ]);
   });
 });
+
+describe("aggregateContributions — stock subtraction", () => {
+  it("subtracts stock within the same dimension", () => {
+    const out = aggregateContributions(
+      [{ unitId: G, quantity: 250 }],
+      [],
+      units(),
+      [{ unitId: G, quantity: 100 }],
+    );
+    expect(out).toEqual([
+      { unitId: G, unitName: "g", quantity: 150, dimension: "mass" },
+    ]);
+  });
+
+  it("clamps the remainder at zero when stock exceeds the total", () => {
+    const out = aggregateContributions(
+      [{ unitId: G, quantity: 100 }],
+      [],
+      units(),
+      [{ unitId: G, quantity: 250 }],
+    );
+    expect(out).toEqual([
+      { unitId: G, unitName: "g", quantity: 0, dimension: "mass" },
+    ]);
+  });
+
+  it("subtracts before containerising (buy whole packs of the remainder)", () => {
+    const edges: ConversionEdge[] = [
+      { from: GLAS, to: G, factor: 100, isContainer: true }, // 1 Glas = 100 g
+    ];
+    const out = aggregateContributions(
+      [{ unitId: G, quantity: 250 }],
+      edges,
+      units(),
+      [{ unitId: G, quantity: 100 }],
+    );
+    // (250 - 100) = 150 g → ceil(150/100) = 2 Gläser, base 150.
+    expect(out).toEqual([
+      {
+        unitId: GLAS,
+        unitName: "Gläser",
+        quantity: 2,
+        dimension: "count",
+        baseQuantity: 150,
+        baseUnitName: "g",
+      },
+    ]);
+  });
+
+  it("normalises the stock unit (kg) before subtracting", () => {
+    const out = aggregateContributions(
+      [{ unitId: G, quantity: 1500 }],
+      [],
+      units(),
+      [{ unitId: 2 /* kg */, quantity: 1 }],
+    );
+    // 1500 g - 1 kg(=1000 g) = 500 g.
+    expect(out).toEqual([
+      { unitId: G, unitName: "g", quantity: 500, dimension: "mass" },
+    ]);
+  });
+
+  it("ignores cross-dimension stock (no phantom line, no effect)", () => {
+    const out = aggregateContributions(
+      [{ unitId: G, quantity: 200 }],
+      [],
+      units(),
+      [{ unitId: STUECK, quantity: 5 }],
+    );
+    expect(out).toEqual([
+      { unitId: G, unitName: "g", quantity: 200, dimension: "mass" },
+    ]);
+  });
+
+  it("emits no line for a stock-only component", () => {
+    const out = aggregateContributions([], [], units(), [
+      { unitId: G, quantity: 100 },
+    ]);
+    expect(out).toEqual([]);
+  });
+
+  it("does not subtract from an open-ended (null) total", () => {
+    const out = aggregateContributions(
+      [{ unitId: G, quantity: null }],
+      [],
+      units(),
+      [{ unitId: G, quantity: 50 }],
+    );
+    expect(out).toEqual([
+      { unitId: G, unitName: "g", quantity: null, dimension: "mass" },
+    ]);
+  });
+});

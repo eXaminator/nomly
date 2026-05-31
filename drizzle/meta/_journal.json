@@ -232,6 +232,13 @@
       "when": 1780255938894,
       "tag": "0032_hard_the_twelve",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "6",
+      "when": 1780260932412,
+      "tag": "0033_silent_princess_powerful",
+      "breakpoints": true
     }
   ]
 }

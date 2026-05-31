@@ -13,6 +13,7 @@ import {
   shoppingItemAmount,
   shoppingItemSource,
   shoppingItemStapleSource,
+  shoppingItemStock,
   stapleGroup,
   unit,
 } from "../../db/schema.ts";
@@ -89,6 +90,15 @@ export type ShoppingItemManualAmount = {
   dimension: AmountDimension;
 };
 
+/** The item's single "Auf Lager" (in‑stock) line. Subtracted from the
+ *  aggregated total of the matching dimension. Null when no stock is set. */
+export type ShoppingItemStock = {
+  quantity: number | null;
+  unitId: number | null;
+  unitName: string | null;
+  dimension: AmountDimension;
+};
+
 export type ShoppingItemView = {
   id: number;
   /** Retained for API compatibility — always "ingredient" after the
@@ -111,6 +121,8 @@ export type ShoppingItemView = {
   stapleSources: ShoppingItemStapleSourceView[];
   /** Individual user-added manual amounts (additive on top of sources). */
   manualAmounts: ShoppingItemManualAmount[];
+  /** The "Auf Lager" line, subtracted from the matching-dimension total. */
+  stock: ShoppingItemStock | null;
   /** The linked article's default unit (own default unit with its display
    *  spelling, else the generic "Stück" fallback). Seeds the unit pickers for
    *  new manual amounts and the "Auf Lager" stock line. */
@@ -290,6 +302,33 @@ export function listShoppingItems(
     }
   }
 
+  const stockByItem = new Map<number, ShoppingItemStock>();
+  if (itemIds.length > 0) {
+    const rows = db
+      .select({
+        itemId: shoppingItemStock.itemId,
+        quantity: shoppingItemStock.quantity,
+        unitId: shoppingItemStock.unitId,
+        unitName: unit.name,
+        unitPlural: unit.plural,
+        dimension: shoppingItemStock.dimension,
+      })
+      .from(shoppingItemStock)
+      .leftJoin(unit, eq(unit.id, shoppingItemStock.unitId))
+      .where(inArray(shoppingItemStock.itemId, itemIds))
+      .all();
+    for (const r of rows) {
+      stockByItem.set(r.itemId, {
+        quantity: r.quantity,
+        unitId: r.unitId,
+        unitName: r.unitName
+          ? pluralizeLabel({ name: r.unitName, plural: r.unitPlural }, r.quantity)
+          : r.unitName,
+        dimension: r.dimension as AmountDimension,
+      });
+    }
+  }
+
   // The conversion engine needs the full unit catalogue (to promote g→kg /
   // ml→l and to resolve any per-ingredient edge) — it's a small table, so load
   // it whole rather than tracking which ids were referenced.
@@ -332,10 +371,16 @@ export function listShoppingItems(
       })),
       ...manuals.map((m) => ({ quantity: m.quantity, unitId: m.unitId })),
     ];
+    const stock = stockByItem.get(r.id) ?? null;
+    const subtractions: ContributionInput[] =
+      stock && stock.quantity != null && stock.unitId != null
+        ? [{ quantity: stock.quantity, unitId: stock.unitId }]
+        : [];
     const amounts = buildAggregatedAmounts(
       contributions,
       conversionsByIngredient.get(r.refId as number) ?? [],
       unitsById,
+      subtractions,
     );
     const unavailable = ingredientUnavailable.get(r.refId as number) ?? [];
     return {
@@ -375,6 +420,7 @@ export function listShoppingItems(
         unitName: m.unitName,
         dimension: m.dimension,
       })),
+      stock,
       defaultUnitId: r.defaultUnitId ?? stueck.unitId,
       defaultUnitName: r.defaultUnitId != null
         ? (r.defaultUnitDisplay ?? r.defaultUnitName)
@@ -407,6 +453,7 @@ function buildAggregatedAmounts(
   contributions: ContributionInput[],
   edges: ConversionEdge[],
   unitsById: Map<number, UnitInfo>,
+  subtractions: ContributionInput[] = [],
 ): ShoppingItemAmount[] {
   const withUnit: Contribution[] = [];
   const unitless: ContributionInput[] = [];
@@ -415,10 +462,17 @@ function buildAggregatedAmounts(
     else unitless.push(c);
   }
 
+  // Only unit‑bearing stock can be removed through the conversion graph; a
+  // unitless stock entry has no node to subtract against.
+  const subWithUnit: Contribution[] = subtractions
+    .filter((c) => c.unitId != null)
+    .map((c) => ({ unitId: c.unitId as number, quantity: c.quantity }));
+
   const out: ShoppingItemAmount[] = aggregateContributions(
     withUnit,
     edges,
     unitsById,
+    subWithUnit,
   ).map((line) => ({
     quantity: line.quantity,
     unitId: line.unitId,
@@ -974,6 +1028,125 @@ export function setItemAmount(
   const view = getItemView(itemId);
   if (!view) throw new ShoppingApiError("item not found", 404);
   return view;
+}
+
+export type SetStockInput = { quantity: number | null; unitId: number | null };
+
+/** Insert or replace the single "Auf Lager" row for an item. */
+function upsertStock(tx: Tx, itemId: number, input: SetStockInput): void {
+  const dim = dimensionForUnitId(tx, input.unitId);
+  const existing = tx
+    .select({ id: shoppingItemStock.id })
+    .from(shoppingItemStock)
+    .where(eq(shoppingItemStock.itemId, itemId))
+    .get();
+  if (existing) {
+    tx.update(shoppingItemStock)
+      .set({
+        quantity: input.quantity,
+        unitId: input.unitId,
+        dimension: dim,
+        updatedAt: sql`unixepoch()`,
+      })
+      .where(eq(shoppingItemStock.itemId, itemId))
+      .run();
+  } else {
+    tx.insert(shoppingItemStock)
+      .values({
+        itemId,
+        quantity: input.quantity,
+        unitId: input.unitId,
+        dimension: dim,
+      })
+      .run();
+  }
+}
+
+/**
+ * Set the "Auf Lager" (in‑stock) amount for an item. The amount is subtracted
+ * from the matching-dimension aggregated total on read. A null `quantity`
+ * clears the stock row instead (same as {@link clearItemStock}).
+ */
+export function setItemStock(itemId: number, input: SetStockInput): ShoppingItemView {
+  const exists = db
+    .select({ id: shoppingItem.id })
+    .from(shoppingItem)
+    .where(eq(shoppingItem.id, itemId))
+    .get();
+  if (!exists) throw new ShoppingApiError("item not found", 404);
+
+  db.transaction((tx) => {
+    if (input.quantity == null) {
+      tx.delete(shoppingItemStock).where(eq(shoppingItemStock.itemId, itemId)).run();
+    } else {
+      upsertStock(tx, itemId, input);
+    }
+    tx.update(shoppingItem)
+      .set({ version: sql`${shoppingItem.version} + 1`, updatedAt: sql`unixepoch()` })
+      .where(eq(shoppingItem.id, itemId))
+      .run();
+  });
+  const view = getItemView(itemId);
+  if (!view) throw new ShoppingApiError("item not found", 404);
+  return view;
+}
+
+/** Remove the "Auf Lager" row for an item (no-op when none exists). */
+export function clearItemStock(itemId: number): ShoppingItemView {
+  const exists = db
+    .select({ id: shoppingItem.id })
+    .from(shoppingItem)
+    .where(eq(shoppingItem.id, itemId))
+    .get();
+  if (!exists) throw new ShoppingApiError("item not found", 404);
+  db.transaction((tx) => {
+    tx.delete(shoppingItemStock).where(eq(shoppingItemStock.itemId, itemId)).run();
+    tx.update(shoppingItem)
+      .set({ version: sql`${shoppingItem.version} + 1`, updatedAt: sql`unixepoch()` })
+      .where(eq(shoppingItem.id, itemId))
+      .run();
+  });
+  const view = getItemView(itemId);
+  if (!view) throw new ShoppingApiError("item not found", 404);
+  return view;
+}
+
+export type StockBatchEntry = {
+  itemId: number;
+  quantity: number | null;
+  unitId: number | null;
+};
+
+/**
+ * Apply many "Auf Lager" edits at once (the whole-list stock check). An entry
+ * with a null quantity clears that item's stock; others upsert. Items that
+ * don't exist are skipped. Returns the refreshed list.
+ */
+export function setStockBatch(entries: StockBatchEntry[]): ShoppingItemView[] {
+  db.transaction((tx) => {
+    const touched = new Set<number>();
+    for (const e of entries) {
+      const exists = tx
+        .select({ id: shoppingItem.id })
+        .from(shoppingItem)
+        .where(eq(shoppingItem.id, e.itemId))
+        .get();
+      if (!exists) continue;
+      if (e.quantity == null) {
+        tx.delete(shoppingItemStock).where(eq(shoppingItemStock.itemId, e.itemId)).run();
+      } else {
+        upsertStock(tx, e.itemId, { quantity: e.quantity, unitId: e.unitId });
+      }
+      touched.add(e.itemId);
+    }
+    for (const itemId of touched) {
+      tx.update(shoppingItem)
+        .set({ version: sql`${shoppingItem.version} + 1`, updatedAt: sql`unixepoch()` })
+        .where(eq(shoppingItem.id, itemId))
+        .run();
+    }
+  });
+  return listShoppingItems();
 }
 
 /**

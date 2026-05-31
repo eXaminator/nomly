@@ -76,11 +76,20 @@ export function aggregateContributions(
   contributions: Contribution[],
   edges: ConversionEdge[],
   units: Map<number, UnitInfo>,
+  /**
+   * "Auf Lager" stock to remove from the total. Each is converted to its
+   * component's base unit and subtracted from the summed contributions before
+   * containerization, with the per-component remainder clamped at zero.
+   * Subtractions never create a line on their own — a stock entry whose unit
+   * shares no component with a positive contribution has no visible effect.
+   */
+  subtractions: Contribution[] = [],
 ): AggregatedLine[] {
-  // 1. Node set: contribution units + edge endpoints, closed over global base
-  //    chains so a unit's dimension base is part of the same graph.
+  // 1. Node set: contribution + subtraction units + edge endpoints, closed over
+  //    global base chains so a unit's dimension base is part of the same graph.
   const nodes = new Set<number>();
   for (const c of contributions) nodes.add(c.unitId);
+  for (const c of subtractions) nodes.add(c.unitId);
   for (const e of edges) {
     nodes.add(e.from);
     nodes.add(e.to);
@@ -176,6 +185,13 @@ export function aggregateContributions(
     contribByUnit.set(c.unitId, list);
   }
 
+  const subByUnit = new Map<number, Contribution[]>();
+  for (const c of subtractions) {
+    const list = subByUnit.get(c.unitId) ?? [];
+    list.push(c);
+    subByUnit.set(c.unitId, list);
+  }
+
   const lines: AggregatedLine[] = [];
   for (const comp of components) {
     // Only emit a line if the component actually carries a contribution.
@@ -197,6 +213,21 @@ export function aggregateContributions(
         sum += c.quantity * m;
         anyKnown = true;
       }
+    }
+    // Subtract any "Auf Lager" stock in this component (converted to base),
+    // clamping the remainder at zero. Only meaningful when the positive total
+    // is known — stock can't be removed from an open-ended (null) total.
+    if (anyKnown) {
+      let stock = 0;
+      for (const id of comp) {
+        for (const c of subByUnit.get(id) ?? []) {
+          if (c.quantity == null) continue;
+          const m = convert(id, base);
+          if (m == null) continue;
+          stock += c.quantity * m;
+        }
+      }
+      if (stock > 0) sum = Math.max(0, sum - stock);
     }
     const baseTotal = anyKnown ? sum : null;
 
