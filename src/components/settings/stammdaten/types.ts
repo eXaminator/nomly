@@ -23,7 +23,6 @@ export const ENTITY_LABELS: Record<
 export type RecipeIngredientUsage = {
   quantity: number | null;
   unitName: string | null;
-  subUnitName: string | null;
   displayUnit: string | null;
   displayName: string | null;
   notes: string | null;
@@ -37,11 +36,28 @@ export type RecipeLink = {
   usages?: RecipeIngredientUsage[];
 };
 
+/** A per-ingredient conversion edge referencing a unit (`1 from = factor × to`). */
+export type ConversionUsage = {
+  fromUnitName: string;
+  toUnitName: string;
+  factor: number;
+  isContainer: boolean;
+};
+
+/** An article whose unit conversions reference a unit — shown in that unit's
+ *  "Verwendung" list. */
+export type IngredientConversionLink = {
+  id: number;
+  name: string;
+  conversions: ConversionUsage[];
+};
+
 export type ImpactRow = {
   id: number;
   refs: Record<string, number>;
   aliasCount: number;
   linkedRecipes?: RecipeLink[];
+  linkedIngredients?: IngredientConversionLink[];
 };
 
 export const REF_LABELS: Record<string, string> = {

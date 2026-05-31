@@ -45,6 +45,23 @@ export type RecipeLink = {
   usages?: RecipeIngredientUsage[];
 };
 
+/** A single per-ingredient conversion edge that references a unit, rendered
+ *  in that unit's "Verwendung". `1 from = factor × to`. */
+export type ConversionUsage = {
+  fromUnitName: string;
+  toUnitName: string;
+  factor: number;
+  isContainer: boolean;
+};
+
+/** An ingredient (article) that carries one or more conversions referencing a
+ *  unit — the unit-side mirror of {@link RecipeLink}. */
+export type IngredientConversionLink = {
+  id: number;
+  name: string;
+  conversions: ConversionUsage[];
+};
+
 export type ImpactRow = {
   id: number;
   refs: RefBreakdown;
@@ -53,6 +70,9 @@ export type ImpactRow = {
    * Empty for entities where there's no clean recipe link. Capped at the
    * service's per-entity limit. */
   linkedRecipes?: RecipeLink[];
+  /** Articles whose unit conversions reference this unit. Only populated for
+   *  the unit context (see {@link linkedIngredientConversionsForUnits}). */
+  linkedIngredients?: IngredientConversionLink[];
 };
 
 /**

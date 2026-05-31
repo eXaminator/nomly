@@ -160,6 +160,32 @@ export function ImpactSection({ entityKind, id, initial }: ImpactSectionProps) {
                   })()}
                 </div>
               )}
+
+              {data.linkedIngredients && data.linkedIngredients.length > 0 && (
+                <div className="border-t border-[var(--color-border)] pt-3">
+                  <p className="mb-2 text-xs font-medium uppercase tracking-wider text-[var(--color-muted-fg)]">
+                    Artikel mit Umrechnungen
+                  </p>
+                  <ul className="flex flex-col gap-2">
+                    {data.linkedIngredients.map((ing) => (
+                      <li key={ing.id}>
+                        <span className="font-medium text-[var(--color-fg)]">
+                          {ing.name}
+                        </span>
+                        <ul className="mt-1 ml-3 flex flex-col gap-0.5 text-xs text-[var(--color-muted-fg)]">
+                          {ing.conversions.map((c, i) => (
+                            <li key={i}>
+                              1 {c.fromUnitName} = {formatQuantity(c.factor)}{" "}
+                              {c.toUnitName}
+                              {c.isContainer ? " (Gebinde)" : ""}
+                            </li>
+                          ))}
+                        </ul>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -176,7 +202,7 @@ export function ImpactSection({ entityKind, id, initial }: ImpactSectionProps) {
  * get the lock icon.
  */
 function UsageLine({ usage: u }: { usage: RecipeIngredientUsage }) {
-  const unitLabel = u.displayUnit ?? u.subUnitName ?? u.unitName ?? "";
+  const unitLabel = u.displayUnit ?? u.unitName ?? "";
   return (
     <li
       className={cn(

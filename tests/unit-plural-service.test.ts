@@ -23,12 +23,14 @@ afterAll(() => {
 let createUnit: typeof import("@/lib/stammdaten/unit/service").createUnit;
 let updateUnit: typeof import("@/lib/stammdaten/unit/service").updateUnit;
 let getUnitDetail: typeof import("@/lib/stammdaten/unit/service").getUnitDetail;
+let getImpactForUnits: typeof import("@/lib/stammdaten/unit/service").getImpactForUnits;
 
 beforeAll(async () => {
   const svc = await import("@/lib/stammdaten/unit/service");
   createUnit = svc.createUnit;
   updateUnit = svc.updateUnit;
   getUnitDetail = svc.getUnitDetail;
+  getImpactForUnits = svc.getImpactForUnits;
 });
 
 describe("unit service — plurals round-trip", () => {
@@ -72,5 +74,77 @@ describe("unit service — plurals round-trip", () => {
     });
     expect(updated.plural).toBeNull();
     expect(updated.aliasPlurals).toEqual({});
+  });
+});
+
+describe("getImpactForUnits — linked ingredient conversions", () => {
+  it("lists every article whose conversions reference the unit, on either side", async () => {
+    const { db } = await import("@/db");
+    const { ingredient, ingredientUnitConversion } = await import("@/db/schema");
+
+    const stueck = createUnit({
+      name: "Stück (impact)",
+      plural: null,
+      aliases: [],
+      aliasPlurals: {},
+      dimension: "count",
+      baseUnitId: null,
+      factor: 1,
+      isContainer: false,
+    });
+    const zehe = createUnit({
+      name: "Zehe (impact)",
+      plural: "Zehen",
+      aliases: [],
+      aliasPlurals: {},
+      dimension: "count",
+      baseUnitId: null,
+      factor: 1,
+      isContainer: false,
+    });
+
+    const [knoblauch] = db
+      .insert(ingredient)
+      .values({ name: "Knoblauch (impact)" })
+      .returning()
+      .all();
+    // 1 Stück = 10 Zehen — references both units.
+    db.insert(ingredientUnitConversion)
+      .values({
+        ingredientId: knoblauch.id,
+        fromUnitId: stueck.id,
+        toUnitId: zehe.id,
+        factor: 10,
+        isContainer: true,
+      })
+      .run();
+
+    // Both endpoints surface the article in their "Verwendung".
+    for (const unitId of [stueck.id, zehe.id]) {
+      const [impact] = getImpactForUnits([unitId]);
+      const link = impact.linkedIngredients?.find((l) => l.id === knoblauch.id);
+      expect(link, `unit ${unitId} should list Knoblauch`).toBeDefined();
+      expect(link!.conversions).toContainEqual({
+        fromUnitName: "Stück (impact)",
+        toUnitName: "Zehe (impact)",
+        factor: 10,
+        isContainer: true,
+      });
+    }
+  });
+
+  it("returns an empty list for a unit no conversion references", () => {
+    const lonely = createUnit({
+      name: "Prise (impact)",
+      plural: null,
+      aliases: [],
+      aliasPlurals: {},
+      dimension: "mass",
+      baseUnitId: null,
+      factor: 1,
+      isContainer: false,
+    });
+    const [impact] = getImpactForUnits([lonely.id]);
+    expect(impact.linkedIngredients).toEqual([]);
   });
 });

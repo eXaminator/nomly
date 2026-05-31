@@ -1,7 +1,10 @@
-import { asc, eq, inArray } from "drizzle-orm";
+import { asc, eq, inArray, or } from "drizzle-orm";
+import { alias } from "drizzle-orm/sqlite-core";
 
 import { db } from "../../../db/index.ts";
 import {
+  ingredient,
+  ingredientUnitConversion,
   recipe,
   recipeIngredient,
   recipeSection,
@@ -9,7 +12,11 @@ import {
   unit,
 } from "../../../db/schema.ts";
 
-import type { RecipeIngredientUsage, RecipeLink } from "./types.ts";
+import type {
+  IngredientConversionLink,
+  RecipeIngredientUsage,
+  RecipeLink,
+} from "./types.ts";
 
 const LIMIT_PER_ID = 50;
 
@@ -99,6 +106,81 @@ export function linkedRecipesForUnits(
     recipeIngredient.unitId,
     /* viaSection */ true,
   );
+}
+
+/**
+ * For each unit, the articles whose per-ingredient conversions reference it —
+ * on EITHER side of the edge (`from_unit_id` or `to_unit_id`). The unit-side
+ * mirror of {@link linkedRecipesForIngredients}: one entry per ingredient,
+ * carrying every conversion of that ingredient that touches the unit. Grouped
+ * per owning unit id; ingredients sorted by name, capped at {@link
+ * LIMIT_PER_ID}.
+ */
+export function linkedIngredientConversionsForUnits(
+  unitIds: number[],
+): Map<number, IngredientConversionLink[]> {
+  const out = new Map<number, IngredientConversionLink[]>();
+  if (unitIds.length === 0) return out;
+  for (const id of unitIds) out.set(id, []);
+
+  const fromUnit = alias(unit, "from_unit");
+  const toUnit = alias(unit, "to_unit");
+  const rows = db
+    .select({
+      fromUnitId: ingredientUnitConversion.fromUnitId,
+      toUnitId: ingredientUnitConversion.toUnitId,
+      ingredientId: ingredientUnitConversion.ingredientId,
+      ingredientName: ingredient.name,
+      fromUnitName: fromUnit.name,
+      toUnitName: toUnit.name,
+      factor: ingredientUnitConversion.factor,
+      isContainer: ingredientUnitConversion.isContainer,
+    })
+    .from(ingredientUnitConversion)
+    .innerJoin(ingredient, eq(ingredient.id, ingredientUnitConversion.ingredientId))
+    .innerJoin(fromUnit, eq(fromUnit.id, ingredientUnitConversion.fromUnitId))
+    .innerJoin(toUnit, eq(toUnit.id, ingredientUnitConversion.toUnitId))
+    .where(
+      or(
+        inArray(ingredientUnitConversion.fromUnitId, unitIds),
+        inArray(ingredientUnitConversion.toUnitId, unitIds),
+      ),
+    )
+    .orderBy(asc(ingredient.name))
+    .all();
+
+  // Per owning unit, group conversions by ingredient (one link per article).
+  const byUnit = new Map<number, Map<number, IngredientConversionLink>>();
+  for (const id of unitIds) byUnit.set(id, new Map());
+  for (const r of rows) {
+    const usage = {
+      fromUnitName: r.fromUnitName,
+      toUnitName: r.toUnitName,
+      factor: r.factor,
+      isContainer: r.isContainer,
+    };
+    // A single edge can name the unit on either end; attribute it to each
+    // selected unit it touches (the unique index keeps from/to distinct).
+    for (const ownerId of [r.fromUnitId, r.toUnitId]) {
+      const byIngredient = byUnit.get(ownerId);
+      const list = out.get(ownerId);
+      if (!byIngredient || !list) continue;
+      const existing = byIngredient.get(r.ingredientId);
+      if (existing) {
+        existing.conversions.push(usage);
+        continue;
+      }
+      if (list.length >= LIMIT_PER_ID) continue;
+      const link: IngredientConversionLink = {
+        id: r.ingredientId,
+        name: r.ingredientName,
+        conversions: [usage],
+      };
+      byIngredient.set(r.ingredientId, link);
+      list.push(link);
+    }
+  }
+  return out;
 }
 
 export function linkedRecipesForTags(
