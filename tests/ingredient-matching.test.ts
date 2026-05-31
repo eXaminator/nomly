@@ -625,3 +625,50 @@ describe("a registered alias wins over the canonical it normalizes near", () => 
     ).toBe("Plant-based meat");
   });
 });
+
+describe("fuzzy alignment tier (single-typo tolerance)", () => {
+  function entry(id: number, alias: string, canonical = alias) {
+    return {
+      ingredientId: id,
+      canonicalName: canonical,
+      aliasName: alias,
+      tokens: alias.toLowerCase().split(/\s+/),
+    };
+  }
+
+  it("a fuzzy token COMPLETING a multi-token alias auto-picks it over the bare head noun", () => {
+    // "planzliche" (typo, missing f) fuzzy-matches "pflanzliche"; "milch" is
+    // exact. The 2-token alias is fully covered and beats lone "Milch".
+    const cat: IngredientCatalog = [
+      { ingredientId: 1, canonicalName: "Milch", aliasName: "Milch", tokens: ["milch"] },
+      {
+        ingredientId: 2,
+        canonicalName: "Pflanzenmilch",
+        aliasName: "pflanzliche Milch",
+        tokens: ["pflanzliche", "milch"],
+      },
+    ];
+    const { matches } = findIngredientCandidates("planzliche Milch", cat);
+    expect(matches[0].ingredientId).toBe(2);
+    expect(matches[0].score).toBeGreaterThanOrEqual(MIN_AUTO_MATCH_SCORE);
+  });
+
+  it("a LONE fuzzy match stays below the auto-pick gate (suggestion only)", () => {
+    // "bitter" fuzzy-matches "butter" (1 substitution, len 6) but a single
+    // fuzzy token earns no bonus, so it can't clear the threshold.
+    const { matches } = findIngredientCandidates("bitter", [entry(1, "butter")]);
+    expect(matches).toHaveLength(1);
+    expect(matches[0].score).toBeLessThan(MIN_AUTO_MATCH_SCORE);
+  });
+
+  it("does NOT fuzzy-match below the length floor (short words stay distinct)", () => {
+    // "Salm" vs "Salz" (len 4) is one substitution but too short to fuzzy —
+    // short words flip meaning on a single edit.
+    expect(findIngredientCandidates("Salm", [entry(1, "Salz")]).matches).toHaveLength(0);
+  });
+
+  it("does NOT fuzzy-match at edit distance 2", () => {
+    // "bitten" vs "butter": u->i and n->r = two edits.
+    expect(findIngredientCandidates("bitten", [entry(1, "butter")]).matches).toHaveLength(0);
+  });
+});

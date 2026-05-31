@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildReparsedRecipeInput,
+  carriedAlternatives,
   groupContiguousByRawLine,
   isLineGroupChanged,
   type CurrentRow,
@@ -182,6 +183,57 @@ describe("groupContiguousByRawLine", () => {
     expect(groupContiguousByRawLine(rows).map((g) => g.map((r) => r.id))).toEqual([
       [10],
     ]);
+  });
+});
+
+describe("carriedAlternatives", () => {
+  const L = "50 ml Kokosmilch (oder Hafer- oder Sojabasis)";
+  function row(over: Partial<{ id: number; rawLine: string | null; alternativeForId: number | null; ingredientId: number | null }>) {
+    return { id: 0, rawLine: L, alternativeForId: null, ingredientId: null, ...over };
+  }
+
+  it("carries an in-source alternative the re-parse no longer produces (surplus)", () => {
+    // group = [primary(rawL), Hafercuisine(rawL alt), Sojacuisine(manual alt)]
+    const group = [
+      row({ id: 1, ingredientId: 596 }),
+      row({ id: 2, ingredientId: 177, alternativeForId: 1 }),
+      row({ id: 3, rawLine: "", ingredientId: 202, alternativeForId: 1 }),
+    ];
+    // Re-parse yields only the primary → both alternatives are carried.
+    const carried = carriedAlternatives(group, 1, new Set([596]));
+    expect(carried.map((g) => g.id)).toEqual([2, 3]);
+  });
+
+  it("does NOT carry an in-source alternative the parser still produces (lets it re-map)", () => {
+    const group = [
+      row({ id: 1, ingredientId: 596 }),
+      row({ id: 2, ingredientId: 5, alternativeForId: 1 }),
+    ];
+    // Re-parse produced 2 rows (primary + the alternative, possibly re-mapped).
+    // Nothing is carried — the parser's row replaces it, no duplicate.
+    expect(carriedAlternatives(group, 2, new Set([596, 8]))).toEqual([]);
+  });
+
+  it("drops a manual alternative the parser now produces itself (no duplicate)", () => {
+    const group = [
+      row({ id: 1, ingredientId: 1 }),
+      row({ id: 2, rawLine: "", ingredientId: 9, alternativeForId: 1 }),
+    ];
+    // Parser now splits the chain and produces ingredient 9 itself.
+    expect(carriedAlternatives(group, 2, new Set([1, 9]))).toEqual([]);
+  });
+
+  it("keeps a manual alternative whose ingredient the parser does not produce", () => {
+    const group = [
+      row({ id: 1, ingredientId: 1 }),
+      row({ id: 2, rawLine: "", ingredientId: 42, alternativeForId: 1 }),
+    ];
+    expect(carriedAlternatives(group, 1, new Set([1])).map((g) => g.id)).toEqual([2]);
+  });
+
+  it("never carries the primary", () => {
+    const group = [row({ id: 1, ingredientId: 596 })];
+    expect(carriedAlternatives(group, 0, new Set())).toEqual([]);
   });
 });
 

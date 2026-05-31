@@ -225,6 +225,48 @@ function carriedAlternativeToProposed(g: {
 }
 
 /**
+ * Existing alternatives in a scanned group that the re-parse does NOT
+ * reproduce, so they must be carried through unchanged — otherwise applying a
+ * change to the ingredient silently trims its alternative unit. Two sources:
+ *
+ *  - **Manual** alternatives (empty rawLine): never produced by parsing. Kept
+ *    unless the parser now produces the same ingredient on its own (avoids a
+ *    duplicate / phantom diff once the parser catches up to a hand-add).
+ *  - **Surplus source-line** alternatives: the parser's output replaces the
+ *    source-line rows (primary + in-source alternatives) positionally. When
+ *    re-parsing yields FEWER rows than the group's source-line rows, the
+ *    trailing alternatives have no counterpart and would be deleted on apply,
+ *    so they're carried. Source-line alternatives the parser DOES still
+ *    produce are left to it — that's how a re-map of an alternative applies.
+ *
+ * `group` is sort-order-ordered (primary first); `proposedCount` is the number
+ * of rows the re-parse produced for the line.
+ */
+export function carriedAlternatives<
+  T extends {
+    rawLine: string | null;
+    alternativeForId?: number | null;
+    ingredientId: number | null;
+  },
+>(
+  group: readonly T[],
+  proposedCount: number,
+  derivedIngredientIds: ReadonlySet<number>,
+): T[] {
+  const sourceRows = group.filter((g) => (g.rawLine ?? "").trim().length > 0);
+  const manualRows = group.filter((g) => (g.rawLine ?? "").trim().length === 0);
+  const droppedSource = sourceRows
+    .slice(proposedCount)
+    .filter((g) => g.alternativeForId != null);
+  const carriedManual = manualRows.filter(
+    (g) =>
+      g.alternativeForId != null &&
+      (g.ingredientId == null || !derivedIngredientIds.has(g.ingredientId)),
+  );
+  return [...droppedSource, ...carriedManual];
+}
+
+/**
  * Scan every recipe. For each contiguous source-line group, re-parse the line
  * with the current parser and keep only groups whose output differs from the
  * stored rows. One DB read for all ingredient rows; parsing is in-process.
@@ -297,22 +339,20 @@ export function scanAllRecipesForReparse(): ReparseScanEntry[] {
     // A line that now reads as noise (no rows) shouldn't propose deleting a
     // real ingredient — skip it (mirrors the per-row re-parse guard).
     if (proposedDerived.length === 0) continue;
-    // Manually-added alternatives (absorbed into the group above, empty
-    // rawLine) aren't reproduced by re-parsing the source line, so carry them
-    // through unchanged: append them to BOTH sides. They then match in the
-    // diff (no spurious change) and are re-inserted on apply instead of being
-    // dropped — "preserve across reparse". Skip any whose ingredient the
-    // re-parse now produces on its own (the parser caught up to what the user
-    // added by hand) so we neither duplicate the row nor flag a phantom diff.
+    // Alternatives the re-parse doesn't reproduce (manual ones, or in-source
+    // ones the parser no longer extracts) are carried through unchanged on
+    // BOTH sides, so the whole alternative unit survives a reparse instead of
+    // being silently trimmed on apply. See {@link carriedAlternatives}.
     const derivedIds = new Set(
       proposedDerived
         .map((p) => p.ingredientId)
         .filter((id): id is number => id != null),
     );
-    const carried = group
-      .filter((g) => (g.rawLine ?? "").trim().length === 0)
-      .filter((g) => g.ingredientId == null || !derivedIds.has(g.ingredientId))
-      .map(carriedAlternativeToProposed);
+    const carried = carriedAlternatives(
+      group,
+      proposedDerived.length,
+      derivedIds,
+    ).map(carriedAlternativeToProposed);
     const proposed = [...proposedDerived, ...carried];
     if (!isLineGroupChanged(current, proposed)) continue;
     entries.push({

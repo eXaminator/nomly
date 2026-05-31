@@ -68,7 +68,7 @@ export type CatalogEntry = {
 
 export type IngredientCatalog = CatalogEntry[];
 
-export type MatchKind = "exact" | "prefix" | "suffix";
+export type MatchKind = "exact" | "prefix" | "suffix" | "fuzzy";
 
 export type IngredientCandidateMatch = {
   ingredientId: number;
@@ -245,6 +245,19 @@ function alignWindowToEntry(
       } else if (okFragment && (wt.endsWith(et) || et.endsWith(wt))) {
         rank = 2;
         kind = "suffix";
+      } else if (
+        // Lowest-priority tier: a single-typo (edit distance 1) match, gated to
+        // tokens of at least 5 chars so short words — where one edit flips the
+        // meaning (Salz/Salm, Reis/Reise) — never fuzzy-match. Earns NO bonus
+        // (see {@link scoreMatch}), so a LONE fuzzy token stays below the
+        // auto-pick gate (a suggestion, never a silent pick); it only tips the
+        // balance when it COMPLETES a multi-token alias whose other tokens are
+        // real matches ("planzliche Milch" → "pflanzliche Milch").
+        Math.min(wt.length, et.length) >= 5 &&
+        isEditDistance1(wt, et)
+      ) {
+        rank = 3;
+        kind = "fuzzy";
       }
       if (kind !== null && rank < bestRank) {
         bestRank = rank;
@@ -292,11 +305,52 @@ function scoreMatch(
   let s = 0;
   for (const a of aligned) {
     const base = window[a.windowOffset].postComma ? 60 : 100;
-    s += base + perTokenBonus(a.entryToken, a.windowToken);
+    // A fuzzy (single-typo) alignment earns NO per-token bonus — it would
+    // otherwise be handed the +20 "close inflection" bonus (an equal-length
+    // typo like "kale"/"kase" has ratio 1.0), pushing a lone fuzzy token to
+    // the auto-pick gate. Zero bonus keeps lone fuzzy matches below it.
+    const bonus = a.kind === "fuzzy" ? 0 : perTokenBonus(a.entryToken, a.windowToken);
+    s += base + bonus;
   }
   if (inOrder) s += 10;
   s -= unmatchedEntryCount * 120;
   return s;
+}
+
+/**
+ * True iff `a` and `b` are within Levenshtein edit distance 1 (a single
+ * substitution, insertion, or deletion). Backs the lowest-priority "fuzzy"
+ * alignment tier; callers gate it on a min token length so short words never
+ * fuzzy-match.
+ */
+function isEditDistance1(a: string, b: string): boolean {
+  if (a === b) return true;
+  const la = a.length;
+  const lb = b.length;
+  if (Math.abs(la - lb) > 1) return false;
+  if (la === lb) {
+    let diff = 0;
+    for (let i = 0; i < la; i++) {
+      if (a[i] !== b[i] && ++diff > 1) return false;
+    }
+    return true; // 1 substitution (0 diffs means a === b, handled above)
+  }
+  // One insertion/deletion: walk the shorter string against the longer.
+  const [short, long] = la < lb ? [a, b] : [b, a];
+  let i = 0;
+  let j = 0;
+  let skipped = false;
+  while (i < short.length && j < long.length) {
+    if (short[i] === long[j]) {
+      i += 1;
+      j += 1;
+    } else {
+      if (skipped) return false;
+      skipped = true;
+      j += 1;
+    }
+  }
+  return true;
 }
 
 /**
