@@ -7,10 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { NumberInput } from "@/components/ui/number-input";
-import {
-  SelectSearch,
-  type SelectSearchItem,
-} from "@/components/ui/select-search";
+import { SelectSearch } from "@/components/ui/select-search";
 import { Switch } from "@/components/ui/switch";
 import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/cn";
