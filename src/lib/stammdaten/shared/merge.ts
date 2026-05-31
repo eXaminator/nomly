@@ -146,6 +146,7 @@ function absorbAliases<Row extends { id: number; name?: string | null }>(
   const aliasParent = adapter.aliasParentColumn;
   const aliasName = adapter.aliasNameColumn;
   if (!aliasTable || !aliasParent || !aliasName) return;
+  const aliasPlural = adapter.aliasPluralColumn ?? null;
 
   const existingAliases = tx
     .select({ name: aliasName })
@@ -158,20 +159,36 @@ function absorbAliases<Row extends { id: number; name?: string | null }>(
   ]);
 
   const loserIds = losers.map((l) => l.id);
+  // Each absorbed name carries its plural along when the alias table has one.
+  // Loser CANONICAL names take the loser row's own plural; loser ALIAS names
+  // take their alias-row plural. NULL when the entity has no plural column.
   const loserAliasRows =
     loserIds.length === 0
       ? []
       : (tx
-          .select({ name: aliasName })
+          .select(
+            aliasPlural
+              ? { name: aliasName, plural: aliasPlural }
+              : { name: aliasName },
+          )
           .from(aliasTable)
           .where(inArray(aliasParent, loserIds))
-          .all() as Array<{ name: string }>);
+          .all() as Array<{ name: string; plural?: string | null }>);
 
-  const candidateNames: string[] = [];
+  const candidates: Array<{ name: string; plural: string | null }> = [];
   for (const loser of losers) {
-    if (loser.name) candidateNames.push(loser.name);
+    if (loser.name) {
+      candidates.push({
+        name: loser.name,
+        plural: aliasPlural
+          ? ((loser as { plural?: string | null }).plural ?? null)
+          : null,
+      });
+    }
   }
-  for (const row of loserAliasRows) candidateNames.push(row.name);
+  for (const row of loserAliasRows) {
+    candidates.push({ name: row.name, plural: row.plural ?? null });
+  }
 
   // Drop loser-side aliases FIRST so the inserts below don't trip the global
   // unique-name constraint on the alias table when a loser's alias name
@@ -182,13 +199,20 @@ function absorbAliases<Row extends { id: number; name?: string | null }>(
 
   const parentColName = bareColName(aliasParent);
   const nameColName = bareColName(aliasName);
-  for (const candidate of candidateNames) {
-    const key = candidate.toLowerCase();
+  const pluralColName = aliasPlural ? bareColName(aliasPlural) : null;
+  for (const candidate of candidates) {
+    const key = candidate.name.toLowerCase();
     if (takenLower.has(key)) continue;
     takenLower.add(key);
-    tx.run(
-      sql`INSERT INTO ${aliasTable} (${parentColName}, ${nameColName}) VALUES (${winner.id}, ${candidate})`,
-    );
+    if (pluralColName) {
+      tx.run(
+        sql`INSERT INTO ${aliasTable} (${parentColName}, ${nameColName}, ${pluralColName}) VALUES (${winner.id}, ${candidate.name}, ${candidate.plural})`,
+      );
+    } else {
+      tx.run(
+        sql`INSERT INTO ${aliasTable} (${parentColName}, ${nameColName}) VALUES (${winner.id}, ${candidate.name})`,
+      );
+    }
   }
 }
 

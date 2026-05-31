@@ -10,6 +10,7 @@ import type { MergeAdapter } from "../shared/types.ts";
 export type UnitRow = {
   id: number;
   name: string;
+  plural: string | null;
   dimension: "mass" | "volume" | "count";
   baseUnitId: number | null;
   factor: number;
@@ -23,6 +24,9 @@ export const unitAdapter: MergeAdapter<UnitRow> = {
   aliasTable: unitAlias,
   aliasParentColumn: unitAlias.unitId,
   aliasNameColumn: unitAlias.name,
+  // Carry plurals onto the winner when a unit is merged in: the loser unit's
+  // own plural for its absorbed canonical name, and each loser alias's plural.
+  aliasPluralColumn: unitAlias.plural,
   fkRewires: [
     {
       table: recipeIngredient,

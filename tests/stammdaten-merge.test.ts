@@ -112,6 +112,43 @@ describe("unit stammdaten merge", () => {
     expect(aliasSet.has("pcs")).toBe(true);
     expect(aliasSet.has("stk")).toBe(true);
   });
+
+  it("carries plurals onto the winner when merging a unit in", async () => {
+    const { unit } = await load();
+    const winner = unit.createUnit({
+      name: "Glas",
+      plural: "Gläser",
+      aliases: [],
+      aliasPlurals: {},
+      dimension: "count",
+      baseUnitId: null,
+      factor: 1,
+      isContainer: false,
+    });
+    // Loser has a canonical plural ("Dosen") and an alias with its own plural
+    // ("can" → "cans") — both must survive the merge as winner-alias plurals.
+    const loser = unit.createUnit({
+      name: "Dose",
+      plural: "Dosen",
+      aliases: ["can"],
+      aliasPlurals: { can: "cans" },
+      dimension: "count",
+      baseUnitId: null,
+      factor: 1,
+      isContainer: false,
+    });
+    unit.mergeUnits(winner.id, [loser.id]);
+    const after = unit.getUnitDetail(winner.id)!;
+    // Absorbed names became aliases…
+    const aliasSet = new Set(after.aliases.map((a) => a.toLowerCase()));
+    expect(aliasSet.has("dose")).toBe(true);
+    expect(aliasSet.has("can")).toBe(true);
+    // …carrying their plurals.
+    expect(after.aliasPlurals["Dose"]).toBe("Dosen");
+    expect(after.aliasPlurals["can"]).toBe("cans");
+    // The winner's own canonical plural is untouched.
+    expect(after.plural).toBe("Gläser");
+  });
 });
 
 describe("tag stammdaten merge", () => {

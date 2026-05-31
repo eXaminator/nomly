@@ -95,6 +95,13 @@ export type MergeAdapter<Row> = {
   aliasTable: SQLiteTable | null;
   aliasParentColumn: SQLiteColumn | null;
   aliasNameColumn: SQLiteColumn | null;
+  /**
+   * Optional plural column on the alias table. When set, a merge carries each
+   * absorbed name's plural onto its new winner-alias row — the loser unit's
+   * own plural for its canonical name, and each loser alias's plural. Left
+   * undefined for entities whose aliases have no plural (ingredients, tags, …).
+   */
+  aliasPluralColumn?: SQLiteColumn | null;
   fkRewires: FkRewire[];
   /** Pre-flight validation across all selected rows. Returns error or null. */
   validate?: (rows: Row[]) => string | null;
