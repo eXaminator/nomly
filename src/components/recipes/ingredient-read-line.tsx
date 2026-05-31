@@ -44,7 +44,7 @@ export type ReadLineProps = {
 /**
  * Read-view formatting of a single recipe ingredient line — the same layout
  * the recipe detail page uses (mono quantity column, name with canonical
- * disclosure, " – notes", "(optional)", alternative arrow + "oder"). Pure
+ * disclosure, " – notes", "(optional)", alternative arrow). Pure
  * presentation: no per-ingredient links / diet markers, so it can be reused
  * wherever an ingredient line needs to read like the recipe view (e.g. the
  * bulk re-parse diff).
@@ -94,7 +94,6 @@ export function RecipeIngredientReadLine({
         )}
       </span>
       <span className="flex-1">
-        {isAlternative ? <span>oder </span> : null}
         {mark(
           highlight?.name,
           <IngredientLine displayName={name} canonicalName={canonicalName} />,

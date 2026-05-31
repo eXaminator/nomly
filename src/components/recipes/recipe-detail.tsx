@@ -55,6 +55,24 @@ function DietMarker({ kind }: { kind: IngredientDietaryClass }) {
 }
 
 /**
+ * Fixed-amount lock marker. Its own always-present column (same `h-[1lh] w-3`
+ * slot as {@link DietMarker} and the upcoming-uses button) so the columns line
+ * up across rows whether or not a row is amount-locked.
+ */
+function FixedAmountMarker({ fixed }: { fixed: boolean }) {
+  return (
+    <span
+      className="inline-flex h-[1lh] w-3 shrink-0 items-center justify-center"
+      aria-hidden={fixed ? undefined : "true"}
+    >
+      {fixed ? (
+        <Lock className="size-3" aria-label="Feste Menge" />
+      ) : null}
+    </span>
+  );
+}
+
+/**
  * The recipe body — title, meta, photo, ingredients and instructions.
  * Shared by the full recipe page (`showEdit`) and the chrome-less embed view
  * used by the Home Assistant iframe (`showEdit={false}`, `mealPlanId={null}`).
@@ -200,17 +218,12 @@ export function RecipeDetail({
                   ingredientId={ing.ingredientId}
                   ingredientName={ing.canonicalIngredientName ?? ing.ingredientName}
                 />
+                <FixedAmountMarker fixed={ing.fixedAmount} />
                 <DietMarker kind={ing.isEquipment ? null : ing.dietaryClass} />
-                <span className="inline-flex min-w-12 items-center gap-1 font-mono text-[var(--color-muted-fg)]">
-                  {ing.fixedAmount ? (
-                    <Lock className="size-3 shrink-0" aria-label="Feste Menge" />
-                  ) : null}
-                  <span>
-                    {formatQuantity(ing.quantity)} {ing.unitName ?? ""}
-                  </span>
+                <span className="inline-flex min-w-12 shrink-0 items-center font-mono text-[var(--color-muted-fg)]">
+                  {formatQuantity(ing.quantity)} {ing.unitName ?? ""}
                 </span>
                 <span className="flex-1">
-                  {asAlternative ? <span>oder </span> : null}
                   <IngredientLine
                     displayName={ing.ingredientName}
                     canonicalName={ing.canonicalIngredientName}
