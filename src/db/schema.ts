@@ -74,18 +74,6 @@ export const unit = sqliteTable("unit", {
   isContainer: integer("is_container", { mode: "boolean" })
     .notNull()
     .default(false),
-  /**
-   * Set on units that are "quantity nouns" of an ingredient — Zehe, Stange,
-   * Bund, Scheibe, Zweig, Blatt … (the sub-unit side of container
-   * conversions). When such a unit is the applied default of a matched alias
-   * AND that alias name embeds the unit ("Knoblauchzehen"), the parser strips
-   * the unit from the *alias* display name (keeping its language) so the row
-   * reads "3 Zehen Knoblauch" instead of "3 Zehen Knoblauchzehen". Dimensional
-   * units (g, ml, …) leave this false so names are never mangled.
-   */
-  isNounUnit: integer("is_noun_unit", { mode: "boolean" })
-    .notNull()
-    .default(false),
 });
 
 export const unitAlias = sqliteTable("unit_alias", {
@@ -168,13 +156,20 @@ export const ingredientAlias = sqliteTable("ingredient_alias", {
   name: text("name").notNull().unique(),
   /**
    * Per-alias default unit (global). Used when the parser hits this alias
-   * with no explicit unit and the alias doesn't point at a sub-unit. Rarely
-   * needed in practice — most defaults are sub-units. Kept around so an
-   * alias like "Olivenöl extra virgin" could still imply ml.
+   * with no explicit unit — e.g. "Knoblauchzehe" → "Zehe", "Olivenöl extra
+   * virgin" → "ml".
    */
   defaultUnitId: integer("default_unit_id").references(() => unit.id, {
     onDelete: "set null",
   }),
+  /**
+   * Optional rename applied when a recipe line matches THIS alias: the row's
+   * display name becomes this instead of the alias text. Lets a unit-compound
+   * alias drop its embedded unit — "Knoblauchzehe" (default unit Zehe) →
+   * displayName "Knoblauch", so the line reads "3 Zehen Knoblauch" not
+   * "3 Zehen Knoblauchzehe". NULL = show the matched alias verbatim (default).
+   */
+  displayName: text("display_name"),
 });
 
 /**

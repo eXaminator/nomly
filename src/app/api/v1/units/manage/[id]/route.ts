@@ -20,7 +20,6 @@ const updateSchema = z.object({
   baseUnitId: z.number().int().positive().nullable(),
   factor: z.number().positive(),
   isContainer: z.boolean().default(false),
-  isNounUnit: z.boolean().default(false),
 });
 
 export async function GET(

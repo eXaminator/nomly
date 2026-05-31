@@ -25,6 +25,8 @@ export type IngredientItem = {
     unitId: number;
     unitName: string;
   }>;
+  /** Per-alias display rename, keyed by alias name. */
+  aliasDisplayNames: Record<string, string>;
   /** Per-ingredient unit conversions (`1 from = factor × to`). */
   conversions: Array<{
     id: number;
@@ -57,6 +59,8 @@ type AliasDraft = {
   name: string;
   /** Per-alias default global unit. */
   defaultUnit: { id: number; name: string } | null;
+  /** Per-alias display rename — shown on recipe rows instead of the alias. */
+  displayName: string;
 };
 
 /**
@@ -95,10 +99,12 @@ export function IngredientForm({
         name: d.unitName,
       });
     }
+    const displayByAlias = item?.aliasDisplayNames ?? {};
     return (item?.aliases ?? []).map((aliasName) => ({
       key: `existing-${aliasName}`,
       name: aliasName,
       defaultUnit: defaultsByAliasLower.get(aliasName.toLowerCase()) ?? null,
+      displayName: displayByAlias[aliasName] ?? "",
     }));
   });
   // Opt-in: also rewrite the matching display names on existing recipes when
@@ -186,19 +192,25 @@ export function IngredientForm({
       aliasName: string;
       unitId: number;
     }> = [];
+    const aliasDisplayNamesPayload: Record<string, string> = {};
     for (const alias of aliases) {
       const aliasName = alias.name.trim();
-      if (aliasName.length === 0 || !alias.defaultUnit) continue;
-      aliasUnitDefaultsPayload.push({
-        aliasName,
-        unitId: alias.defaultUnit.id,
-      });
+      if (aliasName.length === 0) continue;
+      if (alias.defaultUnit) {
+        aliasUnitDefaultsPayload.push({
+          aliasName,
+          unitId: alias.defaultUnit.id,
+        });
+      }
+      const display = alias.displayName.trim();
+      if (display.length > 0) aliasDisplayNamesPayload[aliasName] = display;
     }
     onPayloadChange(
       {
         name: trimmedName,
         aliases: aliasNames,
         aliasUnitDefaults: aliasUnitDefaultsPayload,
+        aliasDisplayNames: aliasDisplayNamesPayload,
         conversions: conversionsPayload,
         defaultUnitId: canonicalDefault?.id ?? null,
         defaultCategoryId: category?.id ?? null,
@@ -270,7 +282,12 @@ export function IngredientForm({
   function addAlias() {
     setAliases((prev) => [
       ...prev,
-      { key: `new-${crypto.randomUUID()}`, name: "", defaultUnit: null },
+      {
+        key: `new-${crypto.randomUUID()}`,
+        name: "",
+        defaultUnit: null,
+        displayName: "",
+      },
     ]);
   }
 
@@ -396,7 +413,10 @@ export function IngredientForm({
           Alternative Namen für diese Zutat. Pro Alias lässt sich optional
           eine Standard-Einheit setzen — z.&nbsp;B. „Knoblauchzehe“ →
           „Zehe“, oder „Olivenöl extra virgin“ → „ml“. Ohne Default fällt
-          der Import auf die globale Standard-Einheit „Stück“ zurück.
+          der Import auf die globale Standard-Einheit „Stück“ zurück. Mit einem
+          „Anzeigename“ wird die Zeile umbenannt, wenn dieser Alias trifft —
+          z.&nbsp;B. „Knoblauchzehe“ → Anzeige „Knoblauch“, damit
+          „3&nbsp;Zehen Knoblauch“ statt „3&nbsp;Zehen Knoblauchzehe“ steht.
         </p>
         {aliases.length > 0 ? (
           <ul className="flex flex-col divide-y divide-[var(--color-border)] overflow-hidden rounded-[var(--radius)] border border-[var(--color-border)]">
@@ -435,6 +455,15 @@ export function IngredientForm({
                       <X className="size-4" />
                     </Button>
                   </div>
+                  <Input
+                    value={alias.displayName}
+                    onChange={(e) =>
+                      updateAlias(alias.key, { displayName: e.target.value })
+                    }
+                    placeholder="Anzeigename beim Treffer (optional, z. B. Knoblauch)"
+                    aria-label="Anzeigename beim Treffer"
+                    className="text-sm"
+                  />
                   {collision && (
                     <p className="flex items-center gap-1 text-xs text-[var(--color-warning)]">
                       <AlertTriangle className="size-3 shrink-0" aria-hidden />

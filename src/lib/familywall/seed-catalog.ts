@@ -258,7 +258,12 @@ function applyEntrySubUnit(
   for (const aliasRaw of entry.subUnitAliases) {
     const name = norm(aliasRaw);
     if (name.length === 0) continue;
-    if (insertIngredientAlias(tx, ctx, ingredientId, name, subUnitId)) {
+    // Compound-noun alias ("Apfelscheibe" → Apfel + Scheibe): default unit is
+    // the promoted sub-unit, and it renames to the canonical so the row shows
+    // "Apfel" with the unit separate, not "Apfelscheibe".
+    if (
+      insertIngredientAlias(tx, ctx, ingredientId, name, subUnitId, entry.canonicalName)
+    ) {
       ctx.counts.subUnitAliasesAdded += 1;
     }
   }
@@ -291,6 +296,7 @@ function insertIngredientAlias(
   ingredientId: number,
   name: string,
   defaultUnitId: number | null,
+  displayName: string | null = null,
 ): boolean {
   const key = lower(name);
   const existingOwner = ctx.aliasByName.get(key);
@@ -300,8 +306,8 @@ function insertIngredientAlias(
       // findAliasCollisions warned about this up front; skip here.
       return false;
     }
-    // Same owner — top up the FK so a re-run after adding compound-noun
-    // aliases works.
+    // Same owner — top up the FK + rename so a re-run after adding
+    // compound-noun aliases works (only fills slots still at the default).
     if (defaultUnitId !== null) {
       tx.update(ingredientAlias)
         .set({ defaultUnitId })
@@ -314,10 +320,22 @@ function insertIngredientAlias(
         )
         .run();
     }
+    if (displayName !== null) {
+      tx.update(ingredientAlias)
+        .set({ displayName })
+        .where(
+          and(
+            eq(ingredientAlias.ingredientId, ingredientId),
+            sql`lower(${ingredientAlias.name}) = ${key}`,
+            sql`${ingredientAlias.displayName} IS NULL`,
+          ),
+        )
+        .run();
+    }
     return false;
   }
   tx.insert(ingredientAlias)
-    .values({ ingredientId, name, defaultUnitId })
+    .values({ ingredientId, name, defaultUnitId, displayName })
     .run();
   ctx.aliasByName.set(key, ingredientId);
   return true;

@@ -18,7 +18,6 @@ import type { IngredientCatalog } from "@/lib/recipe-import/matching";
 function makeLookups(
   catalog: IngredientCatalog,
   extraUnits: readonly string[] = [],
-  nounUnitFormsById: Map<number, string[]> = new Map(),
 ): ParseLookups {
   const unitEntries = ["g", ...extraUnits].map((name, i) => [
     name.toLowerCase(),
@@ -28,7 +27,6 @@ function makeLookups(
     byNameOrAlias: new Map(unitEntries),
     byCanonicalName: new Map(unitEntries),
     containerTokens: new Set(),
-    nounUnitFormsById,
   };
   const ingredients: IngredientLookup = new Map();
   for (const entry of catalog) {
@@ -1317,7 +1315,7 @@ describe("note fragments keep source order, comma-separated", () => {
     expect(out[0].notes).toBe("225 g, large, peeled and deveined");
   });
 
-  it("noun-unit compound alias: '3 Knoblauchzehen' → 3 Zehe Knoblauch (strips the unit-noun)", () => {
+  it("per-alias displayName renames a matched alias: '3 Knoblauchzehen' → 3 Zehe Knoblauch", () => {
     const catalog: IngredientCatalog = [
       {
         ingredientId: 5,
@@ -1325,47 +1323,38 @@ describe("note fragments keep source order, comma-separated", () => {
         aliasName: "Knoblauchzehen",
         tokens: ["knoblauchzehen"],
         defaultUnit: { id: 99, name: "Zehe" },
+        displayName: "Knoblauch",
       },
     ];
-    // Unit 99 ("Zehe") is a noun unit with forms zehen/zehe.
-    const nounForms = new Map([[99, ["zehen", "zehe"]]]);
-    const out = parseIngredientLines(
-      ["3 Knoblauchzehen"],
-      makeLookups(catalog, [], nounForms),
-    );
+    const out = parseIngredientLines(["3 Knoblauchzehen"], makeLookups(catalog));
     expect(out).toHaveLength(1);
     expect(out[0].ingredientId).toBe(5);
     expect(out[0].quantity).toBe(3);
     expect(out[0].unit?.id).toBe(99);
-    // The redundant "zehen" is stripped from the alias → "Knoblauch".
+    // Configured rename → "Knoblauch" (== canonical, so no badge).
     expect(out[0].name).toBe("Knoblauch");
     expect(out[0].canonicalIngredientName).toBeNull();
   });
 
-  it("strips the unit-noun in the alias's own language (English alias stays English)", () => {
+  it("displayName can be any language/text, independent of the canonical", () => {
     const catalog: IngredientCatalog = [
       {
         ingredientId: 5,
         canonicalName: "Knoblauch",
         aliasName: "garlic cloves",
         tokens: ["garlic", "cloves"],
-        defaultUnit: { id: 99, name: "Zehe" },
+        displayName: "garlic",
       },
     ];
-    // Zehe's English alias forms are part of its surface set.
-    const nounForms = new Map([[99, ["cloves", "clove", "zehen", "zehe"]]]);
-    // No quantity → no trailing-unit detection; the alias default drives it.
-    const out = parseIngredientLines(
-      ["garlic cloves"],
-      makeLookups(catalog, [], nounForms),
-    );
+    const out = parseIngredientLines(["garlic cloves"], makeLookups(catalog));
     expect(out[0].ingredientId).toBe(5);
-    // English alias minus "cloves" → "garlic" (NOT the German canonical).
+    // Shows the configured English rename, not the German canonical; the
+    // canonical is still surfaced as the badge.
     expect(out[0].name).toBe("garlic");
     expect(out[0].canonicalIngredientName).toBe("Knoblauch");
   });
 
-  it("a descriptor alias with a non-noun default unit keeps its full name", () => {
+  it("an alias with no displayName shows the matched alias verbatim", () => {
     const catalog: IngredientCatalog = [
       {
         ingredientId: 7,
@@ -1375,7 +1364,6 @@ describe("note fragments keep source order, comma-separated", () => {
         defaultUnit: { id: 3, name: "ml" },
       },
     ];
-    // ml is NOT a noun unit → no forms → nothing stripped.
     const out = parseIngredientLines(
       ["Olivenöl extra virgin"],
       makeLookups(catalog),

@@ -16,7 +16,6 @@ const upsertSchema = z.object({
   baseUnitId: z.number().int().positive().nullable(),
   factor: z.number().positive(),
   isContainer: z.boolean().default(false),
-  isNounUnit: z.boolean().default(false),
 });
 
 export function GET(request: Request) {

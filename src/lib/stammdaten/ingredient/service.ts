@@ -58,6 +58,10 @@ export type IngredientListItem = {
   /** Optional per-alias default unit. Empty when no alias of this ingredient
    *  carries a default. */
   aliasUnitDefaults: AliasUnitDefault[];
+  /** Optional per-alias display rename, keyed by alias name. When a recipe line
+   *  matches the alias, the row shows this name instead of the alias text
+   *  ("Knoblauchzehe" → "Knoblauch"). Only aliases with a rename appear here. */
+  aliasDisplayNames: Record<string, string>;
   defaultCategoryId: number | null;
   defaultCategoryName: string | null;
   /** Per-ingredient unit conversions (density + container edges). */
@@ -83,6 +87,9 @@ export type IngredientUpsertInput = {
     aliasName: string;
     unitId?: number | null;
   }>;
+  /** Optional per-alias display rename, keyed by alias name. Entries
+   *  referencing a missing alias (or with an empty value) are dropped. */
+  aliasDisplayNames?: Record<string, string>;
   /** Per-ingredient conversions to write (replaces all existing rows for this
    *  ingredient). `1 fromUnitId = factor × toUnitId`. */
   conversions?: Array<{
@@ -199,6 +206,31 @@ function loadAliasUnitDefaults(
   return out;
 }
 
+/** Per-ingredient alias display renames, as `{ aliasName: displayName }` maps
+ *  keyed by ingredient id. Only aliases with a non-empty rename are included. */
+function loadAliasDisplayNames(
+  ids: number[],
+): Map<number, Record<string, string>> {
+  const out = new Map<number, Record<string, string>>();
+  if (ids.length === 0) return out;
+  const rows = db
+    .select({
+      ingredientId: ingredientAlias.ingredientId,
+      aliasName: ingredientAlias.name,
+      displayName: ingredientAlias.displayName,
+    })
+    .from(ingredientAlias)
+    .where(inArray(ingredientAlias.ingredientId, ids))
+    .all();
+  for (const row of rows) {
+    if (!row.displayName) continue;
+    const map = out.get(row.ingredientId) ?? {};
+    map[row.aliasName] = row.displayName;
+    out.set(row.ingredientId, map);
+  }
+  return out;
+}
+
 /** Per-ingredient conversion rows, joined to both unit names, grouped by id. */
 function loadConversions(ids: number[]): Map<number, ConversionItem[]> {
   const out = new Map<number, ConversionItem[]>();
@@ -278,6 +310,7 @@ export function listIngredients(query?: string): IngredientListItem[] {
   const ids = baseRows.map((r) => r.id);
   const aliases = loadAliasesGrouped(ids);
   const aliasUnitDefaults = loadAliasUnitDefaults(ids);
+  const aliasDisplayNames = loadAliasDisplayNames(ids);
   const conversions = loadConversions(ids);
   const unitNames = loadUnitNames(baseRows.map((r) => r.defaultUnitId ?? -1));
   const recipeCounts = loadRecipeRefCounts(ids);
@@ -286,6 +319,7 @@ export function listIngredients(query?: string): IngredientListItem[] {
     name: row.name,
     aliases: aliases.get(row.id) ?? [],
     aliasUnitDefaults: aliasUnitDefaults.get(row.id) ?? [],
+    aliasDisplayNames: aliasDisplayNames.get(row.id) ?? {},
     conversions: conversions.get(row.id) ?? [],
     defaultUnitId: row.defaultUnitId,
     defaultUnitName:
@@ -323,6 +357,7 @@ function listIngredientsByIds(ids: number[]): IngredientListItem[] {
     .all();
   const aliases = loadAliasesGrouped(ids);
   const aliasUnitDefaults = loadAliasUnitDefaults(ids);
+  const aliasDisplayNames = loadAliasDisplayNames(ids);
   const conversions = loadConversions(ids);
   const unitNames = loadUnitNames(baseRows.map((r) => r.defaultUnitId ?? -1));
   const recipeCounts = loadRecipeRefCounts(ids);
@@ -331,6 +366,7 @@ function listIngredientsByIds(ids: number[]): IngredientListItem[] {
     name: row.name,
     aliases: aliases.get(row.id) ?? [],
     aliasUnitDefaults: aliasUnitDefaults.get(row.id) ?? [],
+    aliasDisplayNames: aliasDisplayNames.get(row.id) ?? {},
     conversions: conversions.get(row.id) ?? [],
     defaultUnitId: row.defaultUnitId,
     defaultUnitName:
@@ -421,12 +457,14 @@ export function createIngredient(input: IngredientUpsertInput): IngredientDetail
     writeConversions(tx, newId, input.conversions ?? []);
     if (aliases.length > 0) {
       const defaultsByAlias = mapAliasDefaults(input.aliasUnitDefaults, aliases);
+      const displayByAlias = mapAliasDisplayNames(input.aliasDisplayNames, aliases);
       tx.insert(ingredientAlias)
         .values(
           aliases.map((aliasName) => ({
             ingredientId: newId,
             name: aliasName,
             defaultUnitId: defaultsByAlias.get(aliasName.toLowerCase()) ?? null,
+            displayName: displayByAlias.get(aliasName.toLowerCase()) ?? null,
           })),
         )
         .run();
@@ -499,6 +537,27 @@ function mapAliasDefaults(
   return out;
 }
 
+/**
+ * Build a lookup of `aliasNameLower → displayName` from the upsert input. Keeps
+ * only entries whose `aliasName` survived the dedupe pass and carry a non-empty
+ * rename.
+ */
+function mapAliasDisplayNames(
+  displayNames: IngredientUpsertInput["aliasDisplayNames"],
+  aliases: string[],
+): Map<string, string> {
+  const out = new Map<string, string>();
+  if (!displayNames) return out;
+  const aliasLower = new Set(aliases.map((a) => a.toLowerCase()));
+  for (const [aliasName, raw] of Object.entries(displayNames)) {
+    const key = aliasName.trim().toLowerCase();
+    const value = raw?.trim();
+    if (!aliasLower.has(key) || !value) continue;
+    out.set(key, value);
+  }
+  return out;
+}
+
 export function updateIngredient(
   id: number,
   input: IngredientUpsertInput,
@@ -535,12 +594,14 @@ export function updateIngredient(
     writeConversions(tx, id, input.conversions ?? []);
     if (aliases.length > 0) {
       const defaultsByAlias = mapAliasDefaults(input.aliasUnitDefaults, aliases);
+      const displayByAlias = mapAliasDisplayNames(input.aliasDisplayNames, aliases);
       tx.insert(ingredientAlias)
         .values(
           aliases.map((aliasName) => ({
             ingredientId: id,
             name: aliasName,
             defaultUnitId: defaultsByAlias.get(aliasName.toLowerCase()) ?? null,
+            displayName: displayByAlias.get(aliasName.toLowerCase()) ?? null,
           })),
         )
         .run();

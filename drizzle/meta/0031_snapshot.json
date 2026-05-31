@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "b9b419ab-0178-40fe-a27b-2451e801003a",
+  "id": "f5284c02-af91-4434-9647-e082684449e0",
   "prevId": "ffabefab-c8e9-4db6-97ea-4743dabf0f12",
   "tables": {
     "api_token": {
@@ -419,6 +419,13 @@
         "default_unit_id": {
           "name": "default_unit_id",
           "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "display_name": {
+          "name": "display_name",
+          "type": "text",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
@@ -1952,14 +1959,6 @@
         },
         "is_container": {
           "name": "is_container",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": false
-        },
-        "is_noun_unit": {
-          "name": "is_noun_unit",
           "type": "integer",
           "primaryKey": false,
           "notNull": true,

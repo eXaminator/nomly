@@ -27,6 +27,7 @@ const updateSchema = z.object({
   name: z.string().min(1),
   aliases: z.array(z.string()).default([]),
   aliasUnitDefaults: z.array(aliasDefaultSchema).default([]),
+  aliasDisplayNames: z.record(z.string(), z.string()).default({}),
   conversions: z.array(conversionSchema).default([]),
   defaultUnitId: z.number().int().positive().nullable().default(null),
   defaultCategoryId: z.number().int().positive().nullable(),

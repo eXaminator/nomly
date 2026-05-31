@@ -59,6 +59,10 @@ export type CatalogEntry = {
   /** Per-alias default unit — flows through to the parser so a matched alias
    *  can still influence unit selection downstream. */
   defaultUnit?: { id: number; name: string };
+  /** Optional per-alias rename: when this entry is the match, the row's
+   *  display name becomes this instead of the alias text ("Knoblauchzehe" →
+   *  "Knoblauch"). Undefined = show the matched alias verbatim. */
+  displayName?: string;
   /** True when the underlying ingredient is flagged as equipment (Backpapier,
    *  Einmachgläser, …). The parser uses this to default the recipe row to
    *  `isOptional=true` so the user decides per-recipe whether to shop it. */
@@ -83,6 +87,7 @@ export type IngredientCandidateMatch = {
   perTokenKinds: MatchKind[];
   inOrder: boolean;
   defaultUnit?: { id: number; name: string };
+  displayName?: string;
   /** Propagated from the matched {@link CatalogEntry} — see its docstring. */
   isEquipment?: boolean;
   /** The exact candidate-token array (variant) this match was scored
@@ -396,6 +401,7 @@ function bestMatchForEntry(
         perTokenKinds: aligned.map((a) => a.kind),
         inOrder,
         defaultUnit: entry.defaultUnit,
+        displayName: entry.displayName,
         isEquipment: entry.isEquipment,
         candidate,
         isCanonical,
