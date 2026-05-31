@@ -17,6 +17,7 @@ import type {
   ShoppingItemAmount,
   ShoppingItemManualAmount,
   ShoppingItemSourceView,
+  ShoppingItemStapleSourceView,
   ShoppingItemView,
 } from "@/lib/shopping/items";
 import { formatQty } from "@/lib/shopping/format";
@@ -109,10 +110,15 @@ export function ShoppingItemRow({
               </span>
             ) : null}
           </div>
-          {item.sources.length > 0 || item.manualAmounts.length > 0 ? (
+          {item.sources.length > 0 ||
+          item.stapleSources.length > 0 ||
+          item.manualAmounts.length > 0 ? (
             <ul className="flex flex-col gap-0.5 text-xs text-[var(--color-muted-fg)]">
               {item.sources.map((s) => (
                 <SourceLine key={`src-${s.sourceId}`} source={s} />
+              ))}
+              {item.stapleSources.map((s) => (
+                <StapleLine key={`stp-${s.sourceId}`} staple={s} />
               ))}
               {item.manualAmounts.map((m) => (
                 <ManualLine key={`man-${m.id}`} manual={m} />
@@ -228,6 +234,28 @@ function SourceLine({ source }: { source: ShoppingItemSourceView }) {
         );
       })()}
       {source.recipeNotes ? <span>· {source.recipeNotes}</span> : null}
+      {source.mealNote ? (
+        <span className="italic">· {source.mealNote}</span>
+      ) : null}
+    </li>
+  );
+}
+
+function StapleLine({ staple }: { staple: ShoppingItemStapleSourceView }) {
+  return (
+    <li className="inline-flex flex-wrap items-baseline gap-x-1.5 px-1">
+      <span className="font-medium text-[var(--color-fg)]/80">
+        {staple.stapleGroupName}
+      </span>
+      <span className="uppercase tracking-wider">Standard</span>
+      {staple.contributedQuantity != null || staple.contributedUnit ? (
+        <span>
+          {staple.contributedQuantity != null
+            ? formatQty(staple.contributedQuantity)
+            : ""}
+          {staple.contributedUnit ? ` ${staple.contributedUnit}` : ""}
+        </span>
+      ) : null}
     </li>
   );
 }

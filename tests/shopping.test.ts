@@ -397,6 +397,35 @@ describe("shopping merge-on-add", () => {
     expect(tomate?.sources[0].recipeNotes).toBe("fein gehackt");
   });
 
+  it("exposes the planned meal's note on every source from that meal", async () => {
+    const { db } = await import("@/db");
+    const { mealPlan } = await import("@/db/schema");
+    const { eq } = await import("drizzle-orm");
+    db.update(mealPlan)
+      .set({ note: "doppelte Portion einplanen" })
+      .where(eq(mealPlan.id, ctx.mealPlanId))
+      .run();
+    const { previewMeals } = await import("@/lib/shopping/preview");
+    const { addMealsToList } = await import("@/lib/shopping/merge");
+    const { listShoppingItems } = await import("@/lib/shopping/items");
+    const meals = previewMeals("2026-05-23", 1);
+    addMealsToList([
+      {
+        mealPlanId: ctx.mealPlanId,
+        ingredients: meals[0].sections
+          .flatMap((s) => s.ingredients)
+          .map((i) => ({ recipeIngredientId: i.recipeIngredientId })),
+      },
+    ]);
+    const items = listShoppingItems();
+    expect(items.length).toBeGreaterThan(0);
+    for (const item of items) {
+      for (const source of item.sources) {
+        expect(source.mealNote).toBe("doppelte Portion einplanen");
+      }
+    }
+  });
+
   it("reactivates a checked item that is still within the 24h grace window", async () => {
     const { previewMeals } = await import("@/lib/shopping/preview");
     const { addMealsToList } = await import("@/lib/shopping/merge");

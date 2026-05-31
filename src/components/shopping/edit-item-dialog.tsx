@@ -332,6 +332,11 @@ function EditItemDialogBody({
                     <span className="ml-1 text-xs text-[var(--color-muted-fg)]">
                       ({formatDate(s.mealDate)})
                     </span>
+                    {s.mealNote ? (
+                      <span className="ml-1 text-xs italic text-[var(--color-muted-fg)]">
+                        · {s.mealNote}
+                      </span>
+                    ) : null}
                   </span>
                   <Input
                     type="text"

@@ -44,6 +44,9 @@ export type ShoppingItemSourceView = {
   contributedUnitId: number | null;
   contributedUnit: string | null;
   recipeNotes: string | null;
+  /** The planned meal's own note (`meal_plan.note`), shared by every ingredient
+   *  that came from this meal. Null when the meal carries no note. */
+  mealNote: string | null;
 };
 
 export type ShoppingItemStapleSourceView = {
@@ -159,6 +162,7 @@ export function listShoppingItems(
         contributedUnitPlural: unit.plural,
         contributedUnitId: shoppingItemSource.contributedUnitId,
         recipeNotes: recipeIngredient.notes,
+        mealNote: mealPlan.note,
       })
       .from(shoppingItemSource)
       .innerJoin(mealPlan, eq(mealPlan.id, shoppingItemSource.mealPlanId))
@@ -189,6 +193,7 @@ export function listShoppingItems(
           : s.contributedUnit,
         contributedUnitId: s.contributedUnitId,
         recipeNotes: s.recipeNotes,
+        mealNote: s.mealNote,
       });
       sourcesByItem.set(s.itemId, arr);
     }
@@ -349,6 +354,7 @@ export function listShoppingItems(
         contributedUnitId: s.contributedUnitId,
         contributedUnit: s.contributedUnit,
         recipeNotes: s.recipeNotes,
+        mealNote: s.mealNote,
       })),
       stapleSources,
       manualAmounts: manuals.map((m) => ({

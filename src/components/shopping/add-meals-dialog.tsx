@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { CornerDownRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -535,9 +536,15 @@ function IngredientCheckbox({
           onChange={onToggle}
           className="mt-1 size-3.5"
         />
+        {ing.alternativeForId != null ? (
+          <CornerDownRight
+            className="mt-0.5 size-4 shrink-0 text-[var(--color-muted-fg)]"
+            aria-hidden="true"
+          />
+        ) : null}
         <span className="flex flex-1 flex-wrap items-center gap-2">
           <span>{ing.ingredientName}</span>
-          {isOptionalIngredient(ing) ? (
+          {ing.alternativeForId == null && isOptionalIngredient(ing) ? (
             <span className="rounded-full bg-[var(--color-muted)] px-1.5 py-0.5 text-[10px] font-medium uppercase not-italic tracking-wider text-[var(--color-muted-fg)]">
               optional
             </span>
