@@ -99,7 +99,7 @@ async function loadIngredientSubUnits(name: string): Promise<SubUnitOption[]> {
  * length desc → alphabetical` — the UI renders pills in this order without
  * re-sorting client-side.
  */
-type ServerMatch = {
+export type ServerMatch = {
   ingredientId: number;
   canonicalName: string;
   matchedName: string;
@@ -1026,7 +1026,7 @@ export function IngredientRow({
  * Returns a new DraftIngredient with the selection applied. Callers should
  * compare against the previous value to avoid unnecessary onChange churn.
  */
-function applyAutoSelect(
+export function applyAutoSelect(
   current: DraftIngredient,
   typedName: string,
   matches: ServerMatch[],
@@ -1041,7 +1041,12 @@ function applyAutoSelect(
   // (the user may have toggled it since). An UNPINNED row — including an
   // import auto-resolution — falls through to re-evaluate the best match as
   // the text changes.
-  if (current.pinnedByUser && current.selectedIngredientId != null) {
+  if (current.pinnedByUser) {
+    // Deliberate "Neu" pin (pinned with no selection): stay a new-ingredient
+    // row. Typing / a fresh match response must NOT silently re-bind it to a
+    // candidate — otherwise it stops counting as new on save and the
+    // new-ingredient enrichment dialog never opens.
+    if (current.selectedIngredientId == null) return current;
     const hit = matches.find(
       (m) => m.ingredientId === current.selectedIngredientId,
     );
