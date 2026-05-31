@@ -204,6 +204,20 @@
       "when": 1780232253568,
       "tag": "0028_overconfident_puppet_master",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "6",
+      "when": 1780238153688,
+      "tag": "0029_purple_toad_men",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "6",
+      "when": 1780238407889,
+      "tag": "0030_opposite_thaddeus_ross",
+      "breakpoints": true
     }
   ]
 }

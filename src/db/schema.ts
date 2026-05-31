@@ -110,29 +110,15 @@ export const ingredient = sqliteTable("ingredient", {
     onDelete: "set null",
   }),
   /**
-   * Optional density used to convert *volume* amounts (TL, EL, ml, Cup) into
-   * grams on the shopping list, where ml is rarely a useful purchase unit for
-   * a non-liquid (ground spices, flour, …). Stored as grams per millilitre;
-   * shopping aggregation multiplies a volume contribution's ml-equivalent by
-   * this to get grams. NULL = leave volume amounts as volume. The recipe view
-   * is unaffected — only the shopping list converts.
-   */
-  gramsPerMl: real("grams_per_ml"),
-  /**
-   * Canonical-name parser defaults, mirroring `ingredient_alias`'
-   * `default_unit_id` / `default_sub_unit_id`. When a recipe line matches this
+   * Canonical-name parser default unit. When a recipe line matches this
    * ingredient by its *canonical* name (not via an alias) and carries no
-   * explicit unit, the parser substitutes these instead of the generic
+   * explicit unit, the parser substitutes this instead of the generic
    * "Stück" fallback. Resolution order: alias default → ingredient default →
-   * "Stück". Exactly one of the two is meaningful at a time.
+   * "Stück".
    */
   defaultUnitId: integer("default_unit_id").references(() => unit.id, {
     onDelete: "set null",
   }),
-  defaultSubUnitId: integer("default_sub_unit_id").references(
-    (): AnySQLiteColumn => ingredientSubUnit.id,
-    { onDelete: "set null" },
-  ),
   excludeFromShoppingList: integer("exclude_from_shopping_list", { mode: "boolean" })
     .notNull()
     .default(false),
@@ -177,54 +163,41 @@ export const ingredientAlias = sqliteTable("ingredient_alias", {
   defaultUnitId: integer("default_unit_id").references(() => unit.id, {
     onDelete: "set null",
   }),
-  /**
-   * Per-alias default sub-unit. When the alias matches and the line has no
-   * explicit unit, the parser substitutes this ingredient sub-unit instead
-   * of the generic "Stück" fallback. Lets "Knoblauchzehe" (alias of
-   * "Knoblauch") carry sub-unit "Zehe" without making "Zehe" a global unit.
-   */
-  defaultSubUnitId: integer("default_sub_unit_id").references(
-    (): AnySQLiteColumn => ingredientSubUnit.id,
-    { onDelete: "set null" },
-  ),
 });
 
-export const ingredientSubUnit = sqliteTable(
-  "ingredient_sub_unit",
+/**
+ * Per-ingredient unit conversion edge: `1 from_unit = factor × to_unit`.
+ * Together with each unit's global dimension factor these form a graph the
+ * shopping aggregator walks (see src/lib/units/convert.ts): contributions
+ * normalize to a component's base unit and sum, then — when `is_container` is
+ * set — the summed total is converted to the container unit (`from_unit`) and
+ * rounded up ("buy whole packs"). Examples: `1 ml = 0,5 g` (density,
+ * is_container=0); `1 Packung = 4 Stangen`, `1 Glas = 100 g`
+ * (container, is_container=1).
+ */
+export const ingredientUnitConversion = sqliteTable(
+  "ingredient_unit_conversion",
   {
     id: integer("id").primaryKey({ autoIncrement: true }),
     ingredientId: integer("ingredient_id")
       .notNull()
       .references(() => ingredient.id, { onDelete: "cascade" }),
-    /** Display name of the sub-unit ("Zehe", "Zweig", "Stange"). Stored
-     *  ingredient-locally — the same name on a different ingredient is a
-     *  different row, with its own per_purchase value. */
-    name: text("name").notNull(),
-    /**
-     * Optional explicit plural of the sub-unit ("Zehe" → "Zehen"). Matched
-     * against ingredient text alongside the singular and shown for any amount
-     * other than 1. NULL = no plural; the singular is shown for every amount.
-     */
-    plural: text("plural"),
-    /**
-     * The unit this custom unit converts into for shopping aggregation, with
-     * {@link parentAmount}: `1 ⟨this⟩ = parent_amount × ⟨parent⟩`. The parent
-     * is any global unit (Stück, g, ml …). NULL means **standalone** — the
-     * custom unit is never converted and shows as its own shopping line
-     * ("2 Stangen"). Replaces the old per-ingredient purchase-unit rollup.
-     */
-    parentUnitId: integer("parent_unit_id").references(() => unit.id, {
-      onDelete: "set null",
-    }),
-    /**
-     * How many of this custom unit make one parent unit: `1 Stück = 10 Zehen`
-     * → 10, `1 Bund = 15 Zweige` → 15. Shopping converts a contribution of
-     * `q ⟨this⟩` into `q / parent_amount ⟨parent⟩`. Ignored when
-     * {@link parentUnitId} is NULL (standalone).
-     */
-    parentAmount: real("parent_amount").notNull().default(1),
+    fromUnitId: integer("from_unit_id")
+      .notNull()
+      .references(() => unit.id, { onDelete: "cascade" }),
+    toUnitId: integer("to_unit_id")
+      .notNull()
+      .references(() => unit.id, { onDelete: "cascade" }),
+    factor: real("factor").notNull(),
+    isContainer: integer("is_container", { mode: "boolean" }).notNull().default(false),
   },
-  (t) => [uniqueIndex("ingredient_sub_unit_unique").on(t.ingredientId, t.name)],
+  (t) => [
+    uniqueIndex("ingredient_unit_conversion_unique").on(
+      t.ingredientId,
+      t.fromUnitId,
+      t.toUnitId,
+    ),
+  ],
 );
 
 export const recipeIngredient = sqliteTable(
@@ -255,15 +228,6 @@ export const recipeIngredient = sqliteTable(
     displayName: text("display_name"),
     quantity: real("quantity"),
     unitId: integer("unit_id").references(() => unit.id, { onDelete: "set null" }),
-    /**
-     * Mutually-exclusive alternative to `unit_id`: when set, the quantity is
-     * expressed in an ingredient-specific sub-unit ("12 Zehen", "3 Zweige").
-     * The shopping-list aggregator rolls these up into the ingredient's
-     * purchase unit via `ingredient_sub_unit.per_purchase`.
-     */
-    subUnitId: integer("sub_unit_id").references(() => ingredientSubUnit.id, {
-      onDelete: "set null",
-    }),
     /**
      * Mirror of `display_name` for units: when the source said "Tasse" but
      * the row resolves to canonical unit "Cup", `display_unit` preserves
@@ -448,16 +412,6 @@ export const shoppingItemSource = sqliteTable(
     contributedUnitId: integer("contributed_unit_id").references(() => unit.id, {
       onDelete: "set null",
     }),
-    /**
-     * Set instead of `contributed_unit_id` when the recipe line used an
-     * ingredient sub-unit ("5 Stäbchen"). The read-time aggregator rolls
-     * these up into the ingredient's purchase unit via `per_purchase`. The
-     * two columns are mutually exclusive, mirroring `recipe_ingredient`.
-     */
-    contributedSubUnitId: integer("contributed_sub_unit_id").references(
-      () => ingredientSubUnit.id,
-      { onDelete: "set null" },
-    ),
     addedAt: integer("added_at").notNull().default(now),
   },
   (t) => [
@@ -492,16 +446,6 @@ export const stapleGroupItem = sqliteTable(
      */
     quantity: real("quantity"),
     unitId: integer("unit_id").references(() => unit.id, {
-      onDelete: "set null",
-    }),
-    /**
-     * Mutually-exclusive alternative to `unit_id` (mirrors
-     * `recipe_ingredient.sub_unit_id`): an ingredient-specific sub-unit
-     * ("1 Dose", "2 Packungen"). Stored for the editor's round-trip; the
-     * staples→shopping conversion contributes by `unit_id` only, so a
-     * sub-unit row lands unit-less on the list exactly like recipes.
-     */
-    subUnitId: integer("sub_unit_id").references(() => ingredientSubUnit.id, {
       onDelete: "set null",
     }),
     note: text("note"),
@@ -543,13 +487,6 @@ export const shoppingItemStapleSource = sqliteTable(
     contributedUnitId: integer("contributed_unit_id").references(() => unit.id, {
       onDelete: "set null",
     }),
-    /** Mirrors `shopping_item_source.contributed_sub_unit_id`: set when the
-     *  staple item used an ingredient sub-unit. Rolled up to the purchase
-     *  unit at read time. */
-    contributedSubUnitId: integer("contributed_sub_unit_id").references(
-      () => ingredientSubUnit.id,
-      { onDelete: "set null" },
-    ),
     addedAt: integer("added_at").notNull().default(now),
   },
   (t) => [
