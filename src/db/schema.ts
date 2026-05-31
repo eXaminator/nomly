@@ -110,14 +110,14 @@ export const ingredient = sqliteTable("ingredient", {
     onDelete: "set null",
   }),
   /**
-   * The unit the user buys this ingredient in (e.g. Stück for garlic bulbs,
-   * Bund for parsley). Shopping-list aggregation rolls sub-unit quantities
-   * up to this unit and ceils to whole numbers. NULL means "no rollup
-   * configured" — items are aggregated as-is.
+   * Optional density used to convert *volume* amounts (TL, EL, ml, Cup) into
+   * grams on the shopping list, where ml is rarely a useful purchase unit for
+   * a non-liquid (ground spices, flour, …). Stored as grams per millilitre;
+   * shopping aggregation multiplies a volume contribution's ml-equivalent by
+   * this to get grams. NULL = leave volume amounts as volume. The recipe view
+   * is unaffected — only the shopping list converts.
    */
-  purchaseUnitId: integer("purchase_unit_id").references(() => unit.id, {
-    onDelete: "set null",
-  }),
+  gramsPerMl: real("grams_per_ml"),
   /**
    * Canonical-name parser defaults, mirroring `ingredient_alias`'
    * `default_unit_id` / `default_sub_unit_id`. When a recipe line matches this
@@ -207,12 +207,20 @@ export const ingredientSubUnit = sqliteTable(
      */
     plural: text("plural"),
     /**
-     * How many sub-units make one purchase unit. For Knoblauch:Zehe this is
-     * 10 (10 Zehen per Stück). Stored as the multiplier the shopping-list
-     * aggregator divides by when converting sub-unit quantities into
-     * purchase-unit aggregates.
+     * The unit this custom unit converts into for shopping aggregation, with
+     * {@link parentAmount}: `1 ⟨this⟩ = parent_amount × ⟨parent⟩`. The parent
+     * is any global unit (Stück, g, ml …). NULL means **standalone** — the
+     * custom unit is never converted and shows as its own shopping line
+     * ("2 Stangen"). Replaces the old per-ingredient purchase-unit rollup.
      */
-    perPurchase: real("per_purchase").notNull().default(1),
+    parentUnitId: integer("parent_unit_id").references(() => unit.id, {
+      onDelete: "set null",
+    }),
+    /**
+     * Parent units per one of this custom unit. `1 Stange = 4 g` → 4;
+     * `1 Zehe = 0.1 Stück` → 0.1. Ignored when {@link parentUnitId} is NULL.
+     */
+    parentAmount: real("parent_amount").notNull().default(1),
   },
   (t) => [uniqueIndex("ingredient_sub_unit_unique").on(t.ingredientId, t.name)],
 );
