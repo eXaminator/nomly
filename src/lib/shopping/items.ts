@@ -70,6 +70,11 @@ export type ShoppingItemAmount = {
   unitName: string | null;
   dimension: AmountDimension;
   manualAmountId: number | null;
+  /** For containerized (packaging) lines: the summed contributing base amount
+   *  shown in parentheses after the pack count — e.g. `12` / "Zehen" behind
+   *  "2 Stück". Null on non-container lines. */
+  baseQuantity?: number | null;
+  baseUnitName?: string | null;
 };
 
 export type ShoppingItemManualAmount = {
@@ -399,6 +404,8 @@ function buildAggregatedAmounts(
     unitName: line.unitName,
     dimension: line.dimension,
     manualAmountId: null,
+    baseQuantity: line.baseQuantity ?? null,
+    baseUnitName: line.baseUnitName ?? null,
   }));
 
   if (unitless.length > 0) {

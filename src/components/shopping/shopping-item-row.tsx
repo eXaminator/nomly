@@ -186,6 +186,9 @@ function AmountList({ amounts }: { amounts: ShoppingItemAmount[] }) {
           <span>
             {a.quantity != null ? formatQty(a.quantity) : ""}
             {a.unitName ? `${a.quantity != null ? " " : ""}${a.unitName}` : ""}
+            {a.baseQuantity != null && a.baseUnitName
+              ? ` (${formatQty(a.baseQuantity)} ${a.baseUnitName})`
+              : ""}
           </span>
         </React.Fragment>
       ))}

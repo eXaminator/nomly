@@ -68,9 +68,16 @@ describe("aggregateContributions", () => {
       { from: GLAS, to: G, factor: 100, isContainer: true }, // 1 Glas = 100 g
     ];
     const out = aggregateContributions([{ unitId: G, quantity: 250 }], edges, units());
-    // 250 g → ceil(250/100) = 3 Glas.
+    // 250 g → ceil(250/100) = 3 Glas, with the summed base behind it.
     expect(out).toEqual([
-      { unitId: GLAS, unitName: "Gläser", quantity: 3, dimension: "count" },
+      {
+        unitId: GLAS,
+        unitName: "Gläser",
+        quantity: 3,
+        dimension: "count",
+        baseQuantity: 250,
+        baseUnitName: "g",
+      },
     ]);
   });
 
@@ -85,7 +92,14 @@ describe("aggregateContributions", () => {
     );
     // 2 Stangen + 1 Packung(=4 Stangen) = 6 Stangen → ceil(6/4) = 2 Packungen.
     expect(out).toEqual([
-      { unitId: PACKUNG, unitName: "Packungen", quantity: 2, dimension: "count" },
+      {
+        unitId: PACKUNG,
+        unitName: "Packungen",
+        quantity: 2,
+        dimension: "count",
+        baseQuantity: 6,
+        baseUnitName: "Stangen",
+      },
     ]);
   });
 
@@ -123,7 +137,14 @@ describe("aggregateContributions", () => {
     ];
     const out = aggregateContributions([{ unitId: ZEHE, quantity: 12 }], edges, units());
     expect(out).toEqual([
-      { unitId: STUECK, unitName: "Stück", quantity: 2, dimension: "count" },
+      {
+        unitId: STUECK,
+        unitName: "Stück",
+        quantity: 2,
+        dimension: "count",
+        baseQuantity: 12,
+        baseUnitName: "Zehen",
+      },
     ]);
   });
 

@@ -46,6 +46,15 @@ export type AggregatedLine = {
   unitName: string;
   quantity: number | null;
   dimension: Dimension | "none";
+  /**
+   * When the line was containerized (rounded up to whole packs), the summed
+   * pre-container total in the component's base unit — e.g. `12` / "Zehen"
+   * behind a "2 Stück" line, so the display can read "2 Stück (12 Zehen)".
+   * Null/absent on non-container lines (the displayed quantity already IS the
+   * base total there).
+   */
+  baseQuantity?: number | null;
+  baseUnitName?: string | null;
 };
 
 type DirectedEdge = { from: number; to: number; factor: number; isContainer: boolean };
@@ -202,11 +211,17 @@ export function aggregateContributions(
       const toContainer = convert(base, containerEdge.from);
       const qty =
         baseTotal == null || toContainer == null ? null : ceilWhole(baseTotal * toContainer);
+      // Surface the summed base total (the contributing sub-units) so the
+      // display can read "2 Stück (12 Zehen)" — the pack count rounds up, the
+      // parenthetical shows what actually accrued.
+      const baseUnit = units.get(base);
       lines.push({
         unitId: containerEdge.from,
         unitName: container ? pluralizeLabel(container, qty) : String(containerEdge.from),
         quantity: qty,
         dimension: container?.dimension ?? "none",
+        baseQuantity: baseTotal == null ? null : round3(baseTotal),
+        baseUnitName: baseUnit ? pluralizeLabel(baseUnit, baseTotal) : null,
       });
       continue;
     }
