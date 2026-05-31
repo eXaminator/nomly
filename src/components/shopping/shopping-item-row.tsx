@@ -213,7 +213,7 @@ function SourceLine({ source }: { source: ShoppingItemSourceView }) {
       <span className="font-medium text-[var(--color-fg)]/80">{source.recipeTitle}</span>
       <span>({formatDate(source.mealDate)})</span>
       {(() => {
-        const unitLabel = source.contributedUnit ?? source.contributedSubUnit;
+        const unitLabel = source.contributedUnit;
         if (source.contributedQuantity == null && !unitLabel) return null;
         return (
           <span>

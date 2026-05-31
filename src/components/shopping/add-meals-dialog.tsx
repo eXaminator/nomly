@@ -562,7 +562,7 @@ function IngredientCheckbox({
           {/* Fixed-width slot so the inputs above all line up regardless of
               the unit's character count (or absence). */}
           <span className="w-10 text-xs text-[var(--color-muted-fg)]">
-            {ing.unitName ?? ing.subUnitName ?? ""}
+            {ing.unitName ?? ""}
           </span>
         </span>
       </label>

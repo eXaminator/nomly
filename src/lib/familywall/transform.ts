@@ -429,12 +429,10 @@ export function transformFamilywallRecipe(
         // one. The matcher already picked the right ingredient id.
         ingredientId: p.ingredientId,
         quantity: p.quantity,
-        unitId: p.subUnit ? null : p.unit ? p.unit.id : null,
-        subUnitId: p.subUnit ? p.subUnit.id : null,
+        unitId: p.unit ? p.unit.id : null,
         // Keep the imported unit token verbatim (e.g. "Tasse"). Server NULLs
-        // it back out if it equals the canonical unit name. Skipped for
-        // sub-units (the sub-unit name is the source of truth).
-        displayUnit: p.subUnit ? null : (p.rawUnit ?? null),
+        // it back out if it equals the canonical unit name.
+        displayUnit: p.rawUnit ?? null,
         notes: noteParts.length > 0 ? noteParts.join(" – ") : null,
         isOptional: p.isOptional,
         fixedAmount: p.fixedAmount,

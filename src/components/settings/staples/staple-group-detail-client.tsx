@@ -34,8 +34,6 @@ type RowState = {
   name: string;
   quantity: string;
   unitId: number | "";
-  subUnitId: number | null;
-  subUnitName: string | null;
   note: string;
 };
 
@@ -66,8 +64,6 @@ function fromDetail(item: StapleGroupItemDetail): RowState {
     name: item.ingredientName,
     quantity: item.quantity != null ? String(item.quantity) : "",
     unitId: item.unitId ?? "",
-    subUnitId: item.subUnitId,
-    subUnitName: item.subUnitName,
     note: item.note ?? "",
   };
 }
@@ -86,7 +82,6 @@ function rowFingerprint(r: RowState): string {
     pickedIngredientId: r.pickedIngredientId,
     quantity: r.quantity.trim(),
     unitId: r.unitId,
-    subUnitId: r.subUnitId,
     note: r.note.trim(),
   });
 }
@@ -134,8 +129,6 @@ export function StapleGroupDetailClient({ initial, units }: Props) {
         name: "",
         quantity: "",
         unitId: "",
-        subUnitId: null,
-        subUnitName: null,
         note: "",
       },
     ]);
@@ -182,7 +175,7 @@ export function StapleGroupDetailClient({ initial, units }: Props) {
     for (const r of rows) {
       if (!resolvedByKey.has(r.key)) continue;
       const q = parseQty(r.quantity);
-      const hasUnit = (r.unitId !== "" && r.unitId != null) || r.subUnitId != null;
+      const hasUnit = r.unitId !== "" && r.unitId != null;
       if ((q == null) === hasUnit) {
         throw new Error(
           "Menge und Einheit müssen beide gesetzt oder beide leer sein.",
@@ -212,7 +205,6 @@ export function StapleGroupDetailClient({ initial, units }: Props) {
         ingredientId: newIngredientId,
         quantity: parseQty(r.quantity),
         unitId: r.unitId === "" ? null : r.unitId,
-        subUnitId: r.subUnitId,
         note: r.note.trim() === "" ? null : r.note.trim(),
       };
       if (r.id == null) {
@@ -293,9 +285,8 @@ export function StapleGroupDetailClient({ initial, units }: Props) {
           name: d.name,
           aliases: [],
           aliasUnitDefaults: [],
-          subUnits: [],
+          conversions: [],
           defaultCategoryId: d.defaultCategoryId,
-          purchaseUnitId: null,
           excludeFromShoppingList: d.excludeFromShoppingList,
           isEquipment: d.isEquipment,
           dietaryClass: d.dietaryClass,
@@ -535,10 +526,6 @@ function StapleIngredientRow({
         row.unitId !== "" && row.unitId != null
           ? { id: row.unitId, name: unitName }
           : null,
-      subUnit:
-        row.subUnitId != null
-          ? { id: row.subUnitId, name: row.subUnitName ?? "" }
-          : null,
       notes: row.note,
       isOptional: false,
       fixedAmount: false,
@@ -556,9 +543,7 @@ function StapleIngredientRow({
           pickedIngredientId: next.selectedIngredientId,
           pickedIngredientName: next.canonicalName ?? next.name,
           quantity: next.quantity,
-          unitId: next.subUnit ? "" : (next.unit?.id ?? ""),
-          subUnitId: next.subUnit?.id ?? null,
-          subUnitName: next.subUnit?.name ?? null,
+          unitId: next.unit?.id ?? "",
           note: next.notes,
         })
       }

@@ -73,16 +73,11 @@ export default async function EditRecipePage({
         addAsAlias: false,
         unassigned: i.ingredientId == null,
         quantity: quantityToInputString(i.quantity),
-        // sub_unit_id wins over unit_id (the writer keeps them mutually
-        // exclusive). The displayed name comes from the same `unitName`
-        // coalesce on the server, so we don't need to look it up twice.
+        // The displayed unit name comes from the server's `unitName` coalesce
+        // (display_unit override → canonical), so we don't look it up twice.
         unit:
-          i.subUnitId == null && i.unitId !== null && i.unitName
+          i.unitId !== null && i.unitName
             ? { id: i.unitId, name: i.unitName }
-            : null,
-        subUnit:
-          i.subUnitId !== null && i.unitName
-            ? { id: i.subUnitId, name: i.unitName }
             : null,
         notes: i.notes ?? "",
         isOptional: i.isOptional,

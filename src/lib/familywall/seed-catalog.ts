@@ -21,7 +21,7 @@ import {
   category,
   ingredient,
   ingredientAlias,
-  ingredientSubUnit,
+  ingredientUnitConversion,
   unit,
 } from "../../db/schema.ts";
 import {
@@ -213,10 +213,12 @@ function applyEntrySubUnit(
   const subName = norm(entry.subUnit.name);
   if (subName.length === 0) return;
 
-  // The catalog's `purchaseUnit` is the parent the sub-unit converts into;
-  // `perPurchase` is already "custom units per parent" ("1 Stück = 10 Zehen"),
-  // which is exactly `parent_amount`. No purchase unit ⇒ standalone (parent
-  // null), matching the migration's behaviour-preserving rule.
+  // Former sub-units are now global units. Ensure a count-dimension unit with
+  // this name exists, then express the catalog's container relationship as a
+  // per-ingredient conversion (`1 purchaseUnit = perPurchase × subUnit`,
+  // is_container) so aggregation rounds up to whole packs.
+  const subUnitId = findOrInsertCountUnit(tx, ctx, subName);
+
   const parentUnitId = entry.purchaseUnit
     ? ctx.unitIdByName.get(lower(entry.purchaseUnit)) ?? null
     : null;
@@ -225,54 +227,32 @@ function applyEntrySubUnit(
       `${entry.canonicalName}: unknown purchaseUnit "${entry.purchaseUnit}"`,
     );
   }
-  const parentAmount =
-    parentUnitId != null && entry.subUnit.perPurchase > 0
-      ? entry.subUnit.perPurchase
-      : 1;
-
-  let subUnitId: number;
-  const existing = tx
-    .select({
-      id: ingredientSubUnit.id,
-      parentUnitId: ingredientSubUnit.parentUnitId,
-      parentAmount: ingredientSubUnit.parentAmount,
-    })
-    .from(ingredientSubUnit)
-    .where(
-      and(
-        eq(ingredientSubUnit.ingredientId, ingredientId),
-        sql`lower(${ingredientSubUnit.name}) = ${lower(subName)}`,
-      ),
-    )
-    .get();
-  if (existing) {
-    subUnitId = existing.id;
-    // Preserve user-edited conversions: only fill in the parent when the
-    // existing row is still at the schema default (standalone, amount 1) AND
-    // the catalog provides a parent. Mirrors the metadata top-up convention.
-    if (
-      existing.parentUnitId == null &&
-      existing.parentAmount === 1 &&
-      parentUnitId != null
-    ) {
-      tx.update(ingredientSubUnit)
-        .set({ parentUnitId, parentAmount })
-        .where(eq(ingredientSubUnit.id, subUnitId))
+  if (parentUnitId != null && parentUnitId !== subUnitId) {
+    const perPurchase =
+      entry.subUnit.perPurchase > 0 ? entry.subUnit.perPurchase : 1;
+    const existing = tx
+      .select({ id: ingredientUnitConversion.id })
+      .from(ingredientUnitConversion)
+      .where(
+        and(
+          eq(ingredientUnitConversion.ingredientId, ingredientId),
+          eq(ingredientUnitConversion.fromUnitId, parentUnitId),
+          eq(ingredientUnitConversion.toUnitId, subUnitId),
+        ),
+      )
+      .get();
+    if (!existing) {
+      tx.insert(ingredientUnitConversion)
+        .values({
+          ingredientId,
+          fromUnitId: parentUnitId,
+          toUnitId: subUnitId,
+          factor: perPurchase,
+          isContainer: true,
+        })
         .run();
+      ctx.counts.subUnitsAdded += 1;
     }
-  } else {
-    const inserted = tx
-      .insert(ingredientSubUnit)
-      .values({
-        ingredientId,
-        name: subName,
-        parentUnitId,
-        parentAmount,
-      })
-      .returning({ id: ingredientSubUnit.id })
-      .all();
-    subUnitId = inserted[0].id;
-    ctx.counts.subUnitsAdded += 1;
   }
 
   for (const aliasRaw of entry.subUnitAliases) {
@@ -282,6 +262,22 @@ function applyEntrySubUnit(
       ctx.counts.subUnitAliasesAdded += 1;
     }
   }
+}
+
+/** Find a unit by name (case-insensitive) or insert a count-dimension one
+ *  (factor 1, no base). Keeps the ctx cache current for later lookups. */
+function findOrInsertCountUnit(tx: Tx, ctx: SeedContext, name: string): number {
+  const key = lower(name);
+  const existing = ctx.unitIdByName.get(key);
+  if (existing !== undefined) return existing;
+  const inserted = tx
+    .insert(unit)
+    .values({ name: norm(name), dimension: "count", factor: 1 })
+    .returning({ id: unit.id })
+    .all();
+  const id = inserted[0].id;
+  ctx.unitIdByName.set(key, id);
+  return id;
 }
 
 /**
@@ -294,7 +290,7 @@ function insertIngredientAlias(
   ctx: SeedContext,
   ingredientId: number,
   name: string,
-  defaultSubUnitId: number | null,
+  defaultUnitId: number | null,
 ): boolean {
   const key = lower(name);
   const existingOwner = ctx.aliasByName.get(key);
@@ -304,16 +300,16 @@ function insertIngredientAlias(
       // findAliasCollisions warned about this up front; skip here.
       return false;
     }
-    // Same owner — top up the FK so a re-run after adding sub-unit aliases
-    // works.
-    if (defaultSubUnitId !== null) {
+    // Same owner — top up the FK so a re-run after adding compound-noun
+    // aliases works.
+    if (defaultUnitId !== null) {
       tx.update(ingredientAlias)
-        .set({ defaultSubUnitId })
+        .set({ defaultUnitId })
         .where(
           and(
             eq(ingredientAlias.ingredientId, ingredientId),
             sql`lower(${ingredientAlias.name}) = ${key}`,
-            sql`${ingredientAlias.defaultSubUnitId} IS NULL`,
+            sql`${ingredientAlias.defaultUnitId} IS NULL`,
           ),
         )
         .run();
@@ -321,7 +317,7 @@ function insertIngredientAlias(
     return false;
   }
   tx.insert(ingredientAlias)
-    .values({ ingredientId, name, defaultSubUnitId })
+    .values({ ingredientId, name, defaultUnitId })
     .run();
   ctx.aliasByName.set(key, ingredientId);
   return true;

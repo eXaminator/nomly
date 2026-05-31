@@ -25,26 +25,24 @@ export type IngredientItem = {
   aliases: string[];
   aliasUnitDefaults: Array<{
     aliasName: string;
-    unitId: number | null;
-    subUnitId: number | null;
+    unitId: number;
     unitName: string;
   }>;
-  subUnits: Array<{
+  /** Per-ingredient unit conversions (`1 from = factor × to`). */
+  conversions: Array<{
     id: number;
-    name: string;
-    plural: string | null;
-    parentUnitId: number | null;
-    parentUnitName: string | null;
-    parentAmount: number;
+    fromUnitId: number;
+    fromUnitName: string;
+    toUnitId: number;
+    toUnitName: string;
+    factor: number;
+    isContainer: boolean;
   }>;
-  /** Canonical-name parser default (mirrors aliasUnitDefaults). Exactly one of
-   *  defaultUnitId / defaultSubUnitId is set, or both null. */
+  /** Canonical-name parser default unit. */
   defaultUnitId: number | null;
   defaultUnitName: string | null;
-  defaultSubUnitId: number | null;
   defaultCategoryId: number | null;
   defaultCategoryName: string | null;
-  gramsPerMl: number | null;
   excludeFromShoppingList: boolean;
   isEquipment: boolean;
   dietaryClass: "vegan" | "vegetarian" | "meat" | null;
@@ -57,95 +55,48 @@ const DIET_OPTIONS = [
   { value: "meat", label: "Tierisch" },
 ] as const;
 
-/**
- * Sub-unit row in the editor. `tempKey` stays stable across renders so
- * alias-default references survive name edits. `existingId` is the DB id
- * for rows that came back from the loaded ingredient — used to map saved
- * `default_sub_unit_id` references back to a tempKey on initial load.
- */
-type SubUnitDraft = {
-  tempKey: string;
-  existingId?: number;
-  name: string;
-  plural: string;
-  /** Parent global unit this custom unit converts into; null = standalone. */
-  parent: { id: number; name: string } | null;
-  /** `1 ⟨name⟩ = parentAmount × ⟨parent⟩`, as text for the input. */
-  parentAmount: string;
-};
-
-/**
- * Per-alias state. `defaultUnit` either points at a global unit row or at
- * one of this ingredient's sub-units (by sub-unit `tempKey` — id isn't yet
- * known for rows the user just added in this same edit session).
- */
-type AliasUnitRef =
-  | { kind: "unit"; unitId: number; unitName: string }
-  | { kind: "subUnit"; tempKey: string };
-
 type AliasDraft = {
   key: string;
   name: string;
-  defaultUnit: AliasUnitRef | null;
+  /** Per-alias default global unit. */
+  defaultUnit: { id: number; name: string } | null;
 };
 
 /**
- * Synthetic numeric id used by the combined unit/sub-unit picker so it can
- * still rely on `SelectSearchItem.id: number`. Global units get their own
- * positive `unit.id`; the picker rewrites local sub-units to a negative id
- * derived from their position in the current `subUnits` array. The negation
- * lets us tell sub-units from global units without changing SelectSearch's
- * shape.
+ * One conversion edge in the editor. Reads "1 ⟨from⟩ = ⟨factor⟩ ⟨to⟩". A
+ * container edge (`isContainer`) is the "buy whole packs" rule — the per-
+ * component total rounds up to whole ⟨from⟩; a non-container edge is plain
+ * normalization (density: "1 ml = 0,5 g"; count breakdown: "1 Stück = 10 Zehe").
  */
-const SUB_UNIT_OFFSET = 1;
-function subUnitPickerId(localIndex: number): number {
-  return -(localIndex + SUB_UNIT_OFFSET);
-}
-function decodeSubUnitIndex(pickerId: number): number | null {
-  if (pickerId >= 0) return null;
-  return -pickerId - SUB_UNIT_OFFSET;
-}
+type ConversionDraft = {
+  key: string;
+  from: { id: number; name: string } | null;
+  to: { id: number; name: string } | null;
+  factor: string;
+  isContainer: boolean;
+};
 
 export function IngredientForm({
   item,
   onPayloadChange,
 }: EditFormProps<IngredientItem>) {
   const [name, setName] = React.useState(item?.name ?? "");
-  const [subUnits, setSubUnits] = React.useState<SubUnitDraft[]>(
-    () =>
-      (item?.subUnits ?? []).map((s) => ({
-        tempKey: `existing-${s.id}`,
-        existingId: s.id,
-        name: s.name,
-        plural: s.plural ?? "",
-        parent:
-          s.parentUnitId != null && s.parentUnitName != null
-            ? { id: s.parentUnitId, name: s.parentUnitName }
-            : null,
-        parentAmount: s.parentUnitId != null ? String(s.parentAmount) : "1",
-      })),
+  const [conversions, setConversions] = React.useState<ConversionDraft[]>(() =>
+    (item?.conversions ?? []).map((c) => ({
+      key: `existing-${c.id}`,
+      from: { id: c.fromUnitId, name: c.fromUnitName },
+      to: { id: c.toUnitId, name: c.toUnitName },
+      factor: String(c.factor),
+      isContainer: c.isContainer,
+    })),
   );
   const [aliases, setAliases] = React.useState<AliasDraft[]>(() => {
-    const tempKeyBySubUnitId = new Map<number, string>();
-    for (const s of item?.subUnits ?? [])
-      tempKeyBySubUnitId.set(s.id, `existing-${s.id}`);
-    const defaultsByAliasLower = new Map<string, AliasUnitRef>();
+    const defaultsByAliasLower = new Map<string, { id: number; name: string }>();
     for (const d of item?.aliasUnitDefaults ?? []) {
-      if (d.subUnitId != null) {
-        const tempKey = tempKeyBySubUnitId.get(d.subUnitId);
-        if (tempKey) {
-          defaultsByAliasLower.set(d.aliasName.toLowerCase(), {
-            kind: "subUnit",
-            tempKey,
-          });
-        }
-      } else if (d.unitId != null) {
-        defaultsByAliasLower.set(d.aliasName.toLowerCase(), {
-          kind: "unit",
-          unitId: d.unitId,
-          unitName: d.unitName,
-        });
-      }
+      defaultsByAliasLower.set(d.aliasName.toLowerCase(), {
+        id: d.unitId,
+        name: d.unitName,
+      });
     }
     return (item?.aliases ?? []).map((aliasName) => ({
       key: `existing-${aliasName}`,
@@ -164,28 +115,14 @@ export function IngredientForm({
       ? { id: item.defaultCategoryId, name: item.defaultCategoryName }
       : null,
   );
-  const [gramsPerMlText, setGramsPerMlText] = React.useState<string>(
-    item?.gramsPerMl != null ? String(item.gramsPerMl) : "",
+  const [canonicalDefault, setCanonicalDefault] = React.useState<{
+    id: number;
+    name: string;
+  } | null>(
+    item?.defaultUnitId != null && item?.defaultUnitName != null
+      ? { id: item.defaultUnitId, name: item.defaultUnitName }
+      : null,
   );
-  // Canonical-name default unit/sub-unit — same picker model as alias
-  // defaults. A sub-unit reference is held by tempKey so it survives renames.
-  const [canonicalDefault, setCanonicalDefault] =
-    React.useState<AliasUnitRef | null>(() => {
-      if (item?.defaultSubUnitId != null) {
-        const su = (item.subUnits ?? []).find(
-          (s) => s.id === item.defaultSubUnitId,
-        );
-        if (su) return { kind: "subUnit", tempKey: `existing-${su.id}` };
-      }
-      if (item?.defaultUnitId != null && item?.defaultUnitName != null) {
-        return {
-          kind: "unit",
-          unitId: item.defaultUnitId,
-          unitName: item.defaultUnitName,
-        };
-      }
-      return null;
-    });
   const [excludeFromShoppingList, setExclude] = React.useState(
     item?.excludeFromShoppingList ?? false,
   );
@@ -195,14 +132,6 @@ export function IngredientForm({
   const [dietaryClass, setDietaryClass] = React.useState<
     "vegan" | "vegetarian" | "meat" | null
   >(item?.dietaryClass ?? null);
-
-  // Stable reference for the per-row picker `search` callback. The list of
-  // local sub-units is needed at search time; routing it through a ref keeps
-  // SelectSearch's effect from re-firing on every parent render.
-  const subUnitsRef = React.useRef(subUnits);
-  React.useEffect(() => {
-    subUnitsRef.current = subUnits;
-  });
 
   // Renames the user made to the canonical name or to EXISTING aliases (whose
   // key encodes the original name). New/removed aliases aren't renames. Used to
@@ -239,77 +168,43 @@ export function IngredientForm({
     const trimmedName = name.trim();
     const aliasNames = aliases.map((a) => a.name.trim()).filter((n) => n.length > 0);
     const valid = trimmedName.length > 0;
-    const subUnitsPayload = subUnits
-      .filter((su) => su.name.trim().length > 0)
-      .map((su) => {
-        const amount = Number(su.parentAmount.replace(",", "."));
-        return {
-          name: su.name.trim(),
-          plural: su.plural.trim() ? su.plural.trim() : null,
-          parentUnitId: su.parent?.id ?? null,
-          parentAmount:
-            su.parent && Number.isFinite(amount) && amount > 0 ? amount : 1,
-        };
-      });
-    const subUnitIndexByTempKey = new Map<string, number>();
-    {
-      let idx = 0;
-      for (const su of subUnits) {
-        if (su.name.trim().length === 0) continue;
-        subUnitIndexByTempKey.set(su.tempKey, idx);
-        idx += 1;
-      }
-    }
-    type AliasDefaultPayload = {
+    const conversionsPayload = conversions
+      .filter((c) => {
+        const factor = Number(c.factor.replace(",", "."));
+        return (
+          c.from != null &&
+          c.to != null &&
+          c.from.id !== c.to.id &&
+          Number.isFinite(factor) &&
+          factor > 0
+        );
+      })
+      .map((c) => ({
+        fromUnitId: c.from!.id,
+        toUnitId: c.to!.id,
+        factor: Number(c.factor.replace(",", ".")),
+        isContainer: c.isContainer,
+      }));
+    const aliasUnitDefaultsPayload: Array<{
       aliasName: string;
-      unitId: number | null;
-      subUnitIndex: number | null;
-    };
-    const aliasUnitDefaultsPayload: AliasDefaultPayload[] = [];
+      unitId: number;
+    }> = [];
     for (const alias of aliases) {
       const aliasName = alias.name.trim();
       if (aliasName.length === 0 || !alias.defaultUnit) continue;
-      if (alias.defaultUnit.kind === "unit") {
-        aliasUnitDefaultsPayload.push({
-          aliasName,
-          unitId: alias.defaultUnit.unitId,
-          subUnitIndex: null,
-        });
-      } else {
-        const subUnitIndex = subUnitIndexByTempKey.get(
-          alias.defaultUnit.tempKey,
-        );
-        if (subUnitIndex == null) continue;
-        aliasUnitDefaultsPayload.push({
-          aliasName,
-          unitId: null,
-          subUnitIndex,
-        });
-      }
-    }
-    let defaultUnitId: number | null = null;
-    let defaultSubUnitIndex: number | null = null;
-    if (canonicalDefault) {
-      if (canonicalDefault.kind === "unit") {
-        defaultUnitId = canonicalDefault.unitId;
-      } else {
-        const idx = subUnitIndexByTempKey.get(canonicalDefault.tempKey);
-        if (idx != null) defaultSubUnitIndex = idx;
-      }
+      aliasUnitDefaultsPayload.push({
+        aliasName,
+        unitId: alias.defaultUnit.id,
+      });
     }
     onPayloadChange(
       {
         name: trimmedName,
         aliases: aliasNames,
         aliasUnitDefaults: aliasUnitDefaultsPayload,
-        subUnits: subUnitsPayload,
-        defaultUnitId,
-        defaultSubUnitIndex,
+        conversions: conversionsPayload,
+        defaultUnitId: canonicalDefault?.id ?? null,
         defaultCategoryId: category?.id ?? null,
-        gramsPerMl: (() => {
-          const d = Number(gramsPerMlText.replace(",", "."));
-          return gramsPerMlText.trim() && Number.isFinite(d) && d > 0 ? d : null;
-        })(),
         excludeFromShoppingList,
         isEquipment,
         dietaryClass,
@@ -323,10 +218,9 @@ export function IngredientForm({
   }, [
     name,
     aliases,
-    subUnits,
+    conversions,
     canonicalDefault,
     category,
-    gramsPerMlText,
     excludeFromShoppingList,
     isEquipment,
     dietaryClass,
@@ -353,69 +247,27 @@ export function IngredientForm({
     return body.items;
   }
 
-  /**
-   * Combined picker for the per-alias default: global units + this
-   * ingredient's named sub-units, shown as a single ranked list. Sub-units
-   * land first when the query is empty (they're the typical pick for a
-   * compound-noun alias); both lists collapse to substring matches when the
-   * user types.
-   */
-  const searchUnitsAndSubUnits = React.useCallback(
-    async (q: string): Promise<SelectSearchItem[]> => {
-      const lower = q.trim().toLowerCase();
-      const localSubUnits = subUnitsRef.current
-        .map((su, idx) => ({ su, idx }))
-        .filter(({ su }) => su.name.trim().length > 0)
-        .filter(
-          ({ su }) =>
-            lower.length === 0 || su.name.toLowerCase().includes(lower),
-        )
-        .map(({ su, idx }) => ({
-          id: subUnitPickerId(idx),
-          name: su.name,
-        }));
-      const globalUnits = await searchUnits(q);
-      return [...localSubUnits, ...globalUnits];
-    },
-    [],
-  );
-
-  function addSubUnit() {
-    setSubUnits((prev) => [
+  function addConversion() {
+    setConversions((prev) => [
       ...prev,
       {
-        tempKey: `new-${crypto.randomUUID()}`,
-        name: "",
-        plural: "",
-        parent: null,
-        parentAmount: "1",
+        key: `new-${crypto.randomUUID()}`,
+        from: null,
+        to: null,
+        factor: "1",
+        isContainer: false,
       },
     ]);
   }
 
-  function updateSubUnit(
-    tempKey: string,
-    partial: Partial<Pick<SubUnitDraft, "name" | "plural" | "parent" | "parentAmount">>,
-  ) {
-    setSubUnits((prev) =>
-      prev.map((su) => (su.tempKey === tempKey ? { ...su, ...partial } : su)),
+  function updateConversion(key: string, partial: Partial<ConversionDraft>) {
+    setConversions((prev) =>
+      prev.map((c) => (c.key === key ? { ...c, ...partial } : c)),
     );
   }
 
-  function removeSubUnit(tempKey: string) {
-    setSubUnits((prev) => prev.filter((su) => su.tempKey !== tempKey));
-    // Clear any alias default that pointed at the removed sub-unit — silently
-    // dropping it on save would surprise the user.
-    setAliases((prev) =>
-      prev.map((a) =>
-        a.defaultUnit?.kind === "subUnit" && a.defaultUnit.tempKey === tempKey
-          ? { ...a, defaultUnit: null }
-          : a,
-      ),
-    );
-    setCanonicalDefault((prev) =>
-      prev?.kind === "subUnit" && prev.tempKey === tempKey ? null : prev,
-    );
+  function removeConversion(key: string) {
+    setConversions((prev) => prev.filter((c) => c.key !== key));
   }
 
   function addAlias() {
@@ -435,64 +287,6 @@ export function IngredientForm({
     setAliases((prev) => prev.filter((a) => a.key !== key));
   }
 
-  /**
-   * Translate the alias's stored default into the synthetic
-   * `{id, name}` shape SelectSearch expects, picking up the current display
-   * name of any sub-unit it references (so renames flow through).
-   */
-  function pickerValueFor(ref: AliasUnitRef | null): SelectSearchItem | null {
-    if (!ref) return null;
-    if (ref.kind === "unit")
-      return { id: ref.unitId, name: ref.unitName };
-    const idx = subUnits.findIndex((su) => su.tempKey === ref.tempKey);
-    if (idx === -1) return null;
-    return {
-      id: subUnitPickerId(idx),
-      name: subUnits[idx].name.trim() || "(unbenannt)",
-    };
-  }
-
-  function onPickAliasDefault(
-    aliasKey: string,
-    picked: SelectSearchItem | null,
-  ) {
-    if (!picked) {
-      updateAlias(aliasKey, { defaultUnit: null });
-      return;
-    }
-    const subUnitIdx = decodeSubUnitIndex(picked.id);
-    if (subUnitIdx !== null) {
-      const su = subUnits[subUnitIdx];
-      if (!su) return;
-      updateAlias(aliasKey, {
-        defaultUnit: { kind: "subUnit", tempKey: su.tempKey },
-      });
-      return;
-    }
-    updateAlias(aliasKey, {
-      defaultUnit: {
-        kind: "unit",
-        unitId: picked.id,
-        unitName: picked.name,
-      },
-    });
-  }
-
-  function onPickCanonicalDefault(picked: SelectSearchItem | null) {
-    if (!picked) {
-      setCanonicalDefault(null);
-      return;
-    }
-    const subUnitIdx = decodeSubUnitIndex(picked.id);
-    if (subUnitIdx !== null) {
-      const su = subUnits[subUnitIdx];
-      if (!su) return;
-      setCanonicalDefault({ kind: "subUnit", tempKey: su.tempKey });
-      return;
-    }
-    setCanonicalDefault({ kind: "unit", unitId: picked.id, unitName: picked.name });
-  }
-
   return (
     <div className="flex flex-col gap-5">
       <div className="flex flex-col gap-2">
@@ -506,104 +300,69 @@ export function IngredientForm({
       </div>
 
       <div className="flex flex-col gap-2">
-        <Label htmlFor="ingredient-density">Dichte (g/ml, optional)</Label>
-        <Input
-          id="ingredient-density"
-          inputMode="decimal"
-          value={gramsPerMlText}
-          onChange={(e) => setGramsPerMlText(e.target.value)}
-          placeholder="z. B. 0,5"
-        />
+        <Label>Umrechnungen</Label>
         <p className="text-xs text-[var(--color-muted-fg)]">
-          Wenn gesetzt, rechnet die Einkaufsliste Volumenangaben (TL, EL, ml)
-          dieser Zutat in Gramm um — nützlich für Pulver/Gewürze, bei denen ml
-          keine sinnvolle Einkaufsgröße ist.{" "}
-          <a
-            href={`https://www.google.com/search?q=${encodeURIComponent(
-              `${name.trim() || "Lebensmittel"} Dichte g pro ml`,
-            )}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="underline hover:text-[var(--color-fg)]"
-          >
-            Dichte nachschlagen ↗
-          </a>
+          Optional. Zutat-spezifische Umrechnungen für die Einkaufsliste — als
+          „1 ⟨von⟩ = ⟨Menge⟩ ⟨nach⟩“. Ohne Gebinde-Haken normalisieren sie nur
+          (z.&nbsp;B. Dichte „1 ml = 0,5 g“); mit Gebinde-Haken wird die
+          aufsummierte Menge auf ganze ⟨von⟩ aufgerundet („1 Glas = 100 g“,
+          „1 Stück = 10 Zehen“).
         </p>
-      </div>
-
-      <div className="flex flex-col gap-2">
-        <Label>Teil-Einheiten</Label>
-        <p className="text-xs text-[var(--color-muted-fg)]">
-          Optional. Untereinheiten dieser Zutat (z.&nbsp;B. „Zehe“ bei
-          Knoblauch). Lege je Einheit fest, in welche übergeordnete Einheit sie
-          für die Einkaufsliste umgerechnet wird („1 Zehe = 0,1 Stück“) — oder
-          lass sie eigenständig (z.&nbsp;B. „2 Stangen“).
-        </p>
-        {subUnits.length > 0 ? (
+        {conversions.length > 0 ? (
           <ul className="flex flex-col divide-y divide-[var(--color-border)] overflow-hidden rounded-[var(--radius)] border border-[var(--color-border)]">
-            {subUnits.map((su) => (
-              <li key={su.tempKey} className="flex flex-col gap-2 px-3 py-2">
-                <div className="flex items-center gap-2">
-                  <Input
-                    className="flex-1"
-                    value={su.name}
-                    onChange={(e) =>
-                      updateSubUnit(su.tempKey, { name: e.target.value })
-                    }
-                    placeholder="z. B. Zehe"
-                    aria-label="Name der Teil-Einheit"
-                  />
-                  <Input
-                    className="flex-1"
-                    value={su.plural}
-                    onChange={(e) =>
-                      updateSubUnit(su.tempKey, { plural: e.target.value })
-                    }
-                    placeholder="Plural (z. B. Zehen)"
-                    aria-label="Plural der Teil-Einheit"
-                  />
+            {conversions.map((c) => (
+              <li key={c.key} className="flex flex-col gap-2 px-3 py-2">
+                <div className="flex flex-wrap items-center gap-2 text-xs text-[var(--color-muted-fg)]">
+                  <span className="shrink-0">1</span>
+                  <div className="min-w-0 flex-1">
+                    <SelectSearch
+                      value={c.from}
+                      onChange={(p) => updateConversion(c.key, { from: p })}
+                      search={searchUnits}
+                      placeholder="von Einheit"
+                    />
+                  </div>
+                  <span className="shrink-0">=</span>
+                  <div className="w-20">
+                    <NumberInput
+                      value={Number(c.factor.replace(",", ".")) || 0}
+                      onChange={(n) =>
+                        updateConversion(c.key, {
+                          factor: n == null ? "" : String(n),
+                        })
+                      }
+                      min={0.0001}
+                      decimal
+                      aria-label="Faktor"
+                    />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <SelectSearch
+                      value={c.to}
+                      onChange={(p) => updateConversion(c.key, { to: p })}
+                      search={searchUnits}
+                      placeholder="nach Einheit"
+                    />
+                  </div>
                   <Button
                     type="button"
                     variant="ghost"
                     size="icon"
-                    onClick={() => removeSubUnit(su.tempKey)}
-                    aria-label={`${su.name || "Teil-Einheit"} entfernen`}
+                    onClick={() => removeConversion(c.key)}
+                    aria-label="Umrechnung entfernen"
                   >
                     <X className="size-4" />
                   </Button>
                 </div>
-                <div className="flex items-center gap-2 text-xs text-[var(--color-muted-fg)]">
-                  <span className="shrink-0">1</span>
-                  <div className="min-w-0 flex-1">
-                    <SelectSearch
-                      value={su.parent}
-                      onChange={(p) => updateSubUnit(su.tempKey, { parent: p })}
-                      search={searchUnits}
-                      placeholder="eigenständig (kein Parent)"
-                    />
-                  </div>
-                  {su.parent && (
-                    <>
-                      <span className="shrink-0">=</span>
-                      <div className="w-20">
-                        <NumberInput
-                          value={Number(su.parentAmount.replace(",", ".")) || 0}
-                          onChange={(n) =>
-                            updateSubUnit(su.tempKey, {
-                              parentAmount: n == null ? "" : String(n),
-                            })
-                          }
-                          min={0.0001}
-                          decimal
-                          aria-label="Anzahl pro übergeordneter Einheit"
-                        />
-                      </div>
-                      <span className="shrink-0">
-                        {su.plural.trim() || su.name.trim() || "Einheiten"}
-                      </span>
-                    </>
-                  )}
-                </div>
+                <label className="flex cursor-pointer items-center gap-2 text-xs text-[var(--color-muted-fg)]">
+                  <Checkbox
+                    checked={c.isContainer}
+                    onCheckedChange={(v) =>
+                      updateConversion(c.key, { isContainer: Boolean(v) })
+                    }
+                  />
+                  Gebinde (auf ganze ⟨von⟩ aufrunden)
+                </label>
               </li>
             ))}
           </ul>
@@ -613,9 +372,9 @@ export function IngredientForm({
           variant="outline"
           size="sm"
           className="self-start"
-          onClick={addSubUnit}
+          onClick={addConversion}
         >
-          <Plus className="size-4" /> Teil-Einheit hinzufügen
+          <Plus className="size-4" /> Umrechnung hinzufügen
         </Button>
       </div>
 
@@ -624,13 +383,12 @@ export function IngredientForm({
         <p className="text-xs text-[var(--color-muted-fg)]">
           Optional. Welche Einheit der Import annimmt, wenn die Zutat über
           ihren kanonischen Namen (ohne Alias) und ohne explizite Einheit
-          erkannt wird — z.&nbsp;B. „Stäbchen“ bei Gemüsestäbchen. Ohne Default
-          fällt der Import auf „Stück“ zurück.
+          erkannt wird. Ohne Default fällt der Import auf „Stück“ zurück.
         </p>
         <SelectSearch
-          value={pickerValueFor(canonicalDefault)}
-          onChange={onPickCanonicalDefault}
-          search={searchUnitsAndSubUnits}
+          value={canonicalDefault}
+          onChange={setCanonicalDefault}
+          search={searchUnits}
           placeholder="Default-Einheit…"
         />
       </div>
@@ -663,11 +421,11 @@ export function IngredientForm({
                       )}
                     />
                     <SelectSearch
-                      value={pickerValueFor(alias.defaultUnit)}
+                      value={alias.defaultUnit}
                       onChange={(picked) =>
-                        onPickAliasDefault(alias.key, picked)
+                        updateAlias(alias.key, { defaultUnit: picked })
                       }
-                      search={searchUnitsAndSubUnits}
+                      search={searchUnits}
                       placeholder="Default-Einheit…"
                     />
                     <Button

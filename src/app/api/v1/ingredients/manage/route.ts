@@ -7,32 +7,25 @@ import {
   listIngredients,
 } from "@/lib/stammdaten/ingredient/service";
 
-const aliasDefaultSchema = z
-  .object({
-    aliasName: z.string().min(1),
-    unitId: z.number().int().positive().nullable().default(null),
-    subUnitIndex: z.number().int().nonnegative().nullable().default(null),
-  })
-  .refine((v) => v.unitId != null || v.subUnitIndex != null, {
-    message: "Entweder unitId oder subUnitIndex muss gesetzt sein.",
-  });
+const aliasDefaultSchema = z.object({
+  aliasName: z.string().min(1),
+  unitId: z.number().int().positive().nullable().default(null),
+});
 
-const subUnitSchema = z.object({
-  name: z.string().min(1),
-  plural: z.string().nullable().default(null),
-  parentUnitId: z.number().int().positive().nullable().default(null),
-  parentAmount: z.number().positive().default(1),
+const conversionSchema = z.object({
+  fromUnitId: z.number().int().positive(),
+  toUnitId: z.number().int().positive(),
+  factor: z.number().positive(),
+  isContainer: z.boolean().default(false),
 });
 
 const upsertSchema = z.object({
   name: z.string().min(1),
   aliases: z.array(z.string()).default([]),
   aliasUnitDefaults: z.array(aliasDefaultSchema).default([]),
-  subUnits: z.array(subUnitSchema).default([]),
+  conversions: z.array(conversionSchema).default([]),
   defaultUnitId: z.number().int().positive().nullable().default(null),
-  defaultSubUnitIndex: z.number().int().nonnegative().nullable().default(null),
   defaultCategoryId: z.number().int().positive().nullable(),
-  gramsPerMl: z.number().positive().nullable().default(null),
   excludeFromShoppingList: z.boolean(),
   isEquipment: z.boolean().default(false),
   dietaryClass: z.enum(["vegan", "vegetarian", "meat"]).nullable(),

@@ -13,7 +13,6 @@ import { recipe } from "../../db/schema.ts";
 import {
   buildIngredientCatalog,
   buildIngredientLookup,
-  buildSubUnitLookup,
   buildUnitLookup,
 } from "../recipe-import/index.ts";
 import { createRecipe, updateRecipe } from "../recipes/service.ts";
@@ -28,7 +27,6 @@ export function buildLookups() {
     units: buildUnitLookup(),
     ingredients: buildIngredientLookup(),
     ingredientCatalog: buildIngredientCatalog(),
-    subUnits: buildSubUnitLookup(),
   };
 }
 
