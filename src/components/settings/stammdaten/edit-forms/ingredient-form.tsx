@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Plus, X } from "lucide-react";
+import { AlertTriangle, Plus, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,8 +13,10 @@ import {
 } from "@/components/ui/select-search";
 import { Switch } from "@/components/ui/switch";
 import { Checkbox } from "@/components/ui/checkbox";
+import { cn } from "@/lib/cn";
 
 import { ImpactSection } from "../impact-section";
+import { findAliasCollisions } from "../alias-collisions";
 import type { EditFormProps } from "../list-shell";
 
 export type IngredientItem = {
@@ -215,6 +217,13 @@ export function IngredientForm({
     }
     return pairs;
   }, [item, name, aliases]);
+
+  // Aliases virtually identical to the canonical name or to another alias —
+  // surfaced as a non-blocking, per-row warning. Keyed by row index.
+  const aliasCollisions = React.useMemo(
+    () => findAliasCollisions(name, aliases.map((a) => a.name)),
+    [name, aliases],
+  );
 
   React.useEffect(() => {
     const trimmedName = name.trim();
@@ -571,36 +580,52 @@ export function IngredientForm({
         </p>
         {aliases.length > 0 ? (
           <ul className="flex flex-col divide-y divide-[var(--color-border)] overflow-hidden rounded-[var(--radius)] border border-[var(--color-border)]">
-            {aliases.map((alias) => (
-              <li
-                key={alias.key}
-                className="grid grid-cols-[1fr_minmax(8rem,14rem)_auto] items-center gap-2 px-3 py-2"
-              >
-                <Input
-                  value={alias.name}
-                  onChange={(e) =>
-                    updateAlias(alias.key, { name: e.target.value })
-                  }
-                  placeholder="Alias-Name"
-                  aria-label="Alias-Name"
-                />
-                <SelectSearch
-                  value={pickerValueFor(alias.defaultUnit)}
-                  onChange={(picked) => onPickAliasDefault(alias.key, picked)}
-                  search={searchUnitsAndSubUnits}
-                  placeholder="Default-Einheit…"
-                />
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => removeAlias(alias.key)}
-                  aria-label={`${alias.name || "Alias"} entfernen`}
-                >
-                  <X className="size-4" />
-                </Button>
-              </li>
-            ))}
+            {aliases.map((alias, idx) => {
+              const collision = aliasCollisions.get(idx);
+              return (
+                <li key={alias.key} className="flex flex-col gap-1 px-3 py-2">
+                  <div className="grid grid-cols-[1fr_minmax(8rem,14rem)_auto] items-center gap-2">
+                    <Input
+                      value={alias.name}
+                      onChange={(e) =>
+                        updateAlias(alias.key, { name: e.target.value })
+                      }
+                      placeholder="Alias-Name"
+                      aria-label="Alias-Name"
+                      className={cn(
+                        collision &&
+                          "ring-1 ring-[var(--color-warning)] focus-visible:ring-[var(--color-warning)]",
+                      )}
+                    />
+                    <SelectSearch
+                      value={pickerValueFor(alias.defaultUnit)}
+                      onChange={(picked) =>
+                        onPickAliasDefault(alias.key, picked)
+                      }
+                      search={searchUnitsAndSubUnits}
+                      placeholder="Default-Einheit…"
+                    />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => removeAlias(alias.key)}
+                      aria-label={`${alias.name || "Alias"} entfernen`}
+                    >
+                      <X className="size-4" />
+                    </Button>
+                  </div>
+                  {collision && (
+                    <p className="flex items-center gap-1 text-xs text-[var(--color-warning)]">
+                      <AlertTriangle className="size-3 shrink-0" aria-hidden />
+                      {collision.collidesWith === "name"
+                        ? "Quasi identisch mit dem Namen."
+                        : "Quasi identisch mit einem anderen Alias."}
+                    </p>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         ) : null}
         <Button

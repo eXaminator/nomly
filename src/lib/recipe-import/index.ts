@@ -18,7 +18,6 @@ import {
 } from "./json-ld.ts";
 import { parseIsoDurationToMinutes } from "./duration.ts";
 import {
-  canonicalizeMatchToken,
   detectSectionHeader,
   expandIngredientLine,
   isPrepLeadingToken,
@@ -27,6 +26,7 @@ import {
   isStandaloneDescriptor,
   preprocessAlternatives,
   splitConjunctions,
+  tokenizeEntryNameForCatalog,
   type ParsedIngredient,
 } from "./ingredient.ts";
 import {
@@ -427,18 +427,6 @@ export function buildIngredientCatalog(): IngredientCatalog {
           : undefined,
       isEquipment: a.isEquipment || undefined,
     });
-  }
-  return out;
-}
-
-function tokenizeEntryNameForCatalog(name: string): string[] {
-  // Mirror the candidate tokenizer so both sides see the same boundaries.
-  const out: string[] = [];
-  for (const piece of name.split(/[\s,;/\-–—]+/u)) {
-    if (piece.length === 0) continue;
-    const normalized = canonicalizeMatchToken(normalizeForMatch(piece));
-    if (normalized.length === 0) continue;
-    out.push(normalized);
   }
   return out;
 }

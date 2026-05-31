@@ -106,7 +106,7 @@ export function UnitForm({ item, onPayloadChange }: EditFormProps<UnitItem>) {
 
       <div className="flex flex-col gap-2">
         <Label>Aliase</Label>
-        <AliasChipEditor value={aliases} onChange={setAliases} />
+        <AliasChipEditor value={aliases} onChange={setAliases} canonicalName={name} />
       </div>
 
       <div className="flex flex-col gap-2">
