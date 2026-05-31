@@ -142,7 +142,11 @@ export function listShoppingItems(
       id: shoppingItem.id,
       refId: shoppingItem.ingredientId,
       name: ingredient.name,
-      categoryId: shoppingItem.categoryId,
+      // Category is derived from the *current* article default, not the
+      // value snapshotted on the row at creation — so re-categorising an
+      // article in the Stammdaten reflects on the list immediately (the
+      // realtime push tells online clients to refetch).
+      categoryId: ingredient.defaultCategoryId,
       categoryName: category.name,
       checked: shoppingItem.checked,
       checkedAt: shoppingItem.checkedAt,
@@ -157,7 +161,7 @@ export function listShoppingItems(
     })
     .from(shoppingItem)
     .innerJoin(ingredient, eq(ingredient.id, shoppingItem.ingredientId))
-    .leftJoin(category, eq(category.id, shoppingItem.categoryId))
+    .leftJoin(category, eq(category.id, ingredient.defaultCategoryId))
     .leftJoin(unit, eq(unit.id, ingredient.defaultUnitId))
     .all();
 

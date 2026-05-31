@@ -429,6 +429,41 @@ describe("shopping merge-on-add", () => {
     expect(resolveDefaultUnitForIngredient(ctx.ingredientIds.salz).unitId).toBe(stueckId);
   });
 
+  it("derives the item category from the article's current default (live)", async () => {
+    const { db } = await import("@/db");
+    const { category, ingredient } = await import("@/db/schema");
+    const { eq } = await import("drizzle-orm");
+    const { previewMeals } = await import("@/lib/shopping/preview");
+    const { addMealsToList } = await import("@/lib/shopping/merge");
+    const { listShoppingItems } = await import("@/lib/shopping/items");
+    const meals = previewMeals("2026-05-23", 1);
+    addMealsToList([
+      {
+        mealPlanId: ctx.mealPlanId,
+        ingredients: meals[0].sections
+          .flatMap((s) => s.ingredients)
+          .map((i) => ({ recipeIngredientId: i.recipeIngredientId })),
+      },
+    ]);
+    const before = listShoppingItems().find((i) => i.name === "Tomate");
+    expect(before?.categoryName).toBe("Backwaren");
+
+    // Re-categorise the article — the list must reflect it without touching
+    // the shopping_item row.
+    const gemueseId = db
+      .insert(category)
+      .values({ name: "Gemüse" })
+      .returning({ id: category.id })
+      .all()[0].id;
+    db.update(ingredient)
+      .set({ defaultCategoryId: gemueseId })
+      .where(eq(ingredient.id, ctx.ingredientIds.tomate))
+      .run();
+    const after = listShoppingItems().find((i) => i.name === "Tomate");
+    expect(after?.categoryId).toBe(gemueseId);
+    expect(after?.categoryName).toBe("Gemüse");
+  });
+
   it("exposes the planned meal's note on every source from that meal", async () => {
     const { db } = await import("@/db");
     const { mealPlan } = await import("@/db/schema");

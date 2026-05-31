@@ -105,19 +105,13 @@ export function AddItemDialog({ open, onClose, onAdded }: Props) {
     return () => clearTimeout(handle);
   }, [query, open]);
 
-  // Keep the unit field defaulted to the top hit's article default until the
-  // user touches it. Falls back to "Stück" when there are no hits.
-  React.useEffect(() => {
-    if (unitTouched) return;
-    const top = hits[0];
-    if (top?.defaultUnitId != null && top.defaultUnitName) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setUnit({ id: top.defaultUnitId, name: top.defaultUnitName });
-    } else if (stueckFallback) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setUnit(stueckFallback);
-    }
-  }, [hits, unitTouched, stueckFallback]);
+  // The unit field defaults (during render, no effect) to the top hit's
+  // article default until the user touches it, falling back to "Stück".
+  const topHitDefault: ComboboxItem | null =
+    hits[0]?.defaultUnitId != null && hits[0].defaultUnitName
+      ? { id: hits[0].defaultUnitId, name: hits[0].defaultUnitName }
+      : null;
+  const displayedUnit = unitTouched ? unit : (topHitDefault ?? stueckFallback);
 
   /** The unit to persist when adding `hit`: the user's manual choice wins,
    *  otherwise the article's own default (or the Stück fallback). */
@@ -216,7 +210,7 @@ export function AddItemDialog({ open, onClose, onAdded }: Props) {
             <div className="flex flex-col gap-2 sm:w-28">
               <Label>Einheit</Label>
               <Combobox
-                value={unit}
+                value={displayedUnit}
                 onChange={(u) => {
                   setUnit(u);
                   setUnitTouched(true);

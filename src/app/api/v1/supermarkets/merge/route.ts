@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { errorToResponse } from "@/lib/stammdaten/shared/route-helpers";
 import { mergeSupermarkets } from "@/lib/stammdaten/supermarket/service";
+import { publishShoppingChanged } from "@/lib/shopping/realtime";
 
 const mergeSchema = z.object({
   winnerId: z.number().int().positive(),
@@ -15,9 +16,11 @@ export async function POST(request: Request) {
   const parsed = mergeSchema.safeParse(body);
   if (!parsed.success) return NextResponse.json({ error: "validation" }, { status: 400 });
   try {
-    return NextResponse.json(
-      mergeSupermarkets(parsed.data.winnerId, parsed.data.loserIds, { replaceIds: parsed.data.replaceIds }),
-    );
+    const result = mergeSupermarkets(parsed.data.winnerId, parsed.data.loserIds, {
+      replaceIds: parsed.data.replaceIds,
+    });
+    publishShoppingChanged();
+    return NextResponse.json(result);
   } catch (e) {
     return errorToResponse(e);
   }

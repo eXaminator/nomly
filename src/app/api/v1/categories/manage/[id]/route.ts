@@ -10,6 +10,7 @@ import {
   getCategoryDetail,
   updateCategory,
 } from "@/lib/stammdaten/category/service";
+import { publishShoppingChanged } from "@/lib/shopping/realtime";
 
 const updateSchema = z.object({
   name: z.string().min(1),
@@ -39,7 +40,9 @@ export async function PATCH(
   const parsed = updateSchema.safeParse(body);
   if (!parsed.success) return NextResponse.json({ error: "validation" }, { status: 400 });
   try {
-    return NextResponse.json(updateCategory(id, parsed.data));
+    const result = updateCategory(id, parsed.data);
+    publishShoppingChanged();
+    return NextResponse.json(result);
   } catch (e) {
     return errorToResponse(e);
   }
@@ -58,7 +61,9 @@ export async function DELETE(
     return NextResponse.json({ error: "validation" }, { status: 400 });
   }
   try {
-    return NextResponse.json(deleteCategory(id, replaceWith));
+    const result = deleteCategory(id, replaceWith);
+    publishShoppingChanged();
+    return NextResponse.json(result);
   } catch (e) {
     return errorToResponse(e);
   }

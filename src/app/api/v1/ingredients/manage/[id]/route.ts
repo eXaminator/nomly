@@ -10,6 +10,7 @@ import {
   getIngredientDetail,
   updateIngredient,
 } from "@/lib/stammdaten/ingredient/service";
+import { publishShoppingChanged } from "@/lib/shopping/realtime";
 
 const aliasDefaultSchema = z.object({
   aliasName: z.string().min(1),
@@ -69,9 +70,11 @@ export async function PATCH(
   }
   const { renamePairs, propagateRenames, ...upsert } = parsed.data;
   try {
-    return NextResponse.json(
-      updateIngredient(id, upsert, propagateRenames ? renamePairs : []),
-    );
+    const result = updateIngredient(id, upsert, propagateRenames ? renamePairs : []);
+    // Category / default unit / conversion edges all feed the shopping list —
+    // tell open clients to refetch so the change shows immediately.
+    publishShoppingChanged();
+    return NextResponse.json(result);
   } catch (e) {
     return errorToResponse(e);
   }
@@ -90,7 +93,9 @@ export async function DELETE(
     return NextResponse.json({ error: "validation" }, { status: 400 });
   }
   try {
-    return NextResponse.json(deleteIngredient(id, replaceWith));
+    const result = deleteIngredient(id, replaceWith);
+    publishShoppingChanged();
+    return NextResponse.json(result);
   } catch (e) {
     return errorToResponse(e);
   }

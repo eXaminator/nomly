@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { errorToResponse } from "@/lib/stammdaten/shared/route-helpers";
 import { bulkUpdateSupermarkets } from "@/lib/stammdaten/supermarket/service";
+import { publishShoppingChanged } from "@/lib/shopping/realtime";
 
 const schema = z
   .object({
@@ -28,6 +29,7 @@ export async function POST(request: Request) {
       addCategoryIds: parsed.data.addCategoryIds,
       removeCategoryIds: parsed.data.removeCategoryIds,
     });
+    publishShoppingChanged();
     return NextResponse.json(result);
   } catch (e) {
     return errorToResponse(e);
