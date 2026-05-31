@@ -18,6 +18,7 @@ import type {
   ShoppingItemManualAmount,
   ShoppingItemSourceView,
   ShoppingItemStapleSourceView,
+  ShoppingItemStock,
   ShoppingItemView,
 } from "@/lib/shopping/items";
 import { formatQty } from "@/lib/shopping/format";
@@ -112,7 +113,8 @@ export function ShoppingItemRow({
           </div>
           {item.sources.length > 0 ||
           item.stapleSources.length > 0 ||
-          item.manualAmounts.length > 0 ? (
+          item.manualAmounts.length > 0 ||
+          item.stock?.quantity != null ? (
             <ul className="flex flex-col gap-0.5 text-xs text-[var(--color-muted-fg)]">
               {item.sources.map((s) => (
                 <SourceLine key={`src-${s.sourceId}`} source={s} />
@@ -123,6 +125,9 @@ export function ShoppingItemRow({
               {item.manualAmounts.map((m) => (
                 <ManualLine key={`man-${m.id}`} manual={m} />
               ))}
+              {item.stock?.quantity != null ? (
+                <StockLine stock={item.stock} />
+              ) : null}
             </ul>
           ) : null}
         </div>
@@ -237,6 +242,18 @@ function SourceLine({ source }: { source: ShoppingItemSourceView }) {
       {source.mealNote ? (
         <span className="italic">· {source.mealNote}</span>
       ) : null}
+    </li>
+  );
+}
+
+function StockLine({ stock }: { stock: ShoppingItemStock }) {
+  return (
+    <li className="inline-flex flex-wrap items-baseline gap-x-1.5 px-1 text-[var(--color-accent)]">
+      <span className="font-medium">Auf Lager</span>
+      <span>
+        −{stock.quantity != null ? formatQty(stock.quantity) : ""}
+        {stock.unitName ? ` ${stock.unitName}` : ""}
+      </span>
     </li>
   );
 }

@@ -2,7 +2,15 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
-import { CalendarPlus, EyeOff, ListPlus, Plus, RotateCcw, Trash2 } from "lucide-react";
+import {
+  CalendarPlus,
+  EyeOff,
+  ListPlus,
+  PackageCheck,
+  Plus,
+  RotateCcw,
+  Trash2,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { RecipePreviewDialog } from "@/components/planner/recipe-preview-dialog";
 import { cn } from "@/lib/cn";
@@ -15,8 +23,10 @@ import { AddStapleGroupDialog } from "./add-staple-group-dialog";
 import { SupermarketFilter } from "./supermarket-filter";
 import { ClearListDialog } from "./clear-list-dialog";
 import { EditItemDialog } from "./edit-item-dialog";
+import { StockCheckDialog } from "./stock-check-dialog";
 import {
   addItemAmount as apiAddAmount,
+  clearItemStock as apiClearStock,
   clearListSelective as apiClearList,
   deleteItem as apiDelete,
   deleteManualAmount as apiDeleteManual,
@@ -24,6 +34,7 @@ import {
   deleteStapleSource as apiDeleteStapleSource,
   fetchItems,
   patchItem as apiPatch,
+  setItemStock as apiSetStock,
   setManualAmountQuantity as apiSetManualQty,
   setSourceQuantity as apiSetSourceQty,
   setUnavailable as apiSetUnavailable,
@@ -77,6 +88,7 @@ export function ShoppingListView({
   const [addStaplesOpen, setAddStaplesOpen] = React.useState(false);
   const [previewRecipeId, setPreviewRecipeId] = React.useState<number | null>(null);
   const [clearOpen, setClearOpen] = React.useState(false);
+  const [stockCheckOpen, setStockCheckOpen] = React.useState(false);
   // Identify by id so the dialog body re-keys to fresh state when a
   // different item is opened. The actual item passed in comes from the
   // live `items` array so quick updates from other paths flow through.
@@ -308,6 +320,27 @@ export function ShoppingListView({
     }
   }
 
+  async function onSetStock(
+    id: number,
+    stock: { quantity: number | null; unitId: number | null },
+  ) {
+    try {
+      const updated = await apiSetStock(id, stock);
+      setItems((prev) => prev.map((i) => (i.id === updated.id ? updated : i)));
+    } catch {
+      router.refresh();
+    }
+  }
+
+  async function onClearStock(id: number) {
+    try {
+      const updated = await apiClearStock(id);
+      setItems((prev) => prev.map((i) => (i.id === updated.id ? updated : i)));
+    } catch {
+      router.refresh();
+    }
+  }
+
   async function onDelete(id: number) {
     setItems((prev) => prev.filter((i) => i.id !== id));
     try {
@@ -457,6 +490,17 @@ export function ShoppingListView({
         </Button>
         {items.length > 0 ? (
           <Button
+            variant="outline"
+            onClick={() => setStockCheckOpen(true)}
+            aria-label="Auf Lager prüfen"
+            disabled={disabledOffline}
+          >
+            <PackageCheck className="size-4" />
+            <span className="hidden sm:inline">Auf Lager…</span>
+          </Button>
+        ) : null}
+        {items.length > 0 ? (
+          <Button
             variant="ghost"
             className="text-[var(--color-danger)]"
             onClick={() => setClearOpen(true)}
@@ -584,6 +628,17 @@ export function ShoppingListView({
         onDeleteStapleSource={onDeleteStapleSource}
         onDeleteManualAmount={onDeleteManualAmount}
         onPatchNote={onPatchNote}
+        onSetStock={onSetStock}
+        onClearStock={onClearStock}
+      />
+      <StockCheckDialog
+        open={stockCheckOpen}
+        items={items}
+        onClose={() => setStockCheckOpen(false)}
+        onSaved={(updated) => {
+          setItems(updated);
+          setStockCheckOpen(false);
+        }}
       />
       {editingArticleId != null ? (
         <EditArticleDrawer

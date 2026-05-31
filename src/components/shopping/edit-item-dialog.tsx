@@ -38,6 +38,11 @@ type Props = {
   onDeleteStapleSource: (id: number, sourceId: number) => Promise<void>;
   onDeleteManualAmount: (id: number, amountId: number) => Promise<void>;
   onPatchNote: (id: number, note: string | null) => Promise<void>;
+  onSetStock: (
+    id: number,
+    stock: { quantity: number | null; unitId: number | null },
+  ) => Promise<void>;
+  onClearStock: (id: number) => Promise<void>;
 };
 
 function formatDate(iso: string): string {
@@ -109,6 +114,8 @@ function EditItemDialogBody({
   onDeleteStapleSource,
   onDeleteManualAmount,
   onPatchNote,
+  onSetStock,
+  onClearStock,
 }: Props & { item: ShoppingItemView }) {
   const [sourceInputs, setSourceInputs] = React.useState<Record<number, string>>(
     () =>
@@ -142,6 +149,16 @@ function EditItemDialogBody({
   // Pending new manual rows — local-only until Speichern.
   const [pendingNew, setPendingNew] = React.useState<PendingNew[]>([]);
   const [note, setNote] = React.useState(item.note ?? "");
+  const [stockQty, setStockQty] = React.useState(
+    item.stock?.quantity != null ? String(item.stock.quantity) : "",
+  );
+  const [stockUnit, setStockUnit] = React.useState<ComboboxItem | null>(() =>
+    item.stock?.unitId != null && item.stock.unitName
+      ? { id: item.stock.unitId, name: item.stock.unitName }
+      : item.defaultUnitId != null && item.defaultUnitName
+        ? { id: item.defaultUnitId, name: item.defaultUnitName }
+        : null,
+  );
   const [saving, setSaving] = React.useState(false);
 
   // Default unit for a freshly-added row: pick the first unit already present
@@ -258,6 +275,16 @@ function EditItemDialogBody({
       const nextNote = trimmedNote.length > 0 ? trimmedNote : null;
       if (nextNote !== (item.note ?? null)) {
         await onPatchNote(item.id, nextNote);
+      }
+      // "Auf Lager": empty clears the row; a value upserts it.
+      const nextStockQty = parseInput(stockQty);
+      const prevStockQty = item.stock?.quantity ?? null;
+      const prevStockUnit = item.stock?.unitId ?? null;
+      const nextStockUnit = stockUnit?.id ?? null;
+      if (nextStockQty == null) {
+        if (prevStockQty != null) await onClearStock(item.id);
+      } else if (nextStockQty !== prevStockQty || nextStockUnit !== prevStockUnit) {
+        await onSetStock(item.id, { quantity: nextStockQty, unitId: nextStockUnit });
       }
       onClose();
     } finally {
@@ -466,6 +493,31 @@ function EditItemDialogBody({
           <Plus className="size-4" />
           Weitere Menge
         </Button>
+        <div className="flex flex-col gap-2 border-t border-[var(--color-border)] pt-3">
+          <Label>Auf Lager</Label>
+          <div className="flex items-center gap-2">
+            <Input
+              type="text"
+              inputMode="decimal"
+              value={stockQty}
+              onChange={(e) => setStockQty(e.target.value)}
+              placeholder="Menge"
+              className="w-24"
+              aria-label="Auf Lager Menge"
+            />
+            <Combobox
+              value={stockUnit}
+              onChange={setStockUnit}
+              search={searchUnits}
+              placeholder="Einheit"
+              className="w-28"
+            />
+          </div>
+          <p className="text-xs text-[var(--color-muted-fg)]">
+            Wird vom Gesamtbedarf derselben Einheit abgezogen. Leer lassen, um
+            nichts abzuziehen.
+          </p>
+        </div>
         <div className="flex flex-col gap-2">
           <Label htmlFor={`edit-note-${item.id}`}>Notiz</Label>
           <Input

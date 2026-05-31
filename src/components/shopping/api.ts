@@ -201,6 +201,39 @@ export async function deleteItemAmount(
   return data.item;
 }
 
+export async function setItemStock(
+  id: number,
+  stock: { quantity: number | null; unitId: number | null },
+): Promise<ShoppingItemView> {
+  const res = await fetch(`/api/v1/shopping/items/${id}/stock`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(stock),
+  });
+  const data = (await jsonOrThrow(res)) as { item: ShoppingItemView };
+  return data.item;
+}
+
+export async function clearItemStock(id: number): Promise<ShoppingItemView> {
+  const res = await fetch(`/api/v1/shopping/items/${id}/stock`, {
+    method: "DELETE",
+  });
+  const data = (await jsonOrThrow(res)) as { item: ShoppingItemView };
+  return data.item;
+}
+
+export async function setStockBatch(
+  entries: Array<{ itemId: number; quantity: number | null; unitId: number | null }>,
+): Promise<ShoppingItemView[]> {
+  const res = await fetch("/api/v1/shopping/stock", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ entries }),
+  });
+  const data = (await jsonOrThrow(res)) as { items: ShoppingItemView[] };
+  return data.items;
+}
+
 export async function deleteItem(id: number): Promise<void> {
   const res = await fetch(`/api/v1/shopping/items/${id}`, { method: "DELETE" });
   await jsonOrThrow(res);
