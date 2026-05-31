@@ -2,7 +2,8 @@
 
 import * as React from "react";
 import { Button } from "@/components/ui/button";
-import { Combobox, type ComboboxItem } from "@/components/ui/combobox";
+import { type ComboboxItem } from "@/components/ui/combobox";
+import { UnitSelect } from "./unit-select";
 import {
   Dialog,
   DialogBody,
@@ -22,15 +23,6 @@ type Props = {
   onClose: () => void;
   onSaved: (items: ShoppingItemView[]) => void;
 };
-
-async function searchUnits(query: string): Promise<ComboboxItem[]> {
-  const res = await fetch(`/api/v1/units?q=${encodeURIComponent(query)}`, {
-    cache: "no-store",
-  });
-  if (!res.ok) return [];
-  const data = (await res.json()) as { items: Array<{ id: number; name: string }> };
-  return data.items.map((u) => ({ id: u.id, name: u.name }));
-}
 
 function parseInput(raw: string): number | null {
   const trimmed = raw.trim().replace(",", ".");
@@ -134,11 +126,9 @@ function StockCheckBody({
                   className="w-20"
                   aria-label={`Auf Lager: ${i.name}`}
                 />
-                <Combobox
+                <UnitSelect
                   value={units[i.id] ?? null}
                   onChange={(u) => setUnits((prev) => ({ ...prev, [i.id]: u }))}
-                  search={searchUnits}
-                  placeholder="Einheit"
                   className="w-28"
                 />
               </li>

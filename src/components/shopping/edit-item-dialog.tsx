@@ -3,7 +3,8 @@
 import * as React from "react";
 import { Plus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Combobox, type ComboboxItem } from "@/components/ui/combobox";
+import { type ComboboxItem } from "@/components/ui/combobox";
+import { UnitSelect } from "./unit-select";
 import {
   Dialog,
   DialogBody,
@@ -70,17 +71,6 @@ function parseInput(raw: string | undefined): number | null {
   if (trimmed.length === 0) return null;
   const n = Number(trimmed);
   return Number.isFinite(n) ? n : null;
-}
-
-async function searchUnits(query: string): Promise<ComboboxItem[]> {
-  const res = await fetch(`/api/v1/units?q=${encodeURIComponent(query)}`, {
-    cache: "no-store",
-  });
-  if (!res.ok) return [];
-  const data = (await res.json()) as {
-    items: Array<{ id: number; name: string }>;
-  };
-  return data.items.map((u) => ({ id: u.id, name: u.name }));
 }
 
 export function EditItemDialog(props: Props) {
@@ -376,9 +366,6 @@ function EditItemDialogBody({
                     }`}
                   >
                     <span className="font-medium">{s.stapleGroupName}</span>
-                    <span className="ml-1 text-xs uppercase tracking-wider text-[var(--color-muted-fg)]">
-                      Standard
-                    </span>
                   </span>
                   <span className="w-24 text-right text-sm text-[var(--color-muted-fg)]">
                     {s.contributedQuantity != null
@@ -464,11 +451,9 @@ function EditItemDialogBody({
                   placeholder="Menge"
                   className="w-24"
                 />
-                <Combobox
+                <UnitSelect
                   value={p.unit}
                   onChange={(u) => updatePending(p.tempId, { unit: u })}
-                  search={searchUnits}
-                  placeholder="Einheit"
                   className="w-24"
                 />
                 <Button
@@ -505,11 +490,9 @@ function EditItemDialogBody({
               className="w-24"
               aria-label="Auf Lager Menge"
             />
-            <Combobox
+            <UnitSelect
               value={stockUnit}
               onChange={setStockUnit}
-              search={searchUnits}
-              placeholder="Einheit"
               className="w-28"
             />
           </div>

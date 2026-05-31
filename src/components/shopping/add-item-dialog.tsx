@@ -2,7 +2,8 @@
 
 import * as React from "react";
 import { Button } from "@/components/ui/button";
-import { Combobox, type ComboboxItem } from "@/components/ui/combobox";
+import { type ComboboxItem } from "@/components/ui/combobox";
+import { UnitSelect } from "./unit-select";
 import {
   Dialog,
   DialogBody,
@@ -209,14 +210,12 @@ export function AddItemDialog({ open, onClose, onAdded }: Props) {
             </div>
             <div className="flex flex-col gap-2 sm:w-28">
               <Label>Einheit</Label>
-              <Combobox
+              <UnitSelect
                 value={displayedUnit}
                 onChange={(u) => {
                   setUnit(u);
                   setUnitTouched(true);
                 }}
-                search={searchUnits}
-                placeholder="Einheit"
               />
             </div>
           </div>

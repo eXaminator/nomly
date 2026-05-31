@@ -264,7 +264,6 @@ function StapleLine({ staple }: { staple: ShoppingItemStapleSourceView }) {
       <span className="font-medium text-[var(--color-fg)]/80">
         {staple.stapleGroupName}
       </span>
-      <span className="uppercase tracking-wider">Standard</span>
       {staple.contributedQuantity != null || staple.contributedUnit ? (
         <span>
           {staple.contributedQuantity != null
