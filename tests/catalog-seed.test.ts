@@ -148,7 +148,9 @@ describe("runFamilywallCatalogSeed", () => {
       .where(eq(ingredientSubUnit.ingredientId, apfel!.id))
       .all();
     expect(subUnits.find((s) => s.name === "Scheibe")).toBeDefined();
-    expect(subUnits.find((s) => s.name === "Scheibe")?.perPurchase).toBe(8);
+    // Apfel has no purchase unit in the catalog, so its Scheibe sub-unit is
+    // standalone (no parent) after seeding.
+    expect(subUnits.find((s) => s.name === "Scheibe")?.parentUnitId).toBeNull();
 
     const scheibeAliases = db
       .select({ name: ingredientAlias.name })
@@ -163,25 +165,6 @@ describe("runFamilywallCatalogSeed", () => {
     const aliasNames = scheibeAliases.map((a) => a.name);
     expect(aliasNames).toContain("Apfelscheibe");
     expect(aliasNames).toContain("apple slice");
-  });
-
-  it("sets purchaseUnit to Kolben for Mais", async () => {
-    const { db } = await import("@/db");
-    const { ingredient, unit } = await import("@/db/schema");
-    const { sql, eq } = await import("drizzle-orm");
-
-    const mais = db
-      .select({ purchaseUnitId: ingredient.purchaseUnitId })
-      .from(ingredient)
-      .where(sql`name = ${"Mais"}`)
-      .get();
-    expect(mais?.purchaseUnitId).toBeDefined();
-    const u = db
-      .select({ name: unit.name })
-      .from(unit)
-      .where(eq(unit.id, mais!.purchaseUnitId!))
-      .get();
-    expect(u?.name).toBe("Kolben");
   });
 
   it("creates a single Apfel canonical (no per-variety duplicate rows)", async () => {

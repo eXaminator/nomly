@@ -138,7 +138,7 @@ describe("isLineGroupChanged", () => {
     expect(
       isLineGroupChanged(
         [cur({ unitId: 3, subUnitId: null })],
-        [prop({ unit: null, subUnit: { id: 7, name: "Zehe", perPurchase: 1 } })],
+        [prop({ unit: null, subUnit: { id: 7, name: "Zehe" } })],
       ),
     ).toBe(true);
   });

@@ -52,7 +52,6 @@ export async function POST(request: Request) {
     .select({
       id: ingredientSubUnit.id,
       name: ingredientSubUnit.name,
-      perPurchase: ingredientSubUnit.perPurchase,
     })
     .from(ingredientSubUnit)
     .where(inArray(ingredientSubUnit.ingredientId, [ingredientId]))

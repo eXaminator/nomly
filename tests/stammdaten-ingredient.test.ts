@@ -131,7 +131,7 @@ describe("ingredient stammdaten service", () => {
       const created = service.createIngredient({
         name: "Gemüsestäbchen",
         aliases: [],
-        subUnits: [{ name: "Stäbchen", perPurchase: 16 }],
+        subUnits: [{ name: "Stäbchen" }],
         // Index 0 → the "Stäbchen" sub-unit written above.
         defaultSubUnitIndex: 0,
         defaultCategoryId: null,

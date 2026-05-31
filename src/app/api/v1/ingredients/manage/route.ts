@@ -20,7 +20,8 @@ const aliasDefaultSchema = z
 const subUnitSchema = z.object({
   name: z.string().min(1),
   plural: z.string().nullable().default(null),
-  perPurchase: z.number().positive().default(1),
+  parentUnitId: z.number().int().positive().nullable().default(null),
+  parentAmount: z.number().positive().default(1),
 });
 
 const upsertSchema = z.object({
@@ -31,7 +32,7 @@ const upsertSchema = z.object({
   defaultUnitId: z.number().int().positive().nullable().default(null),
   defaultSubUnitIndex: z.number().int().nonnegative().nullable().default(null),
   defaultCategoryId: z.number().int().positive().nullable(),
-  purchaseUnitId: z.number().int().positive().nullable().default(null),
+  gramsPerMl: z.number().positive().nullable().default(null),
   excludeFromShoppingList: z.boolean(),
   isEquipment: z.boolean().default(false),
   dietaryClass: z.enum(["vegan", "vegetarian", "meat"]).nullable(),

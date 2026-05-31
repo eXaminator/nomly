@@ -180,17 +180,6 @@ function applyEntryMetadata(
   if (entry.equipment) updates.isEquipment = true;
   if (entry.excludeFromShoppingList) updates.excludeFromShoppingList = true;
 
-  if (entry.purchaseUnit) {
-    const unitId = ctx.unitIdByName.get(lower(entry.purchaseUnit));
-    if (unitId === undefined) {
-      ctx.counts.warnings.push(
-        `${entry.canonicalName}: unknown purchaseUnit "${entry.purchaseUnit}"`,
-      );
-    } else {
-      updates.purchaseUnitId = unitId;
-    }
-  }
-
   if (Object.keys(updates).length === 0) return;
   tx.update(ingredient)
     .set(updates)
@@ -224,9 +213,30 @@ function applyEntrySubUnit(
   const subName = norm(entry.subUnit.name);
   if (subName.length === 0) return;
 
+  // The catalog's `purchaseUnit` is the parent the sub-unit converts into;
+  // `perPurchase` (custom units per parent) maps to `1 ⟨sub⟩ = 1/perPurchase
+  // ⟨parent⟩`. No purchase unit ⇒ standalone (parent null), matching the
+  // migration's behaviour-preserving rule.
+  const parentUnitId = entry.purchaseUnit
+    ? ctx.unitIdByName.get(lower(entry.purchaseUnit)) ?? null
+    : null;
+  if (entry.purchaseUnit && parentUnitId == null) {
+    ctx.counts.warnings.push(
+      `${entry.canonicalName}: unknown purchaseUnit "${entry.purchaseUnit}"`,
+    );
+  }
+  const parentAmount =
+    parentUnitId != null && entry.subUnit.perPurchase > 0
+      ? 1 / entry.subUnit.perPurchase
+      : 1;
+
   let subUnitId: number;
   const existing = tx
-    .select({ id: ingredientSubUnit.id, perPurchase: ingredientSubUnit.perPurchase })
+    .select({
+      id: ingredientSubUnit.id,
+      parentUnitId: ingredientSubUnit.parentUnitId,
+      parentAmount: ingredientSubUnit.parentAmount,
+    })
     .from(ingredientSubUnit)
     .where(
       and(
@@ -237,12 +247,16 @@ function applyEntrySubUnit(
     .get();
   if (existing) {
     subUnitId = existing.id;
-    // Preserve user-edited perPurchase values: only update if the existing
-    // value is the schema default (1) AND the catalog provides something
-    // more specific. Same convention as runSeed's sub-unit top-up loop.
-    if (existing.perPurchase === 1 && entry.subUnit.perPurchase !== 1) {
+    // Preserve user-edited conversions: only fill in the parent when the
+    // existing row is still at the schema default (standalone, amount 1) AND
+    // the catalog provides a parent. Mirrors the metadata top-up convention.
+    if (
+      existing.parentUnitId == null &&
+      existing.parentAmount === 1 &&
+      parentUnitId != null
+    ) {
       tx.update(ingredientSubUnit)
-        .set({ perPurchase: entry.subUnit.perPurchase })
+        .set({ parentUnitId, parentAmount })
         .where(eq(ingredientSubUnit.id, subUnitId))
         .run();
     }
@@ -252,7 +266,8 @@ function applyEntrySubUnit(
       .values({
         ingredientId,
         name: subName,
-        perPurchase: entry.subUnit.perPurchase,
+        parentUnitId,
+        parentAmount,
       })
       .returning({ id: ingredientSubUnit.id })
       .all();

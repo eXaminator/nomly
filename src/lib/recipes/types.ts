@@ -157,11 +157,8 @@ export type RecipeIngredientView = {
    *  to the singular / raw spelling when no plural applies. */
   unitLabel: string | null;
   /** Set when the row was saved with an ingredient sub-unit instead of a
-   *  global unit. Surfaced for downstream conversion (shopping-list rollup). */
+   *  global unit. */
   subUnitId: number | null;
-  /** How many sub-units make one purchase unit, for shopping aggregation.
-   *  Only meaningful when `subUnitId` is set. */
-  subUnitPerPurchase: number | null;
   notes: string | null;
   isOptional: boolean;
   /** When true, this quantity is constant — meal-plan portion changes do not

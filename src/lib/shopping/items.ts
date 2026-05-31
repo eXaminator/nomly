@@ -25,10 +25,10 @@ import {
 import type { Dimension, UnitRow } from "./format.ts";
 import { pluralizeLabel } from "../units/label.ts";
 import { sweepCheckedItems } from "./sweeper.ts";
-import { loadUnitsByDimension } from "./units-db.ts";
+import { loadGramUnit, loadUnitsByDimension } from "./units-db.ts";
 import {
+  ceilToWhole,
   groupSubUnitTotals,
-  rollupPurchaseTrack,
   type SubUnitRef,
 } from "./subunit-rollup.ts";
 
@@ -121,7 +121,7 @@ export function listShoppingItems(
       id: shoppingItem.id,
       refId: shoppingItem.ingredientId,
       name: ingredient.name,
-      purchaseUnitId: ingredient.purchaseUnitId,
+      gramsPerMl: ingredient.gramsPerMl,
       categoryId: shoppingItem.categoryId,
       categoryName: category.name,
       checked: shoppingItem.checked,
@@ -304,8 +304,34 @@ export function listShoppingItems(
     }
   }
 
+  // Custom-unit (sub-unit) rows for every sub-unit referenced by a
+  // contribution, with their parent-unit conversion. Loaded before the unit
+  // metadata so each sub-unit's parent unit is included in the lookup.
+  const allSubUnitIds = new Set<number>();
+  for (const sources of sourcesByItem.values())
+    for (const s of sources)
+      if (s.contributedSubUnitId != null) allSubUnitIds.add(s.contributedSubUnitId);
+  for (const sources of stapleSourcesByItem.values())
+    for (const s of sources)
+      if (s.contributedSubUnitId != null) allSubUnitIds.add(s.contributedSubUnitId);
+  const subUnitRows =
+    allSubUnitIds.size === 0
+      ? []
+      : db
+          .select({
+            id: ingredientSubUnit.id,
+            name: ingredientSubUnit.name,
+            plural: ingredientSubUnit.plural,
+            parentUnitId: ingredientSubUnit.parentUnitId,
+            parentAmount: ingredientSubUnit.parentAmount,
+          })
+          .from(ingredientSubUnit)
+          .where(inArray(ingredientSubUnit.id, Array.from(allSubUnitIds)))
+          .all();
+
   // Look up unit metadata (factor + dimension) for every unit referenced —
-  // including each item's purchase unit, the target of the sub-unit rollup.
+  // contributions, manual amounts, and each custom unit's parent unit (the
+  // target it converts into for aggregation).
   const allUnitIds = new Set<number>();
   for (const sources of sourcesByItem.values())
     for (const s of sources)
@@ -315,14 +341,15 @@ export function listShoppingItems(
       if (s.contributedUnitId != null) allUnitIds.add(s.contributedUnitId);
   for (const manuals of manualsByItem.values())
     for (const m of manuals) if (m.unitId != null) allUnitIds.add(m.unitId);
-  for (const r of baseRows)
-    if (r.purchaseUnitId != null) allUnitIds.add(r.purchaseUnitId);
+  for (const su of subUnitRows)
+    if (su.parentUnitId != null) allUnitIds.add(su.parentUnitId);
   const unitRows = allUnitIds.size === 0
     ? []
     : (db
         .select({
           id: unit.id,
           name: unit.name,
+          plural: unit.plural,
           dimension: unit.dimension,
           baseUnitId: unit.baseUnitId,
           factor: unit.factor,
@@ -332,35 +359,21 @@ export function listShoppingItems(
         .all() as UnitRow[]);
   const unitsById = new Map(unitRows.map((u) => [u.id, u]));
 
-  // Sub-unit factors (per_purchase) for every sub-unit referenced by a
-  // contribution. Drives the rollup into the purchase unit.
-  const allSubUnitIds = new Set<number>();
-  for (const sources of sourcesByItem.values())
-    for (const s of sources)
-      if (s.contributedSubUnitId != null) allSubUnitIds.add(s.contributedSubUnitId);
-  for (const sources of stapleSourcesByItem.values())
-    for (const s of sources)
-      if (s.contributedSubUnitId != null) allSubUnitIds.add(s.contributedSubUnitId);
   const subUnitsById = new Map<number, SubUnitRef>();
-  if (allSubUnitIds.size > 0) {
-    const rows = db
-      .select({
-        id: ingredientSubUnit.id,
-        name: ingredientSubUnit.name,
-        plural: ingredientSubUnit.plural,
-        perPurchase: ingredientSubUnit.perPurchase,
-      })
-      .from(ingredientSubUnit)
-      .where(inArray(ingredientSubUnit.id, Array.from(allSubUnitIds)))
-      .all();
-    for (const r of rows)
-      subUnitsById.set(r.id, {
-        id: r.id,
-        name: r.name,
-        plural: r.plural,
-        perPurchase: r.perPurchase,
-      });
+  for (const r of subUnitRows) {
+    const parentUnit =
+      r.parentUnitId != null ? unitsById.get(r.parentUnitId) ?? null : null;
+    subUnitsById.set(r.id, {
+      id: r.id,
+      name: r.name,
+      plural: r.plural,
+      parent: parentUnit ? { unit: parentUnit, amount: r.parentAmount } : null,
+    });
   }
+
+  // The base mass unit (grams), needed to express density-converted volume
+  // amounts. Loaded once; null only if the units table has no mass dimension.
+  const gramUnit = loadGramUnit();
 
   const ingredientIds = baseRows.map((r) => r.refId as number);
   const ingredientUnavailable = new Map<number, number[]>();
@@ -411,8 +424,8 @@ export function listShoppingItems(
         dimension: m.dimension,
       })),
       sources: sourceContributions,
-      purchaseUnit:
-        r.purchaseUnitId != null ? unitsById.get(r.purchaseUnitId) ?? null : null,
+      density: r.gramsPerMl ?? null,
+      gramUnit,
     });
     const unavailable = ingredientUnavailable.get(r.refId as number) ?? [];
     return {
@@ -478,58 +491,71 @@ type AggregateInput = {
     dimension: AmountDimension;
   }>;
   sources: Contribution[];
-  /** The ingredient's purchase unit, when set — the rollup target. */
-  purchaseUnit: UnitRow | null;
+  /** Ingredient density (grams per ml). When set, volume contributions are
+   *  converted to grams for the shopping list. */
+  density: number | null;
+  /** Base mass unit (grams) the density conversion targets. */
+  gramUnit: UnitRow | null;
 };
 
 /**
  * Additive aggregation: source contributions and manual entries combine via
  * straight sum within each dimension. Editing a displayed amount scales the
- * underlying contributions (sources first, manuals second); deleting a meal
- * subtracts only its source rows. The on-screen amounts always equal
- * `sum(source) + sum(manuals)` for each dimension, never an override.
+ * underlying contributions; the on-screen amounts always equal
+ * `sum(source) + sum(manuals)`, never an override.
  *
- * Sub-unit contributions ("5 Stäbchen") are pulled out of the per-dimension
- * sum and rolled into the ingredient's purchase unit: each becomes a fraction
- * of a purchase unit, the fractions sum, and the total rounds up to whole
- * purchase units ("2 Packung"). A contribution already in the purchase unit
- * joins that same track. With no purchase unit set, sub-units fall back to a
- * per-sub-unit total ("22 Stäbchen").
+ * Each custom unit (sub-unit) either converts into its parent global unit
+ * (`quantity × parent.amount`) and joins that unit's dimension sum, or — when
+ * it has no parent — stays **standalone** as its own line ("2 Stangen"). With
+ * a density set on the ingredient, volume contributions are first turned into
+ * grams. Per-dimension sums display in their natural unit; count/container
+ * totals round **up** to whole units ("buy whole packs").
  */
 function buildAggregatedAmounts(input: AggregateInput): ShoppingItemAmount[] {
-  const purchaseUnit = input.purchaseUnit;
-  const purchaseTrack: Contribution[] = [];
-  const subUnitFallback: Array<{ quantity: number | null; subUnit: SubUnitRef }> = [];
-  const rest: Contribution[] = [];
+  const standalone: Array<{ quantity: number | null; subUnit: SubUnitRef }> = [];
+  const globals: Contribution[] = [];
 
-  const route = (c: Contribution) => {
+  const place = (c: Contribution) => {
     if (c.subUnit) {
-      if (purchaseUnit) purchaseTrack.push(c);
-      else subUnitFallback.push({ quantity: c.quantity, subUnit: c.subUnit });
-    } else if (
-      purchaseUnit &&
-      c.unit != null &&
-      c.unit.id === purchaseUnit.id
-    ) {
-      purchaseTrack.push(c);
+      if (c.subUnit.parent) {
+        const { unit, amount } = c.subUnit.parent;
+        globals.push({
+          quantity: c.quantity == null ? null : c.quantity * amount,
+          unit,
+          subUnit: null,
+        });
+      } else {
+        standalone.push({ quantity: c.quantity, subUnit: c.subUnit });
+      }
     } else {
-      rest.push(c);
+      globals.push(c);
     }
   };
-  for (const s of input.sources) route(s);
+  for (const s of input.sources) place(s);
   for (const m of input.manuals)
-    route({ quantity: m.quantity, unit: m.unit, subUnit: null });
+    place({ quantity: m.quantity, unit: m.unit, subUnit: null });
+
+  // Density: volume → grams for this ingredient (ml is rarely a useful
+  // purchase unit for a non-liquid).
+  const converted: Contribution[] =
+    input.density != null && input.gramUnit
+      ? globals.map((c) =>
+          c.unit?.dimension === "volume"
+            ? {
+                quantity:
+                  c.quantity == null
+                    ? null
+                    : c.quantity * c.unit.factor * input.density!,
+                unit: input.gramUnit,
+                subUnit: null,
+              }
+            : c,
+        )
+      : globals;
 
   const out: ShoppingItemAmount[] = [];
 
-  if (purchaseUnit && purchaseTrack.length > 0) {
-    const rolled = rollupPurchaseTrack(
-      purchaseTrack.map((c) => ({ quantity: c.quantity, subUnit: c.subUnit })),
-      purchaseUnit,
-    );
-    out.push({ ...rolled, manualAmountId: null });
-  }
-  for (const t of groupSubUnitTotals(subUnitFallback)) {
+  for (const t of groupSubUnitTotals(standalone)) {
     out.push({
       quantity: t.quantity,
       unitId: null,
@@ -540,7 +566,7 @@ function buildAggregatedAmounts(input: AggregateInput): ShoppingItemAmount[] {
   }
 
   const byDim = new Map<AmountDimension, Contribution[]>();
-  for (const c of rest) {
+  for (const c of converted) {
     const dim: AmountDimension = c.unit?.dimension ?? "none";
     const arr = byDim.get(dim) ?? [];
     arr.push(c);
@@ -548,10 +574,13 @@ function buildAggregatedAmounts(input: AggregateInput): ShoppingItemAmount[] {
   }
 
   for (const [dim, contribs] of byDim) {
-    out.push({
-      ...computeSourcesSum(contribs, dim),
-      manualAmountId: null,
-    });
+    const sum = computeSourcesSum(contribs, dim);
+    // Count/container ("Stück", "Packung", "Dose") → buy whole packs.
+    const quantity =
+      dim === "count" && sum.quantity != null
+        ? ceilToWhole(sum.quantity)
+        : sum.quantity;
+    out.push({ ...sum, quantity, manualAmountId: null });
   }
 
   // Stable order: mass, volume, count, unitless.

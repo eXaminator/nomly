@@ -177,7 +177,7 @@ export type ParsedIngredientResponse = {
   unit: { id: number; name: string } | null;
   /** Set when the parser resolved an ingredient-scoped sub-unit instead of a
    *  global unit. Mutually exclusive with `unit`. */
-  subUnit: { id: number; name: string; perPurchase: number } | null;
+  subUnit: { id: number; name: string } | null;
   unitMatch: "matched" | "defaulted" | "unresolved" | "empty";
   rawUnit: string | null;
   name: string;

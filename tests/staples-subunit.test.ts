@@ -34,7 +34,7 @@ async function seed() {
     .all()[0];
   const sub = db
     .insert(ingredientSubUnit)
-    .values({ ingredientId: ing.id, name: "Dose", perPurchase: 400 })
+    .values({ ingredientId: ing.id, name: "Dose" })
     .returning({ id: ingredientSubUnit.id })
     .all()[0];
   const group = db

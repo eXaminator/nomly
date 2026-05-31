@@ -22,12 +22,20 @@ afterAll(() => {
 
 let zeheId = 0;
 let blattId = 0;
+let stueckId = 0;
 let recipeIngredientId = 0;
 
 beforeAll(async () => {
   const { db } = await import("@/db");
-  const { ingredient, ingredientSubUnit, recipe, recipeSection, recipeIngredient } =
+  const { ingredient, ingredientSubUnit, recipe, recipeSection, recipeIngredient, unit } =
     await import("@/db/schema");
+
+  const [stueck] = db
+    .insert(unit)
+    .values({ name: "Stück", dimension: "count", factor: 1 })
+    .returning()
+    .all();
+  stueckId = stueck.id;
 
   const [knoblauch] = db
     .insert(ingredient)
@@ -36,13 +44,19 @@ beforeAll(async () => {
     .all();
   const [zehe] = db
     .insert(ingredientSubUnit)
-    .values({ ingredientId: knoblauch.id, name: "Zehe", plural: "Zehen", perPurchase: 10 })
+    .values({
+      ingredientId: knoblauch.id,
+      name: "Zehe",
+      plural: "Zehen",
+      parentUnitId: stueck.id,
+      parentAmount: 0.1,
+    })
     .returning()
     .all();
   zeheId = zehe.id;
   const [blatt] = db
     .insert(ingredientSubUnit)
-    .values({ ingredientId: knoblauch.id, name: "Blatt", plural: null, perPurchase: 1 })
+    .values({ ingredientId: knoblauch.id, name: "Blatt", plural: null })
     .returning()
     .all();
   blattId = blatt.id;
@@ -90,12 +104,14 @@ describe("updateSubUnit", () => {
     const updated = updateSubUnit(zeheId, {
       name: "Knolle",
       plural: "Knollen",
-      perPurchase: 12,
+      parentUnitId: stueckId,
+      parentAmount: 0.2,
     });
     expect(updated.id).toBe(zeheId);
     expect(updated.name).toBe("Knolle");
     expect(updated.plural).toBe("Knollen");
-    expect(updated.perPurchase).toBe(12);
+    expect(updated.parentUnitId).toBe(stueckId);
+    expect(updated.parentAmount).toBe(0.2);
 
     const ri = db
       .select({ subUnitId: recipeIngredient.subUnitId })
@@ -108,7 +124,12 @@ describe("updateSubUnit", () => {
   it("rejects a rename that collides with a sibling sub-unit", async () => {
     const { updateSubUnit } = await import("@/lib/stammdaten/sub-unit/service");
     expect(() =>
-      updateSubUnit(blattId, { name: "Knolle", plural: null, perPurchase: 1 }),
+      updateSubUnit(blattId, {
+        name: "Knolle",
+        plural: null,
+        parentUnitId: null,
+        parentAmount: 1,
+      }),
     ).toThrow();
   });
 });

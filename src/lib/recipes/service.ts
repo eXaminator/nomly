@@ -368,7 +368,6 @@ export function getRecipe(id: number): RecipeView | null {
     subUnitId: number | null;
     subUnitName: string | null;
     subUnitPlural: string | null;
-    subUnitPerPurchase: number | null;
     notes: string | null;
     isOptional: boolean;
     fixedAmount: boolean;
@@ -407,7 +406,6 @@ export function getRecipe(id: number): RecipeView | null {
             subUnitId: recipeIngredient.subUnitId,
             subUnitName: ingredientSubUnitTable.name,
             subUnitPlural: ingredientSubUnitTable.plural,
-            subUnitPerPurchase: ingredientSubUnitTable.perPurchase,
             notes: recipeIngredient.notes,
             isOptional: recipeIngredient.isOptional,
             fixedAmount: recipeIngredient.fixedAmount,
@@ -524,7 +522,6 @@ export function getRecipe(id: number): RecipeView | null {
           unitName: i.unitName,
           unitLabel: unitLabelFor(i),
           subUnitId: i.subUnitId,
-          subUnitPerPurchase: i.subUnitPerPurchase,
           notes: i.notes,
           isOptional: i.isOptional,
           fixedAmount: i.fixedAmount,

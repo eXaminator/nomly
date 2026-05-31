@@ -5,18 +5,28 @@ import * as React from "react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { NumberInput } from "@/components/ui/number-input";
+import { SelectSearch } from "@/components/ui/select-search";
 
 import type { SubUnitManagedItem } from "@/lib/stammdaten/sub-unit/service";
 
 export type SubUnitFormPayload = {
   name: string;
   plural: string | null;
-  perPurchase: number;
+  parentUnitId: number | null;
+  parentAmount: number;
 };
 
+async function searchUnits(q: string): Promise<Array<{ id: number; name: string }>> {
+  const res = await fetch(`/api/v1/units/manage?q=${encodeURIComponent(q)}`);
+  if (!res.ok) return [];
+  const body = (await res.json()) as { items: Array<{ id: number; name: string }> };
+  return body.items.map((u) => ({ id: u.id, name: u.name }));
+}
+
 /**
- * Drawer body for editing a single ingredient sub-unit. Publishes its payload
- * (and validity) up to the page client, which owns the PATCH call.
+ * Drawer body for editing a single ingredient custom unit. A custom unit
+ * either converts into a parent global unit (`1 ⟨name⟩ = amount ⟨parent⟩`) or
+ * is **standalone** (no parent) and stays its own line on the shopping list.
  */
 export function SubUnitForm({
   item,
@@ -27,21 +37,29 @@ export function SubUnitForm({
 }) {
   const [name, setName] = React.useState(item.name);
   const [plural, setPlural] = React.useState(item.plural ?? "");
-  const [perPurchase, setPerPurchase] = React.useState<number>(item.perPurchase);
+  const [parent, setParent] = React.useState<{ id: number; name: string } | null>(
+    item.parentUnitId != null && item.parentUnitName != null
+      ? { id: item.parentUnitId, name: item.parentUnitName }
+      : null,
+  );
+  const [amountText, setAmountText] = React.useState<string>(
+    item.parentUnitId != null ? String(item.parentAmount) : "1",
+  );
 
   React.useEffect(() => {
     const trimmed = name.trim();
-    const valid =
-      trimmed.length > 0 && Number.isFinite(perPurchase) && perPurchase > 0;
+    const amount = Number(amountText.replace(",", "."));
+    const amountValid = !parent || (Number.isFinite(amount) && amount > 0);
     onPayloadChange(
       {
         name: trimmed,
         plural: plural.trim() ? plural.trim() : null,
-        perPurchase: Number.isFinite(perPurchase) && perPurchase > 0 ? perPurchase : 1,
+        parentUnitId: parent?.id ?? null,
+        parentAmount: parent && Number.isFinite(amount) && amount > 0 ? amount : 1,
       },
-      valid,
+      trimmed.length > 0 && amountValid,
     );
-  }, [name, plural, perPurchase, onPayloadChange]);
+  }, [name, plural, parent, amountText, onPayloadChange]);
 
   return (
     <div className="flex flex-col gap-5">
@@ -68,24 +86,37 @@ export function SubUnitForm({
           onChange={(e) => setPlural(e.target.value)}
           placeholder="z. B. Zehen"
         />
-        <p className="text-xs text-[var(--color-muted-fg)]">
-          Wird beim Import zusätzlich erkannt und bei jeder Menge außer 1
-          angezeigt.
-        </p>
       </div>
 
       <div className="flex flex-col gap-2">
-        <Label htmlFor="subunit-perpurchase">pro Einkaufseinheit</Label>
-        <NumberInput
-          id="subunit-perpurchase"
-          value={perPurchase}
-          onChange={(n) => setPerPurchase(n ?? 1)}
-          min={0.0001}
-          decimal
-        />
+        <Label>Umrechnung</Label>
+        <div className="flex items-center gap-2">
+          <span className="shrink-0 text-sm text-[var(--color-muted-fg)]">
+            1 {name.trim() || "Einheit"} =
+          </span>
+          <div className="w-24">
+            <NumberInput
+              value={Number(amountText.replace(",", ".")) || 0}
+              onChange={(n) => setAmountText(n == null ? "" : String(n))}
+              min={0.0001}
+              decimal
+              disabled={!parent}
+              aria-label="Umrechnungsmenge"
+            />
+          </div>
+          <div className="flex-1">
+            <SelectSearch
+              value={parent}
+              onChange={setParent}
+              search={searchUnits}
+              placeholder="eigenständig (kein Parent)"
+            />
+          </div>
+        </div>
         <p className="text-xs text-[var(--color-muted-fg)]">
-          Wie viele {plural.trim() || name.trim() || "Untereinheiten"} in einer
-          Einkaufseinheit stecken (z. B. 10 Zehen pro Knoblauchstück).
+          Wähle eine übergeordnete Einheit (z.&nbsp;B. „Stück“ oder „g“), in die
+          diese Untereinheit für die Einkaufsliste umgerechnet wird. Ohne
+          übergeordnete Einheit bleibt sie eigenständig (z.&nbsp;B. „2 Stangen“).
         </p>
       </div>
     </div>

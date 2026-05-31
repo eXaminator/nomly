@@ -175,7 +175,7 @@ export function SubUnitPageClient({
               <tr>
                 <th className="px-3 py-2 font-medium">Zutat</th>
                 <th className="px-3 py-2 font-medium">Untereinheit</th>
-                <th className="px-3 py-2 font-medium">pro Einkauf</th>
+                <th className="px-3 py-2 font-medium">Umrechnung</th>
                 <th className="px-3 py-2 font-medium">Verwendung</th>
               </tr>
             </thead>
@@ -198,7 +198,19 @@ export function SubUnitPageClient({
                       </span>
                     )}
                   </td>
-                  <td className="px-3 py-2 tabular-nums">{item.perPurchase}</td>
+                  <td className="px-3 py-2 text-[var(--color-muted-fg)]">
+                    {item.parentUnitId != null && item.parentUnitName ? (
+                      <span className="tabular-nums">
+                        1 {item.name} ={" "}
+                        {item.parentAmount.toLocaleString("de-DE", {
+                          maximumFractionDigits: 4,
+                        })}{" "}
+                        {item.parentUnitName}
+                      </span>
+                    ) : (
+                      "eigenständig"
+                    )}
+                  </td>
                   <td className="px-3 py-2">
                     <Badge variant="outline">{item.usageCount} Rezepte</Badge>
                   </td>

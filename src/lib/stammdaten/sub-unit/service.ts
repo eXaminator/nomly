@@ -1,7 +1,12 @@
 import { and, asc, eq, inArray, ne, or, sql } from "drizzle-orm";
 
 import { db } from "../../../db/index.ts";
-import { ingredient, ingredientSubUnit, recipeIngredient } from "../../../db/schema.ts";
+import {
+  ingredient,
+  ingredientSubUnit,
+  recipeIngredient,
+  unit,
+} from "../../../db/schema.ts";
 
 /**
  * A single ingredient sub-unit ("Zehe" on Knoblauch) as shown on the
@@ -14,7 +19,11 @@ export type SubUnitManagedItem = {
   ingredientName: string;
   name: string;
   plural: string | null;
-  perPurchase: number;
+  /** Parent global unit this custom unit converts into; null = standalone. */
+  parentUnitId: number | null;
+  parentUnitName: string | null;
+  /** `1 ⟨this⟩ = parentAmount × ⟨parent⟩`. Ignored when standalone. */
+  parentAmount: number;
   /** Number of recipe lines referencing this sub-unit. */
   usageCount: number;
 };
@@ -22,7 +31,8 @@ export type SubUnitManagedItem = {
 export type SubUnitUpdateInput = {
   name: string;
   plural: string | null;
-  perPurchase: number;
+  parentUnitId: number | null;
+  parentAmount: number;
 };
 
 export class SubUnitStammdatenError extends Error {
@@ -70,10 +80,13 @@ export function listSubUnitsManaged(query?: string): SubUnitManagedItem[] {
       ingredientName: ingredient.name,
       name: ingredientSubUnit.name,
       plural: ingredientSubUnit.plural,
-      perPurchase: ingredientSubUnit.perPurchase,
+      parentUnitId: ingredientSubUnit.parentUnitId,
+      parentUnitName: unit.name,
+      parentAmount: ingredientSubUnit.parentAmount,
     })
     .from(ingredientSubUnit)
     .innerJoin(ingredient, eq(ingredient.id, ingredientSubUnit.ingredientId))
+    .leftJoin(unit, eq(unit.id, ingredientSubUnit.parentUnitId))
     .where(where)
     .orderBy(sql`unaccent(${ingredient.name})`, asc(ingredientSubUnit.name))
     .all();
@@ -93,10 +106,13 @@ function buildItem(id: number): SubUnitManagedItem {
       ingredientName: ingredient.name,
       name: ingredientSubUnit.name,
       plural: ingredientSubUnit.plural,
-      perPurchase: ingredientSubUnit.perPurchase,
+      parentUnitId: ingredientSubUnit.parentUnitId,
+      parentUnitName: unit.name,
+      parentAmount: ingredientSubUnit.parentAmount,
     })
     .from(ingredientSubUnit)
     .innerJoin(ingredient, eq(ingredient.id, ingredientSubUnit.ingredientId))
+    .leftJoin(unit, eq(unit.id, ingredientSubUnit.parentUnitId))
     .where(eq(ingredientSubUnit.id, id))
     .get();
   if (!row) throw new SubUnitStammdatenError("Untereinheit nicht gefunden.", 404);
@@ -124,10 +140,27 @@ export function updateSubUnit(
   if (name.length === 0) {
     throw new SubUnitStammdatenError("Name darf nicht leer sein.");
   }
-  if (!Number.isFinite(input.perPurchase) || input.perPurchase <= 0) {
-    throw new SubUnitStammdatenError("„pro Einkaufseinheit“ muss positiv sein.");
-  }
   const plural = input.plural?.trim() ? input.plural.trim() : null;
+  // No parent ⇒ standalone (amount irrelevant). With a parent the amount must
+  // be positive.
+  const parentUnitId = input.parentUnitId ?? null;
+  if (parentUnitId != null) {
+    const target = db
+      .select({ id: unit.id })
+      .from(unit)
+      .where(eq(unit.id, parentUnitId))
+      .get();
+    if (!target) {
+      throw new SubUnitStammdatenError("Übergeordnete Einheit nicht gefunden.", 404);
+    }
+    if (!Number.isFinite(input.parentAmount) || input.parentAmount <= 0) {
+      throw new SubUnitStammdatenError("Die Umrechnungsmenge muss positiv sein.");
+    }
+  }
+  const parentAmount =
+    parentUnitId != null && Number.isFinite(input.parentAmount) && input.parentAmount > 0
+      ? input.parentAmount
+      : 1;
 
   // (ingredientId, name) is unique — a rename must not collide with a sibling
   // sub-unit on the same ingredient.
@@ -150,7 +183,7 @@ export function updateSubUnit(
   }
 
   db.update(ingredientSubUnit)
-    .set({ name, plural, perPurchase: input.perPurchase })
+    .set({ name, plural, parentUnitId, parentAmount })
     .where(eq(ingredientSubUnit.id, id))
     .run();
   return buildItem(id);

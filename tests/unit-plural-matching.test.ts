@@ -42,7 +42,7 @@ beforeAll(async () => {
     .all();
   knoblauchId = knoblauch.id;
   db.insert(ingredientSubUnit)
-    .values({ ingredientId: knoblauch.id, name: "Zehe", plural: "Zehen", perPurchase: 10 })
+    .values({ ingredientId: knoblauch.id, name: "Zehe", plural: "Zehen" })
     .run();
 });
 

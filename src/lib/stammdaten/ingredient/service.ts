@@ -39,7 +39,11 @@ export type SubUnitItem = {
   id: number;
   name: string;
   plural: string | null;
-  perPurchase: number;
+  /** Parent global unit this custom unit converts into; null = standalone. */
+  parentUnitId: number | null;
+  parentUnitName: string | null;
+  /** `1 ⟨this⟩ = parentAmount × ⟨parent⟩`. Ignored when standalone. */
+  parentAmount: number;
 };
 
 export type IngredientListItem = {
@@ -51,10 +55,9 @@ export type IngredientListItem = {
   aliasUnitDefaults: AliasUnitDefault[];
   defaultCategoryId: number | null;
   defaultCategoryName: string | null;
-  /** Optional purchase unit (the "Einkaufseinheit") for shopping aggregation.
-   *  Null means "no rollup configured" — shopping list aggregates as-is. */
-  purchaseUnitId: number | null;
-  purchaseUnitName: string | null;
+  /** Optional density (grams per ml). When set, the shopping list converts
+   *  this ingredient's volume amounts (TL, EL, ml) into grams. */
+  gramsPerMl: number | null;
   /** All sub-units defined on this ingredient (Knoblauch → [Zehe]). */
   subUnits: SubUnitItem[];
   /** Canonical-name parser default (mirrors aliasUnitDefaults). At most one of
@@ -87,16 +90,21 @@ export type IngredientUpsertInput = {
   }>;
   /** Sub-units to write (replaces all existing rows for this ingredient).
    *  Order matters: `aliasUnitDefaults.subUnitIndex` indexes into this array. */
-  subUnits?: Array<{ name: string; plural?: string | null; perPurchase: number }>;
+  subUnits?: Array<{
+    name: string;
+    plural?: string | null;
+    parentUnitId?: number | null;
+    parentAmount?: number;
+  }>;
   /** Canonical-name parser default. `defaultSubUnitIndex` indexes into
    *  `subUnits` (same mechanism as `aliasUnitDefaults.subUnitIndex`); takes
    *  precedence over `defaultUnitId` when set. Both omitted/null clears it. */
   defaultUnitId?: number | null;
   defaultSubUnitIndex?: number | null;
   defaultCategoryId: number | null;
-  /** Override the ingredient's purchase unit. Null clears it. Undefined
-   *  leaves it untouched (only matters on update). */
-  purchaseUnitId?: number | null;
+  /** Override the ingredient's density (grams per ml). Null clears it.
+   *  Undefined leaves it untouched (only matters on update). */
+  gramsPerMl?: number | null;
   excludeFromShoppingList: boolean;
   isEquipment?: boolean;
   dietaryClass: "vegan" | "vegetarian" | "meat" | null;
@@ -120,8 +128,7 @@ function selectIngredientWithJoinedData(query?: string) {
       name: ingredient.name,
       defaultCategoryId: ingredient.defaultCategoryId,
       defaultCategoryName: categoryTable.name,
-      purchaseUnitId: ingredient.purchaseUnitId,
-      purchaseUnitName: unitTable.name,
+      gramsPerMl: ingredient.gramsPerMl,
       defaultUnitId: ingredient.defaultUnitId,
       defaultSubUnitId: ingredient.defaultSubUnitId,
       excludeFromShoppingList: ingredient.excludeFromShoppingList,
@@ -129,8 +136,7 @@ function selectIngredientWithJoinedData(query?: string) {
       dietaryClass: ingredient.dietaryClass,
     })
     .from(ingredient)
-    .leftJoin(categoryTable, eq(categoryTable.id, ingredient.defaultCategoryId))
-    .leftJoin(unitTable, eq(unitTable.id, ingredient.purchaseUnitId));
+    .leftJoin(categoryTable, eq(categoryTable.id, ingredient.defaultCategoryId));
 
   if (!query || query.trim().length === 0) {
     // Case- and diacritic-insensitive order so "Apfel" / "äpfel" /
@@ -244,9 +250,12 @@ function loadSubUnits(ids: number[]): Map<number, SubUnitItem[]> {
       ingredientId: ingredientSubUnit.ingredientId,
       name: ingredientSubUnit.name,
       plural: ingredientSubUnit.plural,
-      perPurchase: ingredientSubUnit.perPurchase,
+      parentUnitId: ingredientSubUnit.parentUnitId,
+      parentUnitName: unitTable.name,
+      parentAmount: ingredientSubUnit.parentAmount,
     })
     .from(ingredientSubUnit)
+    .leftJoin(unitTable, eq(unitTable.id, ingredientSubUnit.parentUnitId))
     .where(inArray(ingredientSubUnit.ingredientId, ids))
     .orderBy(asc(ingredientSubUnit.name))
     .all();
@@ -256,7 +265,9 @@ function loadSubUnits(ids: number[]): Map<number, SubUnitItem[]> {
       id: row.id,
       name: row.name,
       plural: row.plural,
-      perPurchase: row.perPurchase,
+      parentUnitId: row.parentUnitId,
+      parentUnitName: row.parentUnitName,
+      parentAmount: row.parentAmount,
     });
     out.set(row.ingredientId, list);
   }
@@ -318,8 +329,7 @@ export function listIngredients(query?: string): IngredientListItem[] {
     defaultSubUnitId: row.defaultSubUnitId,
     defaultCategoryId: row.defaultCategoryId,
     defaultCategoryName: row.defaultCategoryName,
-    purchaseUnitId: row.purchaseUnitId,
-    purchaseUnitName: row.purchaseUnitName,
+    gramsPerMl: row.gramsPerMl,
     excludeFromShoppingList: row.excludeFromShoppingList,
     isEquipment: row.isEquipment,
     dietaryClass: row.dietaryClass,
@@ -340,8 +350,7 @@ function listIngredientsByIds(ids: number[]): IngredientListItem[] {
       name: ingredient.name,
       defaultCategoryId: ingredient.defaultCategoryId,
       defaultCategoryName: categoryTable.name,
-      purchaseUnitId: ingredient.purchaseUnitId,
-      purchaseUnitName: unitTable.name,
+      gramsPerMl: ingredient.gramsPerMl,
       defaultUnitId: ingredient.defaultUnitId,
       defaultSubUnitId: ingredient.defaultSubUnitId,
       excludeFromShoppingList: ingredient.excludeFromShoppingList,
@@ -350,7 +359,6 @@ function listIngredientsByIds(ids: number[]): IngredientListItem[] {
     })
     .from(ingredient)
     .leftJoin(categoryTable, eq(categoryTable.id, ingredient.defaultCategoryId))
-    .leftJoin(unitTable, eq(unitTable.id, ingredient.purchaseUnitId))
     .where(inArray(ingredient.id, ids))
     .all();
   const aliases = loadAliasesGrouped(ids);
@@ -370,8 +378,7 @@ function listIngredientsByIds(ids: number[]): IngredientListItem[] {
     defaultSubUnitId: row.defaultSubUnitId,
     defaultCategoryId: row.defaultCategoryId,
     defaultCategoryName: row.defaultCategoryName,
-    purchaseUnitId: row.purchaseUnitId,
-    purchaseUnitName: row.purchaseUnitName,
+    gramsPerMl: row.gramsPerMl,
     excludeFromShoppingList: row.excludeFromShoppingList,
     isEquipment: row.isEquipment,
     dietaryClass: row.dietaryClass,
@@ -445,7 +452,7 @@ export function createIngredient(input: IngredientUpsertInput): IngredientDetail
       .values({
         name,
         defaultCategoryId: input.defaultCategoryId ?? null,
-        purchaseUnitId: input.purchaseUnitId ?? null,
+        gramsPerMl: input.gramsPerMl ?? null,
         excludeFromShoppingList: input.excludeFromShoppingList,
         isEquipment: input.isEquipment ?? false,
         dietaryClass: input.dietaryClass,
@@ -495,7 +502,12 @@ export function createIngredient(input: IngredientUpsertInput): IngredientDetail
 function writeSubUnits(
   tx: Tx,
   ingredientId: number,
-  subUnits: Array<{ name: string; plural?: string | null; perPurchase: number }>,
+  subUnits: Array<{
+    name: string;
+    plural?: string | null;
+    parentUnitId?: number | null;
+    parentAmount?: number;
+  }>,
 ): number[] {
   tx.delete(ingredientSubUnit)
     .where(eq(ingredientSubUnit.ingredientId, ingredientId))
@@ -512,13 +524,19 @@ function writeSubUnits(
     }
     seen.add(key);
     const plural = su.plural?.trim() ? su.plural.trim() : null;
-    const perPurchase =
-      Number.isFinite(su.perPurchase) && su.perPurchase > 0
-        ? su.perPurchase
+    // No parent unit ⇒ standalone. Amount only matters with a parent and must
+    // be positive; default to 1.
+    const parentUnitId = su.parentUnitId ?? null;
+    const parentAmount =
+      parentUnitId != null &&
+      su.parentAmount != null &&
+      Number.isFinite(su.parentAmount) &&
+      su.parentAmount > 0
+        ? su.parentAmount
         : 1;
     const inserted = tx
       .insert(ingredientSubUnit)
-      .values({ ingredientId, name, plural, perPurchase })
+      .values({ ingredientId, name, plural, parentUnitId, parentAmount })
       .returning({ id: ingredientSubUnit.id })
       .all();
     out.push(inserted[0].id);
@@ -607,7 +625,7 @@ export function updateIngredient(
       .set({
         name,
         defaultCategoryId: input.defaultCategoryId ?? null,
-        purchaseUnitId: input.purchaseUnitId ?? null,
+        gramsPerMl: input.gramsPerMl ?? null,
         excludeFromShoppingList: input.excludeFromShoppingList,
         isEquipment: input.isEquipment ?? false,
         dietaryClass: input.dietaryClass,

@@ -53,7 +53,6 @@ export type UnitMatch =
 export type SubUnitRef = {
   id: number;
   name: string;
-  perPurchase: number;
 };
 
 export type ImportedIngredient = {
@@ -311,7 +310,6 @@ export function buildSubUnitLookup(): SubUnitLookup {
       ingredientId: ingredientSubUnit.ingredientId,
       name: ingredientSubUnit.name,
       plural: ingredientSubUnit.plural,
-      perPurchase: ingredientSubUnit.perPurchase,
     })
     .from(ingredientSubUnit)
     .all();
@@ -320,7 +318,6 @@ export function buildSubUnitLookup(): SubUnitLookup {
     const ref: SubUnitRef = {
       id: r.id,
       name: r.name,
-      perPurchase: r.perPurchase,
     };
     // Sub-units match on their singular plus their configured plural only —
     // no runtime suffix guessing. Existing rows were backfilled with the old
@@ -365,7 +362,6 @@ export function buildIngredientCatalog(): IngredientCatalog {
       defaultUnitName: unit.name,
       defaultSubUnitId: ingredient.defaultSubUnitId,
       defaultSubUnitName: ingredientSubUnit.name,
-      defaultSubUnitPerPurchase: ingredientSubUnit.perPurchase,
     })
     .from(ingredient)
     .leftJoin(unit, eq(unit.id, ingredient.defaultUnitId))
@@ -389,7 +385,6 @@ export function buildIngredientCatalog(): IngredientCatalog {
           ? {
               id: i.defaultSubUnitId,
               name: i.defaultSubUnitName,
-              perPurchase: i.defaultSubUnitPerPurchase ?? 1,
             }
           : undefined,
       isEquipment: i.isEquipment || undefined,
@@ -405,7 +400,6 @@ export function buildIngredientCatalog(): IngredientCatalog {
       defaultUnitName: unit.name,
       defaultSubUnitId: ingredientAlias.defaultSubUnitId,
       defaultSubUnitName: ingredientSubUnit.name,
-      defaultSubUnitPerPurchase: ingredientSubUnit.perPurchase,
     })
     .from(ingredientAlias)
     .innerJoin(ingredient, eq(ingredient.id, ingredientAlias.ingredientId))
@@ -430,7 +424,6 @@ export function buildIngredientCatalog(): IngredientCatalog {
           ? {
               id: a.defaultSubUnitId,
               name: a.defaultSubUnitName,
-              perPurchase: a.defaultSubUnitPerPurchase ?? 1,
             }
           : undefined,
       isEquipment: a.isEquipment || undefined,
@@ -449,7 +442,6 @@ export function buildIngredientLookup(): IngredientLookup {
       defaultUnitName: unit.name,
       defaultSubUnitId: ingredient.defaultSubUnitId,
       defaultSubUnitName: ingredientSubUnit.name,
-      defaultSubUnitPerPurchase: ingredientSubUnit.perPurchase,
     })
     .from(ingredient)
     .leftJoin(unit, eq(unit.id, ingredient.defaultUnitId))
@@ -479,7 +471,6 @@ export function buildIngredientLookup(): IngredientLookup {
           ? {
               id: i.defaultSubUnitId,
               name: i.defaultSubUnitName,
-              perPurchase: i.defaultSubUnitPerPurchase ?? 1,
             }
           : undefined,
     };
@@ -495,7 +486,6 @@ export function buildIngredientLookup(): IngredientLookup {
       defaultUnitName: unit.name,
       defaultSubUnitId: ingredientAlias.defaultSubUnitId,
       defaultSubUnitName: ingredientSubUnit.name,
-      defaultSubUnitPerPurchase: ingredientSubUnit.perPurchase,
     })
     .from(ingredientAlias)
     .innerJoin(ingredient, eq(ingredient.id, ingredientAlias.ingredientId))
@@ -518,7 +508,6 @@ export function buildIngredientLookup(): IngredientLookup {
           ? {
               id: a.defaultSubUnitId,
               name: a.defaultSubUnitName,
-              perPurchase: a.defaultSubUnitPerPurchase ?? 1,
             }
           : undefined,
     };

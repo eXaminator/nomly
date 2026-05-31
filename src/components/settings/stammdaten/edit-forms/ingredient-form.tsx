@@ -33,7 +33,9 @@ export type IngredientItem = {
     id: number;
     name: string;
     plural: string | null;
-    perPurchase: number;
+    parentUnitId: number | null;
+    parentUnitName: string | null;
+    parentAmount: number;
   }>;
   /** Canonical-name parser default (mirrors aliasUnitDefaults). Exactly one of
    *  defaultUnitId / defaultSubUnitId is set, or both null. */
@@ -42,8 +44,7 @@ export type IngredientItem = {
   defaultSubUnitId: number | null;
   defaultCategoryId: number | null;
   defaultCategoryName: string | null;
-  purchaseUnitId: number | null;
-  purchaseUnitName: string | null;
+  gramsPerMl: number | null;
   excludeFromShoppingList: boolean;
   isEquipment: boolean;
   dietaryClass: "vegan" | "vegetarian" | "meat" | null;
@@ -67,7 +68,10 @@ type SubUnitDraft = {
   existingId?: number;
   name: string;
   plural: string;
-  perPurchase: number;
+  /** Parent global unit this custom unit converts into; null = standalone. */
+  parent: { id: number; name: string } | null;
+  /** `1 ⟨name⟩ = parentAmount × ⟨parent⟩`, as text for the input. */
+  parentAmount: string;
 };
 
 /**
@@ -114,7 +118,11 @@ export function IngredientForm({
         existingId: s.id,
         name: s.name,
         plural: s.plural ?? "",
-        perPurchase: s.perPurchase,
+        parent:
+          s.parentUnitId != null && s.parentUnitName != null
+            ? { id: s.parentUnitId, name: s.parentUnitName }
+            : null,
+        parentAmount: s.parentUnitId != null ? String(s.parentAmount) : "1",
       })),
   );
   const [aliases, setAliases] = React.useState<AliasDraft[]>(() => {
@@ -156,13 +164,8 @@ export function IngredientForm({
       ? { id: item.defaultCategoryId, name: item.defaultCategoryName }
       : null,
   );
-  const [purchaseUnit, setPurchaseUnit] = React.useState<{
-    id: number;
-    name: string;
-  } | null>(
-    item && item.purchaseUnitId && item.purchaseUnitName
-      ? { id: item.purchaseUnitId, name: item.purchaseUnitName }
-      : null,
+  const [gramsPerMlText, setGramsPerMlText] = React.useState<string>(
+    item?.gramsPerMl != null ? String(item.gramsPerMl) : "",
   );
   // Canonical-name default unit/sub-unit — same picker model as alias
   // defaults. A sub-unit reference is held by tempKey so it survives renames.
@@ -238,14 +241,16 @@ export function IngredientForm({
     const valid = trimmedName.length > 0;
     const subUnitsPayload = subUnits
       .filter((su) => su.name.trim().length > 0)
-      .map((su) => ({
-        name: su.name.trim(),
-        plural: su.plural.trim() ? su.plural.trim() : null,
-        perPurchase:
-          Number.isFinite(su.perPurchase) && su.perPurchase > 0
-            ? su.perPurchase
-            : 1,
-      }));
+      .map((su) => {
+        const amount = Number(su.parentAmount.replace(",", "."));
+        return {
+          name: su.name.trim(),
+          plural: su.plural.trim() ? su.plural.trim() : null,
+          parentUnitId: su.parent?.id ?? null,
+          parentAmount:
+            su.parent && Number.isFinite(amount) && amount > 0 ? amount : 1,
+        };
+      });
     const subUnitIndexByTempKey = new Map<string, number>();
     {
       let idx = 0;
@@ -301,7 +306,10 @@ export function IngredientForm({
         defaultUnitId,
         defaultSubUnitIndex,
         defaultCategoryId: category?.id ?? null,
-        purchaseUnitId: purchaseUnit?.id ?? null,
+        gramsPerMl: (() => {
+          const d = Number(gramsPerMlText.replace(",", "."));
+          return gramsPerMlText.trim() && Number.isFinite(d) && d > 0 ? d : null;
+        })(),
         excludeFromShoppingList,
         isEquipment,
         dietaryClass,
@@ -318,7 +326,7 @@ export function IngredientForm({
     subUnits,
     canonicalDefault,
     category,
-    purchaseUnit,
+    gramsPerMlText,
     excludeFromShoppingList,
     isEquipment,
     dietaryClass,
@@ -375,13 +383,19 @@ export function IngredientForm({
   function addSubUnit() {
     setSubUnits((prev) => [
       ...prev,
-      { tempKey: `new-${crypto.randomUUID()}`, name: "", plural: "", perPurchase: 1 },
+      {
+        tempKey: `new-${crypto.randomUUID()}`,
+        name: "",
+        plural: "",
+        parent: null,
+        parentAmount: "1",
+      },
     ]);
   }
 
   function updateSubUnit(
     tempKey: string,
-    partial: Partial<Pick<SubUnitDraft, "name" | "plural" | "perPurchase">>,
+    partial: Partial<Pick<SubUnitDraft, "name" | "plural" | "parent" | "parentAmount">>,
   ) {
     setSubUnits((prev) =>
       prev.map((su) => (su.tempKey === tempKey ? { ...su, ...partial } : su)),
@@ -492,69 +506,97 @@ export function IngredientForm({
       </div>
 
       <div className="flex flex-col gap-2">
-        <Label>Einkaufseinheit</Label>
-        <p className="text-xs text-[var(--color-muted-fg)]">
-          Optional. Wird beim Aggregieren der Einkaufsliste als Zieleinheit
-          verwendet — z.&nbsp;B. „Stück“ bei Knoblauch (so dass 12 Zehen → 2
-          Stück werden).
-        </p>
-        <SelectSearch
-          value={purchaseUnit}
-          onChange={setPurchaseUnit}
-          search={searchUnits}
-          placeholder="Standard (Stück)"
+        <Label htmlFor="ingredient-density">Dichte (g/ml, optional)</Label>
+        <Input
+          id="ingredient-density"
+          inputMode="decimal"
+          value={gramsPerMlText}
+          onChange={(e) => setGramsPerMlText(e.target.value)}
+          placeholder="z. B. 0,5"
         />
+        <p className="text-xs text-[var(--color-muted-fg)]">
+          Wenn gesetzt, rechnet die Einkaufsliste Volumenangaben (TL, EL, ml)
+          dieser Zutat in Gramm um — nützlich für Pulver/Gewürze, bei denen ml
+          keine sinnvolle Einkaufsgröße ist.{" "}
+          <a
+            href="https://www.thecalculatorsite.com/cooking/density-foods.php"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline hover:text-[var(--color-fg)]"
+          >
+            Dichte nachschlagen ↗
+          </a>
+        </p>
       </div>
 
       <div className="flex flex-col gap-2">
         <Label>Teil-Einheiten</Label>
         <p className="text-xs text-[var(--color-muted-fg)]">
           Optional. Untereinheiten dieser Zutat (z.&nbsp;B. „Zehe“ bei
-          Knoblauch). Der Wert „pro Einkaufseinheit“ gibt an, wie viele
-          Teil-Einheiten in einer Einkaufseinheit stecken — z.&nbsp;B. 10
-          Zehen pro Knoblauchstück.
+          Knoblauch). Lege je Einheit fest, in welche übergeordnete Einheit sie
+          für die Einkaufsliste umgerechnet wird („1 Zehe = 0,1 Stück“) — oder
+          lass sie eigenständig (z.&nbsp;B. „2 Stangen“).
         </p>
         {subUnits.length > 0 ? (
           <ul className="flex flex-col divide-y divide-[var(--color-border)] overflow-hidden rounded-[var(--radius)] border border-[var(--color-border)]">
             {subUnits.map((su) => (
-              <li
-                key={su.tempKey}
-                className="grid grid-cols-[1fr_1fr_8rem_auto] items-center gap-2 px-3 py-2"
-              >
-                <Input
-                  value={su.name}
-                  onChange={(e) =>
-                    updateSubUnit(su.tempKey, { name: e.target.value })
-                  }
-                  placeholder="z. B. Zehe"
-                  aria-label="Name der Teil-Einheit"
-                />
-                <Input
-                  value={su.plural}
-                  onChange={(e) =>
-                    updateSubUnit(su.tempKey, { plural: e.target.value })
-                  }
-                  placeholder="Plural (z. B. Zehen)"
-                  aria-label="Plural der Teil-Einheit"
-                />
-                <NumberInput
-                  value={su.perPurchase}
-                  onChange={(n) =>
-                    updateSubUnit(su.tempKey, { perPurchase: n ?? 1 })
-                  }
-                  min={0.0001}
-                  decimal
-                  aria-label="pro Einkaufseinheit"
-                />
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => removeSubUnit(su.tempKey)}
-                  aria-label={`${su.name || "Teil-Einheit"} entfernen`}
-                >
-                  <X className="size-4" />
-                </Button>
+              <li key={su.tempKey} className="flex flex-col gap-2 px-3 py-2">
+                <div className="flex items-center gap-2">
+                  <Input
+                    className="flex-1"
+                    value={su.name}
+                    onChange={(e) =>
+                      updateSubUnit(su.tempKey, { name: e.target.value })
+                    }
+                    placeholder="z. B. Zehe"
+                    aria-label="Name der Teil-Einheit"
+                  />
+                  <Input
+                    className="flex-1"
+                    value={su.plural}
+                    onChange={(e) =>
+                      updateSubUnit(su.tempKey, { plural: e.target.value })
+                    }
+                    placeholder="Plural (z. B. Zehen)"
+                    aria-label="Plural der Teil-Einheit"
+                  />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => removeSubUnit(su.tempKey)}
+                    aria-label={`${su.name || "Teil-Einheit"} entfernen`}
+                  >
+                    <X className="size-4" />
+                  </Button>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="shrink-0 text-xs text-[var(--color-muted-fg)]">
+                    1 {su.name.trim() || "Einheit"} =
+                  </span>
+                  <div className="w-20">
+                    <NumberInput
+                      value={Number(su.parentAmount.replace(",", ".")) || 0}
+                      onChange={(n) =>
+                        updateSubUnit(su.tempKey, {
+                          parentAmount: n == null ? "" : String(n),
+                        })
+                      }
+                      min={0.0001}
+                      decimal
+                      disabled={!su.parent}
+                      aria-label="Umrechnungsmenge"
+                    />
+                  </div>
+                  <div className="flex-1">
+                    <SelectSearch
+                      value={su.parent}
+                      onChange={(p) => updateSubUnit(su.tempKey, { parent: p })}
+                      search={searchUnits}
+                      placeholder="eigenständig"
+                    />
+                  </div>
+                </div>
               </li>
             ))}
           </ul>

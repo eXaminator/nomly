@@ -44,7 +44,7 @@ beforeAll(async () => {
   knoblauchId = knoblauch.id;
   const [zehe] = db
     .insert(ingredientSubUnit)
-    .values({ ingredientId: knoblauch.id, name: "Zehe", plural: "Zehen", perPurchase: 10 })
+    .values({ ingredientId: knoblauch.id, name: "Zehe", plural: "Zehen" })
     .returning()
     .all();
   zeheId = zehe.id;

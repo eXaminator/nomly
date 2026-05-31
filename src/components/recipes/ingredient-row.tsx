@@ -76,7 +76,7 @@ async function loadDefaultUnits(): Promise<SelectSearchItem[]> {
   return searchUnits("");
 }
 
-type SubUnitOption = { id: number; name: string; perPurchase: number };
+type SubUnitOption = { id: number; name: string };
 
 async function loadIngredientSubUnits(name: string): Promise<SubUnitOption[]> {
   const trimmed = name.trim();

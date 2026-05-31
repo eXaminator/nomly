@@ -36,6 +36,20 @@ export function loadUnit(id: number): UnitRow | null {
   return (row as UnitRow | undefined) ?? null;
 }
 
+/**
+ * The base mass unit (grams) — the mass-dimension row that is its own base
+ * (factor 1, no base unit). Target of the per-ingredient density conversion.
+ * Null only if the units table has no mass dimension at all.
+ */
+export function loadGramUnit(): UnitRow | null {
+  const rows = loadUnitsByDimension("mass");
+  return (
+    rows.find((u) => u.baseUnitId == null && u.factor === 1) ??
+    rows.slice().sort((a, b) => a.factor - b.factor)[0] ??
+    null
+  );
+}
+
 export function loadUnitsByDimension(dimension: Dimension): UnitRow[] {
   return db
     .select({

@@ -209,7 +209,7 @@ function carriedAlternativeToProposed(g: {
         : null,
     subUnit:
       g.subUnitId != null
-        ? { id: g.subUnitId, name: g.subUnitName ?? "", perPurchase: 1 }
+        ? { id: g.subUnitId, name: g.subUnitName ?? "" }
         : null,
     unitMatch: "matched",
     rawUnit: null,
