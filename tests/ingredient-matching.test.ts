@@ -596,4 +596,32 @@ describe("a registered alias wins over the canonical it normalizes near", () => 
       findIngredientCandidates("200 g Äpfel", cat).matches[0].aliasName,
     ).toBe("Äpfel");
   });
+
+  it("a hyphen-only difference is NOT a surface win — the canonical keeps its hyphen", () => {
+    // The candidate tokenizer splits "plant-based" into ["plant","based"], so
+    // the matched span carries no hyphen. Comparing verbatim would let the
+    // de-hyphenated alias "plant based meat" win; folding separators to spaces
+    // makes it a tie and the canonical "Plant-based meat" (closer to the input)
+    // wins. Works whether or not the input itself has the hyphen.
+    const hyphen: IngredientCatalog = [
+      {
+        ingredientId: 1,
+        canonicalName: "Plant-based meat",
+        aliasName: "Plant-based meat",
+        tokens: ["plant", "based", "meat"],
+      },
+      {
+        ingredientId: 1,
+        canonicalName: "Plant-based meat",
+        aliasName: "plant based meat",
+        tokens: ["plant", "based", "meat"],
+      },
+    ];
+    expect(
+      findIngredientCandidates("plant-based meat", hyphen).matches[0].aliasName,
+    ).toBe("Plant-based meat");
+    expect(
+      findIngredientCandidates("plant based meat", hyphen).matches[0].aliasName,
+    ).toBe("Plant-based meat");
+  });
 });

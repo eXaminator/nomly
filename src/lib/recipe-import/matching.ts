@@ -447,15 +447,31 @@ export type FindCandidatesOptions = {
  * ("Mandeln", exact), handing the within-ingredient tie to the canonical and
  * dropping the plural the user actually typed. The leading qty/unit tokens are
  * equal for both rows, so they can't decide between them.
+ *
+ * Both sides are compared with token separators (hyphen, slash, comma…)
+ * folded to spaces. The candidate tokenizer already splits on those, so the
+ * matched span never carries a hyphen — comparing a hyphenated alias verbatim
+ * would always lose. Folding makes a hyphen-only difference a TIE, which the
+ * caller's isCanonical tiebreak then resolves toward the canonical (input
+ * "plant-based meat" keeps the canonical "Plant-based meat", not the de-
+ * hyphenated alias "plant based meat"). Genuine surface differences
+ * (diacritics, distinct spelling) still separate the ranks.
  */
+function toSurfaceSpan(s: string): string {
+  return s
+    .trim()
+    .toLowerCase()
+    .split(/[\s,;/\-–—]+/u)
+    .filter(Boolean)
+    .join(" ");
+}
+
 function surfaceMatchRank(m: IngredientCandidateMatch): number {
   if (!m.perTokenKinds.every((k) => k === "exact")) return 0;
-  const rawSpan = m.coveredCandidateTokens
-    .map((i) => m.candidate[i].raw)
-    .join(" ")
-    .trim()
-    .toLowerCase();
-  return m.aliasName.trim().toLowerCase() === rawSpan ? 2 : 1;
+  const rawSpan = toSurfaceSpan(
+    m.coveredCandidateTokens.map((i) => m.candidate[i].raw).join(" "),
+  );
+  return toSurfaceSpan(m.aliasName) === rawSpan ? 2 : 1;
 }
 
 /**
