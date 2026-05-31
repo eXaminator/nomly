@@ -3,9 +3,10 @@ import { pluralizeLabel } from "../units/label.ts";
 
 /**
  * An ingredient custom unit ("Zehe", "Stange") with its conversion to a parent
- * global unit for shopping aggregation: `1 ⟨this⟩ = parent.amount × parent.unit`.
- * `parent` null = **standalone** — the custom unit is never converted and shows
- * as its own shopping line ("2 Stangen").
+ * global unit for shopping aggregation: `parent.amount` of *this* unit make one
+ * `parent.unit` ("1 Stück = 10 Zehen"), so `q` of this unit is `q /
+ * parent.amount` parent units. `parent` null = **standalone** — never
+ * converted, shown as its own shopping line ("2 Stangen").
  */
 export type SubUnitRef = {
   id: number;

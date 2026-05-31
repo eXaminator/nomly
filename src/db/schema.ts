@@ -217,8 +217,10 @@ export const ingredientSubUnit = sqliteTable(
       onDelete: "set null",
     }),
     /**
-     * Parent units per one of this custom unit. `1 Stange = 4 g` → 4;
-     * `1 Zehe = 0.1 Stück` → 0.1. Ignored when {@link parentUnitId} is NULL.
+     * How many of this custom unit make one parent unit: `1 Stück = 10 Zehen`
+     * → 10, `1 Bund = 15 Zweige` → 15. Shopping converts a contribution of
+     * `q ⟨this⟩` into `q / parent_amount ⟨parent⟩`. Ignored when
+     * {@link parentUnitId} is NULL (standalone).
      */
     parentAmount: real("parent_amount").notNull().default(1),
   },

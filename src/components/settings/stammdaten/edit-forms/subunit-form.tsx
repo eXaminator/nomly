@@ -90,21 +90,9 @@ export function SubUnitForm({
 
       <div className="flex flex-col gap-2">
         <Label>Umrechnung</Label>
-        <div className="flex items-center gap-2">
-          <span className="shrink-0 text-sm text-[var(--color-muted-fg)]">
-            1 {name.trim() || "Einheit"} =
-          </span>
-          <div className="w-24">
-            <NumberInput
-              value={Number(amountText.replace(",", ".")) || 0}
-              onChange={(n) => setAmountText(n == null ? "" : String(n))}
-              min={0.0001}
-              decimal
-              disabled={!parent}
-              aria-label="Umrechnungsmenge"
-            />
-          </div>
-          <div className="flex-1">
+        <div className="flex items-center gap-2 text-sm text-[var(--color-muted-fg)]">
+          <span className="shrink-0">1</span>
+          <div className="min-w-0 flex-1">
             <SelectSearch
               value={parent}
               onChange={setParent}
@@ -112,6 +100,21 @@ export function SubUnitForm({
               placeholder="eigenständig (kein Parent)"
             />
           </div>
+          {parent && (
+            <>
+              <span className="shrink-0">=</span>
+              <div className="w-24">
+                <NumberInput
+                  value={Number(amountText.replace(",", ".")) || 0}
+                  onChange={(n) => setAmountText(n == null ? "" : String(n))}
+                  min={0.0001}
+                  decimal
+                  aria-label="Anzahl pro übergeordneter Einheit"
+                />
+              </div>
+              <span className="shrink-0">{plural.trim() || name.trim() || "Einheiten"}</span>
+            </>
+          )}
         </div>
         <p className="text-xs text-[var(--color-muted-fg)]">
           Wähle eine übergeordnete Einheit (z.&nbsp;B. „Stück“ oder „g“), in die

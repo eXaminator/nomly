@@ -49,7 +49,7 @@ beforeAll(async () => {
       name: "Zehe",
       plural: "Zehen",
       parentUnitId: stueck.id,
-      parentAmount: 0.1,
+      parentAmount: 10,
     })
     .returning()
     .all();
@@ -105,13 +105,13 @@ describe("updateSubUnit", () => {
       name: "Knolle",
       plural: "Knollen",
       parentUnitId: stueckId,
-      parentAmount: 0.2,
+      parentAmount: 5,
     });
     expect(updated.id).toBe(zeheId);
     expect(updated.name).toBe("Knolle");
     expect(updated.plural).toBe("Knollen");
     expect(updated.parentUnitId).toBe(stueckId);
-    expect(updated.parentAmount).toBe(0.2);
+    expect(updated.parentAmount).toBe(5);
 
     const ri = db
       .select({ subUnitId: recipeIngredient.subUnitId })

@@ -78,15 +78,15 @@ async function seed(staebchenQty: number, purchaseUnit = true): Promise<Ctx> {
     })
     .returning({ id: ingredient.id })
     .all()[0].id;
-  // 16 Stäbchen per Packung ⇒ 1 Stäbchen = 1/16 Packung. With no purchase
-  // unit the custom unit is standalone (no parent).
+  // 1 Packung = 16 Stäbchen. With no purchase unit the custom unit is
+  // standalone (no parent).
   const subUnitId = db
     .insert(ingredientSubUnit)
     .values({
       ingredientId,
       name: "Stäbchen",
       parentUnitId: purchaseUnit ? packungId : null,
-      parentAmount: 1 / 16,
+      parentAmount: 16,
     })
     .returning({ id: ingredientSubUnit.id })
     .all()[0].id;

@@ -214,9 +214,9 @@ function applyEntrySubUnit(
   if (subName.length === 0) return;
 
   // The catalog's `purchaseUnit` is the parent the sub-unit converts into;
-  // `perPurchase` (custom units per parent) maps to `1 ⟨sub⟩ = 1/perPurchase
-  // ⟨parent⟩`. No purchase unit ⇒ standalone (parent null), matching the
-  // migration's behaviour-preserving rule.
+  // `perPurchase` is already "custom units per parent" ("1 Stück = 10 Zehen"),
+  // which is exactly `parent_amount`. No purchase unit ⇒ standalone (parent
+  // null), matching the migration's behaviour-preserving rule.
   const parentUnitId = entry.purchaseUnit
     ? ctx.unitIdByName.get(lower(entry.purchaseUnit)) ?? null
     : null;
@@ -227,7 +227,7 @@ function applyEntrySubUnit(
   }
   const parentAmount =
     parentUnitId != null && entry.subUnit.perPurchase > 0
-      ? 1 / entry.subUnit.perPurchase
+      ? entry.subUnit.perPurchase
       : 1;
 
   let subUnitId: number;

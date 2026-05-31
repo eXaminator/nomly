@@ -519,8 +519,10 @@ function buildAggregatedAmounts(input: AggregateInput): ShoppingItemAmount[] {
     if (c.subUnit) {
       if (c.subUnit.parent) {
         const { unit, amount } = c.subUnit.parent;
+        // amount = custom units per parent ("1 Stück = 10 Zehen"), so a
+        // contribution of q custom units is q / amount parent units.
         globals.push({
-          quantity: c.quantity == null ? null : c.quantity * amount,
+          quantity: c.quantity == null || amount <= 0 ? null : c.quantity / amount,
           unit,
           subUnit: null,
         });

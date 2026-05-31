@@ -519,7 +519,9 @@ export function IngredientForm({
           dieser Zutat in Gramm um — nützlich für Pulver/Gewürze, bei denen ml
           keine sinnvolle Einkaufsgröße ist.{" "}
           <a
-            href="https://www.thecalculatorsite.com/cooking/density-foods.php"
+            href={`https://www.google.com/search?q=${encodeURIComponent(
+              `${name.trim() || "Lebensmittel"} Dichte g pro ml`,
+            )}`}
             target="_blank"
             rel="noopener noreferrer"
             className="underline hover:text-[var(--color-fg)]"
@@ -570,32 +572,37 @@ export function IngredientForm({
                     <X className="size-4" />
                   </Button>
                 </div>
-                <div className="flex items-center gap-2">
-                  <span className="shrink-0 text-xs text-[var(--color-muted-fg)]">
-                    1 {su.name.trim() || "Einheit"} =
-                  </span>
-                  <div className="w-20">
-                    <NumberInput
-                      value={Number(su.parentAmount.replace(",", ".")) || 0}
-                      onChange={(n) =>
-                        updateSubUnit(su.tempKey, {
-                          parentAmount: n == null ? "" : String(n),
-                        })
-                      }
-                      min={0.0001}
-                      decimal
-                      disabled={!su.parent}
-                      aria-label="Umrechnungsmenge"
-                    />
-                  </div>
-                  <div className="flex-1">
+                <div className="flex items-center gap-2 text-xs text-[var(--color-muted-fg)]">
+                  <span className="shrink-0">1</span>
+                  <div className="min-w-0 flex-1">
                     <SelectSearch
                       value={su.parent}
                       onChange={(p) => updateSubUnit(su.tempKey, { parent: p })}
                       search={searchUnits}
-                      placeholder="eigenständig"
+                      placeholder="eigenständig (kein Parent)"
                     />
                   </div>
+                  {su.parent && (
+                    <>
+                      <span className="shrink-0">=</span>
+                      <div className="w-20">
+                        <NumberInput
+                          value={Number(su.parentAmount.replace(",", ".")) || 0}
+                          onChange={(n) =>
+                            updateSubUnit(su.tempKey, {
+                              parentAmount: n == null ? "" : String(n),
+                            })
+                          }
+                          min={0.0001}
+                          decimal
+                          aria-label="Anzahl pro übergeordneter Einheit"
+                        />
+                      </div>
+                      <span className="shrink-0">
+                        {su.plural.trim() || su.name.trim() || "Einheiten"}
+                      </span>
+                    </>
+                  )}
                 </div>
               </li>
             ))}

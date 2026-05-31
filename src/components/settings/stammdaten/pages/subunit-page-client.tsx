@@ -201,11 +201,11 @@ export function SubUnitPageClient({
                   <td className="px-3 py-2 text-[var(--color-muted-fg)]">
                     {item.parentUnitId != null && item.parentUnitName ? (
                       <span className="tabular-nums">
-                        1 {item.name} ={" "}
+                        1 {item.parentUnitName} ={" "}
                         {item.parentAmount.toLocaleString("de-DE", {
                           maximumFractionDigits: 4,
                         })}{" "}
-                        {item.parentUnitName}
+                        {item.plural ?? item.name}
                       </span>
                     ) : (
                       "eigenständig"
