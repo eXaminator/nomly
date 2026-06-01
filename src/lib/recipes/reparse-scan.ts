@@ -6,6 +6,7 @@ import {
   recipeIngredient,
   recipeSection,
   unit,
+  unitAlias,
 } from "@/db/schema";
 import {
   buildIngredientCatalog,
@@ -357,6 +358,36 @@ export function scanAllRecipesForReparse(): ReparseScanEntry[] {
     });
   }
   return entries;
+}
+
+/** A unit's display forms — its canonical singular/plural plus each alias's,
+ *  shipped to the bulk-reparse dialog so it can inflect a label by quantity
+ *  (and thereby ignore singular/plural differences in the diff). */
+export type UnitForm = {
+  id: number;
+  name: string;
+  plural: string | null;
+  aliases: { name: string; plural: string | null }[];
+};
+
+/** Load every unit's singular/plural forms (canonical + aliases) for the
+ *  client-side inflector. The unit/alias tables are small, so load them whole. */
+export function loadUnitForms(): UnitForm[] {
+  const units = db
+    .select({ id: unit.id, name: unit.name, plural: unit.plural })
+    .from(unit)
+    .all();
+  const aliases = db
+    .select({ unitId: unitAlias.unitId, name: unitAlias.name, plural: unitAlias.plural })
+    .from(unitAlias)
+    .all();
+  const byId = new Map<number, UnitForm>(
+    units.map((u) => [u.id, { id: u.id, name: u.name, plural: u.plural, aliases: [] }]),
+  );
+  for (const a of aliases) {
+    byId.get(a.unitId)?.aliases.push({ name: a.name, plural: a.plural });
+  }
+  return [...byId.values()];
 }
 
 /** One line-group replacement: the current rows to drop (by id) and the new

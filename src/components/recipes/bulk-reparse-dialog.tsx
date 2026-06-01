@@ -24,6 +24,8 @@ import {
   promoteAlternative,
 } from "./alternatives";
 import { ingredientToPayload, toNumberOrNull } from "./payload";
+import { buildUnitInflector, type UnitInflector } from "./unit-inflect";
+import type { UnitForm } from "@/lib/recipes/reparse-scan";
 import {
   formatQuantity,
   RecipeIngredientReadLine,
@@ -75,6 +77,7 @@ function draftMappingLabel(d: DraftIngredient): string {
 function computeHighlights(
   current: ScanRowSummary[],
   draft: DraftIngredient[],
+  inflect: UnitInflector,
 ): { current: LineHighlight[]; proposed: LineHighlight[] } {
   const n = Math.max(current.length, draft.length);
   const cur: LineHighlight[] = [];
@@ -92,9 +95,15 @@ function computeHighlights(
       continue;
     }
     const flags: LineHighlight = {
+      // Compare the quantity-inflected unit label on both sides, so a pure
+      // singular/plural difference collapses to the same string (no highlight)
+      // while a real quantity or unit/alias change still differs.
       amount:
-        amountStr(c.quantity, c.unitLabel) !==
-        amountStr(toNumberOrNull(d.quantity), d.unit?.name ?? null),
+        amountStr(c.quantity, inflect(c.unitLabel, c.quantity)) !==
+        amountStr(
+          toNumberOrNull(d.quantity),
+          inflect(d.unit?.name ?? null, toNumberOrNull(d.quantity)),
+        ),
       name: c.name.trim() !== d.name.trim(),
       notes: (c.notes ?? "").trim() !== d.notes.trim(),
       // Identity comparison, not label text: "Brauner Zucker" vs the lowercased
@@ -145,6 +154,8 @@ export function BulkReparseDialog({
   const [pendingNew, setPendingNew] = React.useState<{
     newNames: string[];
   } | null>(null);
+  const [unitForms, setUnitForms] = React.useState<UnitForm[]>([]);
+  const inflect = React.useMemo(() => buildUnitInflector(unitForms), [unitForms]);
   const loadedRef = React.useRef(false);
 
   const runScan = React.useCallback(async () => {
@@ -154,8 +165,12 @@ export function BulkReparseDialog({
     try {
       const r = await fetch("/api/v1/recipes/reparse-scan", { method: "POST" });
       if (!r.ok) throw new Error("scan failed");
-      const data = (await r.json()) as { entries: ScanEntry[] };
+      const data = (await r.json()) as {
+        entries: ScanEntry[];
+        unitForms?: UnitForm[];
+      };
       setEntries(data.entries);
+      setUnitForms(data.unitForms ?? []);
       setStates(
         data.entries.map((e) => ({
           selected: false,
@@ -453,7 +468,11 @@ export function BulkReparseDialog({
                           {g.indices.map((i) => {
                             const entry = entries[i];
                             const st = states[i];
-                            const hi = computeHighlights(entry.current, st.draft);
+                            const hi = computeHighlights(
+                              entry.current,
+                              st.draft,
+                              inflect,
+                            );
                             return (
                               <div key={i} className="flex flex-col gap-2 px-3 py-2">
                                 <div className="flex items-start gap-2">
@@ -482,7 +501,7 @@ export function BulkReparseDialog({
                                             <RecipeIngredientReadLine
                                               key={k}
                                               quantity={c.quantity}
-                                              unitLabel={c.unitLabel}
+                                              unitLabel={inflect(c.unitLabel, c.quantity)}
                                               name={c.name}
                                               canonicalName={c.canonicalName}
                                               notes={c.notes}
@@ -521,7 +540,10 @@ export function BulkReparseDialog({
                                               >
                                                 <RecipeIngredientReadLine
                                                   quantity={toNumberOrNull(d.quantity)}
-                                                  unitLabel={d.unit?.name ?? null}
+                                                  unitLabel={inflect(
+                                                    d.unit?.name ?? null,
+                                                    toNumberOrNull(d.quantity),
+                                                  )}
                                                   name={d.name}
                                                   canonicalName={d.canonicalName}
                                                   notes={d.notes.trim() || null}
