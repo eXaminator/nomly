@@ -905,9 +905,34 @@ export function IngredientRow({
 }
 
 /**
+ * The candidate (if any) whose canonical name OR matched alias equals the
+ * typed text case-insensitively — i.e. an EXACT name collision with an
+ * existing ingredient. This is the condition under which a brand-new
+ * ingredient with that name is impossible: `ingredient.name` is unique, and
+ * the recipe-save resolver (`resolveIngredient`) links such a name to the
+ * existing row regardless of any client-side "Neu" intent. Used both to
+ * auto-bind the row and to disable the "Neu" pill so the user can't make a
+ * "create new" choice the backend would silently override.
+ */
+export function findExactMatch(
+  typedName: string,
+  matches: ServerMatch[],
+): ServerMatch | undefined {
+  const trimmedLower = typedName.trim().toLowerCase();
+  if (trimmedLower.length === 0) return undefined;
+  return matches.find(
+    (m) =>
+      m.canonicalName.toLowerCase() === trimmedLower ||
+      m.matchedName.toLowerCase() === trimmedLower,
+  );
+}
+
+/**
  * Auto-select rules applied after each match response:
  *   1. Sticky: keep the previous selectedIngredientId if it still appears
- *      in the new candidate set.
+ *      in the new candidate set. A deliberate "Neu" pin stays new — UNLESS
+ *      the typed name now EXACTLY collides with an existing ingredient/alias
+ *      (a duplicate name can't be created), in which case it yields to Rule 2.
  *   2. Exact: typed text equals a candidate's canonicalName (case-insensitive).
  *   3. Above threshold: top candidate's score clears MIN_AUTO_MATCH_SCORE.
  *   4. Fallback: "Neu" (selectedIngredientId = null).
@@ -934,29 +959,31 @@ export function applyAutoSelect(
     // Deliberate "Neu" pin (pinned with no selection): stay a new-ingredient
     // row. Typing / a fresh match response must NOT silently re-bind it to a
     // candidate — otherwise it stops counting as new on save and the
-    // new-ingredient enrichment dialog never opens.
-    if (current.selectedIngredientId == null) return current;
-    const hit = matches.find(
-      (m) => m.ingredientId === current.selectedIngredientId,
-    );
-    if (hit) {
-      return {
-        ...current,
-        canonicalName:
-          typedName.trim().toLowerCase() === hit.canonicalName.toLowerCase()
-            ? null
-            : hit.canonicalName,
-      };
+    // new-ingredient enrichment dialog never opens. EXCEPTION: an exact
+    // name/alias collision can't become a new ingredient (unique name; the
+    // save resolver links to the existing row anyway), so it falls through to
+    // Rule 2 and binds the match — keeping the row honest about what saves.
+    if (current.selectedIngredientId == null) {
+      if (!findExactMatch(typedName, matches)) return current;
+    } else {
+      const hit = matches.find(
+        (m) => m.ingredientId === current.selectedIngredientId,
+      );
+      if (hit) {
+        return {
+          ...current,
+          canonicalName:
+            typedName.trim().toLowerCase() === hit.canonicalName.toLowerCase()
+              ? null
+              : hit.canonicalName,
+        };
+      }
+      // Pinned selection vanished from the results — clear and re-evaluate.
     }
-    // Pinned selection vanished from the results — clear and re-evaluate.
   }
   const trimmedLower = typedName.trim().toLowerCase();
   // Rule 2: exact.
-  const exact = matches.find(
-    (m) =>
-      m.canonicalName.toLowerCase() === trimmedLower ||
-      m.matchedName.toLowerCase() === trimmedLower,
-  );
+  const exact = findExactMatch(typedName, matches);
   if (exact) {
     return {
       ...current,
@@ -1073,6 +1100,11 @@ function CandidatePills({
   // Three mutually-exclusive synthetic states: a real candidate, "Neu"
   // (create article), or "Nicht zugeordnet" (free text, no article).
   const isNewSelected = selectedIngredientId == null && !unassigned;
+  // An exact name/alias collision with an existing ingredient: a new
+  // ingredient with that name is impossible (unique name) and the save
+  // resolver would link it to the existing row anyway — so "Neu" is not a
+  // real option here. Disable the pill and steer the user to the match.
+  const exactMatch = findExactMatch(trimmed, candidates);
   // The pill the force-match popover sits next to a forced ingredient that
   // isn't in the candidate list. Surface it as its own pill so the user can
   // see which ingredient the row is pinned to.
@@ -1156,7 +1188,12 @@ function CandidatePills({
       <NewPill
         label={trimmed.length > 0 ? `Neu: ${trimmed}` : "Neu"}
         isSelected={isNewSelected}
-        disabled={trimmed.length === 0}
+        disabled={trimmed.length === 0 || exactMatch != null}
+        disabledReason={
+          exactMatch
+            ? `„${trimmed}" gibt es schon — diese Zutat wird verwendet statt einer neuen.`
+            : undefined
+        }
         onSelect={onSelectNew}
       />
       {allowUnassigned ? (
@@ -1301,11 +1338,15 @@ function NewPill({
   label,
   isSelected,
   disabled,
+  disabledReason,
   onSelect,
 }: {
   label: string;
   isSelected: boolean;
   disabled: boolean;
+  /** Tooltip shown while disabled. Falls back to the "type a name first"
+   *  hint when omitted (the empty-name case). */
+  disabledReason?: string;
   onSelect: () => void;
 }) {
   return (
@@ -1322,7 +1363,7 @@ function NewPill({
       )}
       title={
         disabled
-          ? "Erst einen Zutatennamen eingeben."
+          ? (disabledReason ?? "Erst einen Zutatennamen eingeben.")
           : isSelected
             ? "Neue Zutat wird beim Speichern angelegt."
             : "Als neue Zutat speichern."
