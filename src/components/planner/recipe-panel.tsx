@@ -14,10 +14,15 @@ import { formatDayMonthDe } from "@/lib/meal-plans/dates";
 import { cn } from "@/lib/cn";
 import {
   EMPTY_RECIPE_FILTER,
-  RecipeFilterControls,
-  useFilteredRecipes,
-  type PlannerRecipeFilter,
-} from "./recipe-filter";
+  RecipeFilterBar,
+  recipeFilterToQuery,
+  type RecipeFilterValue,
+} from "@/components/recipes/recipe-filter-bar";
+import {
+  RandomizeProvider,
+  useRandomSample,
+} from "@/components/recipes/randomize-context";
+import { useFilteredRecipes } from "./recipe-filter";
 
 type Props = {
   allTags: string[];
@@ -66,9 +71,7 @@ export function RecipePanel({
   onPreview,
 }: Props) {
   const [filter, setFilter] =
-    React.useState<PlannerRecipeFilter>(EMPTY_RECIPE_FILTER);
-  const { recipes: filtered, loading, error } = useFilteredRecipes(filter);
-  const scrollRef = React.useRef<HTMLDivElement>(null);
+    React.useState<RecipeFilterValue>(EMPTY_RECIPE_FILTER);
 
   // The panel doubles as a "drop a meal here to remove it from the plan"
   // target. The overlay only appears while a *meal* is being dragged (dragging
@@ -80,22 +83,6 @@ export function RecipePanel({
   const { active } = useDndContext();
   const draggingMeal =
     (active?.data.current as DragData | undefined)?.type === "meal";
-
-  const usageByRecipe = React.useMemo(() => {
-    const map = new Map<number, RecipeUsageStats>();
-    for (const u of recipeUsage) {
-      const { recipeId, ...stats } = u;
-      map.set(recipeId, stats);
-    }
-    return map;
-  }, [recipeUsage]);
-
-  const rowVirtualizer = useVirtualizer({
-    count: filtered.length,
-    getScrollElement: () => scrollRef.current,
-    estimateSize: () => 60,
-    overscan: 8,
-  });
 
   return (
     <aside
@@ -147,23 +134,80 @@ export function RecipePanel({
           </span>
         </div>
       ) : null}
-      <RecipeFilterControls allTags={allTags} value={filter} onChange={setFilter} />
+      <RandomizeProvider resetKey={recipeFilterToQuery(filter)}>
+        <PanelRecipeList
+          allTags={allTags}
+          filter={filter}
+          onFilterChange={setFilter}
+          recipeUsage={recipeUsage}
+          today={today}
+          onPreview={onPreview}
+        />
+      </RandomizeProvider>
+    </aside>
+  );
+}
+
+/**
+ * The filter bar + virtualized list, rendered inside {@link RandomizeProvider}
+ * so the randomize control and the list sample together. When randomization is
+ * active the list shows a few random recipes from the filtered set; otherwise
+ * the full filtered catalog.
+ */
+function PanelRecipeList({
+  allTags,
+  filter,
+  onFilterChange,
+  recipeUsage,
+  today,
+  onPreview,
+}: {
+  allTags: string[];
+  filter: RecipeFilterValue;
+  onFilterChange: (next: RecipeFilterValue) => void;
+  recipeUsage: Array<{ recipeId: number } & RecipeUsageStats>;
+  today: string;
+  onPreview: (recipeId: number) => void;
+}) {
+  const { recipes: filtered, loading, error } = useFilteredRecipes(filter);
+  const { recipes: shown } = useRandomSample(filtered);
+  const scrollRef = React.useRef<HTMLDivElement>(null);
+
+  const usageByRecipe = React.useMemo(() => {
+    const map = new Map<number, RecipeUsageStats>();
+    for (const u of recipeUsage) {
+      const { recipeId, ...stats } = u;
+      map.set(recipeId, stats);
+    }
+    return map;
+  }, [recipeUsage]);
+
+  const rowVirtualizer = useVirtualizer({
+    count: shown.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => 60,
+    overscan: 8,
+  });
+
+  return (
+    <>
+      <RecipeFilterBar allTags={allTags} value={filter} onChange={onFilterChange} />
       {/* `pb-4` lives inside the scroll container so the last recipe has
           a bit of breathing room at the bottom when scrolled all the way.
           Rows are virtualized: only the on-screen slice is in the DOM, which
           keeps a large catalog cheap to render (and to keep draggable). */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto pr-1 pb-4">
-        {loading && filtered.length === 0 ? (
+        {loading && shown.length === 0 ? (
           <div className="space-y-1.5">
             {Array.from({ length: 8 }).map((_, i) => (
               <Skeleton key={i} className="h-[52px] w-full" />
             ))}
           </div>
-        ) : error && filtered.length === 0 ? (
+        ) : error && shown.length === 0 ? (
           <p className="text-sm text-[var(--color-danger)]">
             Liste konnte nicht geladen werden.
           </p>
-        ) : filtered.length === 0 ? (
+        ) : shown.length === 0 ? (
           <p className="text-sm text-[var(--color-muted-fg)]">Keine Treffer.</p>
         ) : (
           <div
@@ -171,7 +215,7 @@ export function RecipePanel({
             style={{ height: rowVirtualizer.getTotalSize() }}
           >
             {rowVirtualizer.getVirtualItems().map((virtualRow) => {
-              const recipe = filtered[virtualRow.index];
+              const recipe = shown[virtualRow.index];
               return (
                 <div
                   key={recipe.id}
@@ -194,7 +238,7 @@ export function RecipePanel({
           </div>
         )}
       </div>
-    </aside>
+    </>
   );
 }
 

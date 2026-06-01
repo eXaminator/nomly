@@ -44,7 +44,7 @@ export function DietFilter({ value, onChange }: Props = {}) {
       <Segment
         label="Vegetarisch"
         icon={<Salad className="size-3.5" />}
-        accent="var(--color-warning)"
+        accent="var(--color-success)"
         active={current === "vegetarian"}
         onClick={() => set("vegetarian")}
       />

@@ -4,6 +4,11 @@ import * as React from "react";
 import { useWindowVirtualizer } from "@tanstack/react-virtual";
 import { RecipeCard } from "./recipe-card";
 import { RecipeGridSkeleton } from "./recipe-grid-skeleton";
+import {
+  RANDOM_SAMPLE_SIZE,
+  sampleRecipes,
+  useRandomize,
+} from "./randomize-context";
 import type { RecipeListItem } from "@/lib/recipes/types";
 
 type Filters = {
@@ -65,6 +70,12 @@ function countLabel(
   return `${shown} Rezept${shown === 1 ? "" : "e"}.`;
 }
 
+function randomLabel(shown: number, matched: number): string {
+  const noun = shown === 1 ? "zufälliges Rezept" : "zufällige Rezepte";
+  const hits = matched === 1 ? "Treffer" : "Treffern";
+  return `${shown} ${noun} von ${matched} ${hits}.`;
+}
+
 export function RecipeGridVirtual({
   initialRecipes,
   initialMatchedCount,
@@ -112,17 +123,48 @@ export function RecipeGridVirtual({
   const recipes = full ?? initialRecipes;
   const shown = full ? full.length : initialMatchedCount;
 
+  const {
+    active: randomActive,
+    nonce: randomNonce,
+    setAvailable,
+  } = useRandomize();
+
+  // Tell the control how many recipes it could sample from (drives disabling).
+  // Exiting randomization on a filter change is handled by RandomizeProvider's
+  // `resetKey` (the page passes the same filter key).
+  React.useEffect(() => {
+    setAvailable(full ? full.length : initialMatchedCount);
+  }, [full, initialMatchedCount, setAvailable]);
+
+  // Resample on each roll. Only meaningful once the full list has loaded; the
+  // random subset must come from the complete filtered set, not the SSR page.
+  const sample = React.useMemo(() => {
+    if (!randomActive || !full) return null;
+    return sampleRecipes(full, RANDOM_SAMPLE_SIZE);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [randomActive, randomNonce, full]);
+
   return (
     <div>
       <p className="mt-2 text-sm text-[var(--color-muted-fg)]">
-        {countLabel(shown, totalUnfiltered, filtersActive)}
+        {randomActive && sample
+          ? randomLabel(sample.length, full ? full.length : initialMatchedCount)
+          : countLabel(shown, totalUnfiltered, filtersActive)}
         {errored ? (
           <span className="ml-2 text-[var(--color-danger)]">
             Liste konnte nicht geladen werden.
           </span>
         ) : null}
       </p>
-      {recipes.length === 0 ? null : full ? (
+      {randomActive ? (
+        sample ? (
+          <StaticGrid recipes={sample} pendingMore={false} />
+        ) : (
+          <div className="mt-6">
+            <RecipeGridSkeleton count={RANDOM_SAMPLE_SIZE} />
+          </div>
+        )
+      ) : recipes.length === 0 ? null : full ? (
         <VirtualGrid recipes={full} />
       ) : (
         <StaticGrid recipes={initialRecipes} pendingMore={shown > initialRecipes.length} />

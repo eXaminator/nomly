@@ -22,10 +22,15 @@ import {
 import { cn } from "@/lib/cn";
 import {
   EMPTY_RECIPE_FILTER,
-  RecipeFilterControls,
-  useFilteredRecipes,
-  type PlannerRecipeFilter,
-} from "./recipe-filter";
+  RecipeFilterBar,
+  recipeFilterToQuery,
+  type RecipeFilterValue,
+} from "@/components/recipes/recipe-filter-bar";
+import {
+  RandomizeProvider,
+  useRandomSample,
+} from "@/components/recipes/randomize-context";
+import { useFilteredRecipes } from "./recipe-filter";
 
 type Props = {
   date: string | null;
@@ -57,17 +62,11 @@ function AddMealModalInner({
   onSelect,
 }: Props) {
   const [filter, setFilter] =
-    React.useState<PlannerRecipeFilter>(EMPTY_RECIPE_FILTER);
-  const { recipes: matches } = useFilteredRecipes(filter);
+    React.useState<RecipeFilterValue>(EMPTY_RECIPE_FILTER);
   const [selected, setSelected] = React.useState<PlannerRecipe | null>(null);
   const [servings, setServings] = React.useState<number>(1);
   const [note, setNote] = React.useState("");
   const [saving, setSaving] = React.useState(false);
-
-  const filtered = React.useMemo(
-    () => matches.slice(0, MAX_RESULTS),
-    [matches],
-  );
 
   async function handleSave() {
     if (!selected || !date) return;
@@ -98,60 +97,17 @@ function AddMealModalInner({
         </DialogHeader>
 
         {selected == null ? (
-          <div className="flex flex-col gap-3">
-            <RecipeFilterControls
+          <RandomizeProvider resetKey={recipeFilterToQuery(filter)}>
+            <MealPicker
               allTags={allTags}
-              value={filter}
-              onChange={setFilter}
+              filter={filter}
+              onFilterChange={setFilter}
+              onPick={(r) => {
+                setSelected(r);
+                setServings(defaultMealPortions(r.servings));
+              }}
             />
-            <div className="max-h-72 space-y-1 overflow-y-auto">
-              {filtered.length === 0 ? (
-                <p className="text-sm text-[var(--color-muted-fg)]">
-                  Keine Treffer.
-                </p>
-              ) : (
-                filtered.map((r) => (
-                  <button
-                    key={r.id}
-                    type="button"
-                    onClick={() => {
-                      setSelected(r);
-                      setServings(defaultMealPortions(r.servings));
-                    }}
-                    className={cn(
-                      "flex w-full items-center gap-2 rounded-md border border-[var(--color-border)] bg-[var(--color-card)] p-2 text-left text-sm transition-colors hover:border-[var(--color-accent)]",
-                    )}
-                  >
-                    {r.photoPath ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={`/api/v1/${r.photoPath}`}
-                        alt=""
-                        className="size-10 shrink-0 rounded object-cover"
-                      />
-                    ) : (
-                      <div className="size-10 shrink-0 rounded bg-[var(--color-muted)]" />
-                    )}
-                    <div className="min-w-0 flex-1">
-                      <span className="flex items-center gap-1.5 truncate font-medium">
-                        <DietBadge
-                          isVegan={r.isVegan}
-                          isVegetarian={r.isVegetarian}
-                          confidence={r.dietConfidence}
-                          size="sm"
-                        />
-                        <span className="truncate">{r.title}</span>
-                      </span>
-                      <span className="block truncate text-xs text-[var(--color-muted-fg)]">
-                        {r.servings} Portionen
-                        {r.tags.length > 0 ? ` · ${r.tags.slice(0, 2).join(", ")}` : ""}
-                      </span>
-                    </div>
-                  </button>
-                ))
-              )}
-            </div>
-          </div>
+          </RandomizeProvider>
         ) : (
           <div className="flex flex-col gap-4">
             <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-muted)] p-2 text-sm">
@@ -195,5 +151,75 @@ function AddMealModalInner({
         )}
       </DialogContent>
     </Dialog>
+  );
+}
+
+/**
+ * The filter bar + recipe list, rendered inside {@link RandomizeProvider} so
+ * the shared randomize control works here too. When randomization is active the
+ * list shows a few random matches; otherwise the matches capped at
+ * {@link MAX_RESULTS} (the modal isn't virtualized).
+ */
+function MealPicker({
+  allTags,
+  filter,
+  onFilterChange,
+  onPick,
+}: {
+  allTags: string[];
+  filter: RecipeFilterValue;
+  onFilterChange: (next: RecipeFilterValue) => void;
+  onPick: (recipe: PlannerRecipe) => void;
+}) {
+  const { recipes: matches } = useFilteredRecipes(filter);
+  const { recipes: shown, active } = useRandomSample(matches);
+  const filtered = active ? shown : shown.slice(0, MAX_RESULTS);
+
+  return (
+    <div className="flex flex-col gap-3">
+      <RecipeFilterBar allTags={allTags} value={filter} onChange={onFilterChange} />
+      <div className="max-h-72 space-y-1 overflow-y-auto">
+        {filtered.length === 0 ? (
+          <p className="text-sm text-[var(--color-muted-fg)]">Keine Treffer.</p>
+        ) : (
+          filtered.map((r) => (
+            <button
+              key={r.id}
+              type="button"
+              onClick={() => onPick(r)}
+              className={cn(
+                "flex w-full items-center gap-2 rounded-md border border-[var(--color-border)] bg-[var(--color-card)] p-2 text-left text-sm transition-colors hover:border-[var(--color-accent)]",
+              )}
+            >
+              {r.photoPath ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={`/api/v1/${r.photoPath}`}
+                  alt=""
+                  className="size-10 shrink-0 rounded object-cover"
+                />
+              ) : (
+                <div className="size-10 shrink-0 rounded bg-[var(--color-muted)]" />
+              )}
+              <div className="min-w-0 flex-1">
+                <span className="flex items-center gap-1.5 truncate font-medium">
+                  <DietBadge
+                    isVegan={r.isVegan}
+                    isVegetarian={r.isVegetarian}
+                    confidence={r.dietConfidence}
+                    size="sm"
+                  />
+                  <span className="truncate">{r.title}</span>
+                </span>
+                <span className="block truncate text-xs text-[var(--color-muted-fg)]">
+                  {r.servings} Portionen
+                  {r.tags.length > 0 ? ` · ${r.tags.slice(0, 2).join(", ")}` : ""}
+                </span>
+              </div>
+            </button>
+          ))
+        )}
+      </div>
+    </div>
   );
 }
