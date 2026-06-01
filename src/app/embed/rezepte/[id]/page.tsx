@@ -43,7 +43,10 @@ export default async function EmbedRecipePage({
     <main className="min-h-screen bg-[var(--color-bg)]">
       <div className="mx-auto max-w-screen-2xl px-4 py-6 md:px-6">
         {leftover ? (
-          <div className="mb-4 flex items-center gap-2 rounded-[var(--radius)] border border-dashed border-[var(--color-border)] bg-[var(--color-muted)]/40 px-3 py-2 text-sm text-[var(--color-muted-fg)]">
+          // Match RecipeDetail's own `max-w-4xl` content column so the banner
+          // lines up with the recipe below it instead of spanning the wider
+          // page wrapper.
+          <div className="mx-auto mb-4 flex max-w-4xl items-center gap-2 rounded-[var(--radius)] border border-dashed border-[var(--color-border)] bg-[var(--color-muted)]/40 px-3 py-2 text-sm text-[var(--color-muted-fg)]">
             <Soup className="size-4 shrink-0" />
             <span>
               <span className="font-medium text-[var(--color-fg)]">Reste</span>{" "}

@@ -4,6 +4,7 @@ import * as React from "react";
 import * as Popover from "@radix-ui/react-popover";
 import { Loader2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import { dropdownSuggestions } from "@/lib/autocomplete-ui";
 import { cn } from "@/lib/cn";
 
 type Hit = { ingredientId: number; name: string; canonicalName?: string };
@@ -64,12 +65,9 @@ export function IngredientNameInput({
         }
         const data = (await r.json()) as { items: Hit[] };
         if (my === reqRef.current) {
-          // Hide the popover when the only suggestion equals what's typed —
-          // no useful hint to offer.
-          const filtered = data.items.filter(
-            (h) => h.name.toLowerCase() !== q.toLowerCase(),
-          );
-          setItems(filtered);
+          // Keep the exact match (the server ranks it first) so Tab/Enter
+          // selects it; only hide the popover when it's the *sole* suggestion.
+          setItems(dropdownSuggestions(data.items, q));
           setActiveIdx(0);
         }
       } finally {

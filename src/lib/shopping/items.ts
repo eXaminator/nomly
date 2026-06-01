@@ -1477,7 +1477,21 @@ export function autocompleteItems(rawQuery: string): AutocompleteHit[] {
     .orderBy(asc(ingredientAlias.name))
     .limit(20)
     .all();
-  for (const r of ingA)
+  const qn = unaccent(q);
+  for (const r of ingA) {
+    const key = `ingredient:${r.id}`;
+    if (seen.has(key)) {
+      // The ingredient already matched on its canonical name. If this alias is
+      // the exact query, record it so the row ranks as an exact match below
+      // (the canonical hit carries no matchedAlias on its own).
+      if (unaccent(r.alias) === qn) {
+        const existing = hits.find(
+          (h) => h.kind === "ingredient" && h.id === r.id,
+        );
+        if (existing && !existing.matchedAlias) existing.matchedAlias = r.alias;
+      }
+      continue;
+    }
     push({
       kind: "ingredient",
       id: r.id,
@@ -1486,6 +1500,23 @@ export function autocompleteItems(rawQuery: string): AutocompleteHit[] {
       categoryName: r.categoryName,
       ...resolveDefaultUnit(r.defaultUnitId, r.defaultUnitDisplay, r.defaultUnitName),
     });
+  }
 
-  return hits.slice(0, 20);
+  // Exact matches (canonical name or a matched alias, diacritic-insensitive)
+  // first, then prefix matches, then the rest — preserving the existing
+  // alphabetical order within each tier (stable via the index tiebreak). This
+  // keeps a freshly-completed exact word ("Zucker") pinned to the top instead
+  // of slipping below a longer substring match ("Apfelzucker") or an alias.
+  const tier = (h: AutocompleteHit): number => {
+    const name = unaccent(h.name);
+    const alias = h.matchedAlias ? unaccent(h.matchedAlias) : null;
+    if (name === qn || alias === qn) return 0;
+    if (name.startsWith(qn) || (alias != null && alias.startsWith(qn))) return 1;
+    return 2;
+  };
+  return hits
+    .map((h, i) => ({ h, i }))
+    .sort((a, b) => tier(a.h) - tier(b.h) || a.i - b.i)
+    .map((x) => x.h)
+    .slice(0, 20);
 }
