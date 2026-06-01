@@ -1,20 +1,22 @@
 import { Fragment } from "react";
 import Link from "next/link";
 import {
-  Beef,
   Clock,
   CornerDownRight,
   ExternalLink,
-  Leaf,
   Lock,
   Pencil,
-  Salad,
   Users,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DietBadge } from "@/components/recipes/diet-badge";
+import { DietMarker } from "@/components/recipes/diet-marker";
 import { NeedsUpdateToggle } from "@/components/recipes/needs-update-toggle";
 import { IngredientLine } from "@/components/recipes/ingredient-line";
+import {
+  InstructionBody,
+  type MentionTips,
+} from "@/components/recipes/instruction-body";
 import { formatQuantity } from "@/components/recipes/ingredient-read-line";
 import {
   UpcomingUsesButton,
@@ -22,37 +24,8 @@ import {
 } from "@/components/recipes/ingredient-upcoming-uses";
 import { cn } from "@/lib/cn";
 import { isOptionalIngredient } from "@/lib/recipes/optional";
-import type { IngredientDietaryClass } from "@/lib/recipes/diet";
 import type { RecipeView } from "@/lib/recipes/types";
-import { renderMarkdown } from "@/lib/markdown";
-
-function DietMarker({ kind }: { kind: IngredientDietaryClass }) {
-  // Fixed-width slot one line tall (`h-[1lh]`) so the icon centers on the
-  // first text line even when the row's name/notes wrap — the parent `li`
-  // is `items-start`, so without a line-height box the short icon would pin
-  // to the very top, sitting above the text's optical center.
-  // Color-only signal; labels are kept in `title` for screen readers.
-  return (
-    <span
-      className="inline-flex h-[1lh] w-3 shrink-0 items-center justify-center"
-      aria-hidden={kind == null ? "true" : undefined}
-    >
-      {kind === "vegan" ? (
-        <Leaf className="size-3" style={{ color: "var(--color-success)" }}>
-          <title>vegan</title>
-        </Leaf>
-      ) : kind === "vegetarian" ? (
-        <Salad className="size-3" style={{ color: "var(--color-warning)" }}>
-          <title>vegetarisch</title>
-        </Salad>
-      ) : kind === "meat" ? (
-        <Beef className="size-3" style={{ color: "var(--color-danger)" }}>
-          <title>tierisch</title>
-        </Beef>
-      ) : null}
-    </span>
-  );
-}
+import { highlightIngredientMentions, renderMarkdown } from "@/lib/markdown";
 
 /**
  * Fixed-amount lock marker. Its own always-present column (same `h-[1lh] w-3`
@@ -186,9 +159,67 @@ export function RecipeDetail({
 
         <div className="mt-8 space-y-12">
           {recipe.sections.map((section) => {
-            const html = renderMarkdown(section.instructions);
             const consumables = section.ingredients.filter((i) => !i.isEquipment);
             const equipment = section.ingredients.filter((i) => i.isEquipment);
+            // Underline mentions of this section's food ingredients in the
+            // instructions, with the full list line (colors + diet icon) shown
+            // as a hover/tap tooltip by <InstructionBody>. We feed every
+            // spelling we know — display name, canonical name, and accrued
+            // aliases — so a step written with a different inflection/synonym
+            // than the list row still lights up. Equipment (pots/pans) is
+            // intentionally excluded. The mention id is the index into
+            // `mentionTips`, which <InstructionBody> resolves to render the
+            // tooltip.
+            // Group rows that are the same ingredient (same catalog id, or
+            // same name when unassigned) so a word listed more than once in a
+            // section — e.g. sugar for the dough and again for the topping —
+            // resolves to one mention whose tooltip stacks every entry. The
+            // group's index is the mention id; its spellings are the union of
+            // all member rows' spellings.
+            const mentionGroups: {
+              spellings: Set<string>;
+              tips: MentionTips[number];
+            }[] = [];
+            const groupIndexByKey = new Map<string, number>();
+            for (const i of consumables) {
+              const key =
+                i.ingredientId != null
+                  ? `id:${i.ingredientId}`
+                  : `name:${i.ingredientName.toLowerCase()}`;
+              let gi = groupIndexByKey.get(key);
+              if (gi === undefined) {
+                gi = mentionGroups.length;
+                groupIndexByKey.set(key, gi);
+                mentionGroups.push({ spellings: new Set(), tips: [] });
+              }
+              const group = mentionGroups[gi];
+              for (const s of [
+                i.ingredientName,
+                i.canonicalIngredientName,
+                ...i.aliases,
+              ]) {
+                if (s) group.spellings.add(s);
+              }
+              group.tips.push({
+                quantity: i.quantity,
+                unitLabel: i.unitLabel,
+                name: i.ingredientName,
+                canonicalName: i.canonicalIngredientName,
+                notes: i.notes,
+                isOptional: i.isOptional,
+                fixedAmount: i.fixedAmount,
+                dietaryClass: i.dietaryClass,
+              });
+            }
+            const ingredientMentions = mentionGroups.map((g, index) => ({
+              spellings: [...g.spellings],
+              id: String(index),
+            }));
+            const mentionTips: MentionTips = mentionGroups.map((g) => g.tips);
+            const rendered = renderMarkdown(section.instructions);
+            const html = rendered
+              ? highlightIngredientMentions(rendered, ingredientMentions)
+              : rendered;
 
             type IngredientRow = (typeof section.ingredients)[number];
 
@@ -208,18 +239,25 @@ export function RecipeDetail({
                   isOptionalIngredient(ing) && "italic opacity-65",
                 )}
               >
-                {asAlternative ? (
-                  <CornerDownRight
-                    className="size-4 shrink-0 text-[var(--color-muted-fg)]"
-                    aria-hidden="true"
-                  />
-                ) : null}
                 <UpcomingUsesButton
                   ingredientId={ing.ingredientId}
                   ingredientName={ing.canonicalIngredientName ?? ing.ingredientName}
                 />
                 <FixedAmountMarker fixed={ing.fixedAmount} />
-                <DietMarker kind={ing.isEquipment ? null : ing.dietaryClass} />
+                {/* Alternatives reuse the diet-marker column (same `h-[1lh] w-3`
+                    slot) rather than adding a leading column of their own, so
+                    the row stays aligned with its primary and the arrow simply
+                    takes the diet icon's place. */}
+                {asAlternative ? (
+                  <span className="inline-flex h-[1lh] w-3 shrink-0 items-center justify-center">
+                    <CornerDownRight
+                      className="size-3 text-[var(--color-muted-fg)]"
+                      aria-hidden="true"
+                    />
+                  </span>
+                ) : (
+                  <DietMarker kind={ing.isEquipment ? null : ing.dietaryClass} />
+                )}
                 <span className="inline-flex min-w-12 shrink-0 items-center font-mono text-[var(--color-muted-fg)]">
                   {formatQuantity(ing.quantity)} {ing.unitLabel ?? ""}
                 </span>
@@ -302,10 +340,7 @@ export function RecipeDetail({
                     <aside>{ingredientList}</aside>
                     <article>
                       {html ? (
-                        <div
-                          className="markdown text-[var(--color-fg)]"
-                          dangerouslySetInnerHTML={{ __html: html }}
-                        />
+                        <InstructionBody html={html} tips={mentionTips} />
                       ) : (
                         <p className="text-sm text-[var(--color-muted-fg)]">
                           Keine Anleitung erfasst.

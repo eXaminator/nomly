@@ -173,6 +173,11 @@ export type RecipeIngredientView = {
    *  rows. Alternatives sort immediately after their primary and are
    *  always {@link isOptional}. */
   alternativeForId: number | null;
+  /** All accrued spellings for this ingredient (ingredient_alias.name plus any
+   *  non-empty display_name renames). Empty for unassigned lines. Used to
+   *  highlight ingredient mentions in the section instructions even when the
+   *  cooking step uses a different spelling than the list row. */
+  aliases: string[];
 };
 
 export type RecipeSectionView = {

@@ -448,6 +448,36 @@ export function getRecipe(id: number): RecipeView | null {
       quantity: i.quantity,
     });
 
+  // Every accrued spelling for the recipe's ingredients, so the instructions
+  // can highlight a mention even when the cooking step uses a different form
+  // than the list row. Keyed by ingredient id. Includes the alias name and any
+  // non-empty display_name rename.
+  const recipeIngredientIds = [
+    ...new Set(
+      ingredients.map((i) => i.ingredientId).filter((id): id is number => id != null),
+    ),
+  ];
+  const aliasesByIngredient = new Map<number, string[]>();
+  if (recipeIngredientIds.length > 0) {
+    const aliasRows = db
+      .select({
+        ingredientId: ingredientAliasTable.ingredientId,
+        name: ingredientAliasTable.name,
+        displayName: ingredientAliasTable.displayName,
+      })
+      .from(ingredientAliasTable)
+      .where(inArray(ingredientAliasTable.ingredientId, recipeIngredientIds))
+      .all();
+    for (const a of aliasRows) {
+      const list = aliasesByIngredient.get(a.ingredientId) ?? [];
+      list.push(a.name);
+      if (a.displayName && a.displayName.trim().length > 0) {
+        list.push(a.displayName);
+      }
+      aliasesByIngredient.set(a.ingredientId, list);
+    }
+  }
+
   const tags = db
     .select({ name: tag.name })
     .from(tag)
@@ -505,6 +535,10 @@ export function getRecipe(id: number): RecipeView | null {
           dietaryClass: i.dietaryClass,
           sortOrder: i.sortOrder,
           alternativeForId: i.alternativeForId,
+          aliases:
+            i.ingredientId != null
+              ? (aliasesByIngredient.get(i.ingredientId) ?? [])
+              : [],
         })),
     })),
     createdAt: head.createdAt,

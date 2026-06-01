@@ -99,11 +99,16 @@ summary {
 .markdown {
   line-height: 1.6;
 }
-.markdown > * + * {
-  margin-top: 0.75rem;
+/* Flow spacing: reset the default block margins of direct children, then put a
+   single consistent gap between adjacent ones. Done on `> *` (not `p`/`ol`)
+   so the reset and the gap share the same specificity and the gap actually
+   wins — element-targeted resets (`.markdown p {margin:0}`) outrank `> * + *`
+   and silently swallow the spacing. */
+.markdown > * {
+  margin-block: 0;
 }
-.markdown p {
-  margin: 0;
+.markdown > * + * {
+  margin-top: 1.4em;
 }
 .markdown strong {
   font-weight: 600;
@@ -121,7 +126,6 @@ summary {
 }
 .markdown ol,
 .markdown ul {
-  margin: 0;
   padding-left: 1.5rem;
 }
 .markdown ol {
@@ -131,7 +135,7 @@ summary {
   list-style: disc;
 }
 .markdown li + li {
-  margin-top: 0.25rem;
+  margin-top: 0.65em;
 }
 .markdown li > p:first-child {
   display: inline;
@@ -141,7 +145,15 @@ summary {
 .markdown h3 {
   font-weight: 600;
   line-height: 1.25;
-  margin-top: 1rem;
+}
+/* Headlines get extra air above (more than the paragraph gap) and hug the
+   content that follows them. Scoped to `> * + h…` so a leading headline doesn't
+   gain a top gap, and these outrank the `1.4em` flow gap by specificity. */
+.markdown > * + :is(h1, h2, h3) {
+  margin-top: 1.9em;
+}
+.markdown > :is(h1, h2, h3) + * {
+  margin-top: 0.5em;
 }
 .markdown h1 {
   font-size: 1.5rem;
@@ -170,4 +182,70 @@ summary {
   border-left: 3px solid var(--color-border);
   padding-left: 1rem;
   color: var(--color-muted-fg);
+}
+/* Ingredient mentions detected in section instructions (see
+   highlightIngredientMentions): a dotted accent underline that scans without
+   competing with bold/italic markdown. A rich tooltip (the full ingredient
+   line, colors + diet icon) is shown by <InstructionBody> on hover / keyboard
+   focus / tap — the span is tabindex-focusable, which is what makes it work on
+   touch. */
+.markdown .ingredient-mention {
+  text-decoration: underline dotted;
+  text-decoration-color: var(--color-accent);
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 2px;
+  cursor: help;
+}
+.markdown .ingredient-mention[data-mention] {
+  outline: none;
+}
+/* Stylized numbered steps for recipe instructions. Scoped to .markdown-steps so
+   the description and other markdown keep plain decimal lists. Ordered and
+   unordered lists share the same card box; ol gets a big bold accent number in
+   the left gutter (a CSS counter, absolutely positioned so it top-anchors and
+   visually spans a multi-line step) while ul gets an accent dot in the same
+   gutter. Step text flows normally (paragraphs, wrapping all unaffected). */
+.markdown-steps :is(ol, ul) {
+  list-style: none;
+  padding-left: 0;
+}
+.markdown-steps ol {
+  counter-reset: step;
+}
+.markdown-steps :is(ol, ul) > li {
+  position: relative;
+  padding: 0.85rem 1.1rem 0.85rem 3.75rem;
+  background: var(--color-muted);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+}
+/* A touch more room between cards than the default list-item gap. */
+.markdown-steps :is(ol, ul) > li + li {
+  margin-top: 0.85rem;
+}
+.markdown-steps ol > li {
+  counter-increment: step;
+}
+.markdown-steps ol > li::before {
+  content: counter(step);
+  position: absolute;
+  top: 0.7rem;
+  left: 1.1rem;
+  min-width: 1.9rem;
+  font-size: 1.9rem;
+  font-weight: 700;
+  line-height: 1;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-accent);
+}
+.markdown-steps ul > li::before {
+  content: "";
+  position: absolute;
+  top: 1.3rem;
+  left: 1.75rem;
+  width: 0.6rem;
+  height: 0.6rem;
+  border-radius: 50%;
+  background: var(--color-accent);
 }
