@@ -788,6 +788,110 @@ export function bulkUpdateIngredients(
   return { updatedIds: ids };
 }
 
+export type BulkConversionInput = {
+  fromUnitId: number;
+  toUnitId: number;
+  factor: number;
+  isContainer?: boolean;
+  /** Articles with no existing `(from→to)` edge → insert. */
+  addIds: number[];
+  /** Articles that already carry the edge → update factor + isContainer. */
+  overwriteIds: number[];
+};
+
+export type BulkConversionResult = {
+  addedIds: number[];
+  overwrittenIds: number[];
+  skippedIds: number[];
+};
+
+/**
+ * Add one conversion edge (`1 from = factor × to`) to many articles at once.
+ * Additive — never touches an article's *other* conversions (unlike
+ * {@link writeConversions}, which replaces all). Existence of the edge is
+ * re-checked server-side rather than trusting the caller's split: articles in
+ * `overwriteIds` whose edge exists are updated; articles in `addIds` whose edge
+ * already exists are skipped, so a row added between load and apply is never
+ * clobbered.
+ */
+export function bulkAddConversion(
+  input: BulkConversionInput,
+): BulkConversionResult {
+  const { fromUnitId, toUnitId, factor, isContainer = false } = input;
+  if (fromUnitId === toUnitId) {
+    throw new StammdatenError("Von- und Nach-Einheit müssen verschieden sein.");
+  }
+  if (!Number.isFinite(factor) || factor <= 0) {
+    throw new StammdatenError("Der Faktor muss eine positive Zahl sein.");
+  }
+  const allIds = Array.from(new Set([...input.addIds, ...input.overwriteIds]));
+  const empty: BulkConversionResult = {
+    addedIds: [],
+    overwrittenIds: [],
+    skippedIds: [],
+  };
+  if (allIds.length === 0) return empty;
+
+  // Verify both units exist — a bad id would otherwise surface as a raw FK 500.
+  const units = db
+    .select({ id: unitTable.id })
+    .from(unitTable)
+    .where(inArray(unitTable.id, [fromUnitId, toUnitId]))
+    .all();
+  const unitIds = new Set(units.map((u) => u.id));
+  if (!unitIds.has(fromUnitId) || !unitIds.has(toUnitId)) {
+    throw new StammdatenError("Einheit nicht gefunden.", 404);
+  }
+
+  // Which of the target articles already carry this exact edge.
+  const existing = new Set(
+    db
+      .select({ ingredientId: ingredientUnitConversion.ingredientId })
+      .from(ingredientUnitConversion)
+      .where(
+        and(
+          inArray(ingredientUnitConversion.ingredientId, allIds),
+          eq(ingredientUnitConversion.fromUnitId, fromUnitId),
+          eq(ingredientUnitConversion.toUnitId, toUnitId),
+        ),
+      )
+      .all()
+      .map((r) => r.ingredientId),
+  );
+  const overwriteSet = new Set(input.overwriteIds);
+
+  const addedIds: number[] = [];
+  const overwrittenIds: number[] = [];
+  const skippedIds: number[] = [];
+  db.transaction((tx) => {
+    for (const id of allIds) {
+      if (existing.has(id)) {
+        if (overwriteSet.has(id)) {
+          tx.update(ingredientUnitConversion)
+            .set({ factor, isContainer })
+            .where(
+              and(
+                eq(ingredientUnitConversion.ingredientId, id),
+                eq(ingredientUnitConversion.fromUnitId, fromUnitId),
+                eq(ingredientUnitConversion.toUnitId, toUnitId),
+              ),
+            )
+            .run();
+          overwrittenIds.push(id);
+        } else {
+          skippedIds.push(id);
+        }
+      } else {
+        tx.insert(ingredientUnitConversion)
+          .values({ ingredientId: id, fromUnitId, toUnitId, factor, isContainer })
+          .run();
+        addedIds.push(id);
+      }
+    }
+  });
+  return { addedIds, overwrittenIds, skippedIds };
+}
+
 export function getMergeProposalsForIngredients(): ProposalCluster[] {
   const list = listIngredients();
   return findMergeClusters(

@@ -345,4 +345,183 @@ describe("ingredient stammdaten service", () => {
       );
     });
   });
+
+  describe("bulkAddConversion", () => {
+    let ml = 0;
+    let g = 0;
+    let liter = 0;
+
+    beforeAll(async () => {
+      await resetDb();
+      ml = await seedUnit("ml", "volume");
+      g = await seedUnit("g", "mass");
+      liter = await seedUnit("l", "volume");
+    });
+
+    function newOil(name: string) {
+      return loadModules().then(({ service }) =>
+        service.createIngredient({
+          name,
+          aliases: [],
+          defaultCategoryId: null,
+          excludeFromShoppingList: false,
+          dietaryClass: "vegan",
+        }),
+      );
+    }
+
+    it("adds the edge to articles that have no prior edge", async () => {
+      const { service } = await loadModules();
+      const a = await newOil("Olivenöl");
+      const b = await newOil("Rapsöl");
+      const result = service.bulkAddConversion({
+        fromUnitId: ml,
+        toUnitId: g,
+        factor: 0.9,
+        isContainer: false,
+        addIds: [a.id, b.id],
+        overwriteIds: [],
+      });
+      expect(result.addedIds.sort()).toEqual([a.id, b.id].sort());
+      expect(result.overwrittenIds).toEqual([]);
+      expect(result.skippedIds).toEqual([]);
+      const detail = service.getIngredientDetail(a.id)!;
+      expect(detail.conversions).toHaveLength(1);
+      expect(detail.conversions[0]).toMatchObject({
+        fromUnitId: ml,
+        toUnitId: g,
+        factor: 0.9,
+        isContainer: false,
+      });
+    });
+
+    it("skips an existing edge when the id is only in addIds", async () => {
+      const { service } = await loadModules();
+      const ing = await loadModules().then(({ service: s }) =>
+        s.createIngredient({
+          name: "Sonnenblumenöl",
+          aliases: [],
+          conversions: [
+            { fromUnitId: ml, toUnitId: g, factor: 0.92, isContainer: false },
+          ],
+          defaultCategoryId: null,
+          excludeFromShoppingList: false,
+          dietaryClass: "vegan",
+        }),
+      );
+      const result = service.bulkAddConversion({
+        fromUnitId: ml,
+        toUnitId: g,
+        factor: 0.5,
+        isContainer: false,
+        addIds: [ing.id],
+        overwriteIds: [],
+      });
+      expect(result.skippedIds).toEqual([ing.id]);
+      expect(result.addedIds).toEqual([]);
+      // Original factor untouched.
+      const detail = service.getIngredientDetail(ing.id)!;
+      expect(detail.conversions).toHaveLength(1);
+      expect(detail.conversions[0].factor).toBe(0.92);
+    });
+
+    it("overwrites factor + container when the id is in overwriteIds", async () => {
+      const { service } = await loadModules();
+      const ing = await loadModules().then(({ service: s }) =>
+        s.createIngredient({
+          name: "Kokosöl",
+          aliases: [],
+          conversions: [
+            { fromUnitId: ml, toUnitId: g, factor: 0.92, isContainer: false },
+          ],
+          defaultCategoryId: null,
+          excludeFromShoppingList: false,
+          dietaryClass: "vegan",
+        }),
+      );
+      const result = service.bulkAddConversion({
+        fromUnitId: ml,
+        toUnitId: g,
+        factor: 0.88,
+        isContainer: true,
+        addIds: [],
+        overwriteIds: [ing.id],
+      });
+      expect(result.overwrittenIds).toEqual([ing.id]);
+      const detail = service.getIngredientDetail(ing.id)!;
+      expect(detail.conversions).toHaveLength(1);
+      expect(detail.conversions[0]).toMatchObject({
+        factor: 0.88,
+        isContainer: true,
+      });
+    });
+
+    it("leaves an article's unrelated conversions untouched", async () => {
+      const { service } = await loadModules();
+      const ing = await loadModules().then(({ service: s }) =>
+        s.createIngredient({
+          name: "Leinöl",
+          aliases: [],
+          // An unrelated edge (l → ml) that must survive the add.
+          conversions: [
+            { fromUnitId: liter, toUnitId: ml, factor: 1000, isContainer: true },
+          ],
+          defaultCategoryId: null,
+          excludeFromShoppingList: false,
+          dietaryClass: "vegan",
+        }),
+      );
+      service.bulkAddConversion({
+        fromUnitId: ml,
+        toUnitId: g,
+        factor: 0.93,
+        isContainer: false,
+        addIds: [ing.id],
+        overwriteIds: [],
+      });
+      const detail = service.getIngredientDetail(ing.id)!;
+      expect(detail.conversions).toHaveLength(2);
+      const edge = detail.conversions.find(
+        (c) => c.fromUnitId === liter && c.toUnitId === ml,
+      );
+      expect(edge).toMatchObject({ factor: 1000, isContainer: true });
+    });
+
+    it("rejects from === to and a non-positive factor", async () => {
+      const { service } = await loadModules();
+      const a = await newOil("Sesamöl");
+      expect(() =>
+        service.bulkAddConversion({
+          fromUnitId: ml,
+          toUnitId: ml,
+          factor: 1,
+          addIds: [a.id],
+          overwriteIds: [],
+        }),
+      ).toThrow();
+      expect(() =>
+        service.bulkAddConversion({
+          fromUnitId: ml,
+          toUnitId: g,
+          factor: 0,
+          addIds: [a.id],
+          overwriteIds: [],
+        }),
+      ).toThrow();
+    });
+
+    it("rejects an unknown unit id", async () => {
+      const { service } = await loadModules();
+      const a = await newOil("Walnussöl");
+      expect(() =>
+        service.bulkAddConversion({
+          fromUnitId: 999999,
+          toUnitId: g,
+          factor: 1,
+          addIds: [a.id],
+          overwriteIds: [],
+        }),
+      ).toThrow();
+    });
+  });
 });

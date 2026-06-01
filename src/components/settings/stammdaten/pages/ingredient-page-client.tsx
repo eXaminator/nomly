@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { useUrlBoolean, useUrlString } from "@/lib/url-state";
 
 import { BulkIngredientDialog } from "../bulk-ingredient-dialog";
+import { BulkConversionDialog } from "../bulk-conversion-dialog";
 import {
   IngredientForm,
   type IngredientItem,
@@ -85,6 +86,23 @@ const columns: ColumnDef<IngredientItem>[] = [
       );
     },
     sortValue: (item) => item.aliases.length,
+  },
+  {
+    key: "conversions",
+    header: "Umrechnungen",
+    cell: (item) => {
+      if (item.conversions.length === 0) {
+        return <span className="text-[var(--color-muted-fg)]">—</span>;
+      }
+      return (
+        <span className="text-xs text-[var(--color-muted-fg)]">
+          {item.conversions
+            .map((c) => `${c.fromUnitName}→${c.toUnitName}`)
+            .join(", ")}
+        </span>
+      );
+    },
+    sortValue: (item) => item.conversions.length,
   },
   {
     key: "category",
@@ -173,6 +191,10 @@ export function IngredientPageClient({
   }, [initialItems]);
   const [bulkDialog, setBulkDialog] = React.useState<{
     ids: number[];
+    onApplied: () => void;
+  } | null>(null);
+  const [conversionDialog, setConversionDialog] = React.useState<{
+    items: IngredientItem[];
     onApplied: () => void;
   } | null>(null);
 
@@ -281,14 +303,25 @@ export function IngredientPageClient({
         hardDeleteAllowed={false}
         hardDeleteDisabledReason="Dieser Artikel wird in Rezepten oder Einkaufslisten verwendet — ein Ersatz-Artikel ist erforderlich."
         enableMergeProposals
-        renderBulkActions={({ selectedIds, onApplied }) => (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setBulkDialog({ ids: selectedIds, onApplied })}
-          >
-            Bearbeiten
-          </Button>
+        renderBulkActions={({ selectedIds, selectedItems, onApplied }) => (
+          <>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setBulkDialog({ ids: selectedIds, onApplied })}
+            >
+              Bearbeiten
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() =>
+                setConversionDialog({ items: selectedItems, onApplied })
+              }
+            >
+              Umrechnung hinzufügen
+            </Button>
+          </>
         )}
       />
       {bulkDialog ? (
@@ -298,6 +331,14 @@ export function IngredientPageClient({
           selectedIds={bulkDialog.ids}
           onClose={() => setBulkDialog(null)}
           onApplied={bulkDialog.onApplied}
+        />
+      ) : null}
+      {conversionDialog ? (
+        <BulkConversionDialog
+          open={true}
+          selectedItems={conversionDialog.items}
+          onClose={() => setConversionDialog(null)}
+          onApplied={conversionDialog.onApplied}
         />
       ) : null}
     </>

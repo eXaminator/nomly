@@ -91,6 +91,7 @@ export type ListShellProps<TItem> = {
    *  selection and refreshes the list after the bulk patch lands. */
   renderBulkActions?: (args: {
     selectedIds: number[];
+    selectedItems: TItem[];
     onApplied: () => void;
   }) => React.ReactNode;
   /** Default sort applied on mount. Keeps the list ordered by this column even
@@ -515,6 +516,7 @@ export function ListShell<TItem>({
           </span>
           {renderBulkActions?.({
             selectedIds: selectedItems.map((i) => idOf(i)),
+            selectedItems,
             onApplied: () => {
               setSelectedIds(new Set());
               router.refresh();
