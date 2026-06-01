@@ -37,7 +37,6 @@ import {
   type IngredientCatalog,
 } from "./matching.ts";
 import { savePhotoBuffer, type PhotoPath } from "../photos.ts";
-import { resolveUnitLabel, type UnitLabelInfo } from "../units/label.ts";
 
 export type IngredientMatch = "existing" | "new";
 export type UnitMatch =
@@ -177,19 +176,12 @@ export type UnitLookup = {
    * and prep-word stripping when a container is present.
    */
   containerTokens: Set<string>;
-  /**
-   * Per-unit label info (canonical name + plural + alias forms), keyed by unit
-   * id. The parser uses it to inflect a row's displayed unit by quantity
-   * ("2 Zehe" → "Zehen", "2 clove" → "cloves") via {@link resolveUnitLabel}.
-   */
-  labelInfoById: Map<number, UnitLabelInfo>;
 };
 
 export function buildUnitLookup(): UnitLookup {
   const byNameOrAlias = new Map<string, UnitLookupEntry>();
   const byCanonicalName = new Map<string, UnitLookupEntry>();
   const containerTokens = new Set<string>();
-  const labelInfoById = new Map<number, UnitLabelInfo>();
   const canonical = db
     .select({
       id: unit.id,
@@ -209,7 +201,6 @@ export function buildUnitLookup(): UnitLookup {
     byNameOrAlias.set(lower, entry);
     byCanonicalName.set(lower, entry);
     if (u.isContainer) containerTokens.add(lower);
-    labelInfoById.set(u.id, { name: u.name, plural: u.plural, aliases: [] });
     // A configured plural ("Dose" → "Dosen") is matchable too, but never
     // overwrites a singular already claimed by another unit/alias.
     if (u.plural) {
@@ -241,11 +232,8 @@ export function buildUnitLookup(): UnitLookup {
       if (!byNameOrAlias.has(key)) byNameOrAlias.set(key, entry);
       if (a.isContainer) containerTokens.add(key);
     }
-    labelInfoById
-      .get(a.id)
-      ?.aliases.push({ name: a.aliasName, plural: a.aliasPlural });
   }
-  return { byNameOrAlias, byCanonicalName, containerTokens, labelInfoById };
+  return { byNameOrAlias, byCanonicalName, containerTokens };
 }
 
 export type ResolveUnitResult = {
@@ -851,27 +839,6 @@ function subtractCommaTail(
 }
 
 /**
- * Inflect a resolved unit's display name by quantity, honouring the matched
- * spelling: "2 Zehe" → "Zehen", "2 clove" → "cloves", "1 Zehe" → "Zehe". A
- * configured plural (canonical or alias) is used for any amount other than 1;
- * otherwise the spelling is shown as-is. Returns null when no unit resolved.
- */
-function inflectUnitName(
-  units: UnitLookup,
-  resolved: { id: number; name: string } | null,
-  rawUnit: string | null,
-  quantity: number | null,
-): string | null {
-  if (!resolved) return null;
-  const info = units.labelInfoById.get(resolved.id);
-  const spelling = rawUnit ?? resolved.name;
-  if (!info) return spelling;
-  return (
-    resolveUnitLabel({ unit: info, displayUnit: spelling, quantity }) ?? spelling
-  );
-}
-
-/**
  * Apply an alias/ingredient default unit on top of the initial global-unit
  * resolution. Order of precedence:
  *   1. The unit token resolved to a real global unit ("g", "EL", "Zehe")    → unit
@@ -1035,21 +1002,9 @@ export function parseIngredientLines(
         const final = pickFinalUnit(initialUnit, resolved.defaultUnit);
         out.push({
           quantity: parsed.quantity,
-          // Display the unit inflected by quantity ("2 Zehe" → "Zehen"); the
-          // chosen spelling now lives in unit.name, so rawUnit clears.
-          unit: final.resolved
-            ? {
-                id: final.resolved.id,
-                name: inflectUnitName(
-                  lookups.units,
-                  final.resolved,
-                  final.rawUnit,
-                  parsed.quantity,
-                )!,
-              }
-            : null,
+          unit: final.resolved,
           unitMatch: final.match,
-          rawUnit: final.resolved ? null : final.rawUnit,
+          rawUnit: final.rawUnit,
           name: resolved.name,
           ingredientId: resolved.ingredientId,
           ingredientMatch: resolved.match,
@@ -1274,21 +1229,9 @@ export function parseIngredientLinesIntoSections(
         const final = pickFinalUnit(initialUnit, resolved.defaultUnit);
         currentGroup.ingredients.push({
           quantity: parsed.quantity,
-          // Display the unit inflected by quantity ("2 Zehe" → "Zehen"); the
-          // chosen spelling now lives in unit.name, so rawUnit clears.
-          unit: final.resolved
-            ? {
-                id: final.resolved.id,
-                name: inflectUnitName(
-                  lookups.units,
-                  final.resolved,
-                  final.rawUnit,
-                  parsed.quantity,
-                )!,
-              }
-            : null,
+          unit: final.resolved,
           unitMatch: final.match,
-          rawUnit: final.resolved ? null : final.rawUnit,
+          rawUnit: final.rawUnit,
           name: resolved.name,
           ingredientId: resolved.ingredientId,
           ingredientMatch: resolved.match,

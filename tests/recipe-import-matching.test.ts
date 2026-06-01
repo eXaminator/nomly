@@ -27,7 +27,6 @@ function makeLookups(
     byNameOrAlias: new Map(unitEntries),
     byCanonicalName: new Map(unitEntries),
     containerTokens: new Set(),
-    labelInfoById: new Map(),
   };
   const ingredients: IngredientLookup = new Map();
   for (const entry of catalog) {
@@ -1371,40 +1370,5 @@ describe("note fragments keep source order, comma-separated", () => {
     );
     expect(out[0].ingredientId).toBe(7);
     expect(out[0].name).toBe("Olivenöl extra virgin");
-  });
-
-  it("inflects the unit by quantity (plural for amount != 1)", () => {
-    const catalog: IngredientCatalog = [
-      {
-        ingredientId: 5,
-        canonicalName: "Knoblauch",
-        aliasName: "Knoblauch",
-        tokens: ["knoblauch"],
-      },
-    ];
-    const zehe = { id: 2, name: "Zehe", isContainer: false };
-    const units: UnitLookup = {
-      byNameOrAlias: new Map([
-        ["g", { id: 1, name: "g", isContainer: false }],
-        ["zehe", zehe],
-        ["zehen", zehe], // the configured plural is matchable too
-      ]),
-      byCanonicalName: new Map([
-        ["g", { id: 1, name: "g", isContainer: false }],
-        ["zehe", zehe],
-      ]),
-      containerTokens: new Set(),
-      labelInfoById: new Map([
-        [2, { name: "Zehe", plural: "Zehen", aliases: [] }],
-      ]),
-    };
-    const ingredients: IngredientLookup = new Map([
-      ["knoblauch", { id: 5, canonicalName: "Knoblauch" }],
-    ]);
-    const lookups: ParseLookups = { units, ingredients, ingredientCatalog: catalog };
-    const u = (line: string) => parseIngredientLines([line], lookups)[0].unit?.name;
-    expect(u("2 Zehe Knoblauch")).toBe("Zehen"); // singular source, qty 2 → plural
-    expect(u("3 Zehen Knoblauch")).toBe("Zehen"); // plural source → plural
-    expect(u("1 Zehe Knoblauch")).toBe("Zehe"); // qty 1 → singular
   });
 });
