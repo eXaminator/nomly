@@ -892,6 +892,46 @@ export function bulkAddConversion(
   return { addedIds, overwrittenIds, skippedIds };
 }
 
+export type BulkDeleteConversionResult = { deletedIds: number[] };
+
+/**
+ * Remove the `(from→to)` conversion edge from many articles at once. Touches
+ * only that exact pair, leaving each article's other conversions intact.
+ * Returns the ids that actually had a matching row removed (a `(from→to)` pair
+ * not present on an article is a silent no-op for that article).
+ */
+export function bulkDeleteConversion(
+  fromUnitId: number,
+  toUnitId: number,
+  ids: number[],
+): BulkDeleteConversionResult {
+  if (ids.length === 0) return { deletedIds: [] };
+  const targetIds = Array.from(new Set(ids));
+  const matched = db
+    .select({ ingredientId: ingredientUnitConversion.ingredientId })
+    .from(ingredientUnitConversion)
+    .where(
+      and(
+        inArray(ingredientUnitConversion.ingredientId, targetIds),
+        eq(ingredientUnitConversion.fromUnitId, fromUnitId),
+        eq(ingredientUnitConversion.toUnitId, toUnitId),
+      ),
+    )
+    .all()
+    .map((r) => r.ingredientId);
+  if (matched.length === 0) return { deletedIds: [] };
+  db.delete(ingredientUnitConversion)
+    .where(
+      and(
+        inArray(ingredientUnitConversion.ingredientId, matched),
+        eq(ingredientUnitConversion.fromUnitId, fromUnitId),
+        eq(ingredientUnitConversion.toUnitId, toUnitId),
+      ),
+    )
+    .run();
+  return { deletedIds: matched };
+}
+
 export function getMergeProposalsForIngredients(): ProposalCluster[] {
   const list = listIngredients();
   return findMergeClusters(

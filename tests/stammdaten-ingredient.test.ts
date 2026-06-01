@@ -524,4 +524,85 @@ describe("ingredient stammdaten service", () => {
       ).toThrow();
     });
   });
+
+  describe("bulkDeleteConversion", () => {
+    let ml = 0;
+    let g = 0;
+    let liter = 0;
+
+    beforeAll(async () => {
+      await resetDb();
+      ml = await seedUnit("ml", "volume");
+      g = await seedUnit("g", "mass");
+      liter = await seedUnit("l", "volume");
+    });
+
+    function seedOilWithEdges(
+      name: string,
+      conversions: Array<{
+        fromUnitId: number;
+        toUnitId: number;
+        factor: number;
+        isContainer?: boolean;
+      }>,
+    ) {
+      return loadModules().then(({ service }) =>
+        service.createIngredient({
+          name,
+          aliases: [],
+          conversions,
+          defaultCategoryId: null,
+          excludeFromShoppingList: false,
+          dietaryClass: "vegan",
+        }),
+      );
+    }
+
+    it("removes the edge from the named articles only", async () => {
+      const { service } = await loadModules();
+      const a = await seedOilWithEdges("Olivenöl-D", [
+        { fromUnitId: ml, toUnitId: g, factor: 0.9 },
+      ]);
+      const b = await seedOilWithEdges("Rapsöl-D", [
+        { fromUnitId: ml, toUnitId: g, factor: 0.9 },
+      ]);
+      const result = service.bulkDeleteConversion(ml, g, [a.id]);
+      expect(result.deletedIds).toEqual([a.id]);
+      expect(service.getIngredientDetail(a.id)!.conversions).toHaveLength(0);
+      // The untargeted article keeps its edge.
+      expect(service.getIngredientDetail(b.id)!.conversions).toHaveLength(1);
+    });
+
+    it("leaves an article's other conversions untouched", async () => {
+      const { service } = await loadModules();
+      const ing = await seedOilWithEdges("Leinöl-D", [
+        { fromUnitId: ml, toUnitId: g, factor: 0.93 },
+        { fromUnitId: liter, toUnitId: ml, factor: 1000, isContainer: true },
+      ]);
+      service.bulkDeleteConversion(ml, g, [ing.id]);
+      const detail = service.getIngredientDetail(ing.id)!;
+      expect(detail.conversions).toHaveLength(1);
+      expect(detail.conversions[0]).toMatchObject({
+        fromUnitId: liter,
+        toUnitId: ml,
+        factor: 1000,
+      });
+    });
+
+    it("is a no-op when the (from→to) pair is not present", async () => {
+      const { service } = await loadModules();
+      const ing = await seedOilWithEdges("Sesamöl-D", [
+        { fromUnitId: liter, toUnitId: ml, factor: 1000 },
+      ]);
+      const result = service.bulkDeleteConversion(ml, g, [ing.id]);
+      expect(result.deletedIds).toEqual([]);
+      expect(service.getIngredientDetail(ing.id)!.conversions).toHaveLength(1);
+    });
+
+    it("is a no-op on empty ids", async () => {
+      const { service } = await loadModules();
+      const result = service.bulkDeleteConversion(ml, g, []);
+      expect(result.deletedIds).toEqual([]);
+    });
+  });
 });

@@ -319,7 +319,7 @@ export function IngredientPageClient({
                 setConversionDialog({ items: selectedItems, onApplied })
               }
             >
-              Umrechnung hinzufügen
+              Umrechnungen
             </Button>
           </>
         )}
