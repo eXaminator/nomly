@@ -9,13 +9,14 @@ import {
   CornerDownRight,
   GripVertical,
   Indent,
+  Link2,
   Lock,
   Outdent,
   Pencil,
-  RefreshCw,
-  RotateCw,
-  Tag,
+  Plus,
+  ScanText,
   Trash2,
+  Unlink,
   Unlock,
 } from "lucide-react";
 import type {
@@ -251,36 +252,11 @@ export function IngredientRow({
         if (controller.signal.aborted) return;
         const v = valueRef.current;
         const hasUserEdited = value.name !== seededNameRef.current;
-        // Preserve the currently-selected ingredient in the pill list
-        // even when the narrower live matcher didn't surface it.
-        let merged: ServerMatch[] = data.matches;
-        if (v.selectedIngredientId != null) {
-          const stillIn = data.matches.some(
-            (m) => m.ingredientId === v.selectedIngredientId,
-          );
-          if (!stillIn) {
-            const label = v.canonicalName ?? v.name;
-            merged = [
-              {
-                ingredientId: v.selectedIngredientId,
-                canonicalName: v.canonicalName ?? v.name,
-                matchedName: label,
-                score: 999,
-                // Synthetic pin — carry the row's current name/notes so
-                // re-picking this pill doesn't shuffle text around.
-                name: v.name,
-                notes: v.notes,
-                // Equipment flag isn't surfaced by the synthetic pin path
-                // (the live matcher dropped it). The user already has the
-                // row in their preferred state, so default to false to
-                // avoid re-flipping isOptional.
-                isEquipment: false,
-              },
-              ...data.matches,
-            ];
-          }
-        }
-        setServerMatches(merged);
+        // Store the raw matcher results only. The currently-selected
+        // ingredient is surfaced at render time (`CandidatePills` synthesizes
+        // a chip for it when the matcher didn't return it), so a stale
+        // selection can never leave a mislabeled pin behind in this state.
+        setServerMatches(data.matches);
         // Auto-select rules only re-fire when the user has actually
         // edited the input. Otherwise the row's saved selection stays
         // untouched no matter what the narrower live matcher returns.
@@ -408,45 +384,30 @@ export function IngredientRow({
     });
   }
 
-  /** Click on the synthetic "Nicht zugeordnet" pill: row becomes free text
-   *  not linked to any article. Clears the ingredient link, the canonical
-   *  badge and force-match alias intent. */
-  function selectUnassigned() {
-    onChange({
-      ...value,
-      selectedIngredientId: null,
-      canonicalName: null,
-      originalName: undefined,
-      addAsAlias: false,
-      unassigned: true,
-      importAnnotation: clearAnnotationOn(value.importAnnotation, "ingredient"),
-    });
+  /** Free-text toggle (the link/unlink button in the row actions): flip the
+   *  row between a linked article and free text, WITHOUT discarding anything.
+   *  Quantity, unit, name, notes and the matched selection are all preserved
+   *  (just hidden while free-text is active), so an accidental click is undone
+   *  by clicking again. Deliberately does NOT clear the selection the way the
+   *  old "Nicht zugeordnet" pill did. */
+  function toggleFreeText() {
+    onChange({ ...value, unassigned: !value.unassigned });
   }
 
-  /** The ↻ icon on a candidate pill: copy the pill's displayed text into
-   *  the name input. That's the matched alias name when an alias hit
-   *  drove the candidate (so "TK Erbsen" lands in the input), or the
-   *  canonical when there was no alias. Selection stays on this
-   *  candidate — the sticky rule preserves it through the re-match that
-   *  the text change triggers. */
-  function useCanonicalInName(c: ServerMatch) {
-    const label = c.matchedName || c.canonicalName;
-    setMatchText(label);
+  /** The unlink button on the "Original" box: take the whole original line
+   *  verbatim into the name and make the row free text. A one-shot transform
+   *  (distinct from the reversible toggle); undo it with the reparse button. */
+  function useOriginalAsFreeText() {
+    const raw = (value.rawText ?? "").trim();
+    setMatchText(raw);
     onChange({
       ...value,
-      name: label,
-      canonicalName:
-        label.toLowerCase() === c.canonicalName.toLowerCase()
-          ? null
-          : c.canonicalName,
-      selectedIngredientId: c.ingredientId,
-      // Adopting the catalog spelling — no original to remember.
-      originalName: undefined,
-      addAsAlias: false,
-      unassigned: false,
-      // ↻ adopts this candidate's name AND keeps it selected — pin so the
-      // re-match the text change triggers can't override it.
-      pinnedByUser: true,
+      name: raw,
+      // The whole line lives in the (single) free-text field now — clear the
+      // separate note so it isn't stored/shown twice. Reversible via reparse.
+      notes: "",
+      unassigned: true,
+      importAnnotation: clearAnnotationOn(value.importAnnotation, "ingredient"),
     });
   }
 
@@ -470,46 +431,6 @@ export function IngredientRow({
       // Explicit force-match — sticky against re-matching on typing.
       pinnedByUser: true,
       importAnnotation: clearAnnotationOn(value.importAnnotation, "ingredient"),
-    });
-  }
-
-  /** Toggle "keep my original spelling and remember it as an alias of the
-   *  matched ingredient on save". When the parser substituted the display name
-   *  with the catalog alias (import / pill pick), `originalName` holds the
-   *  user's spelling: turning the toggle ON restores it as the display name
-   *  and flags `addAsAlias`; OFF puts the parser's name back. When there's no
-   *  substituted original (manual entry — the typed text is already the
-   *  display name), it's a plain flag and the name is left untouched.
-   *  `service.ts` inserts the alias (idempotent) on save. */
-  function toggleAlias() {
-    const original = value.originalName?.trim();
-    const sel = serverMatches.find(
-      (m) => m.ingredientId === value.selectedIngredientId,
-    );
-    const canonical = sel?.canonicalName ?? value.canonicalName ?? value.name;
-    const disclose = (display: string): string | null =>
-      display.toLowerCase() === canonical.toLowerCase() ? null : canonical;
-    const showingOriginal = !!original && value.name.trim() === original;
-    if (value.addAsAlias) {
-      // OFF: drop the flag; if we'd swapped in the original, restore the
-      // parser's chosen name (the matched candidate's display, else canonical).
-      const parserName = showingOriginal ? sel?.name ?? canonical : value.name;
-      onChange({
-        ...value,
-        addAsAlias: false,
-        name: parserName,
-        canonicalName: showingOriginal ? disclose(parserName) : value.canonicalName,
-      });
-      return;
-    }
-    // ON: flag it; swap in the original spelling when we have a distinct one.
-    const display = original && original !== value.name ? original : value.name;
-    onChange({
-      ...value,
-      addAsAlias: true,
-      name: display,
-      canonicalName:
-        original && original !== value.name ? disclose(display) : value.canonicalName,
     });
   }
 
@@ -593,15 +514,9 @@ export function IngredientRow({
             selectedCanonicalName={value.canonicalName}
             originalName={value.originalName ?? null}
             addAsAlias={value.addAsAlias}
-            unassigned={value.unassigned}
-            // Staples must resolve to a buyable article.
-            allowUnassigned={false}
             onSelectCandidate={selectCandidate}
             onSelectNew={selectNew}
-            onSelectUnassigned={selectUnassigned}
-            onUseCanonical={useCanonicalInName}
             onForceMatch={forceMatch}
-            onToggleAlias={toggleAlias}
             onEditArticle={setEditingArticleId}
           />
         </div>
@@ -657,248 +572,291 @@ export function IngredientRow({
           <GripVertical className="size-4" />
         </button>
       )}
-      <div className="flex flex-1 min-w-0 flex-col gap-1">
-    {value.isAlternative ? (
-      <p className="text-xs italic text-[var(--color-muted-fg)]">
-        Alternative
-      </p>
-    ) : null}
-    {value.rawText ? (
-      <div className="flex min-w-0 items-center gap-1">
-        <p
-          className="truncate text-xs text-[var(--color-muted-fg)]"
-          title={value.rawText}
-        >
-          Original: „{value.rawText}“
-        </p>
-        {onReparse ? (
-          <button
-            type="button"
-            onClick={() => {
-              if (reparsing) return;
-              setReparsing(true);
-              void Promise.resolve(onReparse()).finally(() =>
-                setReparsing(false),
-              );
-            }}
-            disabled={reparsing}
-            className="shrink-0 rounded p-0.5 text-[var(--color-muted-fg)] hover:bg-[var(--color-muted)] hover:text-[var(--color-fg)] disabled:opacity-50"
-            title="Aus Originalzeile neu parsen (verwirft manuelle Änderungen dieser Zeile)"
-            aria-label="Aus Originalzeile neu parsen"
-          >
-            <RefreshCw className={cn("size-3", reparsing && "animate-spin")} />
-          </button>
+      <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+        {value.rawText ? (
+          // Boxed, indented (it sits inside the fields column) original line:
+          // the source text plus two actions — reparse → linked, or drop the
+          // whole text in as free text.
+          <div className="inline-flex max-w-full items-center gap-1 self-start rounded-md border border-[var(--color-border)] bg-[var(--color-muted)] py-0.5 pl-2 pr-1">
+            <p
+              className="truncate text-xs text-[var(--color-muted-fg)]"
+              title={value.rawText}
+            >
+              <span className="opacity-70">Original:</span> {value.rawText}
+            </p>
+            {onReparse ? (
+              <button
+                type="button"
+                onClick={() => {
+                  if (reparsing) return;
+                  setReparsing(true);
+                  void Promise.resolve(onReparse()).finally(() =>
+                    setReparsing(false),
+                  );
+                }}
+                disabled={reparsing}
+                className="shrink-0 rounded p-1 text-[var(--color-muted-fg)] hover:bg-[var(--color-bg)] hover:text-[var(--color-fg)] disabled:opacity-50"
+                title="Neu parsen und verknüpfen (verwirft manuelle Änderungen dieser Zeile)."
+                aria-label="Aus Originalzeile neu parsen"
+              >
+                <ScanText
+                  className={cn("size-3.5", reparsing && "animate-spin")}
+                />
+              </button>
+            ) : null}
+            <button
+              type="button"
+              onClick={useOriginalAsFreeText}
+              className="shrink-0 rounded p-1 text-[var(--color-muted-fg)] hover:bg-[var(--color-bg)] hover:text-[var(--color-fg)]"
+              title="Originaltext unverändert als Freitext übernehmen (ohne Artikel)."
+              aria-label="Originaltext als Freitext übernehmen"
+            >
+              <Unlink className="size-3.5" />
+            </button>
+          </div>
         ) : null}
-      </div>
-    ) : null}
-    <div
-      className="grid items-start gap-2 grid-cols-[4rem_minmax(0,1fr)_auto_auto_auto_auto_auto] md:grid-cols-[5rem_8rem_minmax(0,1fr)_minmax(0,1fr)_auto_auto_auto_auto_auto]"
-    >
-      {/* Mobile flow (3 rows): [Qty | Unit cs-4]  ·  [Name cs-5]  ·
-          [Notes cs-2 | Opt | Fix | Trash]. Giving Unit the leftover row-1
-          width keeps "Stück"/"Esslöffel" readable; before, a 1fr unit cell
-          was getting squeezed to ~70px next to the icon buttons.
-          Desktop (md+) stays a single-row 7-col grid. */}
-      <Input
-        inputMode="decimal"
-        placeholder="Menge"
-        value={value.quantity}
-        onChange={(e) => onChange({ ...value, quantity: e.target.value })}
-        aria-label="Menge"
-      />
-      <div className="col-span-4 flex flex-col gap-1 md:col-span-1 md:col-start-2 md:row-start-1">
-        <SelectSearch
-          value={pickerValue}
-          onChange={onPickUnit}
-          search={searchUnits}
-          defaultItems={defaultUnits}
-          placeholder="Einheit"
-          onCreate={createUnit}
-          createLabelPrefix="als Einheit anlegen"
-        />
-        <UnitBadge annotation={value.importAnnotation} />
-      </div>
-      <IngredientNameInput
-        value={value.name}
-        onChange={(name, canonical, pickedIngredientId) =>
-          handleNameChange(name, canonical, pickedIngredientId)
-        }
-        placeholder="Zutat"
-        className="col-span-5 md:col-span-1 md:col-start-3 md:row-start-1"
-      />
-      <Input
-        placeholder="Notiz (z. B. fein gehackt)"
-        value={value.notes}
-        onChange={(e) => onChange({ ...value, notes: e.target.value })}
-        aria-label="Notiz"
-        className="col-span-2 md:col-span-1 md:col-start-4 md:row-start-1"
-      />
-      {/* CandidatePills live in their own grid row that spans the Name +
-          Notes columns on desktop (and the full mobile width). Used to
-          sit inside the Name column's flex-col which constrained the
-          pill row to the Name input's width and forced long suggestion
-          lists to wrap awkwardly. */}
-      <div className="col-span-7 md:col-span-2 md:col-start-3 md:row-start-2">
-        <CandidatePills
-          name={value.name}
-          candidates={serverMatches}
-          selectedIngredientId={value.selectedIngredientId}
-          selectedCanonicalName={value.canonicalName}
-          originalName={value.originalName ?? null}
-          addAsAlias={value.addAsAlias}
-          unassigned={value.unassigned}
-          allowUnassigned={true}
-          onSelectCandidate={selectCandidate}
-          onSelectNew={selectNew}
-          onSelectUnassigned={selectUnassigned}
-          onUseCanonical={useCanonicalInName}
-          onForceMatch={forceMatch}
-          onToggleAlias={toggleAlias}
-          onEditArticle={setEditingArticleId}
-        />
-      </div>
-      {editingArticleId != null ? (
-        <EditArticleDrawer
-          ingredientId={editingArticleId}
-          onClose={() => setEditingArticleId(null)}
-        />
-      ) : null}
-      {value.isAlternative ? (
-        // Alternatives are inherently optional — they never get the
-        // toggle. Reserved empty slot keeps the grid columns aligned with
-        // primary rows.
-        <span
-          aria-hidden="true"
-          className="col-start-3 h-9 w-9 md:col-start-5 md:row-start-1 md:h-11 md:w-11"
-        />
-      ) : (
-        <Button
-          variant={value.isOptional ? "secondary" : "ghost"}
-          size="icon"
-          onClick={() => onChange({ ...value, isOptional: !value.isOptional })}
-          aria-pressed={value.isOptional}
-          aria-label={
-            value.isOptional
-              ? "Optional-Markierung entfernen"
-              : "Als optional markieren"
-          }
-          title={
-            value.isOptional
-              ? "Optional – wird im Rezept gedimmt angezeigt und beim Einkaufslisten-Aufbau übersprungen."
-              : "Als optional markieren"
-          }
-          className="col-start-3 h-9 w-9 md:col-start-5 md:row-start-1 md:h-11 md:w-11"
-        >
-          {value.isOptional ? (
-            <CircleHelp className="size-4" />
-          ) : (
-            <CircleCheck className="size-4" />
-          )}
-        </Button>
-      )}
-      <Button
-        variant={value.fixedAmount ? "secondary" : "ghost"}
-        size="icon"
-        onClick={() => onChange({ ...value, fixedAmount: !value.fixedAmount })}
-        aria-pressed={value.fixedAmount}
-        aria-label={
-          value.fixedAmount
-            ? "Feste Menge – Portionen-Skalierung wieder aktivieren"
-            : "Menge unabhängig von Portionen markieren"
-        }
-        title={
-          value.fixedAmount
-            ? "Feste Menge – wird bei geänderter Portionsanzahl nicht skaliert."
-            : "Menge unabhängig von Portionen markieren (z. B. eine Prise Salz)."
-        }
-        className="col-start-4 h-9 w-9 md:col-start-6 md:row-start-1 md:h-11 md:w-11"
-      >
-        {value.fixedAmount ? (
-          <Lock className="size-4" />
+
+        {value.unassigned ? (
+          // Free-text row: a single (growing) field holding the whole line.
+          // No quantity, unit, note or matching — the link/unlink toggle flips
+          // back without losing the hidden quantity/unit/note/selection
+          // (non-destructive).
+          <div className="flex items-start gap-2">
+            <Input
+              placeholder="Freie Angabe (z. B. „etwas zum Garnieren“)"
+              value={value.name}
+              onChange={(e) => {
+                setMatchText(e.target.value);
+                onChange({ ...value, name: e.target.value });
+              }}
+              aria-label="Freie Angabe"
+              className="min-w-0 flex-1"
+            />
+            <FreeTextToggle
+              active
+              onToggle={toggleFreeText}
+              className="h-9 w-9 md:h-11 md:w-11"
+            />
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={onRemove}
+              aria-label="Zutat entfernen"
+              className="h-9 w-9 md:h-11 md:w-11"
+            >
+              <Trash2 className="size-4" />
+            </Button>
+          </div>
         ) : (
-          <Unlock className="size-4" />
+          <div className="grid items-start gap-2 grid-cols-[4rem_minmax(0,1fr)_auto_auto_auto_auto_auto_auto] md:grid-cols-[5rem_8rem_minmax(0,1fr)_minmax(0,1fr)_auto_auto_auto_auto_auto_auto]">
+            {/* Mobile flow: [Qty | Unit] · [Name] · [Notes | actions]. Desktop
+                (md+) is a single row; the trailing actions end with the
+                free-text toggle and delete. */}
+            <Input
+              inputMode="decimal"
+              placeholder="Menge"
+              value={value.quantity}
+              onChange={(e) => onChange({ ...value, quantity: e.target.value })}
+              aria-label="Menge"
+            />
+            <div className="col-span-4 flex flex-col gap-1 md:col-span-1 md:col-start-2 md:row-start-1">
+              <SelectSearch
+                value={pickerValue}
+                onChange={onPickUnit}
+                search={searchUnits}
+                defaultItems={defaultUnits}
+                placeholder="Einheit"
+                onCreate={createUnit}
+                createLabelPrefix="als Einheit anlegen"
+              />
+              <UnitBadge annotation={value.importAnnotation} />
+            </div>
+            <IngredientNameInput
+              value={value.name}
+              onChange={(name, canonical, pickedIngredientId) =>
+                handleNameChange(name, canonical, pickedIngredientId)
+              }
+              placeholder="Zutat"
+              className="col-span-5 md:col-span-1 md:col-start-3 md:row-start-1"
+            />
+            <Input
+              placeholder="Notiz (z. B. fein gehackt)"
+              value={value.notes}
+              onChange={(e) => onChange({ ...value, notes: e.target.value })}
+              aria-label="Notiz"
+              className="col-span-2 md:col-span-1 md:col-start-4 md:row-start-1"
+            />
+            {/* CandidatePills span the Name + Notes columns on desktop and the
+                full mobile width. */}
+            <div className="col-span-8 md:col-span-2 md:col-start-3 md:row-start-2">
+              <CandidatePills
+                name={value.name}
+                candidates={serverMatches}
+                selectedIngredientId={value.selectedIngredientId}
+                selectedCanonicalName={value.canonicalName}
+                originalName={value.originalName ?? null}
+                addAsAlias={value.addAsAlias}
+                onSelectCandidate={selectCandidate}
+                onSelectNew={selectNew}
+                onForceMatch={forceMatch}
+                onEditArticle={setEditingArticleId}
+              />
+            </div>
+            {value.isAlternative ? (
+              // Alternatives are inherently optional — no toggle. Reserved
+              // empty slot keeps the columns aligned with primary rows.
+              <span
+                aria-hidden="true"
+                className="col-start-3 h-9 w-9 md:col-start-5 md:row-start-1 md:h-11 md:w-11"
+              />
+            ) : (
+              <Button
+                variant={value.isOptional ? "secondary" : "ghost"}
+                size="icon"
+                onClick={() =>
+                  onChange({ ...value, isOptional: !value.isOptional })
+                }
+                aria-pressed={value.isOptional}
+                aria-label={
+                  value.isOptional
+                    ? "Optional-Markierung entfernen"
+                    : "Als optional markieren"
+                }
+                title={
+                  value.isOptional
+                    ? "Optional – wird im Rezept gedimmt angezeigt und beim Einkaufslisten-Aufbau übersprungen."
+                    : "Als optional markieren"
+                }
+                className="col-start-3 h-9 w-9 md:col-start-5 md:row-start-1 md:h-11 md:w-11"
+              >
+                {value.isOptional ? (
+                  <CircleHelp className="size-4" />
+                ) : (
+                  <CircleCheck className="size-4" />
+                )}
+              </Button>
+            )}
+            <Button
+              variant={value.fixedAmount ? "secondary" : "ghost"}
+              size="icon"
+              onClick={() =>
+                onChange({ ...value, fixedAmount: !value.fixedAmount })
+              }
+              aria-pressed={value.fixedAmount}
+              aria-label={
+                value.fixedAmount
+                  ? "Feste Menge – Portionen-Skalierung wieder aktivieren"
+                  : "Menge unabhängig von Portionen markieren"
+              }
+              title={
+                value.fixedAmount
+                  ? "Feste Menge – wird bei geänderter Portionsanzahl nicht skaliert."
+                  : "Menge unabhängig von Portionen markieren (z. B. eine Prise Salz)."
+              }
+              className="col-start-4 h-9 w-9 md:col-start-6 md:row-start-1 md:h-11 md:w-11"
+            >
+              {value.fixedAmount ? (
+                <Lock className="size-4" />
+              ) : (
+                <Unlock className="size-4" />
+              )}
+            </Button>
+            {/* Indent/Outdent pair. */}
+            {value.isAlternative ? (
+              onDetach ? (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={onDetach}
+                  aria-label="Zur eigenständigen Zutat machen"
+                  title="Macht diese Alternative zu einer eigenen Zutat. Sie verlässt die Gruppe und steht direkt darunter."
+                  className="col-start-5 h-9 w-9 md:col-start-7 md:row-start-1 md:h-11 md:w-11"
+                >
+                  <Outdent className="size-4" />
+                </Button>
+              ) : (
+                <span
+                  aria-hidden="true"
+                  className="col-start-5 h-9 w-9 md:col-start-7 md:row-start-1 md:h-11 md:w-11"
+                />
+              )
+            ) : onDemote ? (
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={onDemote}
+                aria-label="Als Alternative der vorherigen Zutat einordnen"
+                title="Macht diese Zutat zu einer Alternative der Zutat darüber."
+                className="col-start-5 h-9 w-9 md:col-start-7 md:row-start-1 md:h-11 md:w-11"
+              >
+                <Indent className="size-4" />
+              </Button>
+            ) : (
+              <span
+                aria-hidden="true"
+                className="col-start-5 h-9 w-9 md:col-start-7 md:row-start-1 md:h-11 md:w-11"
+              />
+            )}
+            {/* Add-alternative / promote. */}
+            {!value.isAlternative && onAddAlternative ? (
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={onAddAlternative}
+                aria-label="Alternative hinzufügen"
+                title="Eine alternative Zutat unter dieser Zutat hinzufügen. Alternativen sind immer optional."
+                className="col-start-6 h-9 w-9 md:col-start-8 md:row-start-1 md:h-11 md:w-11"
+              >
+                <CornerDownRight className="size-4" />
+              </Button>
+            ) : value.isAlternative && onPromote ? (
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={onPromote}
+                aria-label="Mit Hauptzutat tauschen"
+                title="Tauscht diese Alternative mit der Hauptzutat: die Alternative wird die neue Hauptzutat, die alte Hauptzutat wird zur Alternative."
+                className="col-start-6 h-9 w-9 md:col-start-8 md:row-start-1 md:h-11 md:w-11"
+              >
+                <ArrowUp className="size-4" />
+              </Button>
+            ) : (
+              <span
+                aria-hidden="true"
+                className="col-start-6 h-9 w-9 md:col-start-8 md:row-start-1 md:h-11 md:w-11"
+              />
+            )}
+            {/* Free-text toggle — last action before delete. Alternatives can't
+                be free text, so they reserve the slot to stay aligned. */}
+            {value.isAlternative ? (
+              <span
+                aria-hidden="true"
+                className="col-start-7 h-9 w-9 md:col-start-9 md:row-start-1 md:h-11 md:w-11"
+              />
+            ) : (
+              <FreeTextToggle
+                active={false}
+                onToggle={toggleFreeText}
+                className="col-start-7 h-9 w-9 md:col-start-9 md:row-start-1 md:h-11 md:w-11"
+              />
+            )}
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={onRemove}
+              aria-label="Zutat entfernen"
+              className="col-start-8 h-9 w-9 md:col-start-10 md:row-start-1 md:h-11 md:w-11"
+            >
+              <Trash2 className="size-4" />
+            </Button>
+          </div>
         )}
-      </Button>
-      {/* Indent/Outdent pair at col 5/7:
-            - Primary with onDemote → Indent (become alt of prior)
-            - Alt with onDetach → Outdent (leave the group as standalone) */}
-      {value.isAlternative ? (
-        onDetach ? (
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={onDetach}
-            aria-label="Zur eigenständigen Zutat machen"
-            title="Macht diese Alternative zu einer eigenen Zutat. Sie verlässt die Gruppe und steht direkt darunter."
-            className="col-start-5 h-9 w-9 md:col-start-7 md:row-start-1 md:h-11 md:w-11"
-          >
-            <Outdent className="size-4" />
-          </Button>
-        ) : (
-          <span
-            aria-hidden="true"
-            className="col-start-5 h-9 w-9 md:col-start-7 md:row-start-1 md:h-11 md:w-11"
+        {editingArticleId != null ? (
+          <EditArticleDrawer
+            ingredientId={editingArticleId}
+            onClose={() => setEditingArticleId(null)}
           />
-        )
-      ) : onDemote ? (
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={onDemote}
-          aria-label="Als Alternative der vorherigen Zutat einordnen"
-          title="Macht diese Zutat zu einer Alternative der Zutat darüber."
-          className="col-start-5 h-9 w-9 md:col-start-7 md:row-start-1 md:h-11 md:w-11"
-        >
-          <Indent className="size-4" />
-        </Button>
-      ) : (
-        <span
-          aria-hidden="true"
-          className="col-start-5 h-9 w-9 md:col-start-7 md:row-start-1 md:h-11 md:w-11"
-        />
-      )}
-      {/* Col 6/8: row-type-specific verb.
-            - Primary with onAddAlternative → CornerDownRight (add child)
-            - Alt with onPromote → ArrowUp (swap with current primary;
-              keeps the group, just changes who leads) */}
-      {!value.isAlternative && onAddAlternative ? (
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={onAddAlternative}
-          aria-label="Alternative hinzufügen"
-          title="Eine alternative Zutat unter dieser Zutat hinzufügen. Alternativen sind immer optional."
-          className="col-start-6 h-9 w-9 md:col-start-8 md:row-start-1 md:h-11 md:w-11"
-        >
-          <CornerDownRight className="size-4" />
-        </Button>
-      ) : value.isAlternative && onPromote ? (
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={onPromote}
-          aria-label="Mit Hauptzutat tauschen"
-          title="Tauscht diese Alternative mit der Hauptzutat: die Alternative wird die neue Hauptzutat, die alte Hauptzutat wird zur Alternative."
-          className="col-start-6 h-9 w-9 md:col-start-8 md:row-start-1 md:h-11 md:w-11"
-        >
-          <ArrowUp className="size-4" />
-        </Button>
-      ) : (
-        <span
-          aria-hidden="true"
-          className="col-start-6 h-9 w-9 md:col-start-8 md:row-start-1 md:h-11 md:w-11"
-        />
-      )}
-      <Button
-        variant="ghost"
-        size="icon"
-        onClick={onRemove}
-        aria-label="Zutat entfernen"
-        className="col-start-7 h-9 w-9 md:col-start-9 md:row-start-1 md:h-11 md:w-11"
-      >
-        <Trash2 className="size-4" />
-      </Button>
-    </div>
+        ) : null}
       </div>
     </div>
   );
@@ -1032,11 +990,10 @@ function annotationShowsAnything(a: ImportAnnotation): boolean {
 }
 
 /**
- * Renders the candidate pills + "Neu" fallback + force-match (+) button.
- * Pills come pre-sorted from the server (score desc → matchedName length
- * desc → alphabetical). One pill is always conceptually selected:
- *   - a real candidate when `selectedIngredientId` matches its id, or
- *   - the synthetic "Neu" pill when `selectedIngredientId` is null.
+ * Renders the candidate chips (max 3) + the "Neu" chip (when the name is a
+ * valid new ingredient) + the force-match (+) popover. Chips are plain text:
+ * clicking selects the candidate (which fills the name); the edit-article
+ * pencil is revealed on hover. Candidates come pre-sorted from the server.
  */
 function CandidatePills({
   name,
@@ -1045,162 +1002,121 @@ function CandidatePills({
   selectedCanonicalName,
   originalName,
   addAsAlias,
-  unassigned,
-  allowUnassigned,
   onSelectCandidate,
   onSelectNew,
-  onSelectUnassigned,
-  onUseCanonical,
   onForceMatch,
-  onToggleAlias,
   onEditArticle,
 }: {
   name: string;
   candidates: ServerMatch[];
   selectedIngredientId: number | null;
-  /** Canonical name of the currently-selected ingredient, when it differs
-   *  from the row's typed text. Surfaces on the anchor pill so a force-
-   *  matched row shows WHICH ingredient it's pinned to. */
+  /** Canonical name of the currently-selected ingredient, used to synthesize
+   *  its chip when the matcher didn't return it (e.g. a force-match to an
+   *  off-list ingredient). Null when the name IS the canonical. */
   selectedCanonicalName: string | null;
   /** The user's original spelling before an auto-match/pill replaced the
-   *  display name (import source span or the text a pill pick overwrote).
-   *  Drives the alias toggle's offered name. Null when there's none. */
+   *  display name. Used as the alias spelling shown on the selected chip when
+   *  "als Alias" is active. Null when there's none. */
   originalName: string | null;
   addAsAlias: boolean;
-  /** The "Nicht zugeordnet" pill is the active selection (free-text row). */
-  unassigned: boolean;
-  /** Whether to offer the "Nicht zugeordnet" pill at all. False in the
-   *  staple editor, where every row must resolve to a buyable article. */
-  allowUnassigned: boolean;
   onSelectCandidate: (c: ServerMatch) => void;
   onSelectNew: () => void;
-  onSelectUnassigned: () => void;
-  onUseCanonical: (c: ServerMatch) => void;
   onForceMatch: (
     ingredientId: number,
     canonical: string,
     addAsAlias: boolean,
   ) => void;
-  /** Flip "remember the display name as an alias of the matched ingredient". */
-  onToggleAlias: () => void;
   onEditArticle: (ingredientId: number) => void;
 }) {
   const trimmed = name.trim();
-  // Hide the whole pill row when there's nothing to interact with — no
-  // typed text + no candidates + no selection yet (including a sticky
-  // "Nicht zugeordnet" selection, which should keep its pill visible).
+  // Nothing to interact with yet.
   if (
     trimmed.length === 0 &&
     candidates.length === 0 &&
-    selectedIngredientId == null &&
-    !unassigned
+    selectedIngredientId == null
   ) {
     return null;
   }
-  // Three mutually-exclusive synthetic states: a real candidate, "Neu"
-  // (create article), or "Nicht zugeordnet" (free text, no article).
-  const isNewSelected = selectedIngredientId == null && !unassigned;
-  // An exact name/alias collision with an existing ingredient: a new
-  // ingredient with that name is impossible (unique name) and the save
-  // resolver would link it to the existing row anyway — so "Neu" is not a
-  // real option here. Disable the pill and steer the user to the match.
+  const isNewSelected = selectedIngredientId == null;
+  // "Neu" is offered only when it's a real option: a non-empty name that does
+  // NOT already exist. An exact name/alias collision can't become a new
+  // ingredient (unique name; the save resolver links to the existing row), so
+  // the chip is hidden entirely rather than shown disabled. Computed over the
+  // real matcher results only — never the synthesized selected chip below.
   const exactMatch = findExactMatch(trimmed, candidates);
-  // The pill the force-match popover sits next to a forced ingredient that
-  // isn't in the candidate list. Surface it as its own pill so the user can
-  // see which ingredient the row is pinned to.
-  const selectedOutOfList =
-    selectedIngredientId != null &&
-    !candidates.some((c) => c.ingredientId === selectedIngredientId);
+  const showNew = trimmed.length > 0 && exactMatch == null;
 
-  // Alias toggle: offer the user's OWN spelling (the original the parser
-  // replaced, else the current name) as an alias of the matched ingredient.
-  // Shown when matched and that spelling differs from the canonical identity —
-  // or whenever it's already flagged (so it stays togglable / shows "active").
-  const aliasCandidate = (originalName?.trim() || trimmed).trim();
-  const canonicalIdentity = selectedCanonicalName ?? trimmed;
-  const worthAliasing =
-    aliasCandidate.length > 0 &&
-    aliasCandidate.toLowerCase() !== canonicalIdentity.toLowerCase();
-  const aliasToggle =
+  // At most 3 candidate chips, but always keep the selected one visible. When
+  // the matcher didn't return the selection (a force-match to an off-list
+  // ingredient, or a narrower live-match view), synthesize a chip for it from
+  // the row's current selection — tied to `selectedIngredientId`, so it can
+  // never go stale the way a stored synthetic pin could.
+  let display = candidates.slice(0, 3);
+  if (
     selectedIngredientId != null &&
-    !unassigned &&
-    (addAsAlias || worthAliasing) ? (
-      <AliasToggle
-        name={aliasCandidate}
-        canonicalName={canonicalIdentity}
-        active={addAsAlias}
-        onToggle={onToggleAlias}
-      />
-    ) : null;
+    !display.some((c) => c.ingredientId === selectedIngredientId)
+  ) {
+    const sel = candidates.find((c) => c.ingredientId === selectedIngredientId);
+    if (sel) {
+      display = [sel, ...display.slice(0, 2)];
+    } else {
+      const canonical = selectedCanonicalName ?? trimmed;
+      display = [
+        {
+          ingredientId: selectedIngredientId,
+          canonicalName: canonical,
+          matchedName: canonical,
+          score: 999,
+          name: trimmed,
+          notes: null,
+          isEquipment: false,
+        },
+        ...display.slice(0, 2),
+      ];
+    }
+  }
+
+  // Spelling that would be saved as an alias when "als Alias" is active: the
+  // user's original spelling, else the current name.
+  const aliasSpelling = (originalName?.trim() || trimmed).trim();
 
   return (
-    <div className="flex flex-wrap gap-1">
-      {candidates.map((c) => {
+    <div className="flex flex-wrap items-center gap-1.5">
+      {display.map((c) => {
         const isCurrent = c.ingredientId === selectedIngredientId;
-        // The matcher carries both names: `canonicalName` is the underlying
-        // identity, `matchedName` is the catalog row that actually hit
-        // (often an alias). Render canonical first so the user sees WHAT
-        // the row resolves to, with the alias in parens when it differs so
-        // they also see WHY it matched ("Erbsen (TK Erbsen)").
-        const aliasDiffers =
+        // `canonicalName` is the identity; `matchedName` is the catalog row
+        // that hit (often an alias) — shown in parens so the user sees WHY it
+        // matched ("Erbsen (TK Erbsen)").
+        const aliasFromMatch =
           c.matchedName.length > 0 &&
-          c.matchedName.toLowerCase() !== c.canonicalName.toLowerCase();
+          c.matchedName.toLowerCase() !== c.canonicalName.toLowerCase()
+            ? c.matchedName
+            : null;
+        // On the selected chip, when "als Alias" is on, surface the kept
+        // spelling in parens with a small "+" (replaces the old "+ Alias").
+        const markAsAlias =
+          isCurrent &&
+          addAsAlias &&
+          aliasSpelling.length > 0 &&
+          aliasSpelling.toLowerCase() !== c.canonicalName.toLowerCase();
         return (
           <CandidatePill
             key={c.ingredientId}
             ingredientId={c.ingredientId}
             canonicalName={c.canonicalName}
-            aliasName={aliasDiffers ? c.matchedName : null}
+            aliasName={markAsAlias ? aliasSpelling : aliasFromMatch}
+            markAsAlias={markAsAlias}
             isSelected={isCurrent}
             onSelect={() => onSelectCandidate(c)}
-            onUseCanonical={() => onUseCanonical(c)}
             onEditArticle={onEditArticle}
           />
         );
       })}
-      {selectedOutOfList && selectedIngredientId != null ? (
-        <span className="inline-flex max-w-full items-center gap-0.5 rounded-full bg-[var(--color-accent)] text-xs text-[var(--color-accent-fg)]">
-          <span
-            className="max-w-full truncate py-0.5 pl-2 pr-1"
-            title={
-              addAsAlias
-                ? `Diese Zeile ist fest mit einer Zutat verknüpft — "${trimmed}" wird beim Speichern als Alias hinzugefügt.`
-                : "Diese Zeile ist fest mit einer Zutat verknüpft."
-            }
-          >
-            {selectedCanonicalName ?? trimmed}
-            {addAsAlias ? (
-              <span className="ml-1 text-[0.65rem]">+ Alias</span>
-            ) : null}
-          </span>
-          <button
-            type="button"
-            onClick={() => onEditArticle(selectedIngredientId)}
-            className="shrink-0 rounded-full px-1.5 py-1 hover:bg-[color-mix(in_srgb,var(--color-accent-fg),var(--color-accent)_75%)]"
-            title="Artikel bearbeiten"
-            aria-label="Artikel bearbeiten"
-          >
-            <Pencil className="size-3" />
-          </button>
-        </span>
-      ) : null}
-      {aliasToggle}
-      <NewPill
-        label={trimmed.length > 0 ? `Neu: ${trimmed}` : "Neu"}
-        isSelected={isNewSelected}
-        disabled={trimmed.length === 0 || exactMatch != null}
-        disabledReason={
-          exactMatch
-            ? `„${trimmed}" gibt es schon — diese Zutat wird verwendet statt einer neuen.`
-            : undefined
-        }
-        onSelect={onSelectNew}
-      />
-      {allowUnassigned ? (
-        <UnassignedPill
-          isSelected={unassigned}
-          disabled={trimmed.length === 0}
-          onSelect={onSelectUnassigned}
+      {showNew ? (
+        <NewPill
+          label={`Neu: ${trimmed}`}
+          isSelected={isNewSelected}
+          onSelect={onSelectNew}
         />
       ) : null}
       <ForceMatchPopover onPick={onForceMatch} typedName={trimmed} />
@@ -1212,32 +1128,28 @@ function CandidatePill({
   ingredientId,
   canonicalName,
   aliasName,
+  markAsAlias,
   isSelected,
   onSelect,
-  onUseCanonical,
   onEditArticle,
 }: {
   ingredientId: number;
   canonicalName: string;
-  /** Alias the matcher hit on, when it differs from the canonical. Rendered
-   *  in parens after the canonical so the user sees both WHAT the row
-   *  resolves to and WHY it matched. `null` means the match hit the
-   *  canonical directly — render just the canonical. */
+  /** Alias the matcher hit on (or the spelling to be kept as an alias),
+   *  rendered in parens after the canonical. `null` → render just canonical. */
   aliasName: string | null;
+  /** Show a small "+" after the name meaning "this spelling will be saved as
+   *  an alias on save" — used on the selected chip when force-match's alias
+   *  option is active. */
+  markAsAlias: boolean;
   isSelected: boolean;
   onSelect: () => void;
-  onUseCanonical: () => void;
   onEditArticle: (ingredientId: number) => void;
 }) {
-  // The pill's primary action (select) keys off the canonical identity, so
-  // tooltips lead with the canonical. The "↻" action copies the alias name
-  // into the input (or the canonical when no alias is involved) — keep its
-  // tooltip aligned with what actually lands in the field.
-  const copyTarget = aliasName ?? canonicalName;
   return (
     <span
       className={cn(
-        "inline-flex max-w-full items-center gap-0.5 rounded-full text-xs transition-colors",
+        "group inline-flex max-w-full items-center overflow-hidden rounded-full text-xs transition-colors",
         isSelected
           ? "bg-[var(--color-accent)] text-[var(--color-accent-fg)]"
           : "bg-[var(--color-muted)] text-[var(--color-fg)]",
@@ -1247,7 +1159,7 @@ function CandidatePill({
         type="button"
         onClick={onSelect}
         className={cn(
-          "max-w-full truncate rounded-full py-0.5 pl-2 pr-1",
+          "max-w-full truncate py-0.5 pl-2.5 pr-2",
           !isSelected &&
             "hover:bg-[color-mix(in_srgb,var(--color-accent),var(--color-bg)_75%)]",
         )}
@@ -1261,26 +1173,20 @@ function CandidatePill({
         {aliasName ? (
           <span className="ml-1 opacity-70">({aliasName})</span>
         ) : null}
+        {markAsAlias ? (
+          <Plus
+            className="ml-1 inline size-3 align-[-2px]"
+            aria-label="wird als Alias gespeichert"
+          />
+        ) : null}
       </button>
-      <button
-        type="button"
-        onClick={onUseCanonical}
-        className={cn(
-          "shrink-0 rounded-full px-1.5 py-1",
-          isSelected
-            ? "hover:bg-[color-mix(in_srgb,var(--color-accent-fg),var(--color-accent)_75%)]"
-            : "hover:bg-[color-mix(in_srgb,var(--color-accent),var(--color-bg)_75%)]",
-        )}
-        title={`„${copyTarget}" in das Namensfeld übernehmen.`}
-        aria-label={`„${copyTarget}" in das Namensfeld übernehmen`}
-      >
-        <RotateCw className="size-3" />
-      </button>
+      {/* Edit-article: hidden at rest, revealed on hover (it widens the chip —
+          a small reflow is fine). On touch (no hover) it stays visible. */}
       <button
         type="button"
         onClick={() => onEditArticle(ingredientId)}
         className={cn(
-          "shrink-0 rounded-full px-1.5 py-1",
+          "hidden shrink-0 py-1 pl-1 pr-2 group-hover:inline-flex [@media(hover:none)]:inline-flex",
           isSelected
             ? "hover:bg-[color-mix(in_srgb,var(--color-accent-fg),var(--color-accent)_75%)]"
             : "hover:bg-[color-mix(in_srgb,var(--color-accent),var(--color-bg)_75%)]",
@@ -1294,79 +1200,29 @@ function CandidatePill({
   );
 }
 
-/**
- * Toggle that flags the row's current display name to be saved as an alias of
- * the matched ingredient. Active = the name will be remembered (so a future
- * import of the same spelling matches directly and keeps it). Reuses the
- * dashed-pill look of "Neu"/"Nicht zugeordnet"; fills in when active.
- */
-function AliasToggle({
-  name,
-  canonicalName,
-  active,
-  onToggle,
-}: {
-  name: string;
-  canonicalName: string;
-  active: boolean;
-  onToggle: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onToggle}
-      aria-pressed={active}
-      className={cn(
-        "inline-flex max-w-full items-center gap-1 truncate rounded-full border border-dashed px-2 py-0.5 text-xs transition-colors",
-        active
-          ? "border-[var(--color-accent)] bg-[color-mix(in_srgb,var(--color-accent),var(--color-bg)_75%)] text-[var(--color-fg)]"
-          : "border-[var(--color-border)] text-[var(--color-muted-fg)] hover:bg-[var(--color-muted)]",
-      )}
-      title={
-        active
-          ? `„${name}" wird beim Speichern als Alias von „${canonicalName}" gemerkt. Klicken zum Rückgängigmachen.`
-          : `„${name}" als Alias von „${canonicalName}" merken — künftige Treffer behalten diese Schreibweise.`
-      }
-    >
-      <Tag className="size-3 shrink-0" />
-      {active ? `Alias: „${name}"` : `„${name}" als Alias`}
-    </button>
-  );
-}
-
 function NewPill({
   label,
   isSelected,
-  disabled,
-  disabledReason,
   onSelect,
 }: {
   label: string;
   isSelected: boolean;
-  disabled: boolean;
-  /** Tooltip shown while disabled. Falls back to the "type a name first"
-   *  hint when omitted (the empty-name case). */
-  disabledReason?: string;
   onSelect: () => void;
 }) {
   return (
     <button
       type="button"
       onClick={onSelect}
-      disabled={disabled}
       className={cn(
         "inline-flex max-w-full items-center gap-1 truncate rounded-full border border-dashed px-2 py-0.5 text-xs transition-colors",
         isSelected
           ? "border-[var(--color-accent)] bg-[color-mix(in_srgb,var(--color-accent),var(--color-bg)_75%)] text-[var(--color-fg)]"
           : "border-[var(--color-border)] text-[var(--color-muted-fg)] hover:bg-[var(--color-muted)]",
-        disabled && "cursor-not-allowed opacity-50",
       )}
       title={
-        disabled
-          ? (disabledReason ?? "Erst einen Zutatennamen eingeben.")
-          : isSelected
-            ? "Neue Zutat wird beim Speichern angelegt."
-            : "Als neue Zutat speichern."
+        isSelected
+          ? "Neue Zutat wird beim Speichern angelegt."
+          : "Als neue Zutat speichern."
       }
     >
       + {label}
@@ -1375,43 +1231,39 @@ function NewPill({
 }
 
 /**
- * "Nicht zugeordnet": marks the row as free text that isn't linked to any
- * article and never reaches a shopping list (leftovers, garnish, things kept
- * at home). Always offered in the recipe editor like the "Neu" pill, and
- * disabled until the row has a name (its text becomes the line's display).
+ * Link/unlink toggle that flips a row between a linked article and free text.
+ * Non-destructive — the row's quantity, unit and matched selection are kept
+ * (hidden) while free-text is active, so toggling back restores them. Replaces
+ * the old "Nicht zugeordnet" pill.
  */
-function UnassignedPill({
-  isSelected,
-  disabled,
-  onSelect,
+function FreeTextToggle({
+  active,
+  onToggle,
+  className,
 }: {
-  isSelected: boolean;
-  disabled: boolean;
-  onSelect: () => void;
+  active: boolean;
+  onToggle: () => void;
+  className?: string;
 }) {
   return (
-    <button
+    <Button
       type="button"
-      onClick={onSelect}
-      disabled={disabled}
-      aria-pressed={isSelected}
-      className={cn(
-        "inline-flex max-w-full items-center gap-1 truncate rounded-full border border-dashed px-2 py-0.5 text-xs transition-colors",
-        isSelected
-          ? "border-[var(--color-accent)] bg-[color-mix(in_srgb,var(--color-accent),var(--color-bg)_75%)] text-[var(--color-fg)]"
-          : "border-[var(--color-border)] text-[var(--color-muted-fg)] hover:bg-[var(--color-muted)]",
-        disabled && "cursor-not-allowed opacity-50",
-      )}
-      title={
-        disabled
-          ? "Erst einen Namen eingeben."
-          : isSelected
-            ? "Nicht zugeordnet: freie Angabe ohne Artikel — kommt nie auf die Einkaufsliste."
-            : "Als freie Angabe ohne Artikel speichern (nicht einkaufbar)."
+      variant={active ? "secondary" : "ghost"}
+      size="icon"
+      onClick={onToggle}
+      aria-pressed={active}
+      aria-label={
+        active ? "Wieder mit einem Artikel verknüpfen" : "Als Freitext ohne Artikel"
       }
+      title={
+        active
+          ? "Freitext aktiv – klicken, um die Zeile wieder mit einem Artikel zu verknüpfen."
+          : "Als Freitext ohne Artikel (ohne Menge/Einheit, kommt nicht auf die Einkaufsliste)."
+      }
+      className={className}
     >
-      Nicht zugeordnet
-    </button>
+      {active ? <Unlink className="size-4" /> : <Link2 className="size-4" />}
+    </Button>
   );
 }
 
@@ -1433,16 +1285,6 @@ function UnitBadge({
       >
         <AlertTriangle className="size-3" />
         Einheit „{annotation.rawUnit}“ unbekannt
-      </span>
-    );
-  }
-  if (annotation.unitState === "defaulted") {
-    return (
-      <span
-        className="inline-flex w-fit items-center gap-1 rounded-full bg-[var(--color-muted)] px-2 py-0.5 text-xs text-[var(--color-muted-fg)]"
-        title="Es wurde keine Einheit erkannt — Standard ‚Stück'."
-      >
-        Standard: Stück
       </span>
     );
   }
