@@ -6,8 +6,10 @@ import {
   category as categoryTable,
   ingredient,
   ingredientAlias,
+  ingredientSupermarketUnavailable,
   ingredientUnitConversion,
   recipeIngredient,
+  supermarket as supermarketTable,
   unit as unitTable,
 } from "../../../db/schema.ts";
 import { getImpact } from "../shared/impact.ts";
@@ -72,6 +74,9 @@ export type IngredientListItem = {
   excludeFromShoppingList: boolean;
   isEquipment: boolean;
   dietaryClass: "vegan" | "vegetarian" | "meat" | null;
+  /** Supermarkets this article is not carried at (`ingredient_supermarket_
+   *  unavailable`). The shopping list mutes these in the active store's view. */
+  excludedSupermarkets: Array<{ id: number; name: string }>;
   recipeRefCount: number;
 };
 
@@ -108,6 +113,10 @@ export type IngredientUpsertInput = {
   excludeFromShoppingList: boolean;
   isEquipment?: boolean;
   dietaryClass: "vegan" | "vegetarian" | "meat" | null;
+  /** Supermarkets this article should be marked unavailable at. Replaces the
+   *  full set of `ingredient_supermarket_unavailable` rows for this ingredient.
+   *  Omitted = leave unchanged on update / none on create. */
+  excludedSupermarketIds?: number[];
 };
 
 export class StammdatenError extends Error {
@@ -277,6 +286,34 @@ function loadConversions(ids: number[]): Map<number, ConversionItem[]> {
   return out;
 }
 
+/** Per-ingredient excluded supermarkets, joined to the supermarket name. */
+function loadExcludedSupermarkets(
+  ids: number[],
+): Map<number, Array<{ id: number; name: string }>> {
+  const out = new Map<number, Array<{ id: number; name: string }>>();
+  if (ids.length === 0) return out;
+  const rows = db
+    .select({
+      ingredientId: ingredientSupermarketUnavailable.ingredientId,
+      id: supermarketTable.id,
+      name: supermarketTable.name,
+    })
+    .from(ingredientSupermarketUnavailable)
+    .innerJoin(
+      supermarketTable,
+      eq(supermarketTable.id, ingredientSupermarketUnavailable.supermarketId),
+    )
+    .where(inArray(ingredientSupermarketUnavailable.ingredientId, ids))
+    .orderBy(sql`unaccent(${supermarketTable.name})`)
+    .all();
+  for (const row of rows) {
+    const list = out.get(row.ingredientId) ?? [];
+    list.push({ id: row.id, name: row.name });
+    out.set(row.ingredientId, list);
+  }
+  return out;
+}
+
 /** unitId → name, for resolving canonical-name default unit display names. */
 function loadUnitNames(unitIds: number[]): Map<number, string> {
   const out = new Map<number, string>();
@@ -319,6 +356,7 @@ export function listIngredients(query?: string): IngredientListItem[] {
   const aliasUnitDefaults = loadAliasUnitDefaults(ids);
   const aliasDisplayNames = loadAliasDisplayNames(ids);
   const conversions = loadConversions(ids);
+  const excludedSupermarkets = loadExcludedSupermarkets(ids);
   const unitNames = loadUnitNames(baseRows.map((r) => r.defaultUnitId ?? -1));
   const recipeCounts = loadRecipeRefCounts(ids);
   return baseRows.map((row) => ({
@@ -337,6 +375,7 @@ export function listIngredients(query?: string): IngredientListItem[] {
     excludeFromShoppingList: row.excludeFromShoppingList,
     isEquipment: row.isEquipment,
     dietaryClass: row.dietaryClass,
+    excludedSupermarkets: excludedSupermarkets.get(row.id) ?? [],
     recipeRefCount: recipeCounts.get(row.id) ?? 0,
   }));
 }
@@ -368,6 +407,7 @@ function listIngredientsByIds(ids: number[]): IngredientListItem[] {
   const aliasUnitDefaults = loadAliasUnitDefaults(ids);
   const aliasDisplayNames = loadAliasDisplayNames(ids);
   const conversions = loadConversions(ids);
+  const excludedSupermarkets = loadExcludedSupermarkets(ids);
   const unitNames = loadUnitNames(baseRows.map((r) => r.defaultUnitId ?? -1));
   const recipeCounts = loadRecipeRefCounts(ids);
   return baseRows.map((row) => ({
@@ -386,6 +426,7 @@ function listIngredientsByIds(ids: number[]): IngredientListItem[] {
     excludeFromShoppingList: row.excludeFromShoppingList,
     isEquipment: row.isEquipment,
     dietaryClass: row.dietaryClass,
+    excludedSupermarkets: excludedSupermarkets.get(row.id) ?? [],
     recipeRefCount: recipeCounts.get(row.id) ?? 0,
   }));
 }
@@ -466,6 +507,7 @@ export function createIngredient(input: IngredientUpsertInput): IngredientDetail
       .all();
     const newId = inserted[0].id;
     writeConversions(tx, newId, input.conversions ?? []);
+    writeExcludedSupermarkets(tx, newId, input.excludedSupermarketIds ?? []);
     if (aliases.length > 0) {
       const defaultsByAlias = mapAliasDefaults(input.aliasUnitDefaults, aliases);
       const displayByAlias = mapAliasDisplayNames(input.aliasDisplayNames, aliases);
@@ -531,6 +573,40 @@ function writeConversions(
     });
   }
   if (rows.length > 0) tx.insert(ingredientUnitConversion).values(rows).run();
+}
+
+/**
+ * Replace the ingredient's excluded-supermarket rows with the supplied set.
+ * De-dupes the ids and validates that each supermarket exists (an unknown id
+ * would otherwise surface as a raw FK 500). Mirrors {@link writeConversions}:
+ * delete-all-then-insert, so the passed list is the new complete set.
+ */
+function writeExcludedSupermarkets(
+  tx: Tx,
+  ingredientId: number,
+  supermarketIds: number[],
+): void {
+  tx.delete(ingredientSupermarketUnavailable)
+    .where(eq(ingredientSupermarketUnavailable.ingredientId, ingredientId))
+    .run();
+  const ids = Array.from(new Set(supermarketIds));
+  if (ids.length === 0) return;
+  const found = tx
+    .select({ id: supermarketTable.id })
+    .from(supermarketTable)
+    .where(inArray(supermarketTable.id, ids))
+    .all();
+  if (found.length !== ids.length) {
+    const have = new Set(found.map((r) => r.id));
+    const missing = ids.filter((id) => !have.has(id));
+    throw new StammdatenError(
+      `Unbekannte Supermärkte: ${missing.join(", ")}.`,
+      404,
+    );
+  }
+  tx.insert(ingredientSupermarketUnavailable)
+    .values(ids.map((supermarketId) => ({ ingredientId, supermarketId })))
+    .run();
 }
 
 /**
@@ -611,6 +687,11 @@ export function updateIngredient(
       .where(eq(ingredientAlias.ingredientId, id))
       .run();
     writeConversions(tx, id, input.conversions ?? []);
+    // Only touch exclusions when the caller supplied them — an omitted field
+    // leaves the existing rows alone (callers that don't manage exclusions).
+    if (input.excludedSupermarketIds !== undefined) {
+      writeExcludedSupermarkets(tx, id, input.excludedSupermarketIds);
+    }
     if (aliases.length > 0) {
       const defaultsByAlias = mapAliasDefaults(input.aliasUnitDefaults, aliases);
       const displayByAlias = mapAliasDisplayNames(input.aliasDisplayNames, aliases);
@@ -734,6 +815,12 @@ export type IngredientBulkPatch = {
   dietaryClass?: "vegan" | "vegetarian" | "meat" | null;
   excludeFromShoppingList?: boolean;
   isEquipment?: boolean;
+  /** Supermarkets to mark unavailable on every selected article. Additive and
+   *  idempotent — never touches exclusions outside this set. */
+  addExcludedSupermarketIds?: number[];
+  /** Supermarkets to un-exclude (restore availability) on every selected
+   *  article. A pair not present is a silent no-op. */
+  removeExcludedSupermarketIds?: number[];
 };
 
 export type IngredientBulkResult = {
@@ -741,11 +828,14 @@ export type IngredientBulkResult = {
 };
 
 /**
- * Apply a partial patch to every selected ingredient. Each field is tristate:
+ * Apply a partial patch to every selected ingredient. Scalar fields are
+ * tristate:
  *   - omitted (`undefined`) → not touched
  *   - explicit `null` (categoryId / dietaryClass) → cleared
  *   - value → set to the value
- * No-op if `patch` carries no fields.
+ * Excluded-supermarket edits are set operations (add / remove), applied
+ * per-article so each article's other exclusions stay intact. No-op if `patch`
+ * carries no fields.
  */
 export function bulkUpdateIngredients(
   ids: number[],
@@ -765,8 +855,16 @@ export function bulkUpdateIngredients(
   if (Object.prototype.hasOwnProperty.call(patch, "isEquipment")) {
     setObj.isEquipment = patch.isEquipment;
   }
-  if (Object.keys(setObj).length === 0) return { updatedIds: [] };
-  setObj.updatedAt = nowSec();
+  const hasScalar = Object.keys(setObj).length > 0;
+  const addSupermarketIds = Array.from(
+    new Set(patch.addExcludedSupermarketIds ?? []),
+  );
+  const removeSupermarketIds = Array.from(
+    new Set(patch.removeExcludedSupermarketIds ?? []),
+  );
+  if (!hasScalar && addSupermarketIds.length === 0 && removeSupermarketIds.length === 0) {
+    return { updatedIds: [] };
+  }
 
   // Verify the category exists when caller wanted to set one (clearing is
   // always safe). FK violation would otherwise surface as a generic 500.
@@ -784,7 +882,57 @@ export function bulkUpdateIngredients(
     }
   }
 
-  db.update(ingredient).set(setObj).where(inArray(ingredient.id, ids)).run();
+  // Verify referenced supermarkets exist (add + remove) — a bad id would
+  // otherwise surface as a raw FK 500 on insert.
+  const allSupermarketIds = Array.from(
+    new Set([...addSupermarketIds, ...removeSupermarketIds]),
+  );
+  if (allSupermarketIds.length > 0) {
+    const found = db
+      .select({ id: supermarketTable.id })
+      .from(supermarketTable)
+      .where(inArray(supermarketTable.id, allSupermarketIds))
+      .all();
+    if (found.length !== allSupermarketIds.length) {
+      const have = new Set(found.map((r) => r.id));
+      const missing = allSupermarketIds.filter((id) => !have.has(id));
+      throw new StammdatenError(
+        `Unbekannte Supermärkte: ${missing.join(", ")}.`,
+        404,
+      );
+    }
+  }
+
+  db.transaction((tx) => {
+    if (hasScalar) {
+      tx.update(ingredient)
+        .set({ ...setObj, updatedAt: nowSec() })
+        .where(inArray(ingredient.id, ids))
+        .run();
+    }
+    if (removeSupermarketIds.length > 0) {
+      tx.delete(ingredientSupermarketUnavailable)
+        .where(
+          and(
+            inArray(ingredientSupermarketUnavailable.ingredientId, ids),
+            inArray(
+              ingredientSupermarketUnavailable.supermarketId,
+              removeSupermarketIds,
+            ),
+          ),
+        )
+        .run();
+    }
+    if (addSupermarketIds.length > 0) {
+      const rows = ids.flatMap((ingredientId) =>
+        addSupermarketIds.map((supermarketId) => ({ ingredientId, supermarketId })),
+      );
+      tx.insert(ingredientSupermarketUnavailable)
+        .values(rows)
+        .onConflictDoNothing()
+        .run();
+    }
+  });
   return { updatedIds: ids };
 }
 

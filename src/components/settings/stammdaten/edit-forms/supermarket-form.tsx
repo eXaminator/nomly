@@ -35,7 +35,6 @@ import { Label } from "@/components/ui/label";
 import { SelectSearch } from "@/components/ui/select-search";
 import { cn } from "@/lib/cn";
 
-import { ImpactSection } from "../impact-section";
 import type { EditFormProps } from "../list-shell";
 
 export type SupermarketItem = {
@@ -57,8 +56,16 @@ export function SupermarketForm({
   const [orderedCategories, setOrderedCategories] = React.useState<
     OrderedCategory[]
   >([]);
+  const [unavailableArticles, setUnavailableArticles] = React.useState<
+    Array<{ id: number; name: string }>
+  >([]);
   const [loadingDetail, setLoadingDetail] = React.useState(item != null);
   const [detailError, setDetailError] = React.useState<string | null>(null);
+  // Full category list, fetched once on mount — drives the "remaining" counter
+  // on the add-all button and is reused by addAllRemaining (no second fetch).
+  const [allCategories, setAllCategories] = React.useState<
+    Array<{ id: number; name: string }>
+  >([]);
 
   // In edit mode we only get the list-row shape (no orderedCategories) — fetch
   // the detail once on mount to hydrate the form.
@@ -79,6 +86,7 @@ export function SupermarketForm({
             categoryId: number;
             categoryName: string;
           }>;
+          unavailableArticles: Array<{ id: number; name: string }>;
         };
       })
       .then((detail) => {
@@ -89,6 +97,7 @@ export function SupermarketForm({
             categoryName: c.categoryName,
           })),
         );
+        setUnavailableArticles(detail.unavailableArticles ?? []);
       })
       .catch((e: unknown) => {
         if (cancelled) return;
@@ -104,16 +113,45 @@ export function SupermarketForm({
     };
   }, [item]);
 
+  // Fetch the full category list once on mount (both create and edit) so the
+  // add-all button can show how many categories are still missing.
+  React.useEffect(() => {
+    let cancelled = false;
+    fetch("/api/v1/categories?q=")
+      .then(async (res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return (await res.json()) as {
+          items: Array<{ id: number; name: string }>;
+        };
+      })
+      .then((body) => {
+        if (!cancelled) setAllCategories(body.items);
+      })
+      .catch(() => {
+        // Non-fatal: the counter just won't show; addAllRemaining falls back
+        // to fetching on click.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   React.useEffect(() => {
     const trimmed = name.trim();
     onPayloadChange(
       {
         name: trimmed,
         orderedCategoryIds: orderedCategories.map((c) => c.categoryId),
+        unavailableIngredientIds: unavailableArticles.map((a) => a.id),
       },
       trimmed.length > 0,
     );
-  }, [name, orderedCategories, onPayloadChange]);
+  }, [name, orderedCategories, unavailableArticles, onPayloadChange]);
+
+  const remainingCategories = React.useMemo(() => {
+    const taken = new Set(orderedCategories.map((c) => c.categoryId));
+    return allCategories.filter((c) => !taken.has(c.id));
+  }, [allCategories, orderedCategories]);
 
   function removeAt(index: number) {
     setOrderedCategories((prev) => prev.filter((_, i) => i !== index));
@@ -192,14 +230,21 @@ export function SupermarketForm({
     setAddingAll(true);
     setAddAllError(null);
     try {
-      const res = await fetch("/api/v1/categories?q=");
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const body = (await res.json()) as {
-        items: Array<{ id: number; name: string }>;
-      };
+      // Prefer the list fetched on mount; fall back to a fresh fetch if that
+      // request hadn't landed (or failed) yet.
+      let categories = allCategories;
+      if (categories.length === 0) {
+        const res = await fetch("/api/v1/categories?q=");
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const body = (await res.json()) as {
+          items: Array<{ id: number; name: string }>;
+        };
+        categories = body.items;
+        setAllCategories(body.items);
+      }
       setOrderedCategories((prev) => {
         const taken = new Set(prev.map((c) => c.categoryId));
-        const additions = body.items
+        const additions = categories
           .filter((i) => !taken.has(i.id))
           .map((i) => ({ categoryId: i.id, categoryName: i.name }));
         return [...prev, ...additions];
@@ -211,6 +256,36 @@ export function SupermarketForm({
     } finally {
       setAddingAll(false);
     }
+  }
+
+  const searchArticles = React.useCallback(
+    async (q: string) => {
+      const res = await fetch(
+        `/api/v1/ingredients/manage?q=${encodeURIComponent(q)}`,
+      );
+      if (!res.ok) return [];
+      const body = (await res.json()) as {
+        items: Array<{ id: number; name: string }>;
+      };
+      const taken = new Set(unavailableArticles.map((a) => a.id));
+      return body.items
+        .filter((a) => !taken.has(a.id))
+        .map((a) => ({ id: a.id, name: a.name }));
+    },
+    [unavailableArticles],
+  );
+
+  function addUnavailableArticle(picked: { id: number; name: string } | null) {
+    if (!picked) return;
+    setUnavailableArticles((prev) =>
+      prev.some((a) => a.id === picked.id)
+        ? prev
+        : [...prev, { id: picked.id, name: picked.name }],
+    );
+  }
+
+  function removeUnavailableArticle(id: number) {
+    setUnavailableArticles((prev) => prev.filter((a) => a.id !== id));
   }
 
   return (
@@ -281,7 +356,7 @@ export function SupermarketForm({
                 variant="outline"
                 size="sm"
                 onClick={addAllRemaining}
-                disabled={addingAll}
+                disabled={addingAll || remainingCategories.length === 0}
               >
                 {addingAll ? (
                   <Loader2 className="size-4 animate-spin" />
@@ -289,6 +364,9 @@ export function SupermarketForm({
                   <ListPlus className="size-4" />
                 )}
                 Alle verbleibenden Kategorien hinzufügen
+                {remainingCategories.length > 0
+                  ? ` (${remainingCategories.length})`
+                  : ""}
               </Button>
               {addAllError ? (
                 <span className="text-xs text-[var(--color-danger)]">
@@ -300,7 +378,40 @@ export function SupermarketForm({
         )}
       </div>
 
-      {item && <ImpactSection entityKind="supermarket" id={item.id} />}
+      {!loadingDetail && (
+        <div className="flex flex-col gap-2">
+          <Label>Nicht verfügbare Artikel</Label>
+          <p className="text-xs text-[var(--color-muted-fg)]">
+            Artikel, die dieser Supermarkt nicht führt. Auf der Einkaufsliste
+            werden sie in diesem Markt ausgegraut.
+          </p>
+          {unavailableArticles.length > 0 ? (
+            <ul className="flex flex-wrap gap-1.5">
+              {unavailableArticles.map((a) => (
+                <li key={a.id}>
+                  <span className="inline-flex items-center gap-1 rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-muted)] py-1 pl-2.5 pr-1 text-sm">
+                    {a.name}
+                    <button
+                      type="button"
+                      onClick={() => removeUnavailableArticle(a.id)}
+                      aria-label={`${a.name} entfernen`}
+                      className="inline-flex size-5 items-center justify-center rounded-md text-[var(--color-muted-fg)] hover:bg-[var(--color-bg)] hover:text-[var(--color-fg)]"
+                    >
+                      <X className="size-3.5" />
+                    </button>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          <SelectSearch
+            value={null}
+            onChange={addUnavailableArticle}
+            search={searchArticles}
+            placeholder="Artikel hinzufügen…"
+          />
+        </div>
+      )}
     </div>
   );
 }

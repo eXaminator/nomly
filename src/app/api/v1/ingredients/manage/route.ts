@@ -32,6 +32,7 @@ const upsertSchema = z.object({
   excludeFromShoppingList: z.boolean(),
   isEquipment: z.boolean().default(false),
   dietaryClass: z.enum(["vegan", "vegetarian", "meat"]).nullable(),
+  excludedSupermarketIds: z.array(z.number().int().positive()).default([]),
 });
 
 export function GET(request: Request) {

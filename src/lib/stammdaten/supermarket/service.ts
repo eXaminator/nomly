@@ -3,12 +3,14 @@ import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "../../../db/index.ts";
 import {
   category,
+  ingredient,
+  ingredientSupermarketUnavailable,
   supermarket,
   supermarketCategory,
 } from "../../../db/schema.ts";
 import { getImpact } from "../shared/impact.ts";
 import { runMerge, MergeError, type MergeResult } from "../shared/merge.ts";
-import type { ImpactRow } from "../shared/types.ts";
+import type { ImpactRow, Tx } from "../shared/types.ts";
 import { normalizeName, validateName } from "../shared/validation.ts";
 import { supermarketAdapter, type SupermarketRow } from "./adapter.ts";
 
@@ -27,12 +29,19 @@ export type SupermarketListItem = {
 
 export type SupermarketDetail = SupermarketListItem & {
   orderedCategories: SupermarketCategoryEntry[];
+  /** Articles not carried at this supermarket (`ingredient_supermarket_
+   *  unavailable`). The mirror of an ingredient's `excludedSupermarkets`. */
+  unavailableArticles: Array<{ id: number; name: string }>;
 };
 
 export type SupermarketUpsertInput = {
   name: string;
   /** Ordered list of category IDs that should belong to this supermarket. */
   orderedCategoryIds: number[];
+  /** Articles to mark unavailable at this supermarket. Replaces the full set of
+   *  `ingredient_supermarket_unavailable` rows for this supermarket. Omitted =
+   *  leave unchanged on update / none on create. */
+  unavailableIngredientIds?: number[];
 };
 
 export class SupermarketStammdatenError extends Error {
@@ -77,6 +86,55 @@ function loadOrderedCategories(
     .all();
 }
 
+function loadUnavailableArticles(
+  supermarketId: number,
+): Array<{ id: number; name: string }> {
+  return db
+    .select({ id: ingredient.id, name: ingredient.name })
+    .from(ingredientSupermarketUnavailable)
+    .innerJoin(
+      ingredient,
+      eq(ingredient.id, ingredientSupermarketUnavailable.ingredientId),
+    )
+    .where(eq(ingredientSupermarketUnavailable.supermarketId, supermarketId))
+    .orderBy(sql`unaccent(${ingredient.name})`)
+    .all();
+}
+
+/**
+ * Replace the supermarket's unavailable-article rows with the supplied set.
+ * De-dupes the ids and validates that each ingredient exists (an unknown id
+ * would otherwise surface as a raw FK 500). delete-all-then-insert, so the
+ * passed list becomes the new complete set.
+ */
+function writeUnavailableArticles(
+  tx: Tx,
+  supermarketId: number,
+  ingredientIds: number[],
+): void {
+  tx.delete(ingredientSupermarketUnavailable)
+    .where(eq(ingredientSupermarketUnavailable.supermarketId, supermarketId))
+    .run();
+  const ids = Array.from(new Set(ingredientIds));
+  if (ids.length === 0) return;
+  const found = tx
+    .select({ id: ingredient.id })
+    .from(ingredient)
+    .where(inArray(ingredient.id, ids))
+    .all();
+  if (found.length !== ids.length) {
+    const have = new Set(found.map((r) => r.id));
+    const missing = ids.filter((id) => !have.has(id));
+    throw new SupermarketStammdatenError(
+      `Unbekannte Artikel: ${missing.join(", ")}.`,
+      404,
+    );
+  }
+  tx.insert(ingredientSupermarketUnavailable)
+    .values(ids.map((ingredientId) => ({ ingredientId, supermarketId })))
+    .run();
+}
+
 export function listSupermarkets(query?: string): SupermarketListItem[] {
   const base =
     !query || query.trim().length === 0
@@ -116,6 +174,7 @@ export function getSupermarketDetail(id: number): SupermarketDetail | null {
     name: row.name,
     orderedCategoryCount: orderedCategories.length,
     orderedCategories,
+    unavailableArticles: loadUnavailableArticles(id),
   };
 }
 
@@ -192,6 +251,7 @@ export function createSupermarket(
         )
         .run();
     }
+    writeUnavailableArticles(tx, newId, input.unavailableIngredientIds ?? []);
     return newId;
   });
   return getSupermarketDetail(id) ?? unreachable();
@@ -227,6 +287,11 @@ export function updateSupermarket(
           })),
         )
         .run();
+    }
+    // Only touch exclusions when the caller supplied them — an omitted field
+    // leaves the existing rows alone.
+    if (input.unavailableIngredientIds !== undefined) {
+      writeUnavailableArticles(tx, id, input.unavailableIngredientIds);
     }
   });
   return getSupermarketDetail(id) ?? unreachable();

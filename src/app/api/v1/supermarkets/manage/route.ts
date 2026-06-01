@@ -10,6 +10,7 @@ import {
 const upsertSchema = z.object({
   name: z.string().min(1),
   orderedCategoryIds: z.array(z.number().int().positive()).default([]),
+  unavailableIngredientIds: z.array(z.number().int().positive()).default([]),
 });
 
 export function GET(request: Request) {

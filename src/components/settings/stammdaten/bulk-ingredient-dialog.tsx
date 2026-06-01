@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Loader2 } from "lucide-react";
+import { Loader2, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -41,6 +41,17 @@ async function searchCategories(q: string): Promise<SelectSearchItem[]> {
   return body.items;
 }
 
+async function fetchSupermarkets(q: string): Promise<SelectSearchItem[]> {
+  const res = await fetch(
+    `/api/v1/supermarkets/manage?q=${encodeURIComponent(q)}`,
+  );
+  if (!res.ok) return [];
+  const body = (await res.json()) as {
+    items: Array<{ id: number; name: string }>;
+  };
+  return body.items.map((s) => ({ id: s.id, name: s.name }));
+}
+
 type Props = {
   open: boolean;
   selectedCount: number;
@@ -62,6 +73,12 @@ export function BulkIngredientDialog({
   const [diet, setDiet] = React.useState<Exclude<DietaryClass, null>>("vegan");
   const [excludeMode, setExcludeMode] = React.useState<FieldMode>("keep");
   const [excludeValue, setExcludeValue] = React.useState(false);
+  const [addSupermarkets, setAddSupermarkets] = React.useState<
+    SelectSearchItem[]
+  >([]);
+  const [removeSupermarkets, setRemoveSupermarkets] = React.useState<
+    SelectSearchItem[]
+  >([]);
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
@@ -76,11 +93,40 @@ export function BulkIngredientDialog({
     setDiet("vegan");
     setExcludeMode("keep");
     setExcludeValue(false);
+    setAddSupermarkets([]);
+    setRemoveSupermarkets([]);
     setError(null);
   }, [open]);
 
+  // Exclude already-chosen markets (in either list) from both pickers so a
+  // supermarket can't land in "add" and "remove" at the same time.
+  const searchAddSupermarkets = React.useCallback(
+    async (q: string) => {
+      const taken = new Set([
+        ...addSupermarkets.map((s) => s.id),
+        ...removeSupermarkets.map((s) => s.id),
+      ]);
+      return (await fetchSupermarkets(q)).filter((s) => !taken.has(s.id));
+    },
+    [addSupermarkets, removeSupermarkets],
+  );
+  const searchRemoveSupermarkets = React.useCallback(
+    async (q: string) => {
+      const taken = new Set([
+        ...addSupermarkets.map((s) => s.id),
+        ...removeSupermarkets.map((s) => s.id),
+      ]);
+      return (await fetchSupermarkets(q)).filter((s) => !taken.has(s.id));
+    },
+    [addSupermarkets, removeSupermarkets],
+  );
+
   const patchHasAnyField =
-    categoryMode !== "keep" || dietMode !== "keep" || excludeMode !== "keep";
+    categoryMode !== "keep" ||
+    dietMode !== "keep" ||
+    excludeMode !== "keep" ||
+    addSupermarkets.length > 0 ||
+    removeSupermarkets.length > 0;
 
   async function apply() {
     if (!patchHasAnyField) return;
@@ -100,6 +146,12 @@ export function BulkIngredientDialog({
       else if (dietMode === "clear") patch.dietaryClass = null;
       if (excludeMode === "set") patch.excludeFromShoppingList = excludeValue;
       else if (excludeMode === "clear") patch.excludeFromShoppingList = false;
+      if (addSupermarkets.length > 0) {
+        patch.addExcludedSupermarketIds = addSupermarkets.map((s) => s.id);
+      }
+      if (removeSupermarkets.length > 0) {
+        patch.removeExcludedSupermarketIds = removeSupermarkets.map((s) => s.id);
+      }
       const res = await fetch("/api/v1/ingredients/bulk", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -181,6 +233,35 @@ export function BulkIngredientDialog({
               <span>{excludeValue ? "Ja" : "Nein"}</span>
             </label>
           </FieldRow>
+          <div className="flex flex-col gap-3 rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-card)] p-3">
+            <span className="text-sm font-medium">Nicht verfügbar bei</span>
+            <SupermarketPicker
+              label="Als nicht verfügbar markieren"
+              items={addSupermarkets}
+              onAdd={(s) =>
+                setAddSupermarkets((prev) =>
+                  prev.some((x) => x.id === s.id) ? prev : [...prev, s],
+                )
+              }
+              onRemove={(id) =>
+                setAddSupermarkets((prev) => prev.filter((x) => x.id !== id))
+              }
+              search={searchAddSupermarkets}
+            />
+            <SupermarketPicker
+              label="Verfügbarkeit wiederherstellen"
+              items={removeSupermarkets}
+              onAdd={(s) =>
+                setRemoveSupermarkets((prev) =>
+                  prev.some((x) => x.id === s.id) ? prev : [...prev, s],
+                )
+              }
+              onRemove={(id) =>
+                setRemoveSupermarkets((prev) => prev.filter((x) => x.id !== id))
+              }
+              search={searchRemoveSupermarkets}
+            />
+          </div>
           {error ? (
             <p className="text-sm text-[var(--color-danger)]">{error}</p>
           ) : null}
@@ -237,6 +318,53 @@ function FieldRow({
         </div>
       </div>
       <div className={mode === "set" ? "" : "opacity-50"}>{children}</div>
+    </div>
+  );
+}
+
+function SupermarketPicker({
+  label,
+  items,
+  onAdd,
+  onRemove,
+  search,
+}: {
+  label: string;
+  items: SelectSearchItem[];
+  onAdd: (s: SelectSearchItem) => void;
+  onRemove: (id: number) => void;
+  search: (q: string) => Promise<SelectSearchItem[]>;
+}) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      <span className="text-xs text-[var(--color-muted-fg)]">{label}</span>
+      {items.length > 0 ? (
+        <ul className="flex flex-wrap gap-1.5">
+          {items.map((s) => (
+            <li key={s.id}>
+              <span className="inline-flex items-center gap-1 rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-muted)] py-1 pl-2.5 pr-1 text-sm">
+                {s.name}
+                <button
+                  type="button"
+                  onClick={() => onRemove(s.id)}
+                  aria-label={`${s.name} entfernen`}
+                  className="inline-flex size-5 items-center justify-center rounded-md text-[var(--color-muted-fg)] hover:bg-[var(--color-bg)] hover:text-[var(--color-fg)]"
+                >
+                  <X className="size-3.5" />
+                </button>
+              </span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      <SelectSearch
+        value={null}
+        onChange={(picked) => {
+          if (picked) onAdd(picked);
+        }}
+        search={search}
+        placeholder="Supermarkt hinzufügen…"
+      />
     </div>
   );
 }

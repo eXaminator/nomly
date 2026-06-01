@@ -145,6 +145,28 @@ const columns: ColumnDef<IngredientItem>[] = [
     sortValue: (item) => item.excludeFromShoppingList,
   },
   {
+    key: "unavailable",
+    header: "Nicht verfügbar bei",
+    cell: (item) => {
+      if (item.excludedSupermarkets.length === 0) {
+        return <span className="text-[var(--color-muted-fg)]">—</span>;
+      }
+      const visible = item.excludedSupermarkets.slice(0, 3);
+      const rest = item.excludedSupermarkets.length - visible.length;
+      return (
+        <span className="flex flex-wrap gap-1">
+          {visible.map((s) => (
+            <Badge key={s.id} variant="outline">
+              {s.name}
+            </Badge>
+          ))}
+          {rest > 0 && <Badge variant="outline">+{rest}</Badge>}
+        </span>
+      );
+    },
+    sortValue: (item) => item.excludedSupermarkets.length,
+  },
+  {
     key: "refs",
     header: "Verwendung",
     cell: (item) => (

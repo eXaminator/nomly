@@ -49,6 +49,8 @@ export type IngredientItem = {
   excludeFromShoppingList: boolean;
   isEquipment: boolean;
   dietaryClass: "vegan" | "vegetarian" | "meat" | null;
+  /** Supermarkets this article is marked unavailable at. */
+  excludedSupermarkets: Array<{ id: number; name: string }>;
   recipeRefCount: number;
 };
 
@@ -139,6 +141,9 @@ export function IngredientForm({
   const [dietaryClass, setDietaryClass] = React.useState<
     "vegan" | "vegetarian" | "meat" | null
   >(item?.dietaryClass ?? null);
+  const [excludedSupermarkets, setExcludedSupermarkets] = React.useState<
+    Array<{ id: number; name: string }>
+  >(item?.excludedSupermarkets ?? []);
 
   // Renames the user made to the canonical name or to EXISTING aliases (whose
   // key encodes the original name). New/removed aliases aren't renames. Used to
@@ -225,6 +230,7 @@ export function IngredientForm({
         excludeFromShoppingList,
         isEquipment,
         dietaryClass,
+        excludedSupermarketIds: excludedSupermarkets.map((s) => s.id),
         // Propagation rider — ignored by the server unless propagateRenames is
         // true (and only applied for exact display_name matches).
         renamePairs,
@@ -241,6 +247,7 @@ export function IngredientForm({
     excludeFromShoppingList,
     isEquipment,
     dietaryClass,
+    excludedSupermarkets,
     renamePairs,
     propagateRenames,
     onPayloadChange,
@@ -253,6 +260,36 @@ export function IngredientForm({
       items: Array<{ id: number; name: string }>;
     };
     return body.items;
+  }
+
+  const searchSupermarkets = React.useCallback(
+    async (q: string) => {
+      const res = await fetch(
+        `/api/v1/supermarkets/manage?q=${encodeURIComponent(q)}`,
+      );
+      if (!res.ok) return [];
+      const body = (await res.json()) as {
+        items: Array<{ id: number; name: string }>;
+      };
+      const taken = new Set(excludedSupermarkets.map((s) => s.id));
+      return body.items
+        .filter((s) => !taken.has(s.id))
+        .map((s) => ({ id: s.id, name: s.name }));
+    },
+    [excludedSupermarkets],
+  );
+
+  function addExcludedSupermarket(picked: { id: number; name: string } | null) {
+    if (!picked) return;
+    setExcludedSupermarkets((prev) =>
+      prev.some((s) => s.id === picked.id)
+        ? prev
+        : [...prev, { id: picked.id, name: picked.name }],
+    );
+  }
+
+  function removeExcludedSupermarket(id: number) {
+    setExcludedSupermarkets((prev) => prev.filter((s) => s.id !== id));
   }
 
   function addConversion() {
@@ -590,6 +627,39 @@ export function IngredientForm({
             </button>
           ))}
         </div>
+      </div>
+
+      <div className="flex flex-col gap-2">
+        <Label>Nicht verfügbar bei</Label>
+        <p className="text-xs text-[var(--color-muted-fg)]">
+          Supermärkte, die diesen Artikel nicht führen. Auf der Einkaufsliste
+          werden passende Einträge im jeweiligen Markt ausgegraut.
+        </p>
+        {excludedSupermarkets.length > 0 ? (
+          <ul className="flex flex-wrap gap-1.5">
+            {excludedSupermarkets.map((s) => (
+              <li key={s.id}>
+                <span className="inline-flex items-center gap-1 rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-muted)] py-1 pl-2.5 pr-1 text-sm">
+                  {s.name}
+                  <button
+                    type="button"
+                    onClick={() => removeExcludedSupermarket(s.id)}
+                    aria-label={`${s.name} entfernen`}
+                    className="inline-flex size-5 items-center justify-center rounded-md text-[var(--color-muted-fg)] hover:bg-[var(--color-bg)] hover:text-[var(--color-fg)]"
+                  >
+                    <X className="size-3.5" />
+                  </button>
+                </span>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+        <SelectSearch
+          value={null}
+          onChange={addExcludedSupermarket}
+          search={searchSupermarkets}
+          placeholder="Supermarkt hinzufügen…"
+        />
       </div>
 
       {item && <ImpactSection entityKind="ingredient" id={item.id} />}

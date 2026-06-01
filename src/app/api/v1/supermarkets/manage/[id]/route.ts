@@ -15,6 +15,7 @@ import { publishShoppingChanged } from "@/lib/shopping/realtime";
 const updateSchema = z.object({
   name: z.string().min(1),
   orderedCategoryIds: z.array(z.number().int().positive()).default([]),
+  unavailableIngredientIds: z.array(z.number().int().positive()).default([]),
 });
 
 export async function GET(

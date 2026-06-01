@@ -36,6 +36,7 @@ const updateSchema = z.object({
   defaultCategoryId: z.number().int().positive().nullable(),
   excludeFromShoppingList: z.boolean(),
   dietaryClass: z.enum(["vegan", "vegetarian", "meat"]).nullable(),
+  excludedSupermarketIds: z.array(z.number().int().positive()).default([]),
   // Optional propagation rider: rewrite exact display_name matches on this
   // ingredient's existing recipe rows when a name/alias was renamed.
   renamePairs: z

@@ -11,13 +11,21 @@ const schema = z
       defaultCategoryId: z.number().int().positive().nullable().optional(),
       dietaryClass: z.enum(["vegan", "vegetarian", "meat"]).nullable().optional(),
       excludeFromShoppingList: z.boolean().optional(),
+      addExcludedSupermarketIds: z
+        .array(z.number().int().positive())
+        .optional(),
+      removeExcludedSupermarketIds: z
+        .array(z.number().int().positive())
+        .optional(),
     }),
   })
   .refine(
     (v) =>
       v.patch.defaultCategoryId !== undefined ||
       v.patch.dietaryClass !== undefined ||
-      v.patch.excludeFromShoppingList !== undefined,
+      v.patch.excludeFromShoppingList !== undefined ||
+      (v.patch.addExcludedSupermarketIds?.length ?? 0) > 0 ||
+      (v.patch.removeExcludedSupermarketIds?.length ?? 0) > 0,
     { message: "Patch is empty." },
   );
 
