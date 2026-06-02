@@ -373,20 +373,10 @@ export function BulkReparseDialog({
         }),
       });
       if (!r.ok) throw new Error("apply failed");
-      const data = (await r.json()) as {
-        updatedRecipes: number;
-        updatedGroups: number;
-        skipped: number;
-      };
       setPendingNew(null);
-      // Re-scan first (it resets the summary), THEN show the result so the
-      // confirmation survives the refresh.
-      await runScan();
-      setSummary(
-        `${data.updatedGroups} Zutaten in ${data.updatedRecipes} Rezepten aktualisiert` +
-          (data.skipped > 0 ? ` (${data.skipped} übersprungen)` : "") +
-          ".",
-      );
+      // Saved — close the dialog. Reopening triggers a fresh scan (the open
+      // effect resets loadedRef), so there's no need to re-run the parse here.
+      onOpenChange(false);
     } catch {
       setError("Anwenden fehlgeschlagen.");
     } finally {
