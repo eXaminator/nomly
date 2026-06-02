@@ -38,6 +38,7 @@ export type UnitItem = {
   baseUnitName: string | null;
   factor: number;
   isContainer: boolean;
+  isGlobalDefault: boolean;
   recipeRefCount: number;
 };
 
@@ -73,6 +74,9 @@ export function UnitForm({ item, onPayloadChange }: EditFormProps<UnitItem>) {
   const [isContainer, setIsContainer] = React.useState<boolean>(
     item?.isContainer ?? false,
   );
+  const [isGlobalDefault, setIsGlobalDefault] = React.useState<boolean>(
+    item?.isGlobalDefault ?? false,
+  );
   const impact = useImpactData("unit", item?.id ?? -1, item != null);
 
   React.useEffect(() => {
@@ -96,6 +100,7 @@ export function UnitForm({ item, onPayloadChange }: EditFormProps<UnitItem>) {
         baseUnitId: baseUnit?.id ?? null,
         factor: Number.isFinite(factor) ? factor : 0,
         isContainer,
+        setAsGlobalDefault: isGlobalDefault,
       },
       valid,
     );
@@ -108,6 +113,7 @@ export function UnitForm({ item, onPayloadChange }: EditFormProps<UnitItem>) {
     baseUnit,
     factorText,
     isContainer,
+    isGlobalDefault,
     onPayloadChange,
   ]);
 
@@ -269,6 +275,21 @@ export function UnitForm({ item, onPayloadChange }: EditFormProps<UnitItem>) {
         <Switch
           checked={isContainer}
           onCheckedChange={(v) => setIsContainer(Boolean(v))}
+        />
+      </div>
+
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <Label>Globale Standardeinheit</Label>
+          <p className="text-xs text-[var(--color-muted-fg)]">
+            Wird Mengen-Zeilen ohne explizite Einheit zugewiesen (z.&nbsp;B.
+            „2&nbsp;Tomaten&rdquo;). Nur eine Einheit kann das sein — Aktivieren
+            schaltet automatisch von der bisherigen um.
+          </p>
+        </div>
+        <Switch
+          checked={isGlobalDefault}
+          onCheckedChange={(v) => setIsGlobalDefault(Boolean(v))}
         />
       </div>
     </div>

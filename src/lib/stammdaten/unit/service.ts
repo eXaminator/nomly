@@ -15,6 +15,10 @@ import {
 import { runMerge, MergeError, type MergeResult } from "../shared/merge.ts";
 import type { ImpactRow } from "../shared/types.ts";
 import {
+  getGlobalDefaultUnitId,
+  setGlobalDefaultUnitId,
+} from "../../settings/global-default-unit.ts";
+import {
   dedupeAliasesIgnoreCase,
   findNameCollision,
   normalizeName,
@@ -38,6 +42,9 @@ export type UnitListItem = {
   baseUnitName: string | null;
   factor: number;
   isContainer: boolean;
+  /** True for the single unit configured as the global default (applied to a
+   *  quantity-bearing line with no explicit unit). */
+  isGlobalDefault: boolean;
   recipeRefCount: number;
 };
 
@@ -52,6 +59,9 @@ export type UnitUpsertInput = {
   baseUnitId: number | null;
   factor: number;
   isContainer: boolean;
+  /** When true, point the global-default-unit setting at this unit on save
+   *  (single-select; overwrites any previous pointer). */
+  setAsGlobalDefault?: boolean;
 };
 
 export class UnitStammdatenError extends Error {
@@ -184,6 +194,7 @@ export function listUnitsManaged(query?: string): UnitListItem[] {
   const aliases = loadAliasesGrouped(ids);
   const recipeCounts = loadRecipeRefCounts(ids);
   const baseUnitNames = resolveBaseUnitNames(base.map((r) => r.baseUnitId));
+  const globalDefaultId = getGlobalDefaultUnitId();
   return base.map((row) => ({
     id: row.id,
     name: row.name,
@@ -195,6 +206,7 @@ export function listUnitsManaged(query?: string): UnitListItem[] {
       row.baseUnitId != null ? baseUnitNames.get(row.baseUnitId) ?? null : null,
     factor: row.factor,
     isContainer: row.isContainer,
+    isGlobalDefault: row.id === globalDefaultId,
     recipeRefCount: recipeCounts.get(row.id) ?? 0,
   }));
 }
@@ -217,6 +229,7 @@ export function getUnitDetail(id: number): UnitListItem | null {
       row.baseUnitId != null ? baseUnitNames.get(row.baseUnitId) ?? null : null,
     factor: row.factor,
     isContainer: row.isContainer,
+    isGlobalDefault: row.id === getGlobalDefaultUnitId(),
     recipeRefCount: recipeCounts.get(row.id) ?? 0,
   };
 }
@@ -357,6 +370,7 @@ export function createUnit(input: UnitUpsertInput): UnitListItem {
     }
     return newId;
   });
+  if (input.setAsGlobalDefault) setGlobalDefaultUnitId(id);
   return getUnitDetail(id) ?? unreachable();
 }
 
@@ -399,6 +413,7 @@ export function updateUnit(id: number, input: UnitUpsertInput): UnitListItem {
         .run();
     }
   });
+  if (input.setAsGlobalDefault) setGlobalDefaultUnitId(id);
   return getUnitDetail(id) ?? unreachable();
 }
 

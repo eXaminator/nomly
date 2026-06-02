@@ -148,3 +148,50 @@ describe("getImpactForUnits — linked ingredient conversions", () => {
     expect(impact.linkedIngredients).toEqual([]);
   });
 });
+
+describe("unit service — global default unit", () => {
+  it("setAsGlobalDefault points the setting at the unit and switches over", () => {
+    const a = createUnit({
+      name: "GD-A",
+      plural: null,
+      aliases: [],
+      aliasPlurals: {},
+      dimension: "count",
+      baseUnitId: null,
+      factor: 1,
+      isContainer: false,
+      setAsGlobalDefault: true,
+    });
+    expect(getUnitDetail(a.id)?.isGlobalDefault).toBe(true);
+
+    // Marking a second unit switches the pointer; the first is no longer it.
+    const b = createUnit({
+      name: "GD-B",
+      plural: null,
+      aliases: [],
+      aliasPlurals: {},
+      dimension: "count",
+      baseUnitId: null,
+      factor: 1,
+      isContainer: false,
+      setAsGlobalDefault: true,
+    });
+    expect(getUnitDetail(b.id)?.isGlobalDefault).toBe(true);
+    expect(getUnitDetail(a.id)?.isGlobalDefault).toBe(false);
+
+    // updateUnit can also claim it.
+    updateUnit(a.id, {
+      name: "GD-A",
+      plural: null,
+      aliases: [],
+      aliasPlurals: {},
+      dimension: "count",
+      baseUnitId: null,
+      factor: 1,
+      isContainer: false,
+      setAsGlobalDefault: true,
+    });
+    expect(getUnitDetail(a.id)?.isGlobalDefault).toBe(true);
+    expect(getUnitDetail(b.id)?.isGlobalDefault).toBe(false);
+  });
+});
