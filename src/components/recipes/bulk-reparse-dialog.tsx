@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { ChevronDown, ChevronRight, Loader2 } from "lucide-react";
+import { ChevronDown, ChevronRight, Loader2, Volume2, VolumeX } from "lucide-react";
 import {
   Dialog,
   DialogBody,
@@ -137,6 +137,13 @@ type ScanEntry = {
 };
 type EntryState = { selected: boolean; editing: boolean; draft: DraftIngredient[] };
 
+type MutedItem = {
+  id: number;
+  recipeId: number;
+  recipeTitle: string;
+  rawLine: string | null;
+};
+
 export function BulkReparseDialog({
   open,
   onOpenChange,
@@ -158,6 +165,79 @@ export function BulkReparseDialog({
   const inflect = React.useMemo(() => buildUnitInflector(unitForms), [unitForms]);
   const loadedRef = React.useRef(false);
   const scanAbortRef = React.useRef<AbortController | null>(null);
+
+  // Muting. Local sets hide items muted during this session without a rescan
+  // (the scan already excludes server-side mutes on reopen). The "Muted" tab
+  // is fed by the GET endpoint.
+  const [view, setView] = React.useState<"open" | "muted">("open");
+  const [mutedRecipes, setMutedRecipes] = React.useState<Set<number>>(new Set());
+  const [mutedLines, setMutedLines] = React.useState<Set<string>>(new Set());
+  const [mutedList, setMutedList] = React.useState<MutedItem[]>([]);
+  const [mutedLoading, setMutedLoading] = React.useState(false);
+
+  const lineKey = (recipeId: number, rawLine: string) => `${recipeId}\n${rawLine}`;
+
+  const loadMuted = React.useCallback(async () => {
+    setMutedLoading(true);
+    try {
+      const r = await fetch("/api/v1/recipes/reparse-mutes");
+      if (r.ok) {
+        const data = (await r.json()) as { mutes: MutedItem[] };
+        setMutedList(data.mutes);
+      }
+    } catch {
+      // non-critical
+    } finally {
+      setMutedLoading(false);
+    }
+  }, []);
+
+  async function muteLine(i: number) {
+    const e = entries[i];
+    setMutedLines((p) => new Set(p).add(lineKey(e.recipeId, e.rawLine)));
+    setEntryState(i, { selected: false });
+    await fetch("/api/v1/recipes/reparse-mutes", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ recipeId: e.recipeId, rawLine: e.rawLine }),
+    }).catch(() => {});
+    void loadMuted();
+  }
+
+  async function muteRecipe(recipeId: number, indices: number[]) {
+    setMutedRecipes((p) => new Set(p).add(recipeId));
+    setStates((prev) =>
+      prev.map((s, idx) => (indices.includes(idx) ? { ...s, selected: false } : s)),
+    );
+    await fetch("/api/v1/recipes/reparse-mutes", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ recipeId }),
+    }).catch(() => {});
+    void loadMuted();
+  }
+
+  async function unmute(m: MutedItem) {
+    await fetch(`/api/v1/recipes/reparse-mutes/${m.id}`, { method: "DELETE" }).catch(
+      () => {},
+    );
+    setMutedList((p) => p.filter((x) => x.id !== m.id));
+    // Allow it back into the open list (it's still in `entries`); a full
+    // resurface for never-loaded items happens on the next scan.
+    if (m.rawLine == null) {
+      setMutedRecipes((p) => {
+        const n = new Set(p);
+        n.delete(m.recipeId);
+        return n;
+      });
+    } else {
+      setMutedLines((p) => {
+        const n = new Set(p);
+        n.delete(lineKey(m.recipeId, m.rawLine!));
+        return n;
+      });
+    }
+  }
 
   const runScan = React.useCallback(async () => {
     // Cancel any in-flight scan before starting a new one. Aborting the fetch
@@ -200,7 +280,11 @@ export function BulkReparseDialog({
   React.useEffect(() => {
     if (open && !loadedRef.current) {
       loadedRef.current = true;
+      setView("open");
+      setMutedRecipes(new Set());
+      setMutedLines(new Set());
       void runScan();
+      void loadMuted();
     }
     if (!open) {
       loadedRef.current = false;
@@ -208,8 +292,9 @@ export function BulkReparseDialog({
       setEntries([]);
       setStates([]);
       setSummary(null);
+      setMutedList([]);
     }
-  }, [open, runScan]);
+  }, [open, runScan, loadMuted]);
 
   // Group entry indices by recipe, preserving scan order.
   const recipeGroups = React.useMemo(() => {
@@ -226,6 +311,22 @@ export function BulkReparseDialog({
     });
     return order.map((id) => ({ recipeId: id, ...byRecipe.get(id)! }));
   }, [entries]);
+
+  // Groups with locally-muted recipes/lines removed (the "Offen" tab view).
+  const visibleGroups = React.useMemo(
+    () =>
+      recipeGroups
+        .filter((g) => !mutedRecipes.has(g.recipeId))
+        .map((g) => ({
+          ...g,
+          indices: g.indices.filter(
+            (i) => !mutedLines.has(lineKey(entries[i].recipeId, entries[i].rawLine)),
+          ),
+        }))
+        .filter((g) => g.indices.length > 0),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [recipeGroups, mutedRecipes, mutedLines, entries],
+  );
 
   const selectedCount = states.filter((s) => s.selected).length;
   const selectedRecipeCount = new Set(
@@ -310,7 +411,11 @@ export function BulkReparseDialog({
     });
   }
   function setAll(value: boolean) {
-    setStates((prev) => prev.map((s) => ({ ...s, selected: value })));
+    // Only (de)select currently-visible entries — never re-select a muted one.
+    const visibleIdx = new Set(visibleGroups.flatMap((g) => g.indices));
+    setStates((prev) =>
+      prev.map((s, idx) => (visibleIdx.has(idx) ? { ...s, selected: value } : s)),
+    );
   }
 
   /** Collect the selected entries' final rows, grouped by recipe, plus the
@@ -398,15 +503,77 @@ export function BulkReparseDialog({
             </DialogDescription>
           </DialogHeader>
           <DialogBody className="flex-1 overflow-y-auto">
-            {loading ? (
+            <div className="mb-3 flex items-center gap-1 border-b border-[var(--color-border)]">
+              <button
+                type="button"
+                onClick={() => setView("open")}
+                className={cn(
+                  "-mb-px border-b-2 px-3 py-1.5 text-sm",
+                  view === "open"
+                    ? "border-[var(--color-accent)] font-medium"
+                    : "border-transparent text-[var(--color-muted-fg)] hover:text-[var(--color-fg)]",
+                )}
+              >
+                Offen
+              </button>
+              <button
+                type="button"
+                onClick={() => setView("muted")}
+                className={cn(
+                  "-mb-px flex items-center gap-1 border-b-2 px-3 py-1.5 text-sm",
+                  view === "muted"
+                    ? "border-[var(--color-accent)] font-medium"
+                    : "border-transparent text-[var(--color-muted-fg)] hover:text-[var(--color-fg)]",
+                )}
+              >
+                <VolumeX className="size-3.5" />
+                Stummgeschaltet
+                {mutedList.length > 0 ? ` (${mutedList.length})` : ""}
+              </button>
+            </div>
+            {view === "muted" ? (
+              mutedLoading ? (
+                <div className="flex items-center gap-2 py-8 text-[var(--color-muted-fg)]">
+                  <Loader2 className="size-4 animate-spin" /> Lädt…
+                </div>
+              ) : mutedList.length === 0 ? (
+                <p className="py-8 text-[var(--color-muted-fg)]">
+                  Nichts stummgeschaltet.
+                </p>
+              ) : (
+                <ul className="flex flex-col divide-y divide-[var(--color-border)] overflow-hidden rounded-[var(--radius)] border border-[var(--color-border)]">
+                  {mutedList.map((m) => (
+                    <li key={m.id} className="flex items-center gap-2 px-3 py-2">
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium">{m.recipeTitle}</p>
+                        <p className="truncate text-xs text-[var(--color-muted-fg)]">
+                          {m.rawLine == null ? "Ganzes Rezept" : `„${m.rawLine}“`}
+                        </p>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => void unmute(m)}
+                      >
+                        <Volume2 className="size-4" /> Aufheben
+                      </Button>
+                    </li>
+                  ))}
+                </ul>
+              )
+            ) : loading ? (
               <div className="flex items-center gap-2 py-8 text-[var(--color-muted-fg)]">
                 <Loader2 className="size-4 animate-spin" /> Prüfe Rezepte…
               </div>
             ) : error ? (
               <p className="py-8 text-[var(--color-danger,#c00)]">{error}</p>
-            ) : entries.length === 0 ? (
+            ) : visibleGroups.length === 0 ? (
               <p className="py-8 text-[var(--color-muted-fg)]">
-                {summary ?? "Keine Änderungen gefunden."}
+                {summary ??
+                  (entries.length === 0
+                    ? "Keine Änderungen gefunden."
+                    : "Alle Änderungen stummgeschaltet.")}
               </p>
             ) : (
               <div className="flex flex-col gap-2">
@@ -429,7 +596,7 @@ export function BulkReparseDialog({
                     Alle abwählen
                   </button>
                 </div>
-                {recipeGroups.map((g) => {
+                {visibleGroups.map((g) => {
                   const allSel = g.indices.every((i) => states[i]?.selected);
                   const someSel = g.indices.some((i) => states[i]?.selected);
                   const isOpen = expanded.has(g.recipeId);
@@ -463,6 +630,15 @@ export function BulkReparseDialog({
                             ({g.indices.length})
                           </span>
                         </button>
+                        <button
+                          type="button"
+                          className="shrink-0 rounded p-1 text-[var(--color-muted-fg)] hover:bg-[var(--color-muted)] hover:text-[var(--color-fg)]"
+                          title="Ganzes Rezept stummschalten"
+                          aria-label={`${g.title} stummschalten`}
+                          onClick={() => void muteRecipe(g.recipeId, g.indices)}
+                        >
+                          <VolumeX className="size-4" />
+                        </button>
                       </div>
                       {isOpen ? (
                         <div className="divide-y divide-[var(--color-border)] border-t border-[var(--color-border)]">
@@ -486,12 +662,23 @@ export function BulkReparseDialog({
                                     }
                                   />
                                   <div className="min-w-0 flex-1">
-                                    <p
-                                      className="truncate text-xs text-[var(--color-muted-fg)]"
-                                      title={entry.rawLine}
-                                    >
-                                      Original: „{entry.rawLine}“
-                                    </p>
+                                    <div className="flex items-center gap-2">
+                                      <p
+                                        className="min-w-0 flex-1 truncate text-xs text-[var(--color-muted-fg)]"
+                                        title={entry.rawLine}
+                                      >
+                                        Original: „{entry.rawLine}“
+                                      </p>
+                                      <button
+                                        type="button"
+                                        className="shrink-0 rounded p-1 text-[var(--color-muted-fg)] hover:bg-[var(--color-muted)] hover:text-[var(--color-fg)]"
+                                        title="Diese Zeile stummschalten"
+                                        aria-label="Zeile stummschalten"
+                                        onClick={() => void muteLine(i)}
+                                      >
+                                        <VolumeX className="size-3.5" />
+                                      </button>
+                                    </div>
                                     <div className="mt-1 grid gap-3 text-sm md:grid-cols-2">
                                       <div>
                                         <div className="mb-0.5 text-xs font-medium uppercase tracking-wide text-[var(--color-muted-fg)]">
