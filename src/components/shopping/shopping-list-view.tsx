@@ -12,11 +12,16 @@ import {
   Trash2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Tabs, TabsContent, TabsList, TabsTrigger, TabCount } from "@/components/ui/tabs";
 import { RecipePreviewDialog } from "@/components/planner/recipe-preview-dialog";
-import { cn } from "@/lib/cn";
 import type { ShoppingItemView } from "@/lib/shopping/items";
+import {
+  groupShoppingItems,
+  type SupermarketSummary,
+} from "@/lib/shopping/group-items";
 import { countNeededItemsPerSupermarket } from "@/lib/shopping/supermarket-availability";
 import { ShoppingItemRow } from "./shopping-item-row";
+import { ShoppingDoneState } from "./shopping-done";
 import { AddItemDialog } from "./add-item-dialog";
 import { AddMealsDialog } from "./add-meals-dialog";
 import { AddStapleGroupDialog } from "./add-staple-group-dialog";
@@ -56,11 +61,7 @@ import { kickSync } from "@/lib/shopping/offline/sync";
 
 const STORAGE_KEY = "nomly.shopping.supermarketId";
 
-export type SupermarketSummary = {
-  id: number;
-  name: string;
-  categories: Array<{ categoryId: number; sortOrder: number }>;
-};
+export type { SupermarketSummary } from "@/lib/shopping/group-items";
 
 type Props = {
   initialItems: ShoppingItemView[];
@@ -105,6 +106,10 @@ export function ShoppingListView({
   // across reloads on purpose — undo is meant for "wait, I already had that"
   // moments while shopping, not for time travel.
   const [recentChecks, setRecentChecks] = React.useState<number[]>([]);
+  // Which list the user is looking at: still-to-buy ("open") or already
+  // checked off ("checked"). Checking the last item leaves them on "open" so
+  // they land on the celebratory done screen rather than an empty list.
+  const [activeTab, setActiveTab] = React.useState<"open" | "checked">("open");
 
   const [connectivity, setConnectivityState] = React.useState(getConnectivity());
 
@@ -390,7 +395,7 @@ export function ShoppingListView({
   }
 
   const grouped = React.useMemo(
-    () => groupByCategory(items, supermarketId, supermarkets),
+    () => groupShoppingItems(items, supermarketId, supermarkets),
     [items, supermarketId, supermarkets],
   );
 
@@ -402,10 +407,36 @@ export function ShoppingListView({
     [items, supermarkets],
   );
 
-  const openTotal = items.filter((i) => !i.checked).length;
-  const checkedTotal = items.filter((i) => i.checked).length;
-  const visibleOpen = openTotal - grouped.hiddenByStore;
-  const filterActive = supermarketId != null && grouped.hiddenByStore > 0;
+  // Stores that still have unchecked items, most-loaded first. Shown on the
+  // done screen as "next stops" — when the current store is cleared, these are
+  // by definition other stores, so tapping one switches the filter there.
+  const nextStops = React.useMemo(
+    () =>
+      supermarkets
+        .map((s) => ({ id: s.id, name: s.name, count: neededCounts.get(s.id) ?? 0 }))
+        .filter((s) => s.count > 0)
+        .sort(
+          (a, b) =>
+            b.count - a.count || a.name.localeCompare(b.name, "de", { sensitivity: "base" }),
+        ),
+    [supermarkets, neededCounts],
+  );
+
+  const renderRow = (item: ShoppingItemView) => (
+    <li key={item.id}>
+      <ShoppingItemRow
+        item={item}
+        activeSupermarketId={supermarketId}
+        onPreviewRecipe={(id) => setPreviewRecipeId(id)}
+        onToggle={onToggleCheck}
+        onEdit={(i) => setEditingItemId(i.id)}
+        onEditArticle={setEditingArticleId}
+        onDelete={onDelete}
+        onToggleUnavailable={onToggleUnavailable}
+        disabledOffline={disabledOffline}
+      />
+    </li>
+  );
 
   return (
     <div className="flex flex-col gap-4">
@@ -426,41 +457,7 @@ export function ShoppingListView({
         </Button>
       </div>
 
-      {/* Sticky shelf: counter pinned left, supermarket select pinned right.
-          Sits below the AppShell topbar (h-16) at z-20 so it doesn't outrank
-          it. */}
-      <div className="sticky top-16 z-20 -mx-4 flex items-center justify-between gap-2 border-b border-[var(--color-border)] bg-[var(--color-bg)]/95 px-4 py-2 backdrop-blur supports-[backdrop-filter]:bg-[var(--color-bg)]/80 md:-mx-6 md:gap-3 md:px-6">
-        <span className="min-w-0 whitespace-nowrap text-sm text-[var(--color-muted-fg)]">
-          {filterActive ? (
-            <>
-              <strong className="font-semibold text-[var(--color-fg)]">
-                {visibleOpen}
-              </strong>
-              <span className="hidden sm:inline"> von </span>
-              <span className="sm:hidden">/</span>
-              {openTotal} offen
-            </>
-          ) : (
-            <>
-              <strong className="font-semibold text-[var(--color-fg)]">
-                {openTotal}
-              </strong>{" "}
-              offen
-            </>
-          )}
-          {" · "}
-          {checkedTotal} erledigt
-        </span>
-        <div className="shrink-0">
-          <SupermarketFilter
-            value={supermarketId}
-            supermarkets={supermarkets}
-            neededCounts={neededCounts}
-            onChange={persistSupermarket}
-          />
-        </div>
-      </div>
-
+      {/* Action buttons — common to both tabs, so they sit above the tab bar. */}
       <div className="flex flex-wrap items-center gap-2">
         <Button
           onClick={() => setAddMealsOpen(true)}
@@ -519,68 +516,82 @@ export function ShoppingListView({
           oder einen Artikel manuell.
         </div>
       ) : (
-        <div className="flex flex-col gap-6">
-          {grouped.hiddenByStore > 0 && supermarketId != null ? (
-            <div
-              role="status"
-              className="flex flex-wrap items-center justify-between gap-3 rounded-[var(--radius)] border border-[var(--color-accent)]/40 bg-[color-mix(in_srgb,var(--color-accent),transparent_92%)] px-4 py-3 text-sm text-[var(--color-fg)]"
-            >
-              <span className="inline-flex items-center gap-2">
-                <EyeOff className="size-4 text-[var(--color-accent)]" />
-                <span>
-                  <strong className="font-semibold">
-                    {grouped.hiddenByStore}{" "}
-                    {grouped.hiddenByStore === 1 ? "Artikel ist" : "Artikel sind"}
-                  </strong>{" "}
-                  durch den Supermarkt-Filter ausgeblendet.
-                </span>
-              </span>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => persistSupermarket(null)}
-              >
-                Alle anzeigen
-              </Button>
+        <Tabs
+          value={activeTab}
+          onValueChange={(v) => setActiveTab(v as "open" | "checked")}
+        >
+          {/* Sticky shelf: tabs pinned left, supermarket select pinned right.
+              Sits below the AppShell topbar (h-16) at z-20 so it doesn't
+              outrank it. */}
+          <div className="sticky top-16 z-20 -mx-4 flex items-center justify-between gap-2 border-b border-[var(--color-border)] bg-[var(--color-bg)]/95 px-4 py-2 backdrop-blur supports-[backdrop-filter]:bg-[var(--color-bg)]/80 md:-mx-6 md:gap-3 md:px-6">
+            <TabsList>
+              <TabsTrigger value="open">
+                Offen
+                <TabCount count={grouped.visibleOpen} />
+              </TabsTrigger>
+              <TabsTrigger value="checked">
+                Erledigt
+                <TabCount count={grouped.visibleChecked} />
+              </TabsTrigger>
+            </TabsList>
+            <div className="shrink-0">
+              <SupermarketFilter
+                value={supermarketId}
+                supermarkets={supermarkets}
+                neededCounts={neededCounts}
+                onChange={persistSupermarket}
+              />
             </div>
-          ) : null}
-          {grouped.groups.map((group) => (
-            <section key={group.key} className="flex flex-col gap-2">
-              <h2
-                className={cn(
-                  "text-xs font-medium uppercase tracking-wider",
-                  group.muted
-                    ? "text-[var(--color-muted-fg)]/60"
-                    : "text-[var(--color-muted-fg)]",
-                )}
-              >
-                {group.label}
-              </h2>
-              <ul
-                className={cn(
-                  "flex flex-col divide-y divide-[var(--color-border)] rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-card)]",
-                  group.muted && "opacity-60",
-                )}
-              >
-                {group.items.map((item) => (
-                  <li key={item.id}>
-                    <ShoppingItemRow
-                      item={item}
-                      activeSupermarketId={supermarketId}
-                      onPreviewRecipe={(id) => setPreviewRecipeId(id)}
-                      onToggle={onToggleCheck}
-                      onEdit={(i) => setEditingItemId(i.id)}
-                      onEditArticle={setEditingArticleId}
-                      onDelete={onDelete}
-                      onToggleUnavailable={onToggleUnavailable}
-                      disabledOffline={disabledOffline}
-                    />
-                  </li>
+          </div>
+
+          <TabsContent value="open" className="mt-4 flex flex-col gap-6">
+            {grouped.visibleOpen === 0 ? (
+              <ShoppingDoneState
+                checkedCount={grouped.visibleChecked}
+                nextStops={nextStops}
+                onShowChecked={() => setActiveTab("checked")}
+                onPickStore={persistSupermarket}
+              />
+            ) : (
+              <>
+                {grouped.hiddenOpen > 0 ? (
+                  <HiddenByStoreBanner
+                    count={grouped.hiddenOpen}
+                    onShowAll={() => persistSupermarket(null)}
+                  />
+                ) : null}
+                {grouped.openGroups.map((group) => (
+                  <section key={group.key} className="flex flex-col gap-2">
+                    <h2 className="text-xs font-medium uppercase tracking-wider text-[var(--color-muted-fg)]">
+                      {group.label}
+                    </h2>
+                    <ul className="flex flex-col divide-y divide-[var(--color-border)] rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-card)]">
+                      {group.items.map(renderRow)}
+                    </ul>
+                  </section>
                 ))}
+              </>
+            )}
+          </TabsContent>
+
+          <TabsContent value="checked" className="mt-4 flex flex-col gap-6">
+            {grouped.hiddenChecked > 0 ? (
+              <HiddenByStoreBanner
+                count={grouped.hiddenChecked}
+                onShowAll={() => persistSupermarket(null)}
+              />
+            ) : null}
+            {grouped.visibleChecked === 0 ? (
+              <div className="rounded-[var(--radius)] border border-dashed border-[var(--color-border)] px-6 py-12 text-center text-sm text-[var(--color-muted-fg)]">
+                Noch nichts abgehakt.
+              </div>
+            ) : (
+              <ul className="flex flex-col divide-y divide-[var(--color-border)] rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-card)] opacity-70">
+                {grouped.checkedItems.map(renderRow)}
               </ul>
-            </section>
-          ))}
-        </div>
+            )}
+          </TabsContent>
+        </Tabs>
       )}
 
       <AddItemDialog
@@ -659,121 +670,35 @@ export function ShoppingListView({
   );
 }
 
-type Group = {
-  key: string;
-  label: string;
-  items: ShoppingItemView[];
-  /** Set on the trailing "Erledigt" sink group so it renders muted. */
-  muted?: boolean;
-};
-
-type GroupedItems = {
-  groups: Group[];
-  /** When a supermarket filter is active, items filtered out by the store
-   *  (unavailable here or in a category this store doesn't carry). 0 when
-   *  no filter is active. */
-  hiddenByStore: number;
-};
-
-function groupByCategory(
-  items: ShoppingItemView[],
-  supermarketId: number | null,
-  supermarkets: SupermarketSummary[],
-): GroupedItems {
-  const sm = supermarketId != null
-    ? supermarkets.find((s) => s.id === supermarketId) ?? null
-    : null;
-  const orderByCategory = sm
-    ? new Map(sm.categories.map((c) => [c.categoryId, c.sortOrder]))
-    : null;
-  const allowedCategoryIds = sm
-    ? new Set(sm.categories.map((c) => c.categoryId))
-    : null;
-
-  const open: ShoppingItemView[] = [];
-  const checked: ShoppingItemView[] = [];
-  let hiddenByStore = 0;
-  for (const item of items) {
-    if (item.checked) {
-      checked.push(item);
-      continue;
-    }
-    if (supermarketId != null) {
-      // Marked as not carried here → hide entirely. Applies to uncategorized
-      // items too — the user opted them out explicitly.
-      if (item.unavailableSupermarketIds.includes(supermarketId)) {
-        hiddenByStore += 1;
-        continue;
-      }
-      // Category exists but this supermarket doesn't carry it → hide. Items
-      // without a category always pass through (the user hasn't tagged them
-      // either way; show them so they aren't accidentally forgotten).
-      if (
-        item.categoryId != null &&
-        allowedCategoryIds != null &&
-        !allowedCategoryIds.has(item.categoryId)
-      ) {
-        hiddenByStore += 1;
-        continue;
-      }
-    }
-    open.push(item);
-  }
-
-  type Bucket = { categoryId: number | null; categoryName: string; items: ShoppingItemView[] };
-  const buckets = new Map<number | "none", Bucket>();
-  for (const item of open) {
-    const key: number | "none" = item.categoryId ?? "none";
-    const b = buckets.get(key) ?? {
-      categoryId: item.categoryId,
-      categoryName: item.categoryName ?? "Ohne Kategorie",
-      items: [],
-    };
-    b.items.push(item);
-    buckets.set(key, b);
-  }
-  for (const b of buckets.values()) {
-    b.items.sort((a, b2) =>
-      a.name.localeCompare(b2.name, "de", { sensitivity: "base" }),
-    );
-  }
-
-  // Uncategorized always sinks to the bottom of the open section, regardless
-  // of whether a supermarket filter is active.
-  const ordered = Array.from(buckets.values()).sort((a, b) => {
-    if (a.categoryId == null && b.categoryId != null) return 1;
-    if (a.categoryId != null && b.categoryId == null) return -1;
-    if (orderByCategory) {
-      const ao = a.categoryId != null ? orderByCategory.get(a.categoryId) : undefined;
-      const bo = b.categoryId != null ? orderByCategory.get(b.categoryId) : undefined;
-      if (ao != null && bo != null) return ao - bo;
-      if (ao != null) return -1;
-      if (bo != null) return 1;
-    }
-    return a.categoryName.localeCompare(b.categoryName, "de", { sensitivity: "base" });
-  });
-
-  const groups: Group[] = ordered.map((b) => ({
-    key: `cat-${b.categoryId ?? "none"}`,
-    label: b.categoryName,
-    items: b.items,
-  }));
-
-  if (checked.length > 0) {
-    // Sort by checkedAt desc so the most-recently-checked item is at the top;
-    // items without a checkedAt (legacy or imported) fall to the bottom.
-    const checkedSorted = [...checked].sort((a, b) => {
-      const aAt = a.checkedAt ?? 0;
-      const bAt = b.checkedAt ?? 0;
-      return bAt - aAt;
-    });
-    groups.push({
-      key: "checked",
-      label: "Erledigt",
-      items: checkedSorted,
-      muted: true,
-    });
-  }
-  return { groups, hiddenByStore };
+/**
+ * Banner shown above a tab's list when the active supermarket filter hides
+ * some of that tab's items, with a shortcut to clear the filter.
+ */
+function HiddenByStoreBanner({
+  count,
+  onShowAll,
+}: {
+  count: number;
+  onShowAll: () => void;
+}) {
+  return (
+    <div
+      role="status"
+      className="flex flex-wrap items-center justify-between gap-3 rounded-[var(--radius)] border border-[var(--color-accent)]/40 bg-[color-mix(in_srgb,var(--color-accent),transparent_92%)] px-4 py-3 text-sm text-[var(--color-fg)]"
+    >
+      <span className="inline-flex items-center gap-2">
+        <EyeOff className="size-4 text-[var(--color-accent)]" />
+        <span>
+          <strong className="font-semibold">
+            {count} {count === 1 ? "Artikel ist" : "Artikel sind"}
+          </strong>{" "}
+          durch den Supermarkt-Filter ausgeblendet.
+        </span>
+      </span>
+      <Button variant="outline" size="sm" onClick={onShowAll}>
+        Alle anzeigen
+      </Button>
+    </div>
+  );
 }
 
