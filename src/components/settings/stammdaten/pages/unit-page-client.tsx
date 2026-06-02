@@ -162,6 +162,7 @@ export function UnitPageClient({
       searchMatches={searchMatches}
       filterControls={filterControls}
       EditForm={UnitForm}
+      tallForm="edit"
       hardDeleteAllowed={true}
     />
   );

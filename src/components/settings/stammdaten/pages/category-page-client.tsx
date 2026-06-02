@@ -132,6 +132,7 @@ export function CategoryPageClient({
         applyFilters={applyFilters}
         filterControls={filterControls}
         EditForm={CategoryForm}
+        tallForm="edit"
         hardDeleteAllowed={true}
         renderBulkActions={({ selectedIds, onApplied }) => (
           <Button

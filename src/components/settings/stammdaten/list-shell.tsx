@@ -15,7 +15,7 @@ import {
 } from "@/lib/url-state";
 
 import { DeleteDialog } from "./delete-dialog";
-import { DrawerShell } from "./drawer-shell";
+import { DialogShell } from "./dialog-shell";
 import { MergeDialog } from "./merge-dialog";
 import { MergeProposalsDialog } from "./merge-proposals-dialog";
 import {
@@ -98,6 +98,12 @@ export type ListShellProps<TItem> = {
    *  as rows are added client-side (a new row sorts into place instead of
    *  landing at the bottom). The column's `sortValue` must be set. */
   initialSort?: SortState;
+  /** Pin the edit dialog to a tall fixed height so switching tabs doesn't
+   *  resize it. "always" fills in both create and edit (forms that show tabs
+   *  in both modes, e.g. ingredient/supermarket); "edit" fills only in edit
+   *  mode (forms whose create view is a single short panel, e.g. the
+   *  name-only entities that gain a "Verwendung" tab once they exist). */
+  tallForm?: "always" | "edit";
 };
 
 export function ListShell<TItem>({
@@ -116,6 +122,7 @@ export function ListShell<TItem>({
   enableMergeProposals,
   renderBulkActions,
   initialSort,
+  tallForm,
 }: ListShellProps<TItem>) {
   const router = useRouter();
   const labels = ENTITY_LABELS[entityKind];
@@ -548,8 +555,12 @@ export function ListShell<TItem>({
       )}
 
       {drawer && (
-        <DrawerShell
+        <DialogShell
           open={true}
+          fillHeight={
+            tallForm === "always" ||
+            (tallForm === "edit" && drawer.mode === "edit")
+          }
           onClose={closeDrawer}
           title={
             drawer.mode === "create" ? `Neue ${labels.singular}` : nameOf(drawer.item)
@@ -569,7 +580,7 @@ export function ListShell<TItem>({
             item={drawer.mode === "edit" ? drawer.item : null}
             onPayloadChange={handlePayloadChange}
           />
-        </DrawerShell>
+        </DialogShell>
       )}
 
       {mergeOpen && selectedItems.length >= 2 && (

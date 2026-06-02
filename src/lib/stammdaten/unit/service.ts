@@ -8,6 +8,7 @@ import {
 } from "../../../db/schema.ts";
 import { getImpact } from "../shared/impact.ts";
 import {
+  linkedDerivedUnits,
   linkedIngredientConversionsForUnits,
   linkedRecipesForUnits,
 } from "../shared/linked-recipes.ts";
@@ -462,10 +463,12 @@ export function getImpactForUnits(ids: number[]): ImpactRow[] {
   const base = getImpact(ids, unitAdapter);
   const linkedByOwner = linkedRecipesForUnits(ids);
   const linkedIngredientsByOwner = linkedIngredientConversionsForUnits(ids);
+  const derivedByOwner = linkedDerivedUnits(ids);
   return base.map((row) => ({
     ...row,
     linkedRecipes: linkedByOwner.get(row.id) ?? [],
     linkedIngredients: linkedIngredientsByOwner.get(row.id) ?? [],
+    linkedDerivedUnits: derivedByOwner.get(row.id) ?? [],
   }));
 }
 

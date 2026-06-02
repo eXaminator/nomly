@@ -2,7 +2,7 @@
 
 import * as React from "react";
 
-import { DrawerShell } from "@/components/settings/stammdaten/drawer-shell";
+import { DialogShell } from "@/components/settings/stammdaten/dialog-shell";
 import {
   IngredientForm,
   type IngredientItem,
@@ -17,13 +17,13 @@ type Props = {
 };
 
 /**
- * Opens the Stammdaten article editor (the same IngredientForm + DrawerShell
+ * Opens the Stammdaten article editor (the same IngredientForm + DialogShell
  * the settings page uses) from anywhere — recipe edit, shopping list, staple
  * groups. Loads the article on open, saves via the shared manage endpoint.
  * Edit-only: deletion stays in the Stammdaten admin to keep its replacement
  * flow in one place.
  */
-export function EditArticleDrawer({ ingredientId, onClose, onSaved }: Props) {
+export function EditArticleDialog({ ingredientId, onClose, onSaved }: Props) {
   const [item, setItem] = React.useState<IngredientItem | null>(null);
   const [loadError, setLoadError] = React.useState<string | null>(null);
   const [payload, setPayload] = React.useState<unknown>(null);
@@ -79,8 +79,9 @@ export function EditArticleDrawer({ ingredientId, onClose, onSaved }: Props) {
   }
 
   return (
-    <DrawerShell
+    <DialogShell
       open
+      fillHeight
       onClose={onClose}
       title={item?.name ?? "Artikel bearbeiten"}
       mode="edit"
@@ -96,6 +97,6 @@ export function EditArticleDrawer({ ingredientId, onClose, onSaved }: Props) {
           {loadError ?? "lädt…"}
         </p>
       )}
-    </DrawerShell>
+    </DialogShell>
   );
 }

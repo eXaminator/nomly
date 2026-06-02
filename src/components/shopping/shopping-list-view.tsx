@@ -39,7 +39,7 @@ import {
   setSourceQuantity as apiSetSourceQty,
   setUnavailable as apiSetUnavailable,
 } from "./api";
-import { EditArticleDrawer } from "@/components/articles/edit-article-drawer";
+import { EditArticleDialog } from "@/components/articles/edit-article-dialog";
 import { useShoppingRealtime } from "./use-shopping-realtime";
 import {
   getConnectivity,
@@ -641,7 +641,7 @@ export function ShoppingListView({
         }}
       />
       {editingArticleId != null ? (
-        <EditArticleDrawer
+        <EditArticleDialog
           ingredientId={editingArticleId}
           onClose={() => setEditingArticleId(null)}
           onSaved={async () => {

@@ -97,6 +97,7 @@ export function SupermarketPageClient({
         nameOf={(i) => i.name}
         searchMatches={searchMatches}
         EditForm={SupermarketForm}
+        tallForm="always"
         hardDeleteAllowed={true}
         mergeWarning={
           <>

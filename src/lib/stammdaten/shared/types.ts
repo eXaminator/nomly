@@ -62,6 +62,14 @@ export type IngredientConversionLink = {
   conversions: ConversionUsage[];
 };
 
+/** A plain reference to another core-data row (id + display name). Used for the
+ *  reference tabs that are a flat list — derived units, a category's articles,
+ *  the supermarkets that order a category. */
+export type EntityRef = {
+  id: number;
+  name: string;
+};
+
 export type ImpactRow = {
   id: number;
   refs: RefBreakdown;
@@ -73,6 +81,12 @@ export type ImpactRow = {
   /** Articles whose unit conversions reference this unit. Only populated for
    *  the unit context (see {@link linkedIngredientConversionsForUnits}). */
   linkedIngredients?: IngredientConversionLink[];
+  /** Units that use this unit as their base (unit context). */
+  linkedDerivedUnits?: EntityRef[];
+  /** Articles whose default category is this category (category context). */
+  linkedCategoryIngredients?: EntityRef[];
+  /** Supermarkets that order this category (category context). */
+  linkedCategorySupermarkets?: EntityRef[];
 };
 
 /**

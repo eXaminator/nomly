@@ -2,205 +2,184 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { ChevronDown, ExternalLink, Loader2, Lock, Pencil } from "lucide-react";
+import { ExternalLink, Loader2, Lock, Pencil } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { isOptionalIngredient } from "@/lib/recipes/optional";
 
 import {
   type EntityKind,
+  type EntityRef,
   type ImpactRow,
+  type IngredientConversionLink,
   type RecipeIngredientUsage,
-  REF_LABELS,
-  refsSum,
+  type RecipeLink,
 } from "./types";
 
-export type ImpactSectionProps = {
-  entityKind: EntityKind;
-  id: number;
-  /** Initial impact, when known. If omitted, the section fetches on expand. */
-  initial?: ImpactRow;
-};
-
 /**
- * Expandable "Verwendung anzeigen" inside the drawer. Lazy-loads impact from
- * /api/v1/<entity>/impact when first expanded (no preload).
+ * Lazily fetch a single entity's impact row from /api/v1/<entity>/impact.
+ * Fetches once when `enabled` first turns true, then caches — toggling
+ * `enabled` back off doesn't drop or refetch the data. Each reference tab
+ * reads its own slice of the returned row.
  */
-export function ImpactSection({ entityKind, id, initial }: ImpactSectionProps) {
-  const [open, setOpen] = React.useState(false);
-  const [data, setData] = React.useState<ImpactRow | null>(initial ?? null);
+export function useImpactData(
+  entityKind: EntityKind,
+  id: number,
+  enabled: boolean,
+) {
+  const [data, setData] = React.useState<ImpactRow | null>(null);
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
-  async function ensureLoaded() {
-    if (data) return;
+  React.useEffect(() => {
+    if (!enabled || data) return;
+    let cancelled = false;
+    // setState-in-effect: synchronizes external (server-fetched) impact data
+    // into local state when the form first opens in edit mode.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true);
     setError(null);
-    try {
-      const res = await fetch(
-        `/api/v1/${pluralFor(entityKind)}/impact?ids=${id}`,
-      );
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const body = (await res.json()) as { items: ImpactRow[] };
-      setData(body.items[0] ?? { id, refs: {}, aliasCount: 0 });
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Konnte nicht laden.");
-    } finally {
-      setLoading(false);
-    }
+    fetch(`/api/v1/${pluralFor(entityKind)}/impact?ids=${id}`)
+      .then(async (res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return (await res.json()) as { items: ImpactRow[] };
+      })
+      .then((body) => {
+        if (!cancelled) setData(body.items[0] ?? { id, refs: {}, aliasCount: 0 });
+      })
+      .catch((e: unknown) => {
+        if (!cancelled)
+          setError(e instanceof Error ? e.message : "Konnte nicht laden.");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [enabled, entityKind, id, data]);
+
+  return { data, loading, error };
+}
+
+/**
+ * Wraps a reference tab's body with the shared loading / error / empty states
+ * so each list renderer can assume it has data to show.
+ */
+export function ReferencePane({
+  loading,
+  error,
+  isEmpty,
+  emptyText,
+  children,
+}: {
+  loading: boolean;
+  error: string | null;
+  isEmpty: boolean;
+  emptyText: string;
+  children: React.ReactNode;
+}) {
+  if (loading) {
+    return (
+      <div className="flex items-center gap-2 text-sm text-[var(--color-muted-fg)]">
+        <Loader2 className="size-4 animate-spin" /> lädt…
+      </div>
+    );
   }
+  if (error) {
+    return <p className="text-sm text-[var(--color-danger)]">{error}</p>;
+  }
+  if (isEmpty) {
+    return <p className="text-sm text-[var(--color-muted-fg)]">{emptyText}</p>;
+  }
+  return <>{children}</>;
+}
 
-  const total = data ? refsSum(data.refs) : null;
-
+/** Linked list of recipes, each optionally with its per-row usage details. */
+export function RecipeReferenceList({ recipes }: { recipes: RecipeLink[] }) {
   return (
-    <div className="rounded-[var(--radius)] border border-[var(--color-border)]">
-      <button
-        type="button"
-        onClick={() => {
-          const next = !open;
-          setOpen(next);
-          if (next) void ensureLoaded();
-        }}
-        className="flex w-full items-center justify-between px-4 py-3 text-left text-sm"
-        aria-expanded={open}
-      >
-        <span className="font-medium">
-          Verwendung
-          {total != null && (
-            <span className="ml-2 text-[var(--color-muted-fg)]">
-              ({total === 0 ? "nirgendwo" : `${total} Referenzen`})
-            </span>
+    <ul className="flex flex-col gap-2 text-sm">
+      {recipes.map((r) => (
+        <li key={r.id}>
+          <Link
+            href={`/rezepte/${r.id}`}
+            className="inline-flex items-center gap-1 text-[var(--color-accent)] hover:underline"
+          >
+            {r.title}
+            <ExternalLink className="size-3" />
+          </Link>
+          {r.usages && r.usages.length > 0 && (
+            <ul className="mt-1 ml-3 flex flex-col gap-0.5 text-xs">
+              {r.usages.map((u, i) => (
+                <UsageLine key={i} usage={u} />
+              ))}
+            </ul>
           )}
-        </span>
-        <ChevronDown
-          className={cn("size-4 transition-transform", open && "rotate-180")}
-        />
-      </button>
-      {open && (
-        <div className="border-t border-[var(--color-border)] px-4 py-3 text-sm">
-          {loading && (
-            <div className="flex items-center gap-2 text-[var(--color-muted-fg)]">
-              <Loader2 className="size-4 animate-spin" /> lädt…
-            </div>
-          )}
-          {error && (
-            <p className="text-[var(--color-danger)]">{error}</p>
-          )}
-          {data && !loading && !error && (
-            <div className="flex flex-col gap-3">
-              <ul className="flex flex-col gap-1">
-                {Object.entries(data.refs).filter(([, n]) => n > 0).length ===
-                0 ? (
-                  <li className="text-[var(--color-muted-fg)]">
-                    Diese Zeile wird nirgendwo verwendet.
-                  </li>
-                ) : (
-                  Object.entries(data.refs)
-                    .filter(([, n]) => n > 0)
-                    .map(([key, count]) => (
-                      <li key={key} className="flex justify-between gap-2">
-                        <span className="text-[var(--color-muted-fg)]">
-                          {REF_LABELS[key] ?? key}
-                        </span>
-                        <span className="font-medium">{count}</span>
-                      </li>
-                    ))
-                )}
-                {data.aliasCount > 0 && (
-                  <li className="flex justify-between gap-2">
-                    <span className="text-[var(--color-muted-fg)]">Aliase</span>
-                    <span className="font-medium">{data.aliasCount}</span>
-                  </li>
-                )}
-              </ul>
+        </li>
+      ))}
+    </ul>
+  );
+}
 
-              {data.linkedIngredients && data.linkedIngredients.length > 0 && (
-                <div className="border-t border-[var(--color-border)] pt-3">
-                  <p className="mb-2 text-xs font-medium uppercase tracking-wider text-[var(--color-muted-fg)]">
-                    Artikel mit Umrechnungen
-                  </p>
-                  <ul className="flex flex-col gap-2">
-                    {data.linkedIngredients.map((ing) => (
-                      <li key={ing.id}>
-                        <Link
-                          href={`/einstellungen/zutaten?edit=${ing.id}`}
-                          className="inline-flex items-center gap-1 text-[var(--color-accent)] hover:underline"
-                        >
-                          {ing.name}
-                          <Pencil className="size-3" />
-                        </Link>
-                        <ul className="mt-1 ml-3 flex flex-col gap-0.5 text-xs text-[var(--color-muted-fg)]">
-                          {ing.conversions.map((c, i) => (
-                            <li key={i}>
-                              1 {c.fromUnitName} = {formatQuantity(c.factor)}{" "}
-                              {c.toUnitName}
-                              {c.isContainer ? " (Gebinde)" : ""}
-                            </li>
-                          ))}
-                        </ul>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
+/** Linked list of articles whose unit conversions reference the unit. */
+export function ConversionReferenceList({
+  items,
+}: {
+  items: IngredientConversionLink[];
+}) {
+  return (
+    <ul className="flex flex-col gap-2 text-sm">
+      {items.map((ing) => (
+        <li key={ing.id}>
+          <Link
+            href={`/einstellungen/zutaten?edit=${ing.id}`}
+            className="inline-flex items-center gap-1 text-[var(--color-accent)] hover:underline"
+          >
+            {ing.name}
+            <Pencil className="size-3" />
+          </Link>
+          <ul className="mt-1 ml-3 flex flex-col gap-0.5 text-xs text-[var(--color-muted-fg)]">
+            {ing.conversions.map((c, i) => (
+              <li key={i}>
+                1 {c.fromUnitName} = {formatQuantity(c.factor)} {c.toUnitName}
+                {c.isContainer ? " (Gebinde)" : ""}
+              </li>
+            ))}
+          </ul>
+        </li>
+      ))}
+    </ul>
+  );
+}
 
-              {data.linkedRecipes && data.linkedRecipes.length > 0 && (
-                <div className="border-t border-[var(--color-border)] pt-3">
-                  <p className="mb-2 text-xs font-medium uppercase tracking-wider text-[var(--color-muted-fg)]">
-                    Rezepte
-                  </p>
-                  <ul className="flex flex-col gap-2">
-                    {data.linkedRecipes.map((r) => (
-                      <li key={r.id}>
-                        <Link
-                          href={`/rezepte/${r.id}`}
-                          className="inline-flex items-center gap-1 text-[var(--color-accent)] hover:underline"
-                        >
-                          {r.title}
-                          <ExternalLink className="size-3" />
-                        </Link>
-                        {r.usages && r.usages.length > 0 && (
-                          <ul className="mt-1 ml-3 flex flex-col gap-0.5 text-xs">
-                            {r.usages.map((u, i) => (
-                              <UsageLine key={i} usage={u} />
-                            ))}
-                          </ul>
-                        )}
-                      </li>
-                    ))}
-                  </ul>
-                  {(() => {
-                    // `refs.recipes` counts recipe_ingredient ROWS, not
-                    // distinct recipes — so for ingredients that show up in
-                    // multiple rows of the same recipe, the raw count
-                    // outruns `linkedRecipes.length`. Comparing against the
-                    // total number of usage lines we actually render (sum
-                    // of `usages` arrays, falling back to 1 per recipe when
-                    // we don't carry usages) is the honest threshold.
-                    const totalShown = data.linkedRecipes!.reduce(
-                      (n, r) => n + (r.usages?.length ?? 1),
-                      0,
-                    );
-                    const total = data.refs.recipes ?? 0;
-                    if (total <= totalShown) return null;
-                    return (
-                      <p className="mt-1 text-xs text-[var(--color-muted-fg)]">
-                        … und {total - totalShown} weitere.
-                      </p>
-                    );
-                  })()}
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      )}
-    </div>
+/** Linked list of plain core-data references (id + name) that deep-link into
+ *  the matching Stammdaten editor via `editHref`. */
+export function EntityReferenceList({
+  items,
+  editHref,
+}: {
+  items: EntityRef[];
+  editHref: (id: number) => string;
+}) {
+  return (
+    <ul className="flex flex-col gap-1.5 text-sm">
+      {items.map((it) => (
+        <li key={it.id}>
+          <Link
+            href={editHref(it.id)}
+            className="inline-flex items-center gap-1 text-[var(--color-accent)] hover:underline"
+          >
+            {it.name}
+            <Pencil className="size-3" />
+          </Link>
+        </li>
+      ))}
+    </ul>
   );
 }
 
 /**
  * Mirrors the recipe-view ingredient row (see `src/app/rezepte/[id]/page.tsx`)
- * so the "Verwendung" list reads the same way the recipe does: a monospace
+ * so the reference list reads the same way the recipe does: a monospace
  * quantity + unit on the left, the display name in the middle, and notes
  * after an em-dash. Optional rows render italic/muted; fixed-amount rows
  * get the lock icon.

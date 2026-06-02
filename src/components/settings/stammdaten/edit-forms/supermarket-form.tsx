@@ -33,6 +33,14 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { SelectSearch } from "@/components/ui/select-search";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+  TabCount,
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "@/components/ui/tabs";
 import { cn } from "@/lib/cn";
 
 import type { EditFormProps } from "../list-shell";
@@ -289,18 +297,76 @@ export function SupermarketForm({
   }
 
   return (
-    <div className="flex flex-col gap-5">
-      <div className="flex flex-col gap-2">
-        <Label htmlFor="supermarket-name">Name</Label>
-        <Input
-          id="supermarket-name"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          autoFocus
-        />
-      </div>
+    <Tabs defaultValue="stammdaten">
+      <TabsList className="mb-4">
+        <TabsTrigger value="stammdaten">Stammdaten</TabsTrigger>
+        <TabsTrigger value="kategorien">
+          Kategorien
+          <TabCount count={orderedCategories.length} />
+        </TabsTrigger>
+      </TabsList>
 
-      <div className="flex flex-col gap-2">
+      <TabsContent value="stammdaten" className="flex flex-col gap-5">
+        <div className="flex flex-col gap-2">
+          <Label htmlFor="supermarket-name">Name</Label>
+          <Input
+            id="supermarket-name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            autoFocus
+          />
+        </div>
+
+        <div className="flex flex-col gap-2">
+          <Label>Nicht verfügbare Artikel</Label>
+          <p className="text-xs text-[var(--color-muted-fg)]">
+            Artikel, die dieser Supermarkt nicht führt. Auf der Einkaufsliste
+            werden sie in diesem Markt ausgegraut.
+          </p>
+          {loadingDetail ? (
+            // Hold the layout while the detail fetch lands, so the section
+            // doesn't pop in and shift the form.
+            <>
+              <div className="flex flex-wrap gap-1.5">
+                <Skeleton className="h-7 w-24" />
+                <Skeleton className="h-7 w-28" />
+                <Skeleton className="h-7 w-20" />
+              </div>
+              <Skeleton className="h-11 w-full" />
+            </>
+          ) : (
+            <>
+              {unavailableArticles.length > 0 ? (
+                <ul className="flex flex-wrap gap-1.5">
+                  {unavailableArticles.map((a) => (
+                    <li key={a.id}>
+                      <span className="inline-flex items-center gap-1 rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-muted)] py-1 pl-2.5 pr-1 text-sm">
+                        {a.name}
+                        <button
+                          type="button"
+                          onClick={() => removeUnavailableArticle(a.id)}
+                          aria-label={`${a.name} entfernen`}
+                          className="inline-flex size-5 items-center justify-center rounded-md text-[var(--color-muted-fg)] hover:bg-[var(--color-bg)] hover:text-[var(--color-fg)]"
+                        >
+                          <X className="size-3.5" />
+                        </button>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+              <SelectSearch
+                value={null}
+                onChange={addUnavailableArticle}
+                search={searchArticles}
+                placeholder="Artikel hinzufügen…"
+              />
+            </>
+          )}
+        </div>
+      </TabsContent>
+
+      <TabsContent value="kategorien" className="flex flex-col gap-2">
         <Label>Kategorien-Reihenfolge</Label>
         {loadingDetail ? (
           <div className="flex items-center gap-2 rounded-[var(--radius)] border border-dashed border-[var(--color-border)] px-3 py-4 text-sm text-[var(--color-muted-fg)]">
@@ -376,43 +442,8 @@ export function SupermarketForm({
             </div>
           </div>
         )}
-      </div>
-
-      {!loadingDetail && (
-        <div className="flex flex-col gap-2">
-          <Label>Nicht verfügbare Artikel</Label>
-          <p className="text-xs text-[var(--color-muted-fg)]">
-            Artikel, die dieser Supermarkt nicht führt. Auf der Einkaufsliste
-            werden sie in diesem Markt ausgegraut.
-          </p>
-          {unavailableArticles.length > 0 ? (
-            <ul className="flex flex-wrap gap-1.5">
-              {unavailableArticles.map((a) => (
-                <li key={a.id}>
-                  <span className="inline-flex items-center gap-1 rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-muted)] py-1 pl-2.5 pr-1 text-sm">
-                    {a.name}
-                    <button
-                      type="button"
-                      onClick={() => removeUnavailableArticle(a.id)}
-                      aria-label={`${a.name} entfernen`}
-                      className="inline-flex size-5 items-center justify-center rounded-md text-[var(--color-muted-fg)] hover:bg-[var(--color-bg)] hover:text-[var(--color-fg)]"
-                    >
-                      <X className="size-3.5" />
-                    </button>
-                  </span>
-                </li>
-              ))}
-            </ul>
-          ) : null}
-          <SelectSearch
-            value={null}
-            onChange={addUnavailableArticle}
-            search={searchArticles}
-            placeholder="Artikel hinzufügen…"
-          />
-        </div>
-      )}
-    </div>
+      </TabsContent>
+    </Tabs>
   );
 }
 

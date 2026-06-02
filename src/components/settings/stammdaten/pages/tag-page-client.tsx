@@ -66,6 +66,7 @@ export function TagPageClient({ initialItems }: { initialItems: TagItem[] }) {
       applyFilters={applyFilters}
       filterControls={filterControls}
       EditForm={TagForm}
+      tallForm="edit"
       hardDeleteAllowed={true}
       mergeWarning={
         <>Die Namen der nicht ausgewählten Tags gehen verloren (Tags haben keine Aliase).</>

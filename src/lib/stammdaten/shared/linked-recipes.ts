@@ -9,10 +9,13 @@ import {
   recipeIngredient,
   recipeSection,
   recipeTag,
+  supermarket,
+  supermarketCategory,
   unit,
 } from "../../../db/schema.ts";
 
 import type {
+  EntityRef,
   IngredientConversionLink,
   RecipeIngredientUsage,
   RecipeLink,
@@ -252,5 +255,72 @@ function collectRecipeJoin(
     list.push({ id: r.recipeId, title: r.title });
   }
   return out;
+}
+
+/** Helper: bucket flat {ownerId, id, name} rows into a per-owner EntityRef[]. */
+function groupRefs(
+  ownerIds: number[],
+  rows: Array<{ ownerId: number | null; id: number; name: string }>,
+): Map<number, EntityRef[]> {
+  const out = new Map<number, EntityRef[]>();
+  for (const id of ownerIds) out.set(id, []);
+  for (const r of rows) {
+    if (r.ownerId == null) continue;
+    const list = out.get(r.ownerId);
+    if (!list || list.length >= LIMIT_PER_ID) continue;
+    list.push({ id: r.id, name: r.name });
+  }
+  return out;
+}
+
+/** For each unit, the units that use it as their base (`base_unit_id`). */
+export function linkedDerivedUnits(
+  unitIds: number[],
+): Map<number, EntityRef[]> {
+  if (unitIds.length === 0) return new Map();
+  const rows = db
+    .select({ ownerId: unit.baseUnitId, id: unit.id, name: unit.name })
+    .from(unit)
+    .where(inArray(unit.baseUnitId, unitIds))
+    .orderBy(asc(unit.name))
+    .all();
+  return groupRefs(unitIds, rows);
+}
+
+/** For each category, the articles whose default category points at it. */
+export function linkedIngredientsForCategories(
+  categoryIds: number[],
+): Map<number, EntityRef[]> {
+  if (categoryIds.length === 0) return new Map();
+  const rows = db
+    .select({
+      ownerId: ingredient.defaultCategoryId,
+      id: ingredient.id,
+      name: ingredient.name,
+    })
+    .from(ingredient)
+    .where(inArray(ingredient.defaultCategoryId, categoryIds))
+    .orderBy(asc(ingredient.name))
+    .all();
+  return groupRefs(categoryIds, rows);
+}
+
+/** For each category, the supermarkets that include it in their order. */
+export function linkedSupermarketsForCategories(
+  categoryIds: number[],
+): Map<number, EntityRef[]> {
+  if (categoryIds.length === 0) return new Map();
+  const rows = db
+    .select({
+      ownerId: supermarketCategory.categoryId,
+      id: supermarket.id,
+      name: supermarket.name,
+    })
+    .from(supermarketCategory)
+    .innerJoin(supermarket, eq(supermarket.id, supermarketCategory.supermarketId))
+    .where(inArray(supermarketCategory.categoryId, categoryIds))
+    .orderBy(asc(supermarket.name))
+    .all();
+  return groupRefs(categoryIds, rows);
 }
 

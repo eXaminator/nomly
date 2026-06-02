@@ -7,9 +7,22 @@ import { Label } from "@/components/ui/label";
 import { SelectSearch } from "@/components/ui/select-search";
 
 import { Switch } from "@/components/ui/switch";
+import {
+  TabCount,
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "@/components/ui/tabs";
 
 import { AliasChipEditor } from "../alias-chip-editor";
-import { ImpactSection } from "../impact-section";
+import {
+  ConversionReferenceList,
+  EntityReferenceList,
+  RecipeReferenceList,
+  ReferencePane,
+  useImpactData,
+} from "../impact-section";
 import type { EditFormProps } from "../list-shell";
 
 export type Dimension = "mass" | "volume" | "count";
@@ -60,7 +73,7 @@ export function UnitForm({ item, onPayloadChange }: EditFormProps<UnitItem>) {
   const [isContainer, setIsContainer] = React.useState<boolean>(
     item?.isContainer ?? false,
   );
-
+  const impact = useImpactData("unit", item?.id ?? -1, item != null);
 
   React.useEffect(() => {
     const trimmed = name.trim();
@@ -116,7 +129,7 @@ export function UnitForm({ item, onPayloadChange }: EditFormProps<UnitItem>) {
     factorText.trim().length > 0 &&
     (!Number.isFinite(factorNum) || factorNum <= 0);
 
-  return (
+  const fields = (
     <div className="flex flex-col gap-5">
       <div className="flex flex-col gap-2">
         <Label htmlFor="unit-name">Name</Label>
@@ -258,8 +271,66 @@ export function UnitForm({ item, onPayloadChange }: EditFormProps<UnitItem>) {
           onCheckedChange={(v) => setIsContainer(Boolean(v))}
         />
       </div>
-
-      {item && <ImpactSection entityKind="unit" id={item.id} />}
     </div>
+  );
+
+  // Create mode has no usage yet — render the fields bare.
+  if (!item) return fields;
+
+  const recipes = impact.data?.linkedRecipes ?? [];
+  const conversionArticles = impact.data?.linkedIngredients ?? [];
+  const derivedUnits = impact.data?.linkedDerivedUnits ?? [];
+  return (
+    <Tabs defaultValue="stammdaten">
+      <TabsList className="mb-4 flex-wrap">
+        <TabsTrigger value="stammdaten">Stammdaten</TabsTrigger>
+        <TabsTrigger value="rezepte">
+          Rezepte
+          {impact.data && <TabCount count={recipes.length} />}
+        </TabsTrigger>
+        <TabsTrigger value="artikel">
+          Artikel
+          {impact.data && <TabCount count={conversionArticles.length} />}
+        </TabsTrigger>
+        <TabsTrigger value="einheiten">
+          Einheiten
+          {impact.data && <TabCount count={derivedUnits.length} />}
+        </TabsTrigger>
+      </TabsList>
+      <TabsContent value="stammdaten">{fields}</TabsContent>
+      <TabsContent value="rezepte">
+        <ReferencePane
+          loading={impact.loading}
+          error={impact.error}
+          isEmpty={recipes.length === 0}
+          emptyText="Wird in keinem Rezept verwendet."
+        >
+          <RecipeReferenceList recipes={recipes} />
+        </ReferencePane>
+      </TabsContent>
+      <TabsContent value="artikel">
+        <ReferencePane
+          loading={impact.loading}
+          error={impact.error}
+          isEmpty={conversionArticles.length === 0}
+          emptyText="Keine Artikel mit Umrechnungen über diese Einheit."
+        >
+          <ConversionReferenceList items={conversionArticles} />
+        </ReferencePane>
+      </TabsContent>
+      <TabsContent value="einheiten">
+        <ReferencePane
+          loading={impact.loading}
+          error={impact.error}
+          isEmpty={derivedUnits.length === 0}
+          emptyText="Keine Einheit nutzt diese als Basis."
+        >
+          <EntityReferenceList
+            items={derivedUnits}
+            editHref={(id) => `/einstellungen/einheiten?edit=${id}`}
+          />
+        </ReferencePane>
+      </TabsContent>
+    </Tabs>
   );
 }

@@ -91,8 +91,9 @@ function MealEditorDialog({ meal, onClose, onSave, onDelete }: Props) {
           className={cn(
             // Side panel on every breakpoint: full viewport height, slides in
             // from the right edge. Mobile takes the whole width; ≥ sm caps at
-            // a fixed sidebar width. Matches DrawerShell so every sidebar form
-            // in the app has the same shape.
+            // a fixed sidebar width. The Stammdaten/article editors use a
+            // centered DialogShell instead; the planner keeps this sidebar
+            // shape deliberately (quick day-by-day edits, no dense form).
             "fixed inset-y-0 right-0 z-50 flex w-full flex-col bg-[var(--color-card)] shadow-2xl",
             "sm:max-w-md",
             "data-[state=open]:animate-in data-[state=closed]:animate-out",

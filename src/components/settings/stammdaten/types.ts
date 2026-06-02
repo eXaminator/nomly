@@ -45,11 +45,17 @@ export type ConversionUsage = {
 };
 
 /** An article whose unit conversions reference a unit — shown in that unit's
- *  "Verwendung" list. */
+ *  reference tab. */
 export type IngredientConversionLink = {
   id: number;
   name: string;
   conversions: ConversionUsage[];
+};
+
+/** A plain reference to another core-data row (id + display name). */
+export type EntityRef = {
+  id: number;
+  name: string;
 };
 
 export type ImpactRow = {
@@ -58,6 +64,9 @@ export type ImpactRow = {
   aliasCount: number;
   linkedRecipes?: RecipeLink[];
   linkedIngredients?: IngredientConversionLink[];
+  linkedDerivedUnits?: EntityRef[];
+  linkedCategoryIngredients?: EntityRef[];
+  linkedCategorySupermarkets?: EntityRef[];
 };
 
 export const REF_LABELS: Record<string, string> = {

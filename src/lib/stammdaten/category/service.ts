@@ -10,6 +10,10 @@ import {
   supermarketCategory,
 } from "../../../db/schema.ts";
 import { getImpact } from "../shared/impact.ts";
+import {
+  linkedIngredientsForCategories,
+  linkedSupermarketsForCategories,
+} from "../shared/linked-recipes.ts";
 import { runMerge, MergeError, type MergeResult } from "../shared/merge.ts";
 import type { ImpactRow } from "../shared/types.ts";
 import {
@@ -427,7 +431,14 @@ export function mergeCategories(
 }
 
 export function getImpactForCategories(ids: number[]): ImpactRow[] {
-  return getImpact(ids, categoryAdapter);
+  const base = getImpact(ids, categoryAdapter);
+  const ingredientsByOwner = linkedIngredientsForCategories(ids);
+  const supermarketsByOwner = linkedSupermarketsForCategories(ids);
+  return base.map((row) => ({
+    ...row,
+    linkedCategoryIngredients: ingredientsByOwner.get(row.id) ?? [],
+    linkedCategorySupermarkets: supermarketsByOwner.get(row.id) ?? [],
+  }));
 }
 
 function unreachable(): never {

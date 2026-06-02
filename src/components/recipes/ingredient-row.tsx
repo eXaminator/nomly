@@ -24,7 +24,8 @@ import type {
   DraggableSyntheticListeners,
 } from "@dnd-kit/core";
 import { Button } from "@/components/ui/button";
-import { EditArticleDrawer } from "@/components/articles/edit-article-drawer";
+import { EditArticleDialog } from "@/components/articles/edit-article-dialog";
+import type { IngredientItem } from "@/components/settings/stammdaten/edit-forms/ingredient-form";
 import { Input } from "@/components/ui/input";
 import {
   SelectSearch,
@@ -211,6 +212,10 @@ export function IngredientRow({
   // signal they're redefining the ingredient, so the matcher follows the
   // typed text from then on.
   const [matchText, setMatchText] = React.useState(() => liveMatchQuery(value));
+  // Bumped to force a live-matcher re-fetch without changing `matchText` —
+  // e.g. after the linked article is edited in place, so renamed
+  // aliases/display names refresh in the candidate pills.
+  const [matchRefresh, setMatchRefresh] = React.useState(0);
   const onChangeRef = React.useRef(onChange);
   const valueRef = React.useRef(value);
   React.useEffect(() => {
@@ -279,7 +284,27 @@ export function IngredientRow({
       window.clearTimeout(handle);
       controller.abort();
     };
-  }, [matchText]);
+  }, [matchText, matchRefresh]);
+
+  // Called after the in-place article editor saves. Reflect the change in this
+  // row immediately: patch the displayed canonical name if this row is linked
+  // to the edited article, and re-run the matcher so pills pick up renamed
+  // aliases/display names. Auto-select stays untouched (the name field didn't
+  // change, so the effect's `hasUserEdited` gate is false).
+  const handleArticleSaved = React.useCallback(
+    (updated: IngredientItem) => {
+      const v = valueRef.current;
+      if (
+        v.selectedIngredientId != null &&
+        updated.id === v.selectedIngredientId &&
+        updated.name !== v.canonicalName
+      ) {
+        onChangeRef.current({ ...v, canonicalName: updated.name });
+      }
+      setMatchRefresh((n) => n + 1);
+    },
+    [],
+  );
 
   /** Global-unit picker. Former ingredient sub-units are now global units, so
    *  they surface here like any other unit. */
@@ -521,9 +546,10 @@ export function IngredientRow({
           />
         </div>
         {editingArticleId != null ? (
-          <EditArticleDrawer
+          <EditArticleDialog
             ingredientId={editingArticleId}
             onClose={() => setEditingArticleId(null)}
+            onSaved={handleArticleSaved}
           />
         ) : null}
       </div>
@@ -852,9 +878,10 @@ export function IngredientRow({
           </div>
         )}
         {editingArticleId != null ? (
-          <EditArticleDrawer
+          <EditArticleDialog
             ingredientId={editingArticleId}
             onClose={() => setEditingArticleId(null)}
+            onSaved={handleArticleSaved}
           />
         ) : null}
       </div>

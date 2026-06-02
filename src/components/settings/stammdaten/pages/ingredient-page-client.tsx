@@ -322,6 +322,7 @@ export function IngredientPageClient({
         searchMatches={searchMatches}
         filterControls={filterControls}
         EditForm={IngredientForm}
+        tallForm="always"
         hardDeleteAllowed={false}
         hardDeleteDisabledReason="Dieser Artikel wird in Rezepten oder Einkaufslisten verwendet — ein Ersatz-Artikel ist erforderlich."
         enableMergeProposals
