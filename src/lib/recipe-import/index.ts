@@ -37,6 +37,7 @@ import {
   type IngredientCatalog,
 } from "./matching.ts";
 import { savePhotoBuffer, type PhotoPath } from "../photos.ts";
+import { getGlobalDefaultUnitId } from "../settings/global-default-unit.ts";
 
 export type IngredientMatch = "existing" | "new";
 export type UnitMatch =
@@ -170,17 +171,24 @@ export type UnitLookupEntry = {
 export type UnitLookup = {
   byNameOrAlias: Map<string, UnitLookupEntry>;
   byCanonicalName: Map<string, UnitLookupEntry>;
+  /** Canonical units keyed by id — lets the global-default pointer resolve to
+   *  a concrete entry. */
+  byId: Map<number, UnitLookupEntry>;
   /**
    * Lowercased tokens (canonical names + aliases) of units flagged as
    * containers. The parser uses this set to suppress conjunction-splitting
    * and prep-word stripping when a container is present.
    */
   containerTokens: Set<string>;
+  /** The configured global default unit id (or null) — the terminal fallback
+   *  for a quantity-bearing line with no explicit unit. */
+  globalDefaultUnitId: number | null;
 };
 
 export function buildUnitLookup(): UnitLookup {
   const byNameOrAlias = new Map<string, UnitLookupEntry>();
   const byCanonicalName = new Map<string, UnitLookupEntry>();
+  const byId = new Map<number, UnitLookupEntry>();
   const containerTokens = new Set<string>();
   const canonical = db
     .select({
@@ -200,6 +208,7 @@ export function buildUnitLookup(): UnitLookup {
     };
     byNameOrAlias.set(lower, entry);
     byCanonicalName.set(lower, entry);
+    byId.set(u.id, entry);
     if (u.isContainer) containerTokens.add(lower);
     // A configured plural ("Dose" → "Dosen") is matchable too, but never
     // overwrites a singular already claimed by another unit/alias.
@@ -233,7 +242,13 @@ export function buildUnitLookup(): UnitLookup {
       if (a.isContainer) containerTokens.add(key);
     }
   }
-  return { byNameOrAlias, byCanonicalName, containerTokens };
+  return {
+    byNameOrAlias,
+    byCanonicalName,
+    byId,
+    containerTokens,
+    globalDefaultUnitId: getGlobalDefaultUnitId(),
+  };
 }
 
 export type ResolveUnitResult = {
@@ -263,11 +278,16 @@ export function resolveUnit(
     }
     return { resolved: null, match: "unresolved", rawUnit: rawUnitName };
   }
-  // No unit token. Default to Stück for "3 Eier"-style entries.
+  // No unit token. Default a quantity-bearing line ("3 Eier") to the configured
+  // global default unit, falling back to literal "Stück" when the pointer is
+  // unset or dangling.
   if (quantity !== null && quantity > 0) {
-    const stueck = lookup.byCanonicalName.get("stück");
-    if (stueck) {
-      return { resolved: stueck, match: "defaulted", rawUnit: null };
+    const fallback =
+      (lookup.globalDefaultUnitId != null
+        ? lookup.byId.get(lookup.globalDefaultUnitId)
+        : undefined) ?? lookup.byCanonicalName.get("stück");
+    if (fallback) {
+      return { resolved: fallback, match: "defaulted", rawUnit: null };
     }
   }
   return { resolved: null, match: "empty", rawUnit: null };
@@ -292,6 +312,9 @@ export type IngredientLookup = Map<string, IngredientLookupHit>;
  */
 export function buildIngredientCatalog(): IngredientCatalog {
   const out: IngredientCatalog = [];
+  // Terminal fallback for an entry's resolved matching unit (alias default →
+  // ingredient default → global default). Read once per build.
+  const globalDefaultUnitId = getGlobalDefaultUnitId() ?? undefined;
   const canonicals = db
     .select({
       id: ingredient.id,
@@ -316,6 +339,8 @@ export function buildIngredientCatalog(): IngredientCatalog {
         i.defaultUnitId != null && i.defaultUnitName != null
           ? { id: i.defaultUnitId, name: i.defaultUnitDisplay ?? i.defaultUnitName }
           : undefined,
+      // Resolved matching unit: ingredient default → global default.
+      unitId: i.defaultUnitId ?? globalDefaultUnitId,
       isEquipment: i.isEquipment || undefined,
     });
   }
@@ -324,6 +349,7 @@ export function buildIngredientCatalog(): IngredientCatalog {
       id: ingredient.id,
       canonicalName: ingredient.name,
       isEquipment: ingredient.isEquipment,
+      ingredientDefaultUnitId: ingredient.defaultUnitId,
       aliasName: ingredientAlias.name,
       aliasDisplayName: ingredientAlias.displayName,
       defaultUnitId: ingredientAlias.defaultUnitId,
@@ -344,6 +370,8 @@ export function buildIngredientCatalog(): IngredientCatalog {
         a.defaultUnitId != null && a.defaultUnitName != null
           ? { id: a.defaultUnitId, name: a.defaultUnitDisplay ?? a.defaultUnitName }
           : undefined,
+      // Resolved matching unit: alias default → ingredient default → global.
+      unitId: a.defaultUnitId ?? a.ingredientDefaultUnitId ?? globalDefaultUnitId,
       displayName: a.aliasDisplayName ?? undefined,
       isEquipment: a.isEquipment || undefined,
     });
@@ -649,7 +677,17 @@ function resolveIngredientForRow(
       .filter((s) => s.length > 0)
       .join(", ");
     if (wideText.length > 0) {
-      const { matches } = findIngredientCandidates(wideText, catalog);
+      // Resolve the line's unit so the matcher can use it as the decider:
+      // among gate-clearers, a candidate whose resolved unit matches the line's
+      // wins (canned "Dose" vs fresh "Stück"). Gated on the undoubled score, so
+      // the unit can't crash the auto-match gate.
+      const lineUnitId =
+        resolveUnit(lookups.units, parsed.unitName, parsed.quantity).resolved?.id ??
+        null;
+      const { matches } = findIngredientCandidates(wideText, catalog, {
+        lineUnitId,
+        gateScore: autoMatchScoreThreshold,
+      });
       wideMatches = matches;
       const top = matches[0];
       if (top && top.score >= autoMatchScoreThreshold) {

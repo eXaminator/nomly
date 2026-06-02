@@ -26,7 +26,9 @@ function makeLookups(
   const units: UnitLookup = {
     byNameOrAlias: new Map(unitEntries),
     byCanonicalName: new Map(unitEntries),
+    byId: new Map(unitEntries.map(([, e]) => [e.id, e] as const)),
     containerTokens: new Set(),
+    globalDefaultUnitId: null,
   };
   const ingredients: IngredientLookup = new Map();
   for (const entry of catalog) {
