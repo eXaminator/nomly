@@ -389,6 +389,100 @@ automation:
 (`response_variable` requires a recent HA; `avail.content` holds the parsed
 JSON. Match the store by `name` or by hard-coding its `id`.)
 
+## 7. Morning reminder (today's meal still needs shopping)
+
+Each morning at 9am, notify when a meal is planned for **today** that still has
+**unchecked** items on the list — naming each meal, how many items are left, and
+which supermarkets carry them.
+
+`GET /api/v1/shopping/today-meal-status` returns exactly that, already scoped to
+today (server-local day) and to items traceable to today's meals (leftovers
+excluded):
+
+```json
+{
+  "date": "2026-06-02",
+  "needsShopping": true,
+  "totalUncheckedItems": 4,
+  "meals": [
+    {
+      "mealPlanId": 123,
+      "recipeId": 45,
+      "recipeTitle": "Spaghetti Bolognese",
+      "uncheckedItemCount": 3,
+      "items": [{ "name": "Hackfleisch" }, { "name": "Zwiebeln" }, { "name": "Tomaten" }],
+      "supermarkets": [
+        { "id": 1, "name": "ASDA",  "carriesCount": 3 },
+        { "id": 2, "name": "Tesco", "carriesCount": 3 },
+        { "id": 3, "name": "CoOp",  "carriesCount": 2 }
+      ]
+    }
+  ]
+}
+```
+
+`supermarkets` lists only shops carrying ≥1 of that meal's unchecked items,
+sorted by `carriesCount` (most-covering first), so the notification can say
+which shop gets you the most in one trip.
+
+```yaml
+# configuration.yaml
+rest_command:
+  nomly_today_meal_status:
+    url: "https://nomly.weingaertner.pro/api/v1/shopping/today-meal-status"
+    method: GET
+    headers:
+      Authorization: !secret nomly_bearer
+
+automation:
+  - alias: "Nomly — Morgendliche Einkaufserinnerung"
+    trigger:
+      - platform: time
+        at: "09:00:00"
+    action:
+      - service: rest_command.nomly_today_meal_status
+        response_variable: status
+      - condition: template
+        value_template: "{{ status.content.needsShopping }}"
+      - service: notify.mobile_app_phone
+        data:
+          title: "Einkauf für heute"
+          # One line per meal, e.g.:
+          #   3 Artikel für „Spaghetti Bolognese“ — ASDA (3), Tesco (3), CoOp (2)
+          message: >-
+            {% set ns = namespace(lines=[]) %}
+            {% for m in status.content.meals %}
+              {% set shops = namespace(parts=[]) %}
+              {% for s in m.supermarkets %}
+                {% set shops.parts = shops.parts + [s.name ~ ' (' ~ s.carriesCount ~ ')'] %}
+              {% endfor %}
+              {% set line = m.uncheckedItemCount ~ ' Artikel für „' ~ m.recipeTitle ~ '“'
+                 ~ (' — ' ~ (shops.parts | join(', ')) if shops.parts else '') %}
+              {% set ns.lines = ns.lines + [line] %}
+            {% endfor %}
+            {{ ns.lines | join('\n') }}
+          data:
+            url: "https://nomly.weingaertner.pro/einkauf"
+```
+
+> The `message` template needs only `needsShopping`, `meals[].recipeTitle`,
+> `meals[].uncheckedItemCount`, and `meals[].supermarkets[]`. For a simpler line
+> that drops the per-shop counts:
+>
+> ```jinja
+> {% set ns = namespace(lines=[]) %}
+> {% for m in status.content.meals %}
+>   {% set ns.lines = ns.lines + [m.uncheckedItemCount ~ ' Artikel für „' ~ m.recipeTitle
+>      ~ '“ — ' ~ (m.supermarkets | map(attribute='name') | join(', '))] %}
+> {% endfor %}
+> {{ ns.lines | join('\n') }}
+> ```
+>
+> `response_variable` requires a recent HA; `status.content` holds the parsed
+> JSON. The `time` trigger fires in HA's own timezone, and the endpoint's
+> "today" is the nomly server's local day — keep both in the same timezone (they
+> already are for a single-household setup).
+
 ## Endpoint reference (added for HA)
 
 | Method | Path | Purpose |
@@ -397,5 +491,6 @@ JSON. Match the store by `name` or by hard-coding its `id`.)
 | POST | `/api/v1/shopping/items` `{byName}` | Add an item (existing). |
 | GET | `/api/v1/ingredients/usage?name=` | Where an ingredient is used + on-list. |
 | GET | `/api/v1/shopping/store-availability` | Per-store still-needed count. |
+| GET | `/api/v1/shopping/today-meal-status` | Today's meals still needing shopping + per-shop coverage. |
 | GET | `/embed/rezepte/<id>?k=<embed token>` | Chrome-less recipe view for the iframe. |
 | GET | `/einkauf?supermarket=<id>` | Shopping list with a store preselected. |
