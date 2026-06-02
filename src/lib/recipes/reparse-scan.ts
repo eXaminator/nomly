@@ -14,6 +14,10 @@ import {
   buildUnitLookup,
   parseIngredientLines,
 } from "@/lib/recipe-import";
+import {
+  buildCatalogBlockIndex,
+  type CatalogBlockIndex,
+} from "@/lib/recipe-import/matching";
 import { loadMuteSet } from "@/lib/recipes/reparse-mutes";
 import type { ParsedIngredientResponse } from "@/components/recipes/types";
 import type {
@@ -34,6 +38,7 @@ type ReparseLookups = {
   units: ReturnType<typeof buildUnitLookup>;
   ingredients: ReturnType<typeof buildIngredientLookup>;
   ingredientCatalog: ReturnType<typeof buildIngredientCatalog>;
+  ingredientCatalogIndex: CatalogBlockIndex;
 };
 
 /** Current (stored) ingredient row, reduced to the fields that decide whether
@@ -294,11 +299,18 @@ const parseCache = new Map<string, ParsedIngredientResponse[]>();
 let cacheFingerprint: string | null = null;
 /** Counts actual parser invocations (cache misses) — test-only observability. */
 let parseInvocations = 0;
+/** Block index for the cached catalog — rebuilt alongside the cache when the
+ *  fingerprint changes, so the cold reparse only scores ~70 candidates/line
+ *  instead of all ~3,000 catalog entries. */
+let catalogIndex: CatalogBlockIndex | null = null;
 
 /** FNV-1a over the parse inputs: catalog entries (id|aliasName|unitId) plus the
  *  unit lookup (token→id, sorted) and the global default unit. Cheap over a few
  *  thousand entries; no large string allocation. */
-function fingerprintInputs(lookups: ReparseLookups): string {
+function fingerprintInputs(
+  catalog: ReparseLookups["ingredientCatalog"],
+  units: ReparseLookups["units"],
+): string {
   let h = 0x811c9dc5;
   const mix = (s: string) => {
     for (let i = 0; i < s.length; i++) {
@@ -306,7 +318,7 @@ function fingerprintInputs(lookups: ReparseLookups): string {
       h = Math.imul(h, 0x01000193);
     }
   };
-  for (const e of lookups.ingredientCatalog) {
+  for (const e of catalog) {
     mix(e.aliasName);
     mix("|");
     mix(String(e.ingredientId));
@@ -314,14 +326,14 @@ function fingerprintInputs(lookups: ReparseLookups): string {
     mix(String(e.unitId ?? ""));
     mix(";");
   }
-  const unitKeys = Array.from(lookups.units.byNameOrAlias.entries())
+  const unitKeys = Array.from(units.byNameOrAlias.entries())
     .map(([k, v]) => `${k}=${v.id}`)
     .sort();
   for (const k of unitKeys) {
     mix(k);
     mix(",");
   }
-  mix(`gd=${lookups.units.globalDefaultUnitId ?? ""}`);
+  mix(`gd=${units.globalDefaultUnitId ?? ""}`);
   return (h >>> 0).toString(16);
 }
 
@@ -345,6 +357,7 @@ function parseLineCached(
 export function __resetReparseParseCache(): void {
   parseCache.clear();
   cacheFingerprint = null;
+  catalogIndex = null;
   parseInvocations = 0;
 }
 
@@ -366,18 +379,25 @@ export function __getReparseParseInvocations(): number {
 export async function scanAllRecipesForReparse(
   signal?: AbortSignal,
 ): Promise<ReparseScanEntry[]> {
-  const lookups: ReparseLookups = {
-    units: buildUnitLookup(),
-    ingredients: buildIngredientLookup(),
-    ingredientCatalog: buildIngredientCatalog(),
-  };
-  // Drop the parse cache when the parse inputs changed since the last scan; an
-  // unchanged catalog keeps it warm so reopening the dialog is near-instant.
-  const fingerprint = fingerprintInputs(lookups);
-  if (fingerprint !== cacheFingerprint) {
+  const units = buildUnitLookup();
+  const ingredients = buildIngredientLookup();
+  const ingredientCatalog = buildIngredientCatalog();
+  // Drop the parse cache + rebuild the block index when the parse inputs changed
+  // since the last scan. An unchanged catalog keeps both warm so reopening the
+  // dialog is near-instant; after a catalog edit the cold rescan still only
+  // scores the indexed candidate subset (~70/line vs ~3,000).
+  const fingerprint = fingerprintInputs(ingredientCatalog, units);
+  if (fingerprint !== cacheFingerprint || catalogIndex === null) {
     parseCache.clear();
+    catalogIndex = buildCatalogBlockIndex(ingredientCatalog);
     cacheFingerprint = fingerprint;
   }
+  const lookups: ReparseLookups = {
+    units,
+    ingredients,
+    ingredientCatalog,
+    ingredientCatalogIndex: catalogIndex,
+  };
   // Muted recipes / lines are skipped entirely (not parsed, not returned) —
   // diffs the user has intentionally hand-handled.
   const muted = loadMuteSet();

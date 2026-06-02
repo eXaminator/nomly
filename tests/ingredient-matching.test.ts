@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildCatalogBlockIndex,
   findIngredientCandidates,
   MIN_AUTO_MATCH_SCORE,
   tokenizeCandidate,
@@ -743,5 +744,68 @@ describe("unit decider", () => {
       lineUnitId: DOSE,
     });
     expect(matches[0].score).toBeLessThan(MIN_AUTO_MATCH_SCORE);
+  });
+});
+
+describe("block index equivalence", () => {
+  // A catalog exercising exact, prefix, suffix, inflection and compound cases —
+  // the indexed path must return byte-identical top results to the full sweep.
+  function bigCatalog(): IngredientCatalog {
+    const e = (id: number, alias: string, canonical = alias) => ({
+      ingredientId: id,
+      canonicalName: canonical,
+      aliasName: alias,
+      tokens: alias.toLowerCase().split(/\s+/),
+    });
+    return [
+      e(1, "Paprika"),
+      e(2, "Paprikapulver"),
+      e(2, "Paprikapulver rosenscharf"),
+      e(3, "Tomate"),
+      e(3, "Tomaten"),
+      e(4, "Cherry Tomate"),
+      e(5, "Vollkornbrot"),
+      e(6, "Brot"),
+      e(7, "Spinat"),
+      e(7, "Blattspinat"),
+      e(8, "Olivenöl extra vergine"),
+      e(9, "Kichererbsen"),
+      e(10, "Kichererbsenmehl"),
+      e(11, "pflanzliche Milch"),
+      e(12, "Mandel"),
+      e(12, "Mandeln"),
+      e(13, "Zwiebel"),
+      e(14, "rote Zwiebel"),
+    ];
+  }
+
+  const inputs = [
+    "Paprika",
+    "Paprikapulver",
+    "Paprikapulver rosenscharfes",
+    "rosenscharfes Paprikapulver",
+    "Tomaten",
+    "Cherry-Tomate",
+    "Blattspinat",
+    "junger frischer Blattspinat",
+    "extra vergine Olivenöl",
+    "Kichererbsenmehl",
+    "planzliche Milch", // single typo → fuzzy
+    "Mandeln",
+    "rote Zwiebeln",
+    "200 g Mehl, gesiebt",
+    "etwas völlig Unbekanntes",
+  ];
+
+  it("indexed path returns identical matches to the full sweep", () => {
+    const cat = bigCatalog();
+    const index = buildCatalogBlockIndex(cat);
+    for (const input of inputs) {
+      const full = findIngredientCandidates(input, cat);
+      const idx = findIngredientCandidates(input, cat, { index });
+      expect(idx.matches.map((m) => [m.ingredientId, m.aliasName, m.score])).toEqual(
+        full.matches.map((m) => [m.ingredientId, m.aliasName, m.score]),
+      );
+    }
   });
 });

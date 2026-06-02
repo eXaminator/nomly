@@ -486,9 +486,57 @@ function perTokenBonus(et: string, wt: string): number {
  */
 export const MIN_AUTO_MATCH_SCORE = 130;
 
+/**
+ * Blocking keys for a normalised token: the token itself plus its first-3 and
+ * last-3 character "blocks". Two tokens that can align in the matcher share at
+ * least one block — exact (same token), prefix (same first 3), suffix (same
+ * last 3). This is what lets {@link buildCatalogBlockIndex} prune the catalog to
+ * a handful of candidates per line instead of scoring all ~3,000 entries.
+ *
+ * Caveat: a single-substitution fuzzy match whose edit lands on the exact
+ * middle char of a 5–7 char token shares no block — so the index can miss that
+ * narrow case. Fuzzy is the lowest-priority tier (no bonus, only completes a
+ * multi-token alias), and the index is OPT-IN — only the bulk-reparse scan uses
+ * it; live `/match` and recipe import keep the full sweep — so interactive
+ * matching is unaffected. The reparse equivalence test guards the corpus.
+ */
+function blockKeys(token: string): string[] {
+  if (token.length < 3) return [token];
+  return [token, `^${token.slice(0, 3)}`, `${token.slice(-3)}$`];
+}
+
+/** token-block → catalog entry indices. Built from a specific catalog array;
+ *  must be passed to {@link findIngredientCandidates} alongside that SAME
+ *  catalog (the indices point into it). */
+export type CatalogBlockIndex = Map<string, number[]>;
+
+/** Build the blocking index for a catalog. Reuse it across many lines (e.g. the
+ *  bulk scan) so its build cost amortises. */
+export function buildCatalogBlockIndex(catalog: IngredientCatalog): CatalogBlockIndex {
+  const index: CatalogBlockIndex = new Map();
+  catalog.forEach((entry, i) => {
+    const added = new Set<string>();
+    for (const tok of entry.tokens) {
+      for (const key of blockKeys(tok)) {
+        if (added.has(key)) continue;
+        added.add(key);
+        const arr = index.get(key);
+        if (arr) arr.push(i);
+        else index.set(key, [i]);
+      }
+    }
+  });
+  return index;
+}
+
 export type FindCandidatesOptions = {
   /** Cap on returned matches. Defaults to 5. */
   limit?: number;
+  /** Optional prebuilt {@link CatalogBlockIndex} for the SAME catalog. When
+   *  given, only entries sharing a token block with the line are scored
+   *  (≈20× fewer for a 3,000-entry catalog) — results are identical to the full
+   *  sweep, it just skips entries that provably cannot align. */
+  index?: CatalogBlockIndex;
   /** Resolved canonical unit id of the line being matched (or null). When set,
    *  a gate-clearing candidate whose resolved unit equals this id gets its SORT
    *  weight doubled — the unit decides between name-plausible candidates
@@ -595,6 +643,24 @@ export function findIngredientCandidates(
       : [primary];
   const limit = options.limit ?? 5;
 
+  // With a block index, score only the entries that share a token block with
+  // some variant token — every entry that could possibly align. Without it,
+  // score the whole catalog (unchanged behaviour). The pruned set is a strict
+  // superset of the full sweep's actual matches, so results are identical.
+  let entriesToScan: IngredientCatalog = catalog;
+  if (options.index) {
+    const idx = new Set<number>();
+    for (const variant of variants) {
+      for (const t of variant) {
+        for (const key of blockKeys(t.normalized)) {
+          const arr = options.index.get(key);
+          if (arr) for (const i of arr) idx.add(i);
+        }
+      }
+    }
+    entriesToScan = Array.from(idx, (i) => catalog[i]);
+  }
+
   // One best entry per ingredient id, plus a remember of which variant
   // produced it so we can return that variant as `candidate`. Within an
   // ingredient, score wins; ties favor the canonical row (so the pill
@@ -605,7 +671,7 @@ export function findIngredientCandidates(
     { match: IngredientCandidateMatch; variant: CandidateToken[] }
   >();
   for (const variant of variants) {
-    for (const entry of catalog) {
+    for (const entry of entriesToScan) {
       const m = bestMatchForEntry(entry, variant);
       if (!m) continue;
       const existing = bestById.get(m.ingredientId);

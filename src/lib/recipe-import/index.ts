@@ -33,6 +33,7 @@ import {
   MIN_AUTO_MATCH_SCORE,
   tokenizeCandidate,
   type CandidateToken,
+  type CatalogBlockIndex,
   type IngredientCandidateMatch,
   type IngredientCatalog,
 } from "./matching.ts";
@@ -525,6 +526,11 @@ export type ParseLookups = {
    *  backward compatibility — callers that don't provide it get the old
    *  exact-lookup behaviour. */
   ingredientCatalog?: IngredientCatalog;
+  /** Optional block index for {@link ingredientCatalog} — when present, the
+   *  matcher prunes its candidate sweep (used by the bulk reparse scan, which
+   *  parses thousands of lines against the same catalog). Must be built from
+   *  the SAME catalog instance. */
+  ingredientCatalogIndex?: CatalogBlockIndex;
 };
 
 /**
@@ -687,6 +693,7 @@ function resolveIngredientForRow(
       const { matches } = findIngredientCandidates(wideText, catalog, {
         lineUnitId,
         gateScore: autoMatchScoreThreshold,
+        index: lookups.ingredientCatalogIndex,
       });
       wideMatches = matches;
       const top = matches[0];
