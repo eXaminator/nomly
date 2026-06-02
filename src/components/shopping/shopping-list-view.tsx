@@ -20,6 +20,7 @@ import {
   type SupermarketSummary,
 } from "@/lib/shopping/group-items";
 import { countNeededItemsPerSupermarket } from "@/lib/shopping/supermarket-availability";
+import { resolveSupermarketDeepLink } from "@/lib/shopping/supermarket-deep-link";
 import { ShoppingItemRow } from "./shopping-item-row";
 import { ShoppingDoneState } from "./shopping-done";
 import { AddItemDialog } from "./add-item-dialog";
@@ -173,17 +174,24 @@ export function ShoppingListView({
   }, [connectivity]);
 
   React.useEffect(() => {
-    // A `?supermarket=<id>` deep link (e.g. the Home Assistant geofence
-    // notification) takes precedence over the stored default. A deep-linked
-    // store is also persisted, so a later reload keeps it.
+    // A `?supermarket=` deep link (e.g. a Home Assistant notification) takes
+    // precedence over the stored default: a valid id selects + persists that
+    // store; `all` (or an empty value) resets to "Alle Supermärkte" and clears
+    // the stored default; with no param the stored default is restored.
     const fromUrl = new URLSearchParams(window.location.search).get("supermarket");
-    const candidate = fromUrl ?? window.localStorage.getItem(STORAGE_KEY);
-    if (candidate == null) return;
-    const n = Number.parseInt(candidate, 10);
-    if (Number.isFinite(n) && supermarkets.some((s) => s.id === n)) {
+    const action = resolveSupermarketDeepLink(
+      fromUrl,
+      window.localStorage.getItem(STORAGE_KEY),
+      (id) => supermarkets.some((s) => s.id === id),
+    );
+    if (action.id !== undefined) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
-      setSupermarketId(n);
-      if (fromUrl != null) window.localStorage.setItem(STORAGE_KEY, String(n));
+      setSupermarketId(action.id);
+    }
+    if (action.storage === "write" && action.id != null) {
+      window.localStorage.setItem(STORAGE_KEY, String(action.id));
+    } else if (action.storage === "clear") {
+      window.localStorage.removeItem(STORAGE_KEY);
     }
   }, [supermarkets]);
 

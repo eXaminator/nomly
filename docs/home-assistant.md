@@ -493,4 +493,5 @@ automation:
 | GET | `/api/v1/shopping/store-availability` | Per-store still-needed count. |
 | GET | `/api/v1/shopping/today-meal-status` | Today's meals still needing shopping + per-shop coverage. |
 | GET | `/embed/rezepte/<id>?k=<embed token>` | Chrome-less recipe view for the iframe. |
-| GET | `/einkauf?supermarket=<id>` | Shopping list with a store preselected. |
+| GET | `/einkauf?supermarket=<id>` | Shopping list with a store preselected (persists as the default). |
+| GET | `/einkauf?supermarket=all` | Shopping list with the store filter reset to "Alle Supermärkte" (clears the stored default). |
