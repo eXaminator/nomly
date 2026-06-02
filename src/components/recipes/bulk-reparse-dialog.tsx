@@ -157,13 +157,22 @@ export function BulkReparseDialog({
   const [unitForms, setUnitForms] = React.useState<UnitForm[]>([]);
   const inflect = React.useMemo(() => buildUnitInflector(unitForms), [unitForms]);
   const loadedRef = React.useRef(false);
+  const scanAbortRef = React.useRef<AbortController | null>(null);
 
   const runScan = React.useCallback(async () => {
+    // Cancel any in-flight scan before starting a new one. Aborting the fetch
+    // also disconnects the request, which the server honors to stop scanning.
+    scanAbortRef.current?.abort();
+    const ac = new AbortController();
+    scanAbortRef.current = ac;
     setLoading(true);
     setError(null);
     setSummary(null);
     try {
-      const r = await fetch("/api/v1/recipes/reparse-scan", { method: "POST" });
+      const r = await fetch("/api/v1/recipes/reparse-scan", {
+        method: "POST",
+        signal: ac.signal,
+      });
       if (!r.ok) throw new Error("scan failed");
       const data = (await r.json()) as {
         entries: ScanEntry[];
@@ -180,13 +189,14 @@ export function BulkReparseDialog({
       );
       setExpanded(new Set());
     } catch {
-      setError("Scan fehlgeschlagen.");
+      // An aborted scan (dialog closed / re-scan) isn't an error.
+      if (!ac.signal.aborted) setError("Scan fehlgeschlagen.");
     } finally {
-      setLoading(false);
+      if (!ac.signal.aborted) setLoading(false);
     }
   }, []);
 
-  // Scan once each time the dialog opens.
+  // Scan once each time the dialog opens; abort the in-flight scan on close.
   React.useEffect(() => {
     if (open && !loadedRef.current) {
       loadedRef.current = true;
@@ -194,6 +204,7 @@ export function BulkReparseDialog({
     }
     if (!open) {
       loadedRef.current = false;
+      scanAbortRef.current?.abort();
       setEntries([]);
       setStates([]);
       setSummary(null);

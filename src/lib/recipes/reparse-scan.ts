@@ -256,12 +256,32 @@ export function carriedAlternatives<
   return [...droppedSource, ...carriedManual];
 }
 
+/** Yield to the event loop between chunks of a large scan. A *macrotask* hop
+ *  (setImmediate) — not a microtask like `await Promise.resolve()` — is what
+ *  actually lets other queued HTTP requests (navigations, API calls) run while
+ *  the scan is in progress. */
+function yieldToEventLoop(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve));
+}
+
+/** How many line-groups to parse between event-loop yields. Big enough that the
+ *  per-chunk yield overhead stays negligible, small enough that the longest
+ *  uninterrupted block is a handful of parses. */
+const SCAN_YIELD_EVERY = 25;
+
 /**
  * Scan every recipe. For each contiguous source-line group, re-parse the line
  * with the current parser and keep only groups whose output differs from the
  * stored rows. One DB read for all ingredient rows; parsing is in-process.
+ *
+ * Async + chunked: the parse loop yields to the event loop every
+ * {@link SCAN_YIELD_EVERY} groups so it doesn't freeze the single-threaded
+ * server, and honors `signal` (the request aborts when the dialog is closed or
+ * the user navigates away) by bailing at the next chunk boundary.
  */
-export function scanAllRecipesForReparse(): ReparseScanEntry[] {
+export async function scanAllRecipesForReparse(
+  signal?: AbortSignal,
+): Promise<ReparseScanEntry[]> {
   const lookups = {
     units: buildUnitLookup(),
     ingredients: buildIngredientLookup(),
@@ -299,9 +319,18 @@ export function scanAllRecipesForReparse(): ReparseScanEntry[] {
       asc(recipeIngredient.sortOrder),
     )
     .all();
+  signal?.throwIfAborted();
 
+  const groups = groupContiguousByRawLine(rows);
   const entries: ReparseScanEntry[] = [];
-  for (const group of groupContiguousByRawLine(rows)) {
+  for (let gi = 0; gi < groups.length; gi++) {
+    // Hand the event loop back periodically so navigations/API calls aren't
+    // starved, and stop early if the client disconnected (dialog closed).
+    if (gi > 0 && gi % SCAN_YIELD_EVERY === 0) {
+      signal?.throwIfAborted();
+      await yieldToEventLoop();
+    }
+    const group = groups[gi];
     const head = group[0];
     const rawLine = (head.rawLine ?? "").trim();
     const current: CurrentRow[] = group.map((g) => ({
