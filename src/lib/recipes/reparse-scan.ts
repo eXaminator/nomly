@@ -28,6 +28,13 @@ import type {
  * path. See docs/superpowers/specs/2026-05-30-bulk-reparse-recipes-design.md.
  */
 
+/** The parse inputs built once per scan. */
+type ReparseLookups = {
+  units: ReturnType<typeof buildUnitLookup>;
+  ingredients: ReturnType<typeof buildIngredientLookup>;
+  ingredientCatalog: ReturnType<typeof buildIngredientCatalog>;
+};
+
 /** Current (stored) ingredient row, reduced to the fields that decide whether
  *  a re-parse would change anything. */
 export type CurrentRow = {
@@ -270,6 +277,82 @@ function yieldToEventLoop(): Promise<void> {
 const SCAN_YIELD_EVERY = 25;
 
 /**
+ * In-memory cache of the PROPOSED parse keyed by trimmed raw line. The proposed
+ * parse is a pure function of `(rawLine, lookups)`, so a raw line shared across
+ * recipes parses once (within-scan dedup) and a reopen with an unchanged
+ * catalog reuses everything (cross-open reuse — the dialog is opened
+ * repeatedly). Only the proposed side is cached; the "changed?" decision still
+ * reads the current rows fresh each scan. Process-lifetime only — a restart
+ * starts cold, which is fine.
+ */
+const parseCache = new Map<string, ParsedIngredientResponse[]>();
+/** Fingerprint of the parse inputs the cache was built against. When the
+ *  catalog or unit lookup changes, the fingerprint changes and the cache is
+ *  dropped — so an ingredient/alias/unit/global-default edit between two opens
+ *  is reflected. */
+let cacheFingerprint: string | null = null;
+/** Counts actual parser invocations (cache misses) — test-only observability. */
+let parseInvocations = 0;
+
+/** FNV-1a over the parse inputs: catalog entries (id|aliasName|unitId) plus the
+ *  unit lookup (token→id, sorted) and the global default unit. Cheap over a few
+ *  thousand entries; no large string allocation. */
+function fingerprintInputs(lookups: ReparseLookups): string {
+  let h = 0x811c9dc5;
+  const mix = (s: string) => {
+    for (let i = 0; i < s.length; i++) {
+      h ^= s.charCodeAt(i);
+      h = Math.imul(h, 0x01000193);
+    }
+  };
+  for (const e of lookups.ingredientCatalog) {
+    mix(e.aliasName);
+    mix("|");
+    mix(String(e.ingredientId));
+    mix("|");
+    mix(String(e.unitId ?? ""));
+    mix(";");
+  }
+  const unitKeys = Array.from(lookups.units.byNameOrAlias.entries())
+    .map(([k, v]) => `${k}=${v.id}`)
+    .sort();
+  for (const k of unitKeys) {
+    mix(k);
+    mix(",");
+  }
+  mix(`gd=${lookups.units.globalDefaultUnitId ?? ""}`);
+  return (h >>> 0).toString(16);
+}
+
+/** Parse a single raw line through the cache, counting genuine misses. */
+function parseLineCached(
+  rawLine: string,
+  lookups: ReparseLookups,
+): ParsedIngredientResponse[] {
+  const hit = parseCache.get(rawLine);
+  if (hit) return hit;
+  parseInvocations += 1;
+  const parsed = parseIngredientLines(
+    [rawLine],
+    lookups,
+  ) as unknown as ParsedIngredientResponse[];
+  parseCache.set(rawLine, parsed);
+  return parsed;
+}
+
+/** Test-only: clear the parse cache + fingerprint + invocation counter. */
+export function __resetReparseParseCache(): void {
+  parseCache.clear();
+  cacheFingerprint = null;
+  parseInvocations = 0;
+}
+
+/** Test-only: number of genuine parser invocations since the last reset. */
+export function __getReparseParseInvocations(): number {
+  return parseInvocations;
+}
+
+/**
  * Scan every recipe. For each contiguous source-line group, re-parse the line
  * with the current parser and keep only groups whose output differs from the
  * stored rows. One DB read for all ingredient rows; parsing is in-process.
@@ -282,11 +365,18 @@ const SCAN_YIELD_EVERY = 25;
 export async function scanAllRecipesForReparse(
   signal?: AbortSignal,
 ): Promise<ReparseScanEntry[]> {
-  const lookups = {
+  const lookups: ReparseLookups = {
     units: buildUnitLookup(),
     ingredients: buildIngredientLookup(),
     ingredientCatalog: buildIngredientCatalog(),
   };
+  // Drop the parse cache when the parse inputs changed since the last scan; an
+  // unchanged catalog keeps it warm so reopening the dialog is near-instant.
+  const fingerprint = fingerprintInputs(lookups);
+  if (fingerprint !== cacheFingerprint) {
+    parseCache.clear();
+    cacheFingerprint = fingerprint;
+  }
   const rows = db
     .select({
       recipeId: recipe.id,
@@ -343,10 +433,7 @@ export async function scanAllRecipesForReparse(
       isOptional: g.isOptional,
       alternativeForId: g.alternativeForId,
     }));
-    const proposedDerived = parseIngredientLines(
-      [rawLine],
-      lookups,
-    ) as unknown as ParsedIngredientResponse[];
+    const proposedDerived = parseLineCached(rawLine, lookups);
     // A line that now reads as noise (no rows) shouldn't propose deleting a
     // real ingredient — skip it (mirrors the per-row re-parse guard).
     if (proposedDerived.length === 0) continue;
