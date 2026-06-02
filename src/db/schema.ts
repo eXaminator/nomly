@@ -48,6 +48,27 @@ export const recipeSection = sqliteTable(
   (t) => [index("recipe_section_recipe_idx").on(t.recipeId)],
 );
 
+/**
+ * Bulk-reparse mute: suppress a recipe (raw_line NULL) or a single source line
+ * (raw_line = the trimmed raw line) from the bulk-reparse scan, for diffs the
+ * user has intentionally hand-handled. Keyed on (recipe_id, raw_line) — NOT a
+ * recipe_ingredient id, because apply recreates rows while the raw source line
+ * is stable. Permanent until removed; editing the line's raw text changes the
+ * key (a new line resurfaces), and deleting the recipe cascades the mute.
+ */
+export const reparseMute = sqliteTable(
+  "reparse_mute",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    recipeId: integer("recipe_id")
+      .notNull()
+      .references(() => recipe.id, { onDelete: "cascade" }),
+    rawLine: text("raw_line"),
+    createdAt: integer("created_at").notNull().default(now),
+  },
+  (t) => [index("reparse_mute_recipe_idx").on(t.recipeId)],
+);
+
 export const unit = sqliteTable("unit", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   name: text("name").notNull().unique(),

@@ -14,6 +14,7 @@ import {
   buildUnitLookup,
   parseIngredientLines,
 } from "@/lib/recipe-import";
+import { loadMuteSet } from "@/lib/recipes/reparse-mutes";
 import type { ParsedIngredientResponse } from "@/components/recipes/types";
 import type {
   RecipeIngredientInput,
@@ -377,6 +378,9 @@ export async function scanAllRecipesForReparse(
     parseCache.clear();
     cacheFingerprint = fingerprint;
   }
+  // Muted recipes / lines are skipped entirely (not parsed, not returned) —
+  // diffs the user has intentionally hand-handled.
+  const muted = loadMuteSet();
   const rows = db
     .select({
       recipeId: recipe.id,
@@ -423,6 +427,10 @@ export async function scanAllRecipesForReparse(
     const group = groups[gi];
     const head = group[0];
     const rawLine = (head.rawLine ?? "").trim();
+    // Skip muted groups before any parsing (hide + cost nothing).
+    if (muted.recipes.has(head.recipeId) || muted.lines.has(`${head.recipeId} ${rawLine}`)) {
+      continue;
+    }
     const current: CurrentRow[] = group.map((g) => ({
       id: g.id,
       ingredientId: g.ingredientId,
