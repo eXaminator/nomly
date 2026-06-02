@@ -59,6 +59,11 @@ export type CatalogEntry = {
   /** Per-alias default unit — flows through to the parser so a matched alias
    *  can still influence unit selection downstream. */
   defaultUnit?: { id: number; name: string };
+  /** Resolved default unit id (alias default → ingredient default → global
+   *  default) used by the unit decider in {@link findIngredientCandidates}.
+   *  Distinct from {@link defaultUnit}, which is the display unit for the row;
+   *  this is the matching signal and always resolves through the full chain. */
+  unitId?: number;
   /** Optional per-alias rename: when this entry is the match, the row's
    *  display name becomes this instead of the alias text ("Knoblauchzehe" →
    *  "Knoblauch"). Undefined = show the matched alias verbatim. */
@@ -87,6 +92,8 @@ export type IngredientCandidateMatch = {
   perTokenKinds: MatchKind[];
   inOrder: boolean;
   defaultUnit?: { id: number; name: string };
+  /** Resolved unit id for the unit decider — see {@link CatalogEntry.unitId}. */
+  unitId?: number;
   displayName?: string;
   /** Propagated from the matched {@link CatalogEntry} — see its docstring. */
   isEquipment?: boolean;
@@ -401,6 +408,7 @@ function bestMatchForEntry(
         perTokenKinds: aligned.map((a) => a.kind),
         inOrder,
         defaultUnit: entry.defaultUnit,
+        unitId: entry.unitId,
         displayName: entry.displayName,
         isEquipment: entry.isEquipment,
         candidate,
@@ -481,6 +489,16 @@ export const MIN_AUTO_MATCH_SCORE = 130;
 export type FindCandidatesOptions = {
   /** Cap on returned matches. Defaults to 5. */
   limit?: number;
+  /** Resolved canonical unit id of the line being matched (or null). When set,
+   *  a gate-clearing candidate whose resolved unit equals this id gets its SORT
+   *  weight doubled — the unit decides between name-plausible candidates
+   *  (canned "Dose" vs fresh "Stück"). The gate itself still reads the
+   *  undoubled `score`, so the unit can never push a below-gate match to an
+   *  auto-pick. */
+  lineUnitId?: number | null;
+  /** Score a candidate must reach (on its undoubled name score) to qualify for
+   *  unit doubling. Defaults to {@link MIN_AUTO_MATCH_SCORE}. */
+  gateScore?: number;
 };
 
 /**
@@ -596,8 +614,21 @@ export function findIngredientCandidates(
       }
     }
   }
+  // Unit decider: the line's resolved unit doubles a candidate's SORT weight
+  // when that candidate already clears the gate on its NAME score and its
+  // resolved unit equals the line's unit. Gating on the undoubled score is what
+  // stops the unit from crossing the auto-match gate — `match.score` is left
+  // untouched (the caller's gate check reads it), only ranking changes.
+  const lineUnitId = options.lineUnitId ?? null;
+  const gate = options.gateScore ?? MIN_AUTO_MATCH_SCORE;
+  const rankWeight = (m: IngredientCandidateMatch): number =>
+    lineUnitId != null && m.unitId === lineUnitId && m.score >= gate
+      ? m.score * 2
+      : m.score;
   const sorted = Array.from(bestById.values()).sort((a, b) => {
-    if (b.match.score !== a.match.score) return b.match.score - a.match.score;
+    const aw = rankWeight(a.match);
+    const bw = rankWeight(b.match);
+    if (aw !== bw) return bw - aw;
     // Cross-ingredient tiebreak: prefer the candidate whose winning row is
     // the canonical (a redundant guard since canonicals already get a +1
     // score boost in bestMatchForEntry, but explicit here so the sort

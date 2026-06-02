@@ -672,3 +672,76 @@ describe("fuzzy alignment tier (single-typo tolerance)", () => {
     expect(findIngredientCandidates("bitten", [entry(1, "butter")]).matches).toHaveLength(0);
   });
 });
+
+describe("unit decider", () => {
+  const DOSE = 12,
+    STUECK = 14,
+    G = 1;
+  // fresh Tomate (Stück) vs Dosentomate (Dose); both share base + descriptor
+  // aliases so the unit, not the name, is what distinguishes them.
+  function cat() {
+    const e = (id: number, c: string, a: string, unitId: number) => ({
+      ingredientId: id,
+      canonicalName: c,
+      aliasName: a,
+      tokens: a.toLowerCase().split(/\s+/),
+      unitId,
+    });
+    return [
+      e(123, "Tomate", "Tomate", STUECK),
+      e(123, "Tomate", "tomatoes", STUECK),
+      e(123, "Tomate", "Tomaten", STUECK),
+      e(580, "Dosentomate", "Dosentomate", DOSE),
+      e(580, "Dosentomate", "tomatoes", DOSE),
+      e(580, "Dosentomate", "Tomaten", DOSE),
+      e(580, "Dosentomate", "chopped tomatoes", DOSE),
+    ];
+  }
+
+  it("unit Dose picks the canned variant when both clear the gate (shared alias)", () => {
+    const { matches } = findIngredientCandidates("Tomaten", cat(), {
+      lineUnitId: DOSE,
+    });
+    expect(matches[0].ingredientId).toBe(580);
+  });
+
+  it("unit Stück picks fresh for the same shared alias", () => {
+    const { matches } = findIngredientCandidates("Tomaten", cat(), {
+      lineUnitId: STUECK,
+    });
+    expect(matches[0].ingredientId).toBe(123);
+  });
+
+  it("unit Stück overrides a higher NAME score (fresh beats canned 'chopped tomatoes')", () => {
+    // "tomatoes, chopped": canned matches both tokens (~200), fresh only
+    // "tomatoes" (~130) — yet Stück must flip it to fresh.
+    const { matches } = findIngredientCandidates("tomatoes, chopped", cat(), {
+      lineUnitId: STUECK,
+    });
+    expect(matches[0].ingredientId).toBe(123);
+  });
+
+  it("non-matching unit (g) falls back to name score → canned wins on 'chopped tomatoes'", () => {
+    const { matches } = findIngredientCandidates("chopped tomatoes", cat(), {
+      lineUnitId: G,
+    });
+    expect(matches[0].ingredientId).toBe(580);
+  });
+
+  it("doubling never crosses the gate: a below-gate unit match does not auto-clear", () => {
+    // "Dosento" prefix-matches only "Dosentomate" (no bonus) → ~110 < 130.
+    const only = [
+      {
+        ingredientId: 580,
+        canonicalName: "Dosentomate",
+        aliasName: "Dosentomate",
+        tokens: ["dosentomate"],
+        unitId: DOSE,
+      },
+    ];
+    const { matches } = findIngredientCandidates("Dosento", only, {
+      lineUnitId: DOSE,
+    });
+    expect(matches[0].score).toBeLessThan(MIN_AUTO_MATCH_SCORE);
+  });
+});
