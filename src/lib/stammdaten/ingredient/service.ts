@@ -464,6 +464,12 @@ function validateInput(
     );
   }
 
+  // Alias-vs-alias collisions are intentionally NOT blocked: two ingredients
+  // may share an alias (e.g. "tomatoes" on fresh Tomate and canned
+  // Dosentomate), with the line's unit deciding at match time — the management
+  // UI surfaces those as an advisory warning rather than erroring. An alias
+  // matching an existing CANONICAL name is still rejected, so canonical names
+  // stay sacrosanct in the namespace.
   for (const alias of cleanedAliases) {
     const collision = findNameCollision({
       name: alias,
@@ -476,11 +482,9 @@ function validateInput(
       excludeCanonicalId: excludeId,
       excludeAliasParentId: excludeId,
     });
-    if (collision) {
+    if (collision && collision.kind === "canonical") {
       throw new StammdatenError(
-        `Alias "${alias}" ist bereits vergeben (${
-          collision.kind === "canonical" ? "als Zutat" : "als Alias"
-        }: "${collision.name}").`,
+        `Alias "${alias}" ist bereits vergeben (als Zutat: "${collision.name}").`,
         409,
       );
     }

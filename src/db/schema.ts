@@ -160,7 +160,14 @@ export const ingredientAlias = sqliteTable("ingredient_alias", {
   ingredientId: integer("ingredient_id")
     .notNull()
     .references(() => ingredient.id, { onDelete: "cascade" }),
-  name: text("name").notNull().unique(),
+  /**
+   * NOT globally unique: two ingredients may share an alias (e.g. "tomatoes"
+   * on both fresh Tomate and canned Dosentomate), disambiguated at match time
+   * by the line's unit (see the unit decider in `findIngredientCandidates`).
+   * Collisions are advisory — surfaced as a warning in the management UI, not
+   * blocked. Canonical `ingredient.name` stays unique.
+   */
+  name: text("name").notNull(),
   /**
    * Per-alias default unit (global). Used when the parser hits this alias
    * with no explicit unit — e.g. "Knoblauchzehe" → "Zehe", "Olivenöl extra

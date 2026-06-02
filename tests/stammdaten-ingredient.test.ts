@@ -126,6 +126,29 @@ describe("ingredient stammdaten service", () => {
       ).toThrow(/bereits vergeben/);
     });
 
+    it("allows two ingredients to SHARE an alias (advisory, not blocked)", async () => {
+      const { service } = await loadModules();
+      const fresh = service.createIngredient({
+        name: "Frischtomate",
+        aliases: ["tomatoes"],
+        defaultCategoryId: null,
+        excludeFromShoppingList: false,
+        dietaryClass: null,
+      });
+      // Same alias on a different ingredient must NOT throw — the unit decides
+      // at match time.
+      const canned = service.createIngredient({
+        name: "Dosentomate",
+        aliases: ["tomatoes"],
+        defaultCategoryId: null,
+        excludeFromShoppingList: false,
+        dietaryClass: null,
+      });
+      expect(fresh.aliases).toContain("tomatoes");
+      expect(canned.aliases).toContain("tomatoes");
+      expect(canned.id).not.toBe(fresh.id);
+    });
+
     it("persists a default unit + per-ingredient conversion and reads them back", async () => {
       const { db, schema, service } = await loadModules();
       const [stueck] = db
