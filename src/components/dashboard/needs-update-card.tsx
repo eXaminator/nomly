@@ -57,9 +57,9 @@ export function NeedsUpdateCard({
                 <li key={recipe.id}>
                   <Link
                     href={`/rezepte/${recipe.id}`}
-                    className="flex min-h-11 items-center truncate rounded-md px-2 -mx-2 text-sm font-medium text-[var(--color-fg)] hover:bg-[var(--color-muted)]/50 hover:underline"
+                    className="flex min-h-11 min-w-0 items-center rounded-md px-2 -mx-2 text-sm font-medium text-[var(--color-fg)] hover:bg-[var(--color-muted)]/50 hover:underline"
                   >
-                    {recipe.title}
+                    <span className="truncate">{recipe.title}</span>
                   </Link>
                 </li>
               ))}

@@ -103,7 +103,7 @@ export function UpcomingMealsCard({
                             confidence={meal.recipe.dietConfidence}
                             size="sm"
                           />
-                          <span className="truncate text-sm font-medium text-[var(--color-fg)] group-hover:underline">
+                          <span className="min-w-0 truncate text-sm font-medium text-[var(--color-fg)] group-hover:underline">
                             {meal.recipe.title}
                           </span>
                           {meal.isLeftover ? (
