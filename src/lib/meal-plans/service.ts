@@ -453,6 +453,42 @@ export function getRecipeUsageStats(today: string): Map<number, RecipeUsageStats
   return out;
 }
 
+export type MostEatenRecipe = {
+  recipeId: number;
+  title: string;
+  photoPath: string | null;
+  /** Past cook days (today included), leftover days excluded. */
+  count: number;
+};
+
+/**
+ * The most-cooked recipes for the dashboard: meal-plan history up to and
+ * including today, grouped per recipe. Leftover days are excluded — like
+ * {@link getRecipeUsageStats}, the count reflects how often a recipe was
+ * actually cooked, not re-eaten. Ties break alphabetically by title.
+ */
+export function getMostEatenRecipes(today: string, limit: number): MostEatenRecipe[] {
+  assertIsoDate(today);
+  const count = sql<number>`COUNT(*)`.as("count");
+  const rows = db
+    .select({
+      recipeId: mealPlan.recipeId,
+      title: recipe.title,
+      photoPath: recipe.photoPath,
+      count,
+    })
+    .from(mealPlan)
+    .innerJoin(recipe, eq(recipe.id, mealPlan.recipeId))
+    .where(and(sql`${mealPlan.date} <= ${today}`, eq(mealPlan.isLeftover, false)))
+    .groupBy(mealPlan.recipeId)
+    .all();
+
+  return rows
+    .map((r) => ({ ...r, count: Number(r.count) }))
+    .sort((a, b) => b.count - a.count || a.title.localeCompare(b.title, "de"))
+    .slice(0, limit);
+}
+
 function computeDietForRecipes(recipeIds: number[]): Map<number, RecipeDiet> {
   if (recipeIds.length === 0) return new Map();
   const rows = db

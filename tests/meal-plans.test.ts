@@ -310,6 +310,83 @@ describe("recipe usage stats", () => {
   });
 });
 
+describe("most eaten recipes", () => {
+  let curryId: number;
+  let salatId: number;
+  let suppeId: number;
+
+  beforeAll(async () => {
+    const { db } = await import("@/db");
+    const { recipe } = await import("@/db/schema");
+    const insert = (title: string) =>
+      db
+        .insert(recipe)
+        .values({ title, servings: 2 })
+        .returning({ id: recipe.id })
+        .all()[0].id;
+    curryId = insert("Dashboard-Curry");
+    salatId = insert("Dashboard-Salat");
+    suppeId = insert("Dashboard-Suppe");
+  });
+
+  beforeEach(async () => {
+    const { db } = await import("@/db");
+    const { mealPlan } = await import("@/db/schema");
+    db.delete(mealPlan).run();
+  });
+
+  it("ranks by past cook count (today included), capped at limit", async () => {
+    const { createMeal, getMostEatenRecipes } = await import(
+      "@/lib/meal-plans/service"
+    );
+    const today = "2026-06-03";
+    createMeal({ recipeId: curryId, date: "2026-05-01" });
+    createMeal({ recipeId: curryId, date: "2026-05-15" });
+    createMeal({ recipeId: curryId, date: today });
+    createMeal({ recipeId: salatId, date: "2026-05-10" });
+    createMeal({ recipeId: salatId, date: "2026-05-20" });
+    createMeal({ recipeId: suppeId, date: "2026-05-25" });
+
+    const top = getMostEatenRecipes(today, 2);
+    expect(top.map((t) => t.recipeId)).toEqual([curryId, salatId]);
+    expect(top[0].count).toBe(3);
+    expect(top[0].title).toBe("Dashboard-Curry");
+    expect(top[1].count).toBe(2);
+  });
+
+  it("ignores future plannings and leftover days", async () => {
+    const { createMeal, getMostEatenRecipes } = await import(
+      "@/lib/meal-plans/service"
+    );
+    const today = "2026-06-03";
+    createMeal({ recipeId: curryId, date: "2026-05-01" });
+    createMeal({ recipeId: curryId, date: "2026-05-02", isLeftover: true });
+    createMeal({ recipeId: curryId, date: "2026-06-10" });
+    createMeal({ recipeId: salatId, date: "2026-05-10" });
+    createMeal({ recipeId: salatId, date: "2026-05-20" });
+
+    const top = getMostEatenRecipes(today, 5);
+    expect(top.map((t) => t.recipeId)).toEqual([salatId, curryId]);
+    expect(top.find((t) => t.recipeId === curryId)?.count).toBe(1);
+  });
+
+  it("breaks count ties by title and returns [] without history", async () => {
+    const { createMeal, getMostEatenRecipes } = await import(
+      "@/lib/meal-plans/service"
+    );
+    const today = "2026-06-03";
+    expect(getMostEatenRecipes(today, 5)).toEqual([]);
+
+    createMeal({ recipeId: suppeId, date: "2026-05-01" });
+    createMeal({ recipeId: curryId, date: "2026-05-02" });
+    const top = getMostEatenRecipes(today, 5);
+    expect(top.map((t) => t.title)).toEqual([
+      "Dashboard-Curry",
+      "Dashboard-Suppe",
+    ]);
+  });
+});
+
 describe("planner settings", () => {
   beforeEach(async () => {
     const { db } = await import("@/db");
