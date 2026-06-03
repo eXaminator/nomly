@@ -65,7 +65,7 @@ export default function Home() {
       </div>
       <div className="mt-8 flex flex-col gap-4">
         <TodayShoppingWarning status={todayStatus} />
-        <div className="grid gap-4 lg:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           <UpcomingMealsCard
             dates={dates}
             meals={meals}
