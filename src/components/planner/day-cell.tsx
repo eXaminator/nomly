@@ -63,10 +63,11 @@ export function DayCell({
     <div
       className={cn(
         "flex flex-col rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-card)] p-3",
-        // Today's marker: a thick accent bar on the LEFT edge. Visually
-        // distinct from the drop-zone ring (which highlights the meals
-        // sub-column) so it doesn't get mistaken for one.
-        isToday && "border-l-4 border-l-[var(--color-accent)] shadow-sm",
+        // Today's marker: the whole frame goes accent-coloured, with thick
+        // bars on the left AND right edges and the (still thin) top/bottom
+        // edges tinted to match.
+        isToday &&
+          "border-[var(--color-accent)] border-l-4 border-r-4 shadow-sm",
       )}
     >
       <header className="mb-2 flex items-baseline justify-between gap-2">

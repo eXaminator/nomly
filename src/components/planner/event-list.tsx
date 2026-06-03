@@ -17,7 +17,7 @@ export function EventList({ events }: Props) {
       {events.map((event) => (
         <li
           key={event.uid}
-          className="flex flex-col gap-0.5 rounded-[var(--radius)] border-l-2 bg-[var(--color-muted)]/30 py-1 pl-2 pr-1.5"
+          className="flex flex-col gap-0.5 rounded-[var(--radius)] border border-[var(--color-border)] border-l-2 bg-[var(--color-muted)]/30 py-1 pl-2 pr-1.5"
           style={{ borderLeftColor: event.feedColor }}
           title={titleText(event)}
         >
