@@ -13,6 +13,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { DietBadge } from "@/components/recipes/diet-badge";
 import { IngredientLine } from "@/components/recipes/ingredient-line";
+import { formatQuantity } from "@/components/recipes/ingredient-read-line";
 import { NeedsUpdateToggle } from "@/components/recipes/needs-update-toggle";
 import {
   UpcomingUsesButton,
@@ -30,12 +31,6 @@ type Props = {
   mealPlanId?: number | null;
   onClose: () => void;
 };
-
-function formatQuantity(q: number | null): string {
-  if (q === null) return "";
-  const rounded = Math.round(q * 100) / 100;
-  return new Intl.NumberFormat("de-DE", { maximumFractionDigits: 2 }).format(rounded);
-}
 
 export function RecipePreviewDialog({ recipeId, mealPlanId = null, onClose }: Props) {
   const open = recipeId != null;
@@ -229,7 +224,10 @@ function RecipeBody({ recipeId, mealPlanId }: { recipeId: number; mealPlanId: nu
                             />
                           ) : null}
                           <span>
-                            {formatQuantity(ing.quantity)} {ing.unitName ?? ""}
+                            {formatQuantity(ing.quantity, {
+                              fraction: ing.displayFraction,
+                            })}{" "}
+                            {ing.unitName ?? ""}
                           </span>
                         </span>
                         <span className="flex-1">

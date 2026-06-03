@@ -122,6 +122,7 @@ type ScanRowSummary = {
   canonicalName: string | null;
   quantity: number | null;
   unitLabel: string | null;
+  displayFraction: boolean;
   notes: string | null;
   isOptional: boolean;
   isAlternative: boolean;
@@ -163,6 +164,12 @@ export function BulkReparseDialog({
   } | null>(null);
   const [unitForms, setUnitForms] = React.useState<UnitForm[]>([]);
   const inflect = React.useMemo(() => buildUnitInflector(unitForms), [unitForms]);
+  // Fraction-display flag by unit id — the proposed rows carry only a unit id,
+  // so this lets the diff render them as fractions to match the current side.
+  const fractionByUnitId = React.useMemo(
+    () => new Map(unitForms.map((u) => [u.id, u.displayFraction])),
+    [unitForms],
+  );
   const loadedRef = React.useRef(false);
   const scanAbortRef = React.useRef<AbortController | null>(null);
 
@@ -690,6 +697,7 @@ export function BulkReparseDialog({
                                               key={k}
                                               quantity={c.quantity}
                                               unitLabel={inflect(c.unitLabel, c.quantity)}
+                                              displayFraction={c.displayFraction}
                                               name={c.name}
                                               canonicalName={c.canonicalName}
                                               notes={c.notes}
@@ -732,6 +740,13 @@ export function BulkReparseDialog({
                                                     d.unit?.name ?? null,
                                                     toNumberOrNull(d.quantity),
                                                   )}
+                                                  displayFraction={
+                                                    d.unit?.id != null
+                                                      ? (fractionByUnitId.get(
+                                                          d.unit.id,
+                                                        ) ?? false)
+                                                      : false
+                                                  }
                                                   name={d.name}
                                                   canonicalName={d.canonicalName}
                                                   notes={d.notes.trim() || null}

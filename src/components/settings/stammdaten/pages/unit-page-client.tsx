@@ -66,6 +66,7 @@ const columns: ColumnDef<UnitItem>[] = [
       <span className="inline-flex items-center gap-1">
         <Badge variant="outline">{DIMENSION_LABEL[item.dimension]}</Badge>
         {item.isContainer && <Badge variant="accent">Behälter</Badge>}
+        {item.displayFraction && <Badge variant="accent">Bruch</Badge>}
         {item.isGlobalDefault && <Badge variant="accent">Standard</Badge>}
       </span>
     ),

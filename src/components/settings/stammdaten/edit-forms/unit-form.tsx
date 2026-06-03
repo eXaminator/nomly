@@ -38,6 +38,7 @@ export type UnitItem = {
   baseUnitName: string | null;
   factor: number;
   isContainer: boolean;
+  displayFraction: boolean;
   isGlobalDefault: boolean;
   recipeRefCount: number;
 };
@@ -74,6 +75,9 @@ export function UnitForm({ item, onPayloadChange }: EditFormProps<UnitItem>) {
   const [isContainer, setIsContainer] = React.useState<boolean>(
     item?.isContainer ?? false,
   );
+  const [displayFraction, setDisplayFraction] = React.useState<boolean>(
+    item?.displayFraction ?? false,
+  );
   const [isGlobalDefault, setIsGlobalDefault] = React.useState<boolean>(
     item?.isGlobalDefault ?? false,
   );
@@ -100,6 +104,7 @@ export function UnitForm({ item, onPayloadChange }: EditFormProps<UnitItem>) {
         baseUnitId: baseUnit?.id ?? null,
         factor: Number.isFinite(factor) ? factor : 0,
         isContainer,
+        displayFraction,
         setAsGlobalDefault: isGlobalDefault,
       },
       valid,
@@ -113,6 +118,7 @@ export function UnitForm({ item, onPayloadChange }: EditFormProps<UnitItem>) {
     baseUnit,
     factorText,
     isContainer,
+    displayFraction,
     isGlobalDefault,
     onPayloadChange,
   ]);
@@ -275,6 +281,21 @@ export function UnitForm({ item, onPayloadChange }: EditFormProps<UnitItem>) {
         <Switch
           checked={isContainer}
           onCheckedChange={(v) => setIsContainer(Boolean(v))}
+        />
+      </div>
+
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <Label>Als Bruch anzeigen</Label>
+          <p className="text-xs text-[var(--color-muted-fg)]">
+            Mengen dieser Einheit werden in Rezeptansichten als Bruch
+            dargestellt (¼&nbsp;TL, 1½&nbsp;EL) statt als Dezimalzahl. Werte
+            ohne passenden Bruch bleiben dezimal.
+          </p>
+        </div>
+        <Switch
+          checked={displayFraction}
+          onCheckedChange={(v) => setDisplayFraction(Boolean(v))}
         />
       </div>
 

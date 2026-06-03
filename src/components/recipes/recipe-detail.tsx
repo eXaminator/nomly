@@ -259,7 +259,8 @@ export function RecipeDetail({
                   <DietMarker kind={ing.isEquipment ? null : ing.dietaryClass} />
                 )}
                 <span className="inline-flex min-w-12 shrink-0 items-center font-mono text-[var(--color-muted-fg)]">
-                  {formatQuantity(ing.quantity)} {ing.unitLabel ?? ""}
+                  {formatQuantity(ing.quantity, { fraction: ing.displayFraction })}{" "}
+                  {ing.unitLabel ?? ""}
                 </span>
                 <span className="flex-1">
                   <IngredientLine

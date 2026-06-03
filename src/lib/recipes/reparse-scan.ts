@@ -174,6 +174,8 @@ export type ScanRowSummary = {
   canonicalName: string | null;
   quantity: number | null;
   unitLabel: string | null;
+  /** Whether this row's unit is flagged for fraction display. */
+  displayFraction: boolean;
   notes: string | null;
   isOptional: boolean;
   isAlternative: boolean;
@@ -415,6 +417,7 @@ export async function scanAllRecipesForReparse(
       quantity: recipeIngredient.quantity,
       unitId: recipeIngredient.unitId,
       unitName: unit.name,
+      displayFraction: unit.displayFraction,
       displayUnit: recipeIngredient.displayUnit,
       notes: recipeIngredient.notes,
       isOptional: recipeIngredient.isOptional,
@@ -494,6 +497,7 @@ export async function scanAllRecipesForReparse(
         quantity: g.quantity,
         // Match the recipe read view: display_unit, then the canonical unit name.
         unitLabel: g.displayUnit ?? g.unitName ?? null,
+        displayFraction: g.displayFraction ?? false,
         notes: g.notes,
         isOptional: g.isOptional,
         isAlternative: g.alternativeForId != null,
@@ -511,6 +515,9 @@ export type UnitForm = {
   id: number;
   name: string;
   plural: string | null;
+  /** Whether this unit is flagged for fraction display — lets the diff render
+   *  proposed rows (which carry only a unit id) as fractions too. */
+  displayFraction: boolean;
   aliases: { name: string; plural: string | null }[];
 };
 
@@ -518,7 +525,12 @@ export type UnitForm = {
  *  client-side inflector. The unit/alias tables are small, so load them whole. */
 export function loadUnitForms(): UnitForm[] {
   const units = db
-    .select({ id: unit.id, name: unit.name, plural: unit.plural })
+    .select({
+      id: unit.id,
+      name: unit.name,
+      plural: unit.plural,
+      displayFraction: unit.displayFraction,
+    })
     .from(unit)
     .all();
   const aliases = db
@@ -526,7 +538,16 @@ export function loadUnitForms(): UnitForm[] {
     .from(unitAlias)
     .all();
   const byId = new Map<number, UnitForm>(
-    units.map((u) => [u.id, { id: u.id, name: u.name, plural: u.plural, aliases: [] }]),
+    units.map((u) => [
+      u.id,
+      {
+        id: u.id,
+        name: u.name,
+        plural: u.plural,
+        displayFraction: u.displayFraction,
+        aliases: [],
+      },
+    ]),
   );
   for (const a of aliases) {
     byId.get(a.unitId)?.aliases.push({ name: a.name, plural: a.plural });

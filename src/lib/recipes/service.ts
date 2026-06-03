@@ -357,6 +357,8 @@ export function getRecipe(id: number): RecipeView | null {
     unitName: string | null;
     canonicalUnitName: string | null;
     unitPlural: string | null;
+    // NULL for unassigned lines (no unit joined); coalesced to false below.
+    displayFraction: boolean | null;
     displayUnit: string | null;
     notes: string | null;
     isOptional: boolean;
@@ -389,6 +391,7 @@ export function getRecipe(id: number): RecipeView | null {
             >`coalesce(${recipeIngredient.displayUnit}, ${unitTable.name})`,
             canonicalUnitName: unitTable.name,
             unitPlural: unitTable.plural,
+            displayFraction: unitTable.displayFraction,
             displayUnit: recipeIngredient.displayUnit,
             notes: recipeIngredient.notes,
             isOptional: recipeIngredient.isOptional,
@@ -527,6 +530,7 @@ export function getRecipe(id: number): RecipeView | null {
           unitId: i.unitId,
           unitName: i.unitName,
           unitLabel: unitLabelFor(i),
+          displayFraction: i.displayFraction ?? false,
           notes: i.notes,
           isOptional: i.isOptional,
           fixedAmount: i.fixedAmount,

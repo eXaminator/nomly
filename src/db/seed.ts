@@ -213,7 +213,14 @@ export function runSeed(): SeedCounts {
       } else {
         const inserted = tx
           .insert(unit)
-          .values({ name, dimension: u.dimension, factor: u.factor })
+          .values({
+            name,
+            dimension: u.dimension,
+            factor: u.factor,
+            // Insert-time default only; never re-applied on a top-up run, so a
+            // user's later toggle in the unit UI is preserved.
+            displayFraction: u.displayFraction ?? false,
+          })
           .returning({ id: unit.id })
           .all();
         id = inserted[0].id;

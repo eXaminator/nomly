@@ -42,6 +42,9 @@ export type UnitListItem = {
   baseUnitName: string | null;
   factor: number;
   isContainer: boolean;
+  /** When true, recipe read views render this unit's quantities as fractions
+   *  (¼ TL) instead of decimals. */
+  displayFraction: boolean;
   /** True for the single unit configured as the global default (applied to a
    *  quantity-bearing line with no explicit unit). */
   isGlobalDefault: boolean;
@@ -59,6 +62,8 @@ export type UnitUpsertInput = {
   baseUnitId: number | null;
   factor: number;
   isContainer: boolean;
+  /** When true, recipe read views show this unit's quantities as fractions. */
+  displayFraction: boolean;
   /** When true, point the global-default-unit setting at this unit on save
    *  (single-select; overwrites any previous pointer). */
   setAsGlobalDefault?: boolean;
@@ -144,6 +149,7 @@ function loadUnitsBase(query?: string) {
         baseUnitId: unit.baseUnitId,
         factor: unit.factor,
         isContainer: unit.isContainer,
+        displayFraction: unit.displayFraction,
       })
       .from(unit)
       .orderBy(sql`unaccent(${unit.name})`)
@@ -163,6 +169,7 @@ function loadUnitsBase(query?: string) {
       baseUnitId: unit.baseUnitId,
       factor: unit.factor,
       isContainer: unit.isContainer,
+      displayFraction: unit.displayFraction,
     })
     .from(unit)
     .where(
@@ -206,6 +213,7 @@ export function listUnitsManaged(query?: string): UnitListItem[] {
       row.baseUnitId != null ? baseUnitNames.get(row.baseUnitId) ?? null : null,
     factor: row.factor,
     isContainer: row.isContainer,
+    displayFraction: row.displayFraction,
     isGlobalDefault: row.id === globalDefaultId,
     recipeRefCount: recipeCounts.get(row.id) ?? 0,
   }));
@@ -229,6 +237,7 @@ export function getUnitDetail(id: number): UnitListItem | null {
       row.baseUnitId != null ? baseUnitNames.get(row.baseUnitId) ?? null : null,
     factor: row.factor,
     isContainer: row.isContainer,
+    displayFraction: row.displayFraction,
     isGlobalDefault: row.id === getGlobalDefaultUnitId(),
     recipeRefCount: recipeCounts.get(row.id) ?? 0,
   };
@@ -353,6 +362,7 @@ export function createUnit(input: UnitUpsertInput): UnitListItem {
         baseUnitId: input.baseUnitId ?? null,
         factor: input.factor,
         isContainer: input.isContainer,
+        displayFraction: input.displayFraction,
       })
       .returning({ id: unit.id })
       .all();
@@ -397,6 +407,7 @@ export function updateUnit(id: number, input: UnitUpsertInput): UnitListItem {
         baseUnitId: input.baseUnitId ?? null,
         factor: input.factor,
         isContainer: input.isContainer,
+        displayFraction: input.displayFraction,
       })
       .where(eq(unit.id, id))
       .run();

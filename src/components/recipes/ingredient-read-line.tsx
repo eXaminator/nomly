@@ -2,10 +2,23 @@ import type { ReactNode } from "react";
 import { CornerDownRight, Lock } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { IngredientLine } from "@/components/recipes/ingredient-line";
+import { toFractionDisplay } from "@/lib/units/fraction";
 
-/** Display formatting for an ingredient quantity (de-DE, ≤2 decimals). */
-export function formatQuantity(q: number | null): string {
+/**
+ * Display formatting for an ingredient quantity (de-DE, ≤2 decimals). When
+ * `fraction` is set (the line's unit is flagged for fraction display), a value
+ * that resolves to a clean fraction renders as one (¼, 1½); anything else falls
+ * back to the decimal format.
+ */
+export function formatQuantity(
+  q: number | null,
+  opts?: { fraction?: boolean },
+): string {
   if (q === null) return "";
+  if (opts?.fraction) {
+    const fraction = toFractionDisplay(q);
+    if (fraction !== null) return fraction;
+  }
   const rounded = Math.round(q * 100) / 100;
   return new Intl.NumberFormat("de-DE", { maximumFractionDigits: 2 }).format(
     rounded,
@@ -24,6 +37,9 @@ export type LineHighlight = {
 export type ReadLineProps = {
   quantity: number | null;
   unitLabel: string | null;
+  /** When true, the line's unit is flagged for fraction display; the quantity
+   *  renders as a fraction when it resolves to one. */
+  displayFraction?: boolean;
   name: string;
   canonicalName: string | null;
   notes: string | null;
@@ -52,6 +68,7 @@ export type ReadLineProps = {
 export function RecipeIngredientReadLine({
   quantity,
   unitLabel,
+  displayFraction = false,
   name,
   canonicalName,
   notes,
@@ -89,7 +106,8 @@ export function RecipeIngredientReadLine({
         {mark(
           highlight?.amount,
           <span>
-            {formatQuantity(quantity)} {unitLabel ?? ""}
+            {formatQuantity(quantity, { fraction: displayFraction })}{" "}
+            {unitLabel ?? ""}
           </span>,
         )}
       </span>

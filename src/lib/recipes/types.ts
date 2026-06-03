@@ -152,6 +152,10 @@ export type RecipeIngredientView = {
    *  amount other than 1, when one is configured). Falls back to the singular
    *  / raw spelling when no plural applies. */
   unitLabel: string | null;
+  /** When true, this line's unit is flagged for fraction display, so the read
+   *  view renders the quantity as a fraction (¼ TL) when it resolves to one,
+   *  decimal otherwise. */
+  displayFraction: boolean;
   notes: string | null;
   isOptional: boolean;
   /** When true, this quantity is constant — meal-plan portion changes do not

@@ -24,6 +24,10 @@ export type SeedUnit = {
    *  here we pre-compute the factor so the seeder doesn't need a lookup
    *  table at runtime. */
   factor: number;
+  /** Default for the `display_fraction` flag at *insert* time only. Spoon/cup
+   *  units read naturally as fractions (¼ TL). The seeder never overwrites it
+   *  on a re-run, so a user's later toggle in the unit UI is preserved. */
+  displayFraction?: boolean;
 };
 
 export const SEED_UNITS: SeedUnit[] = [
@@ -34,9 +38,9 @@ export const SEED_UNITS: SeedUnit[] = [
   { name: "ml", aliases: ["milliliter", "milliliters", "Milliliter"], dimension: "volume", factor: 1 },
   { name: "l", aliases: ["liter", "liters", "Liter"], dimension: "volume", factor: 1000 },
   { name: "fl oz", aliases: [], dimension: "volume", factor: 29.5735295625 },
-  { name: "EL", aliases: ["tbsp", "tbsps", "tablespoon", "tablespoons", "Esslöffel", "esslöffel", "Eßlöffel"], dimension: "volume", factor: 14.7867647813 },
-  { name: "TL", aliases: ["tl", "tsp", "tsps", "teaspoon", "teaspoons", "Teelöffel", "teelöffel"], dimension: "volume", factor: 4.92892159375 },
-  { name: "Cup", aliases: ["Cups", "cup", "cups", "Tasse", "tassen", "Tassen", "c.", "c"], dimension: "volume", factor: 236.5882365 },
+  { name: "EL", aliases: ["tbsp", "tbsps", "tablespoon", "tablespoons", "Esslöffel", "esslöffel", "Eßlöffel"], dimension: "volume", factor: 14.7867647813, displayFraction: true },
+  { name: "TL", aliases: ["tl", "tsp", "tsps", "teaspoon", "teaspoons", "Teelöffel", "teelöffel"], dimension: "volume", factor: 4.92892159375, displayFraction: true },
+  { name: "Cup", aliases: ["Cups", "cup", "cups", "Tasse", "tassen", "Tassen", "c.", "c"], dimension: "volume", factor: 236.5882365, displayFraction: true },
   { name: "Prise", aliases: ["Prisen", "pinch", "pinches"], dimension: "volume", factor: 1 },
   { name: "Dose", aliases: ["Dosen", "can", "cans"], dimension: "count", factor: 1 },
   { name: "Flasche", aliases: ["Flaschen", "Bottle", "Bottles", "bottle", "bottles"], dimension: "count", factor: 1 },
