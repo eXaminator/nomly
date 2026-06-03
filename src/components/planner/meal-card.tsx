@@ -583,8 +583,15 @@ function MobileMealCard({
           setOffset(0);
           onDelete(meal.id);
         }}
-        style={{ width: DELETE_OPEN }}
-        className="absolute inset-y-0 left-0 flex items-center justify-center bg-[var(--color-danger)] text-white"
+        // Only present once the card is actually swiped right — otherwise the
+        // card's rounded corners (and leftover cards' translucency) let the red
+        // peek through behind a resting card.
+        style={{
+          width: DELETE_OPEN,
+          opacity: dx > 0 ? 1 : 0,
+          pointerEvents: deleteOpen ? "auto" : "none",
+        }}
+        className="absolute inset-y-0 left-0 flex items-center justify-center bg-[var(--color-danger)] text-white transition-opacity"
         tabIndex={deleteOpen ? 0 : -1}
       >
         <Trash2 className="size-5" />
@@ -592,7 +599,8 @@ function MobileMealCard({
       {/* Edit hint, revealed by a left-swipe (sits under the right edge). */}
       <div
         aria-hidden
-        className="absolute inset-y-0 right-0 flex items-center justify-end pr-5 text-[var(--color-accent)]"
+        style={{ opacity: dx < 0 ? 1 : 0 }}
+        className="absolute inset-y-0 right-0 flex items-center justify-end pr-5 text-[var(--color-accent)] transition-opacity"
       >
         <Pencil className="size-5" />
       </div>
@@ -616,7 +624,7 @@ function MobileMealCard({
         <a
           href={`/rezepte/${meal.recipe.id}?meal=${meal.id}`}
           aria-label={`„${meal.recipe.title}“ ansehen`}
-          className="shrink-0 self-start focus-visible:outline-none"
+          className="shrink-0 self-center focus-visible:outline-none"
           onClick={handlePreviewClick}
         >
           {meal.recipe.photoPath ? (
@@ -631,28 +639,27 @@ function MobileMealCard({
           )}
         </a>
 
-        <div className="flex min-w-0 flex-1 flex-col gap-1">
+        <div className="flex min-w-0 flex-1 flex-col justify-center gap-1">
           <a
             href={`/rezepte/${meal.recipe.id}?meal=${meal.id}`}
-            className="min-w-0 focus-visible:outline-none"
+            className="flex min-w-0 items-center gap-1.5 focus-visible:outline-none"
             onClick={handlePreviewClick}
           >
-            <span className="line-clamp-2 text-sm font-medium text-[var(--color-fg)]">
-              <DietBadge
-                isVegan={meal.recipe.isVegan}
-                isVegetarian={meal.recipe.isVegetarian}
-                confidence={meal.recipe.dietConfidence}
-                size="sm"
-                className="mr-1 align-middle"
-              />
+            <DietBadge
+              isVegan={meal.recipe.isVegan}
+              isVegetarian={meal.recipe.isVegetarian}
+              confidence={meal.recipe.dietConfidence}
+              size="sm"
+            />
+            <span className="min-w-0 truncate text-sm font-medium text-[var(--color-fg)]">
               {meal.recipe.title}
-              {meal.isLeftover ? (
-                <span className="ml-1 inline-flex shrink-0 items-center gap-1 rounded-full bg-[var(--color-muted)] px-1.5 py-0.5 align-middle text-[10px] font-medium uppercase tracking-wider text-[var(--color-muted-fg)]">
-                  <Soup className="size-3" />
-                  Reste
-                </span>
-              ) : null}
             </span>
+            {meal.isLeftover ? (
+              <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-[var(--color-muted)] px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-[var(--color-muted-fg)]">
+                <Soup className="size-3" />
+                Reste
+              </span>
+            ) : null}
           </a>
 
           <div className="flex items-center gap-1 text-xs text-[var(--color-muted-fg)]">
