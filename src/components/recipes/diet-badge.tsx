@@ -12,8 +12,9 @@ type Props = {
 
 /**
  * Single badge: the strongest claim available. "probable" tier uses a dashed
- * outline + "Wahrscheinlich " prefix; "definite" uses the filled pill.
- * Nothing rendered when the recipe has no claim to make.
+ * outline; "definite" uses the filled pill. The label text is the same for
+ * both tiers — confidence reads from the outline alone. Nothing rendered when
+ * the recipe has no claim to make.
  */
 export function DietBadge({
   isVegan,
@@ -67,8 +68,8 @@ function Badge({
   const accent = kind === "vegan" ? "var(--color-success)" : "var(--color-warning)";
   const padding = size === "sm" ? "px-1.5 py-0.5 text-[10px]" : "px-2 py-0.5 text-xs";
   const iconSize = size === "sm" ? "size-3" : "size-3.5";
+  // "probable" reads only from the dashed outline — no text prefix.
   const isProbable = confidence === "probable";
-  const label = isProbable ? `Wahrscheinlich ${baseLabel}` : baseLabel;
   return (
     <span
       className={cn(
@@ -86,7 +87,7 @@ function Badge({
       }}
     >
       <Icon className={iconSize} />
-      {label}
+      {baseLabel}
     </span>
   );
 }
