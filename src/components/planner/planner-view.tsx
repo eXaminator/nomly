@@ -34,6 +34,7 @@ import {
 import type { PlannerRecipe } from "@/lib/recipes/types";
 import type { PlannerSettings } from "@/lib/settings/planner";
 import type { EventsByDate } from "@/lib/ical/events";
+import { useIsMobile } from "@/lib/use-is-mobile";
 import { DayCell } from "./day-cell";
 import { RecipePanel } from "./recipe-panel";
 import { useRecipeCatalog } from "./use-recipe-catalog";
@@ -674,6 +675,12 @@ export function PlannerView({
     useSensor(KeyboardSensor),
   );
 
+  // Phones can't drag-to-reorder (the pointer sensor swallows the touch, and
+  // it never worked well on touch anyway). Below `md` we turn dragging off and
+  // the cards switch to a swipe layout; reorder there is the up/down chevrons,
+  // and the edit panel's date field moves a meal across days.
+  const isMobile = useIsMobile();
+
   return (
     <DndContext
       // Stable `id` keeps @dnd-kit's internal `DndDescribedBy-{n}` ARIA id
@@ -753,7 +760,7 @@ export function PlannerView({
                 }}
                 dropTarget={dropTarget}
                 dragSourceSize={dragSourceSize}
-                draggable={true}
+                draggable={!isMobile}
               />
             ))}
             <button

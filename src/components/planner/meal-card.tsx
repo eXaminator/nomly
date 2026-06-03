@@ -163,6 +163,26 @@ export function MealCard({
           transform: CSS.Translate.toString(transform),
         };
 
+  // On phones the planner turns dragging off (`draggable=false`) and the card
+  // switches to a swipe layout: swipe left opens the editor, swipe right
+  // reveals a delete button, a tap opens the recipe preview. The dnd hooks
+  // above still run (disabled) so hook order stays stable across breakpoints.
+  if (!draggable) {
+    return (
+      <MobileMealCard
+        meal={meal}
+        onEdit={onEdit}
+        onReorderUp={onReorderUp}
+        onReorderDown={onReorderDown}
+        onDelete={onDelete}
+        onAdjustPortions={onAdjustPortions}
+        onToggleLeftover={onToggleLeftover}
+        onDuplicateLeftover={onDuplicateLeftover}
+        onPreviewRecipe={onPreviewRecipe}
+      />
+    );
+  }
+
   return (
     <div
       ref={setNodeRef}
@@ -426,6 +446,312 @@ export function MealCard({
             onPointerDown={(e) => e.stopPropagation()}
             onClick={(e) => {
               e.stopPropagation();
+              onReorderDown(meal.id);
+            }}
+            className="inline-flex size-7 items-center justify-center rounded-md text-[var(--color-muted-fg)] hover:bg-[var(--color-muted)] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+          >
+            <ChevronDown className="size-4" />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+type MobileProps = {
+  meal: MealPlanView;
+  onEdit: (meal: MealPlanView) => void;
+  onReorderUp: (mealId: number) => void;
+  onReorderDown: (mealId: number) => void;
+  onDelete: (mealId: number) => void;
+  onAdjustPortions: (mealId: number, delta: number) => void;
+  onToggleLeftover: (mealId: number, next: boolean) => void;
+  onDuplicateLeftover: (mealId: number) => void;
+  onPreviewRecipe: (recipeId: number, mealPlanId: number) => void;
+};
+
+// Swipe thresholds (px). Left past EDIT_TRIGGER opens the editor on release;
+// right past DELETE_REVEAL leaves the card resting open at DELETE_OPEN with the
+// delete button exposed. Travel is clamped to [MAX_LEFT, DELETE_OPEN].
+const EDIT_TRIGGER = 72;
+const DELETE_REVEAL = 48;
+const DELETE_OPEN = 88;
+const MAX_LEFT = -100;
+const AXIS_LOCK = 6;
+
+/**
+ * Phone variant of {@link MealCard}. No drag-and-drop — reorder is the
+ * up/down chevrons (kept on the right), edit/delete are swipe gestures, and a
+ * tap opens the recipe preview. The name gets the full width up to the
+ * chevrons and wraps to two lines instead of truncating to nothing.
+ */
+function MobileMealCard({
+  meal,
+  onEdit,
+  onReorderUp,
+  onReorderDown,
+  onDelete,
+  onAdjustPortions,
+  onToggleLeftover,
+  onDuplicateLeftover,
+  onPreviewRecipe,
+}: MobileProps) {
+  const [dx, setDx] = React.useState(0);
+  const [dragging, setDragging] = React.useState(false);
+  const startRef = React.useRef<{ x: number; y: number } | null>(null);
+  const baseRef = React.useRef(0);
+  const axisRef = React.useRef<"none" | "h" | "v">("none");
+  const movedRef = React.useRef(false);
+  // Mirror of `dx` so the touch handlers read the live offset regardless of
+  // render timing — touchend must not decide on a stale closure value.
+  const dxRef = React.useRef(0);
+  const setOffset = React.useCallback((v: number) => {
+    dxRef.current = v;
+    setDx(v);
+  }, []);
+
+  const isCustomServings = meal.servings !== meal.recipe.baseServings;
+  const deleteOpen = dx >= DELETE_REVEAL;
+
+  function onTouchStart(e: React.TouchEvent) {
+    if (e.touches.length !== 1) return;
+    startRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+    baseRef.current = dxRef.current;
+    axisRef.current = "none";
+    movedRef.current = false;
+    setDragging(true);
+  }
+  function onTouchMove(e: React.TouchEvent) {
+    const s = startRef.current;
+    if (!s) return;
+    const ddx = e.touches[0].clientX - s.x;
+    const ddy = e.touches[0].clientY - s.y;
+    if (axisRef.current === "none") {
+      if (Math.abs(ddx) < AXIS_LOCK && Math.abs(ddy) < AXIS_LOCK) return;
+      // Lock to whichever axis the finger commits to first. Vertical → leave it
+      // to the page scroll; horizontal → it's a swipe.
+      axisRef.current = Math.abs(ddx) > Math.abs(ddy) ? "h" : "v";
+    }
+    if (axisRef.current !== "h") return;
+    movedRef.current = true;
+    const next = Math.max(MAX_LEFT, Math.min(DELETE_OPEN, baseRef.current + ddx));
+    setOffset(next);
+  }
+  function onTouchEnd() {
+    setDragging(false);
+    const wasHorizontal = axisRef.current === "h";
+    startRef.current = null;
+    if (!wasHorizontal) return;
+    const cur = dxRef.current;
+    if (cur <= -EDIT_TRIGGER) {
+      setOffset(0);
+      onEdit(meal);
+    } else if (cur >= DELETE_REVEAL) {
+      setOffset(DELETE_OPEN);
+    } else {
+      setOffset(0);
+    }
+  }
+
+  function handlePreviewClick(e: React.MouseEvent) {
+    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) {
+      return;
+    }
+    // Swallow the click that trails a swipe, and let a tap close an open
+    // delete affordance instead of navigating.
+    if (movedRef.current || dxRef.current !== 0) {
+      e.preventDefault();
+      movedRef.current = false;
+      if (dxRef.current !== 0) setOffset(0);
+      return;
+    }
+    e.preventDefault();
+    onPreviewRecipe(meal.recipe.id, meal.id);
+  }
+
+  const stop = (e: React.SyntheticEvent) => e.stopPropagation();
+
+  return (
+    <div className="relative overflow-hidden rounded-[var(--radius)]">
+      {/* Delete affordance, revealed by a right-swipe (sits under the left
+          edge). Tapping it deletes immediately — the deliberate swipe is the
+          confirmation. */}
+      <button
+        type="button"
+        aria-label="Löschen"
+        onClick={() => {
+          setOffset(0);
+          onDelete(meal.id);
+        }}
+        style={{ width: DELETE_OPEN }}
+        className="absolute inset-y-0 left-0 flex items-center justify-center bg-[var(--color-danger)] text-white"
+        tabIndex={deleteOpen ? 0 : -1}
+      >
+        <Trash2 className="size-5" />
+      </button>
+      {/* Edit hint, revealed by a left-swipe (sits under the right edge). */}
+      <div
+        aria-hidden
+        className="absolute inset-y-0 right-0 flex items-center justify-end pr-5 text-[var(--color-accent)]"
+      >
+        <Pencil className="size-5" />
+      </div>
+
+      <div
+        onTouchStart={onTouchStart}
+        onTouchMove={onTouchMove}
+        onTouchEnd={onTouchEnd}
+        onTouchCancel={onTouchEnd}
+        style={{
+          transform: `translateX(${dx}px)`,
+          transition: dragging ? "none" : "transform 0.18s ease",
+          touchAction: "pan-y",
+        }}
+        className={cn(
+          "relative flex items-stretch gap-2 rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-card)] p-2 shadow-sm",
+          meal.isLeftover &&
+            "border-dashed bg-[var(--color-muted)]/30 opacity-75 shadow-none",
+        )}
+      >
+        <a
+          href={`/rezepte/${meal.recipe.id}?meal=${meal.id}`}
+          aria-label={`„${meal.recipe.title}“ ansehen`}
+          className="shrink-0 self-start focus-visible:outline-none"
+          onClick={handlePreviewClick}
+        >
+          {meal.recipe.photoPath ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={`/api/v1/${meal.recipe.photoPath}`}
+              alt=""
+              className="size-12 rounded object-cover"
+            />
+          ) : (
+            <div className="size-12 rounded bg-[var(--color-muted)]" />
+          )}
+        </a>
+
+        <div className="flex min-w-0 flex-1 flex-col gap-1">
+          <a
+            href={`/rezepte/${meal.recipe.id}?meal=${meal.id}`}
+            className="min-w-0 focus-visible:outline-none"
+            onClick={handlePreviewClick}
+          >
+            <span className="line-clamp-2 text-sm font-medium text-[var(--color-fg)]">
+              <DietBadge
+                isVegan={meal.recipe.isVegan}
+                isVegetarian={meal.recipe.isVegetarian}
+                confidence={meal.recipe.dietConfidence}
+                size="sm"
+                className="mr-1 align-middle"
+              />
+              {meal.recipe.title}
+              {meal.isLeftover ? (
+                <span className="ml-1 inline-flex shrink-0 items-center gap-1 rounded-full bg-[var(--color-muted)] px-1.5 py-0.5 align-middle text-[10px] font-medium uppercase tracking-wider text-[var(--color-muted-fg)]">
+                  <Soup className="size-3" />
+                  Reste
+                </span>
+              ) : null}
+            </span>
+          </a>
+
+          <div className="flex items-center gap-1 text-xs text-[var(--color-muted-fg)]">
+            <button
+              type="button"
+              aria-label="Weniger Portionen"
+              disabled={meal.servings <= 1}
+              onClick={(e) => {
+                stop(e);
+                onAdjustPortions(meal.id, -1);
+              }}
+              className="inline-flex size-6 shrink-0 items-center justify-center rounded text-[var(--color-muted-fg)] hover:bg-[var(--color-muted)] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] disabled:pointer-events-none disabled:opacity-40"
+            >
+              <Minus className="size-3.5" />
+            </button>
+            <span
+              className={cn(
+                "shrink-0 tabular-nums",
+                isCustomServings && "font-semibold text-[var(--color-accent)]",
+              )}
+            >
+              {meal.servings} Portionen
+            </span>
+            <button
+              type="button"
+              aria-label="Mehr Portionen"
+              onClick={(e) => {
+                stop(e);
+                onAdjustPortions(meal.id, 1);
+              }}
+              className="inline-flex size-6 shrink-0 items-center justify-center rounded text-[var(--color-muted-fg)] hover:bg-[var(--color-muted)] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+            >
+              <Plus className="size-3.5" />
+            </button>
+            {isCustomServings ? (
+              <button
+                type="button"
+                aria-label="Auf Standardportionen zurücksetzen"
+                title={`Auf ${meal.recipe.baseServings} Portionen zurücksetzen`}
+                onClick={(e) => {
+                  stop(e);
+                  onAdjustPortions(meal.id, meal.recipe.baseServings - meal.servings);
+                }}
+                className="inline-flex size-6 shrink-0 items-center justify-center rounded text-[var(--color-muted-fg)] hover:bg-[var(--color-muted)] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+              >
+                <RotateCcw className="size-3.5" />
+              </button>
+            ) : null}
+
+            <span className="ml-auto flex shrink-0 items-center gap-0.5">
+              <button
+                type="button"
+                aria-label={meal.isLeftover ? "Reste-Markierung entfernen" : "Als Reste markieren"}
+                aria-pressed={meal.isLeftover}
+                onClick={(e) => {
+                  stop(e);
+                  onToggleLeftover(meal.id, !meal.isLeftover);
+                }}
+                className={cn(
+                  "inline-flex size-7 items-center justify-center rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]",
+                  meal.isLeftover
+                    ? "bg-[var(--color-muted)] text-[var(--color-fg)]"
+                    : "text-[var(--color-muted-fg)] hover:bg-[var(--color-muted)] hover:text-[var(--color-fg)]",
+                )}
+              >
+                <Soup className="size-4" />
+              </button>
+              <button
+                type="button"
+                aria-label="Als Reste auf nächsten Tag kopieren"
+                onClick={(e) => {
+                  stop(e);
+                  onDuplicateLeftover(meal.id);
+                }}
+                className="inline-flex size-7 items-center justify-center rounded-md text-[var(--color-muted-fg)] hover:bg-[var(--color-muted)] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+              >
+                <CopyPlus className="size-4" />
+              </button>
+            </span>
+          </div>
+        </div>
+
+        <div className="flex shrink-0 flex-col gap-0.5 self-center">
+          <button
+            type="button"
+            aria-label="Nach oben"
+            onClick={(e) => {
+              stop(e);
+              onReorderUp(meal.id);
+            }}
+            className="inline-flex size-7 items-center justify-center rounded-md text-[var(--color-muted-fg)] hover:bg-[var(--color-muted)] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+          >
+            <ChevronUp className="size-4" />
+          </button>
+          <button
+            type="button"
+            aria-label="Nach unten"
+            onClick={(e) => {
+              stop(e);
               onReorderDown(meal.id);
             }}
             className="inline-flex size-7 items-center justify-center rounded-md text-[var(--color-muted-fg)] hover:bg-[var(--color-muted)] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
