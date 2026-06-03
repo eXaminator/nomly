@@ -7,7 +7,6 @@ import {
   ChevronDown,
   ChevronUp,
   CopyPlus,
-  Eye,
   Minus,
   Pencil,
   Plus,
@@ -339,19 +338,6 @@ export function MealCard({
             wrapping row. */}
         <div className="flex flex-col gap-0.5">
           <div className="flex justify-end gap-0.5">
-            <button
-              type="button"
-              aria-label="Vorschau anzeigen"
-              title="Vorschau anzeigen"
-              onPointerDown={(e) => e.stopPropagation()}
-              onClick={(e) => {
-                e.stopPropagation();
-                onPreviewRecipe(meal.recipe.id, meal.id);
-              }}
-              className="inline-flex size-7 items-center justify-center rounded-md text-[var(--color-muted-fg)] hover:bg-[var(--color-muted)] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
-            >
-              <Eye className="size-4" />
-            </button>
             <button
               type="button"
               aria-label="Bearbeiten"
