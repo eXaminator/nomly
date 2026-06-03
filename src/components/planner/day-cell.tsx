@@ -210,7 +210,9 @@ function DayEndDropZone({
           type="button"
           onClick={() => onAddMeal(date)}
           aria-label="Mahlzeit hinzufügen"
-          className="flex h-7 w-full items-center justify-center gap-1 rounded-md text-xs text-[var(--color-muted-fg)] opacity-0 transition-opacity hover:bg-[var(--color-muted)] hover:text-[var(--color-fg)] focus-visible:opacity-100 group-hover:opacity-100 md:opacity-60"
+          // Mobile has no hover to reveal this, so show a persistent dashed
+          // add button; desktop keeps the borderless 60%-until-hover affordance.
+          className="flex h-7 w-full items-center justify-center gap-1 rounded-md border border-dashed border-[var(--color-border)] text-xs text-[var(--color-muted-fg)] transition-opacity hover:bg-[var(--color-muted)] hover:text-[var(--color-fg)] focus-visible:opacity-100 group-hover:opacity-100 md:border-0 md:opacity-60"
         >
           <Plus className="size-3" />
         </button>
