@@ -92,16 +92,17 @@ export function DayCell({
             stack on mobile, where it collapses to nothing). */}
         <div className="hidden bg-[var(--color-border)] md:block" aria-hidden />
 
-        {/* Meals column (DnD target). No padding on mobile so meal rows line
-            up with the full-width event rows; `md:p-1` keeps the drop-ring
-            inset on desktop. */}
+        {/* Meals column (DnD target). No padding on either breakpoint: meal
+            rows then sit flush to the column edge, so they're the same
+            distance from the divider as the events and their first card lines
+            up with the first event's top. */}
         <div
           ref={setNodeRef}
           className={cn(
             // `relative` so absolutely-positioned dragged cards (see
             // MealCard's drag style) resolve their width:100% against this
             // column instead of the viewport.
-            "relative flex min-h-[80px] flex-col gap-2 rounded-md transition-colors md:p-1",
+            "relative flex min-h-[80px] flex-col gap-2 rounded-md transition-colors",
             isOver
               ? "bg-[color-mix(in_srgb,var(--color-accent),transparent_88%)] ring-2 ring-[var(--color-accent)]"
               : "bg-transparent",
