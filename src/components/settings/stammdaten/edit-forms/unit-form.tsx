@@ -289,8 +289,8 @@ export function UnitForm({ item, onPayloadChange }: EditFormProps<UnitItem>) {
           <Label>Als Bruch anzeigen</Label>
           <p className="text-xs text-[var(--color-muted-fg)]">
             Mengen dieser Einheit werden in Rezeptansichten als Bruch
-            dargestellt (¼&nbsp;TL, 1½&nbsp;EL) statt als Dezimalzahl. Werte
-            ohne passenden Bruch bleiben dezimal.
+            dargestellt (1/4&nbsp;TL, 1&nbsp;1/2&nbsp;EL) statt als
+            Dezimalzahl. Werte ohne passenden Bruch bleiben dezimal.
           </p>
         </div>
         <Switch

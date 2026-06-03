@@ -7,8 +7,8 @@ import { toFractionDisplay } from "@/lib/units/fraction";
 /**
  * Display formatting for an ingredient quantity (de-DE, ≤2 decimals). When
  * `fraction` is set (the line's unit is flagged for fraction display), a value
- * that resolves to a clean fraction renders as one (¼, 1½); anything else falls
- * back to the decimal format.
+ * that resolves to a clean fraction renders as one ("1/4", "1 1/2"); anything
+ * else falls back to the decimal format.
  */
 export function formatQuantity(
   q: number | null,

@@ -43,7 +43,7 @@ export type UnitListItem = {
   factor: number;
   isContainer: boolean;
   /** When true, recipe read views render this unit's quantities as fractions
-   *  (¼ TL) instead of decimals. */
+   *  ("1/4 TL") instead of decimals. */
   displayFraction: boolean;
   /** True for the single unit configured as the global default (applied to a
    *  quantity-bearing line with no explicit unit). */

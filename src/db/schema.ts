@@ -97,7 +97,7 @@ export const unit = sqliteTable("unit", {
     .default(false),
   /**
    * When set, recipe read views render this unit's quantities as fractions
-   * (¼ TL, 1½ EL) instead of decimals. Display-only: storage stays decimal and
+   * ("1/4 TL", "1 1/2 EL") instead of decimals. Display-only: storage stays decimal and
    * values that aren't close to a clean fraction fall back to the decimal
    * format. Natural for spoon/cup units; off by default for g/ml.
    */

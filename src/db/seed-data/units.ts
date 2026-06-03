@@ -25,8 +25,8 @@ export type SeedUnit = {
    *  table at runtime. */
   factor: number;
   /** Default for the `display_fraction` flag at *insert* time only. Spoon/cup
-   *  units read naturally as fractions (¼ TL). The seeder never overwrites it
-   *  on a re-run, so a user's later toggle in the unit UI is preserved. */
+   *  units read naturally as fractions ("1/4 TL"). The seeder never overwrites
+   *  it on a re-run, so a user's later toggle in the unit UI is preserved. */
   displayFraction?: boolean;
 };
 

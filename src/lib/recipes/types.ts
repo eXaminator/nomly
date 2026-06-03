@@ -153,8 +153,8 @@ export type RecipeIngredientView = {
    *  / raw spelling when no plural applies. */
   unitLabel: string | null;
   /** When true, this line's unit is flagged for fraction display, so the read
-   *  view renders the quantity as a fraction (¼ TL) when it resolves to one,
-   *  decimal otherwise. */
+   *  view renders the quantity as a fraction ("1/4 TL") when it resolves to
+   *  one, decimal otherwise. */
   displayFraction: boolean;
   notes: string | null;
   isOptional: boolean;
