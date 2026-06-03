@@ -85,17 +85,23 @@ export function DayCell({
         </div>
       </header>
 
-      <div className="grid flex-1 grid-cols-1 gap-2 md:grid-cols-[1fr_2fr]">
+      <div className="grid flex-1 grid-cols-1 gap-2 md:grid-cols-[1fr_1px_2fr]">
         <EventList events={events} />
 
-        {/* Meals column (DnD target) */}
+        {/* Light rule centred in the column gap (desktop only — the columns
+            stack on mobile, where it collapses to nothing). */}
+        <div className="hidden bg-[var(--color-border)] md:block" aria-hidden />
+
+        {/* Meals column (DnD target). No padding on mobile so meal rows line
+            up with the full-width event rows; `md:p-1` keeps the drop-ring
+            inset on desktop. */}
         <div
           ref={setNodeRef}
           className={cn(
             // `relative` so absolutely-positioned dragged cards (see
             // MealCard's drag style) resolve their width:100% against this
             // column instead of the viewport.
-            "relative flex min-h-[80px] flex-col gap-2 rounded-md p-1 transition-colors",
+            "relative flex min-h-[80px] flex-col gap-2 rounded-md transition-colors md:p-1",
             isOver
               ? "bg-[color-mix(in_srgb,var(--color-accent),transparent_88%)] ring-2 ring-[var(--color-accent)]"
               : "bg-transparent",
