@@ -313,9 +313,13 @@ export type IngredientLookup = Map<string, IngredientLookupHit>;
  */
 export function buildIngredientCatalog(): IngredientCatalog {
   const out: IngredientCatalog = [];
-  // Terminal fallback for an entry's resolved matching unit (alias default →
-  // ingredient default → global default). Read once per build.
-  const globalDefaultUnitId = getGlobalDefaultUnitId() ?? undefined;
+  // NOTE: an entry's matching unit (`unitId`) is CURATED-ONLY (alias default →
+  // ingredient default). The global default unit deliberately does NOT flow in
+  // here: it exists to give unit-less LINES a unit, and routing it into the
+  // catalog handed every uncurated entry a phantom "Stück" that then "agreed"
+  // with a defaulted line unit — doubling a weak name match past a strong
+  // curated one ("1 garlic clove crushed" picked Nelken via "cloves" over
+  // Knoblauch's exact "garlic clove"/Zehe).
   const canonicals = db
     .select({
       id: ingredient.id,
@@ -340,8 +344,8 @@ export function buildIngredientCatalog(): IngredientCatalog {
         i.defaultUnitId != null && i.defaultUnitName != null
           ? { id: i.defaultUnitId, name: i.defaultUnitDisplay ?? i.defaultUnitName }
           : undefined,
-      // Resolved matching unit: ingredient default → global default.
-      unitId: i.defaultUnitId ?? globalDefaultUnitId,
+      // Curated matching unit: ingredient default only (no global fallback).
+      unitId: i.defaultUnitId ?? undefined,
       isEquipment: i.isEquipment || undefined,
     });
   }
@@ -371,8 +375,9 @@ export function buildIngredientCatalog(): IngredientCatalog {
         a.defaultUnitId != null && a.defaultUnitName != null
           ? { id: a.defaultUnitId, name: a.defaultUnitDisplay ?? a.defaultUnitName }
           : undefined,
-      // Resolved matching unit: alias default → ingredient default → global.
-      unitId: a.defaultUnitId ?? a.ingredientDefaultUnitId ?? globalDefaultUnitId,
+      // Curated matching unit: alias default → ingredient default (no global
+      // fallback).
+      unitId: a.defaultUnitId ?? a.ingredientDefaultUnitId ?? undefined,
       displayName: a.aliasDisplayName ?? undefined,
       isEquipment: a.isEquipment || undefined,
     });

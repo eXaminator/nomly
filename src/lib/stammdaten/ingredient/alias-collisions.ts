@@ -2,16 +2,17 @@ import { eq } from "drizzle-orm";
 import { db } from "../../../db/index.ts";
 import { ingredient, ingredientAlias, unit } from "../../../db/schema.ts";
 import { normalizeForMatch } from "../../recipe-import/ingredient.ts";
-import { getGlobalDefaultUnitId } from "../../settings/global-default-unit.ts";
 
 export type AliasCollision = {
   ingredientId: number;
   ingredientName: string;
   /** Where the colliding name lives on that ingredient. */
   kind: "canonical" | "alias";
-  /** The other entry's resolved matching unit name (alias default → ingredient
-   *  default → global default), or null when none resolves. Surfaced so the
-   *  user can confirm the unit will disambiguate the two. */
+  /** The other entry's CURATED matching unit name (alias default → ingredient
+   *  default), or null when none is declared. Mirrors the matcher's unit
+   *  decider exactly — the global default unit doesn't flow in there either —
+   *  so what the user sees while curating is what disambiguates at match
+   *  time. */
   unitName: string | null;
 };
 
@@ -28,7 +29,6 @@ export function findCrossIngredientAliasCollisions(
 ): AliasCollision[] {
   const key = normalizeForMatch(name);
   if (key.length === 0) return [];
-  const globalDefaultUnitId = getGlobalDefaultUnitId();
 
   const unitNameById = new Map<number, string>(
     db
@@ -41,7 +41,7 @@ export function findCrossIngredientAliasCollisions(
     own: number | null,
     ingredientDefault: number | null,
   ): string | null => {
-    const id = own ?? ingredientDefault ?? globalDefaultUnitId;
+    const id = own ?? ingredientDefault;
     return id != null ? unitNameById.get(id) ?? null : null;
   };
 

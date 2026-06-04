@@ -59,10 +59,12 @@ export type CatalogEntry = {
   /** Per-alias default unit — flows through to the parser so a matched alias
    *  can still influence unit selection downstream. */
   defaultUnit?: { id: number; name: string };
-  /** Resolved default unit id (alias default → ingredient default → global
-   *  default) used by the unit decider in {@link findIngredientCandidates}.
-   *  Distinct from {@link defaultUnit}, which is the display unit for the row;
-   *  this is the matching signal and always resolves through the full chain. */
+  /** CURATED default unit id (alias default → ingredient default; the global
+   *  default unit deliberately does NOT flow in) used by the unit decider in
+   *  {@link findIngredientCandidates}. Distinct from {@link defaultUnit},
+   *  which is the display unit for the row; this is the matching signal —
+   *  undefined means "nobody declared a unit", so the entry can never be
+   *  "confirmed" by a line unit (in particular not by a defaulted one). */
   unitId?: number;
   /** Optional per-alias rename: when this entry is the match, the row's
    *  display name becomes this instead of the alias text ("Knoblauchzehe" →
