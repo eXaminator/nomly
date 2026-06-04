@@ -1,6 +1,7 @@
 import {
   BookOpenText,
   CalendarDays,
+  House,
   ShoppingCart,
   Settings,
   type LucideIcon,
@@ -14,6 +15,8 @@ export type NavItem = {
 };
 
 export const NAV_ITEMS: ReadonlyArray<NavItem> = [
+  // matchPrefix "/" only ever extends to "//…", so Start is active on "/" alone.
+  { href: "/", label: "Start", icon: House, matchPrefix: "/" },
   { href: "/rezepte", label: "Rezepte", icon: BookOpenText, matchPrefix: "/rezepte" },
   { href: "/plan", label: "Plan", icon: CalendarDays, matchPrefix: "/plan" },
   { href: "/einkauf", label: "Einkauf", icon: ShoppingCart, matchPrefix: "/einkauf" },
