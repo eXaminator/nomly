@@ -18,18 +18,25 @@ async function loadBuildManifest(): Promise<BuildManifest | null> {
   return null;
 }
 
+// Build-manifest page keys look like "/(app)/einkauf/page" in the app
+// router. Strip route groups and the trailing "/page" so they're comparable
+// to route paths ("/(app)/page" → "/").
+function normalizePageKey(page: string): string {
+  const cleaned = page.replace(/\/\([^)]*\)/g, "").replace(/\/page$/, "");
+  return cleaned === "" ? "/" : cleaned;
+}
+
+// Routes whose page chunks the SW precaches: everything that must render
+// offline. ("/_app"/"/_layout" cover the pages-router style manifest.)
+const PRECACHE_ROUTES = new Set(["/", "/start", "/einkauf", "/offline", "/_app", "/_layout"]);
+
 async function main(): Promise<void> {
   const manifest = await loadBuildManifest();
   const assets = new Set<string>();
 
   if (manifest?.pages) {
     for (const [page, files] of Object.entries(manifest.pages)) {
-      if (
-        page === "/einkauf" ||
-        page === "/offline" ||
-        page === "/_app" ||
-        page === "/_layout"
-      ) {
+      if (PRECACHE_ROUTES.has(normalizePageKey(page))) {
         for (const f of files) assets.add(`/_next/${f}`);
       }
     }
@@ -39,10 +46,13 @@ async function main(): Promise<void> {
   }
 
   // App shell extras the SW always wants cached on install. `/offline` is the
-  // generic fallback served when any non-`/einkauf` navigation fails offline —
-  // it keeps the app header + nav reachable on every page.
+  // generic fallback served when a navigation fails offline; `/start` is the
+  // PWA entry redirect and must work at offline launch. The dashboard `/` is
+  // deliberately NOT in this list — the SW seeds it itself with
+  // `redirect: "error"` so a logged-out install can't cache the login page.
   const shell = [
     "/einkauf",
+    "/start",
     "/offline",
     "/manifest.webmanifest",
     "/icons/icon.svg",
