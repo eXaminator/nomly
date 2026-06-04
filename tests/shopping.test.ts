@@ -205,6 +205,80 @@ describe("shopping preview", () => {
     expect(names).not.toContain("übrige Reste");
   });
 
+  it("surfaces unassigned lines read-only via unparsedLines, scaled", async () => {
+    const { db } = await import("@/db");
+    const { recipeIngredient } = await import("@/db/schema");
+    db.insert(recipeIngredient)
+      .values({
+        sectionId: ctx.sectionId,
+        ingredientId: null,
+        displayName: "übrige Reste",
+        quantity: 1,
+        unitId: null,
+        notes: "vom Vortag",
+      })
+      .run();
+    const { previewMeals } = await import("@/lib/shopping/preview");
+    const meals = previewMeals("2026-05-23", 1);
+    expect(meals[0].unparsedLines).toHaveLength(1);
+    const line = meals[0].unparsedLines[0];
+    expect(line.displayName).toBe("übrige Reste");
+    expect(line.qty).toBe(2); // 1 * (4/2 servings scale)
+    expect(line.notes).toBe("vom Vortag");
+  });
+
+  it("keeps a meal whose recipe has ONLY unparsed lines", async () => {
+    const { db } = await import("@/db");
+    const { mealPlan, recipe, recipeIngredient, recipeSection } = await import(
+      "@/db/schema"
+    );
+    const onlyUnparsedRecipeId = db
+      .insert(recipe)
+      .values({ title: "Resteessen", servings: 2 })
+      .returning({ id: recipe.id })
+      .all()[0].id;
+    const secId = db
+      .insert(recipeSection)
+      .values({ recipeId: onlyUnparsedRecipeId, title: null, instructions: "" })
+      .returning({ id: recipeSection.id })
+      .all()[0].id;
+    db.insert(recipeIngredient)
+      .values({
+        sectionId: secId,
+        ingredientId: null,
+        displayName: "Reste von gestern",
+      })
+      .run();
+    db.insert(mealPlan)
+      .values({
+        recipeId: onlyUnparsedRecipeId,
+        date: "2026-05-23",
+        sortOrder: 1,
+      })
+      .run();
+    const { previewMeals } = await import("@/lib/shopping/preview");
+    const meals = previewMeals("2026-05-23", 1);
+    const meal = meals.find((m) => m.recipeTitle === "Resteessen");
+    expect(meal).toBeDefined();
+    expect(meal?.sections).toHaveLength(0);
+    expect(meal?.unparsedLines.map((l) => l.displayName)).toEqual([
+      "Reste von gestern",
+    ]);
+  });
+
+  it("passes the recipe's needsUpdate flag through", async () => {
+    const { db } = await import("@/db");
+    const { recipe } = await import("@/db/schema");
+    const { eq } = await import("drizzle-orm");
+    const { previewMeals } = await import("@/lib/shopping/preview");
+    expect(previewMeals("2026-05-23", 1)[0].needsUpdate).toBe(false);
+    db.update(recipe)
+      .set({ needsUpdate: true })
+      .where(eq(recipe.id, ctx.recipeId))
+      .run();
+    expect(previewMeals("2026-05-23", 1)[0].needsUpdate).toBe(true);
+  });
+
   it("keeps optional ingredients but flags them with isOptional", async () => {
     const { db } = await import("@/db");
     const { recipeIngredient } = await import("@/db/schema");

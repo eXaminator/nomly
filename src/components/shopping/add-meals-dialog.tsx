@@ -18,6 +18,8 @@ import { Label } from "@/components/ui/label";
 import { addDays } from "@/lib/meal-plans/dates";
 import type { PreviewMeal, PreviewIngredient } from "@/lib/shopping/preview";
 import { isOptionalIngredient } from "@/lib/recipes/optional";
+import { formatQuantity } from "@/components/recipes/ingredient-read-line";
+import { NeedsUpdateToggle } from "@/components/recipes/needs-update-toggle";
 
 /** Iterates a meal's ingredients across all its sections. Used for the
  *  selection/quantity bookkeeping that doesn't care about section
@@ -411,30 +413,48 @@ function MealRow({
     meal.sections.length > 1 ||
     (meal.sections.length === 1 && meal.sections[0].title !== null);
 
+  // A meal can consist of ONLY unparsed lines — it's still listed (so the
+  // user sees the un-addable entries), but there's nothing to select.
+  const hasSelectable = flattenIngredients(meal).length > 0;
+
   return (
     <li className="flex flex-col gap-1.5 px-3 py-2">
-      <label className="flex cursor-pointer items-center gap-2">
-        <input
-          type="checkbox"
-          checked={state === "all"}
-          ref={(el) => {
-            if (el) el.indeterminate = state === "some";
-          }}
-          onChange={onToggleMeal}
-          className="size-4"
-        />
-        <span className="flex flex-1 flex-wrap items-baseline gap-2">
-          <span className="font-medium">{meal.recipeTitle}</span>
-          <span className="text-xs text-[var(--color-muted-fg)]">
-            {formatDate(meal.date)} · {meal.servings} Portionen
-          </span>
-          {meal.alreadyOnList ? (
-            <span className="rounded-full bg-[color-mix(in_srgb,var(--color-accent),transparent_85%)] px-2 py-0.5 text-xs text-[var(--color-accent)]">
-              Bereits auf der Liste
+      <div className="flex items-center gap-2">
+        <label
+          className={`flex flex-1 items-center gap-2 ${
+            hasSelectable ? "cursor-pointer" : ""
+          }`}
+        >
+          <input
+            type="checkbox"
+            checked={state === "all"}
+            ref={(el) => {
+              if (el) el.indeterminate = state === "some";
+            }}
+            onChange={onToggleMeal}
+            disabled={!hasSelectable}
+            className="size-4"
+          />
+          <span className="flex flex-1 flex-wrap items-baseline gap-2">
+            <span className="font-medium">{meal.recipeTitle}</span>
+            <span className="text-xs text-[var(--color-muted-fg)]">
+              {formatDate(meal.date)} · {meal.servings} Portionen
             </span>
-          ) : null}
-        </span>
-      </label>
+            {meal.alreadyOnList ? (
+              <span className="rounded-full bg-[color-mix(in_srgb,var(--color-accent),transparent_85%)] px-2 py-0.5 text-xs text-[var(--color-accent)]">
+                Bereits auf der Liste
+              </span>
+            ) : null}
+          </span>
+        </label>
+        {/* Outside the <label> so toggling the update mark never flips the
+            meal checkbox. */}
+        <NeedsUpdateToggle
+          recipeId={meal.recipeId}
+          initial={meal.needsUpdate}
+          iconOnly
+        />
+      </div>
       <div className="ml-6 flex flex-col gap-1.5">
         {meal.sections.map((section) => {
           const sectionState = mealSelectionState(section.ingredients, selected);
@@ -483,6 +503,39 @@ function MealRow({
             </div>
           );
         })}
+        {meal.unparsedLines.length > 0 ? (
+          <div className="flex flex-col gap-1">
+            <p
+              className="text-xs font-medium uppercase tracking-wide text-[var(--color-muted-fg)]"
+              title="Diese Zeilen sind keinem Artikel zugeordnet und können nicht in die Einkaufsliste übernommen werden."
+            >
+              Nicht übernehmbar
+            </p>
+            <ul
+              className={`flex flex-col gap-1${
+                showSectionHeadings ? " ml-5" : ""
+              }`}
+            >
+              {meal.unparsedLines.map((l) => {
+                const amount = [formatQuantity(l.qty), l.unitLabel ?? ""]
+                  .filter(Boolean)
+                  .join(" ");
+                return (
+                  <li
+                    key={l.recipeIngredientId}
+                    className="text-sm italic text-[var(--color-muted-fg)]"
+                  >
+                    {amount ? `${amount} ` : ""}
+                    {l.displayName}
+                    {l.notes ? (
+                      <span className="text-xs"> – {l.notes}</span>
+                    ) : null}
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        ) : null}
       </div>
     </li>
   );
@@ -544,11 +597,6 @@ function IngredientCheckbox({
         ) : null}
         <span className="flex flex-1 flex-wrap items-center gap-2">
           <span>{ing.ingredientName}</span>
-          {ing.alternativeForId == null && isOptionalIngredient(ing) ? (
-            <span className="rounded-full bg-[var(--color-muted)] px-1.5 py-0.5 text-[10px] font-medium uppercase not-italic tracking-wider text-[var(--color-muted-fg)]">
-              optional
-            </span>
-          ) : null}
           {ing.notes ? (
             <span className="text-xs text-[var(--color-muted-fg)]">
               · {ing.notes}

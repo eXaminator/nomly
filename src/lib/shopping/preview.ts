@@ -1,4 +1,4 @@
-import { and, asc, between, eq, inArray, isNotNull, sql } from "drizzle-orm";
+import { and, asc, between, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { db } from "../../db/index.ts";
 import {
   ingredient,
@@ -48,6 +48,23 @@ export type PreviewIngredient = {
   isEquipment: boolean;
 };
 
+/**
+ * An unassigned line (`ingredient_id` NULL, the "Nicht zugeordnet" pill) of a
+ * previewed meal. These can never be added to the shopping list — the dialog
+ * surfaces them read-only so whoever builds the list at least SEES that the
+ * recipe has a line that won't make it onto the list.
+ */
+export type PreviewUnparsedLine = {
+  recipeIngredientId: number;
+  /** The line's only text (`display_name` is always set for unassigned rows). */
+  displayName: string;
+  /** Scaled like regular lines (servings override), since it's still the
+   *  amount the cook will need — fixed-amount lines keep the recipe value. */
+  qty: number | null;
+  unitLabel: string | null;
+  notes: string | null;
+};
+
 export type PreviewSection = {
   /** Recipe section id. Stable within a recipe; surfaced so the UI can use
    *  it as a React key. */
@@ -66,7 +83,12 @@ export type PreviewMeal = {
   recipeTitle: string;
   servings: number;
   alreadyOnList: boolean;
+  /** Recipe is marked for a later update — drives the wrench toggle on the
+   *  meal row so the list-maker can (un)mark it right from the dialog. */
+  needsUpdate: boolean;
   sections: PreviewSection[];
+  /** Read-only "Nicht übernehmbar" block rendered below the sections. */
+  unparsedLines: PreviewUnparsedLine[];
 };
 
 /**
@@ -75,7 +97,9 @@ export type PreviewMeal = {
  * - ingredient quantities scaled by `servings_override / recipe.servings`
  * - drop ingredients flagged `exclude_from_shopping_list`
  * - drop optional ingredients (spec: "the shopping-list builder skips them")
- * - drop meals that end up with zero remaining lines
+ * - unassigned lines (`ingredient_id` NULL) are surfaced read-only via
+ *   `unparsedLines` — never selectable, never added to the list
+ * - drop meals that end up with zero remaining lines AND no unparsed lines
  * - alreadyOnList = true when a `shopping_item_source` row still references
  *   the meal (transitively → item still exists, since FK is ON DELETE CASCADE)
  */
@@ -94,6 +118,7 @@ export function previewMeals(start: string, lengthDays: number): PreviewMeal[] {
       recipeId: recipe.id,
       recipeTitle: recipe.title,
       recipeServings: recipe.servings,
+      needsUpdate: recipe.needsUpdate,
     })
     .from(mealPlan)
     .innerJoin(recipe, eq(recipe.id, mealPlan.recipeId))
@@ -142,6 +167,41 @@ export function previewMeals(start: string, lengthDays: number): PreviewMeal[] {
     .orderBy(asc(recipeSection.sortOrder), asc(recipeIngredient.sortOrder))
     .all();
 
+  // Unassigned lines can't pass the main query (inner join on `ingredient`),
+  // so they get their own lightweight fetch. They're display-only: no
+  // article, no selection, no shopping contribution.
+  const unparsedRows = db
+    .select({
+      recipeId: recipeSection.recipeId,
+      recipeIngredientId: recipeIngredient.id,
+      displayName: recipeIngredient.displayName,
+      qty: recipeIngredient.quantity,
+      // Same display rule as the recipe view: the source's verbatim unit
+      // wins over the canonical unit name.
+      unitLabel: sql<
+        string | null
+      >`coalesce(${recipeIngredient.displayUnit}, ${unit.name})`,
+      notes: recipeIngredient.notes,
+      fixedAmount: recipeIngredient.fixedAmount,
+    })
+    .from(recipeIngredient)
+    .innerJoin(recipeSection, eq(recipeSection.id, recipeIngredient.sectionId))
+    .leftJoin(unit, eq(unit.id, recipeIngredient.unitId))
+    .where(
+      and(
+        inArray(recipeSection.recipeId, recipeIds),
+        isNull(recipeIngredient.ingredientId),
+      ),
+    )
+    .orderBy(asc(recipeSection.sortOrder), asc(recipeIngredient.sortOrder))
+    .all();
+  const unparsedByRecipe = new Map<number, typeof unparsedRows>();
+  for (const l of unparsedRows) {
+    const arr = unparsedByRecipe.get(l.recipeId) ?? [];
+    arr.push(l);
+    unparsedByRecipe.set(l.recipeId, arr);
+  }
+
   const linesByRecipe = new Map<number, typeof lines>();
   for (const l of lines) {
     // exclude_from_shopping_list is a stamm-level "never include" flag
@@ -172,9 +232,22 @@ export function previewMeals(start: string, lengthDays: number): PreviewMeal[] {
   const out: PreviewMeal[] = [];
   for (const m of meals) {
     const recipeLines = linesByRecipe.get(m.recipeId) ?? [];
-    if (recipeLines.length === 0) continue;
+    const unparsedRecipeLines = unparsedByRecipe.get(m.recipeId) ?? [];
+    // A meal with ONLY unparsed lines still shows up — the whole point of
+    // surfacing them is that the list-maker sees the recipe has lines that
+    // can't be added, instead of the meal silently disappearing.
+    if (recipeLines.length === 0 && unparsedRecipeLines.length === 0) continue;
     const servings = m.servingsOverride ?? m.recipeServings;
     const scale = m.recipeServings > 0 ? servings / m.recipeServings : 1;
+    const unparsedLines: PreviewUnparsedLine[] = unparsedRecipeLines.map(
+      (l) => ({
+        recipeIngredientId: l.recipeIngredientId,
+        displayName: l.displayName ?? "",
+        qty: l.qty == null ? null : l.fixedAmount ? l.qty : l.qty * scale,
+        unitLabel: l.unitLabel,
+        notes: l.notes,
+      }),
+    );
     // Group ingredients by section, preserving section + ingredient order
     // (already enforced via the ORDER BY on the query). The dialog uses
     // these to render headings — when a recipe has just one unnamed
@@ -238,7 +311,7 @@ export function previewMeals(start: string, lengthDays: number): PreviewMeal[] {
         ingredients: equipmentLines,
       });
     }
-    if (sections.length === 0) continue;
+    if (sections.length === 0 && unparsedLines.length === 0) continue;
     out.push({
       mealPlanId: m.mealPlanId,
       date: m.date,
@@ -246,7 +319,9 @@ export function previewMeals(start: string, lengthDays: number): PreviewMeal[] {
       recipeTitle: m.recipeTitle,
       servings,
       alreadyOnList: alreadyOnList.has(m.mealPlanId),
+      needsUpdate: !!m.needsUpdate,
       sections,
+      unparsedLines,
     });
   }
 

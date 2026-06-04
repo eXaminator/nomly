@@ -16,12 +16,17 @@ export function NeedsUpdateToggle({
   recipeId,
   initial,
   size,
+  iconOnly = false,
 }: {
   recipeId: number;
   initial: boolean;
   /** Forwarded to the underlying Button — use "sm" to match adjacent small
    *  buttons (e.g. in the recipe preview dialog header). */
   size?: React.ComponentProps<typeof Button>["size"];
+  /** Compact wrench-only rendering for tight rows (e.g. the meal rows in
+   *  the "Mahlzeiten hinzufügen" dialog). The label moves into the
+   *  aria-label; the tooltip stays. */
+  iconOnly?: boolean;
 }) {
   const router = useRouter();
   const [needsUpdate, setNeedsUpdate] = React.useState(initial);
@@ -46,6 +51,8 @@ export function NeedsUpdateToggle({
     }
   }
 
+  const label = needsUpdate ? "Update vorgemerkt" : "Update vormerken";
+
   return (
     <Button
       type="button"
@@ -54,18 +61,20 @@ export function NeedsUpdateToggle({
       onClick={toggle}
       disabled={saving}
       aria-pressed={needsUpdate}
+      aria-label={iconOnly ? label : undefined}
       title={
         needsUpdate
           ? "Update-Markierung entfernen"
           : "Rezept für ein späteres Update vormerken"
       }
       className={cn(
+        iconOnly && "h-7 w-7 p-0",
         needsUpdate &&
           "border-[var(--color-warning)] bg-[color-mix(in_srgb,var(--color-warning),transparent_85%)] text-[var(--color-warning)] hover:bg-[color-mix(in_srgb,var(--color-warning),transparent_75%)]",
       )}
     >
       <Wrench className="size-4" />
-      {needsUpdate ? "Update vorgemerkt" : "Update vormerken"}
+      {iconOnly ? null : label}
     </Button>
   );
 }
