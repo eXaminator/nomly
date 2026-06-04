@@ -20,6 +20,10 @@ const BYPASS_EXACT = new Set([
   // The static offline fallback the SW caches — must succeed (not redirect to
   // login) whenever the SW precaches it, even if the session has expired.
   "/offline",
+  // The PWA entry redirect — must succeed (not bounce to login) so the SW
+  // can precache it and launch offline; it carries no data, the target page
+  // enforces auth itself.
+  "/start",
 ]);
 
 function isBypassed(pathname: string): boolean {

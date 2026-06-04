@@ -8,6 +8,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { BulkReparseButton } from "@/components/recipes/bulk-reparse-button";
+import { StartPageSetting } from "@/components/settings/start-page-setting";
 
 export const dynamic = "force-dynamic";
 
@@ -106,6 +107,22 @@ export default async function EinstellungenPage() {
               </Link>
             ))}
           </div>
+        </div>
+        <div>
+          <h2 className="mb-3 text-sm font-medium uppercase tracking-wider text-[var(--color-muted-fg)]">
+            App
+          </h2>
+          <Card>
+            <CardHeader className="flex flex-row items-start justify-between gap-3">
+              <div>
+                <CardTitle>Startseite</CardTitle>
+                <CardDescription>
+                  Mit welcher Seite die App öffnet. Gilt nur für dieses Gerät.
+                </CardDescription>
+              </div>
+              <StartPageSetting />
+            </CardHeader>
+          </Card>
         </div>
         <div>
           <h2 className="mb-3 text-sm font-medium uppercase tracking-wider text-[var(--color-muted-fg)]">
