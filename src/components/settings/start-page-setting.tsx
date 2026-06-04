@@ -5,32 +5,50 @@ import {
   START_PAGE_KEY,
   START_PAGE_OPTIONS,
   resolveStartPage,
+  type StartPage,
 } from "@/lib/start-page";
+
+// localStorage is the store; same-tab writes don't fire "storage" events, so
+// onChange notifies these listeners by hand.
+const listeners = new Set<() => void>();
+
+function subscribe(onChange: () => void): () => void {
+  listeners.add(onChange);
+  window.addEventListener("storage", onChange);
+  return () => {
+    listeners.delete(onChange);
+    window.removeEventListener("storage", onChange);
+  };
+}
+
+function readStartPage(): StartPage {
+  try {
+    return resolveStartPage(window.localStorage.getItem(START_PAGE_KEY));
+  } catch {
+    return "/"; // storage unavailable — show the default
+  }
+}
 
 /**
  * Per-device start-page select (localStorage, not the DB — each device may
  * want a different entry page, and the value must be readable offline at
- * app launch).
+ * app launch). The server snapshot renders the default; the stored value
+ * swaps in after hydration.
  */
 export function StartPageSetting() {
-  const [value, setValue] = React.useState<string>("/");
-
-  React.useEffect(() => {
-    try {
-      setValue(resolveStartPage(window.localStorage.getItem(START_PAGE_KEY)));
-    } catch {
-      // storage unavailable — keep the default
-    }
-  }, []);
+  const value = React.useSyncExternalStore(
+    subscribe,
+    readStartPage,
+    (): StartPage => "/",
+  );
 
   const onChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const next = resolveStartPage(e.target.value);
-    setValue(next);
     try {
-      window.localStorage.setItem(START_PAGE_KEY, next);
+      window.localStorage.setItem(START_PAGE_KEY, resolveStartPage(e.target.value));
     } catch {
-      // storage unavailable — the select still reflects the choice
+      // storage unavailable — nothing to persist
     }
+    for (const notify of listeners) notify();
   };
 
   return (
