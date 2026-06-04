@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { Wrench } from "lucide-react";
 import {
   Card,
@@ -6,6 +5,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { OfflineAwareLink } from "./offline-aware-link";
 
 export type NeedsUpdateRecipe = {
   id: number;
@@ -37,12 +37,12 @@ export function NeedsUpdateCard({
           Zu überarbeiten
         </CardTitle>
         {recipes.length > 0 ? (
-          <Link
+          <OfflineAwareLink
             href="/rezepte?update=1"
             className="text-sm font-medium text-[var(--color-accent)] hover:underline"
           >
             Alle ansehen →
-          </Link>
+          </OfflineAwareLink>
         ) : null}
       </CardHeader>
       <CardContent>
@@ -55,12 +55,12 @@ export function NeedsUpdateCard({
             <ul className="flex flex-col gap-1">
               {visible.map((recipe) => (
                 <li key={recipe.id}>
-                  <Link
+                  <OfflineAwareLink
                     href={`/rezepte/${recipe.id}`}
                     className="flex min-h-11 min-w-0 items-center rounded-md px-2 -mx-2 text-sm font-medium text-[var(--color-fg)] hover:bg-[var(--color-muted)]/50 hover:underline"
                   >
                     <span className="truncate">{recipe.title}</span>
-                  </Link>
+                  </OfflineAwareLink>
                 </li>
               ))}
             </ul>

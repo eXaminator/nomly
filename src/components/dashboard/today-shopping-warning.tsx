@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { TriangleAlert } from "lucide-react";
+import { OfflineAwareLink } from "./offline-aware-link";
 import type { TodayMealShoppingStatus } from "@/lib/shopping/today-meal-shopping";
 
 /**
@@ -24,12 +25,12 @@ export function TodayShoppingWarning({
       <ul className="mt-2 flex flex-col gap-1 pl-7 text-sm text-[var(--color-muted-fg)]">
         {status.meals.map((meal) => (
           <li key={meal.mealPlanId}>
-            <Link
+            <OfflineAwareLink
               href={`/rezepte/${meal.recipeId}?meal=${meal.mealPlanId}`}
               className="font-medium text-[var(--color-fg)] hover:underline"
             >
               {meal.recipeTitle}
-            </Link>{" "}
+            </OfflineAwareLink>{" "}
             — {meal.uncheckedItemCount} Artikel
             {meal.supermarkets.length > 0 ? (
               <>

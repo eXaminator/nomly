@@ -1,4 +1,6 @@
-import Link from "next/link";
+"use client";
+
+import * as React from "react";
 import { Soup } from "lucide-react";
 import {
   Card,
@@ -11,7 +13,10 @@ import type { MealPlanView } from "@/lib/meal-plans/types";
 import {
   formatDayMonthDe,
   formatWeekdayLongDe,
+  todayIso,
 } from "@/lib/meal-plans/dates";
+import { filterUpcomingDates } from "@/lib/meal-plans/upcoming-dates";
+import { OfflineAwareLink } from "./offline-aware-link";
 import { cn } from "@/lib/cn";
 
 function dayLabel(iso: string, today: string): string {
@@ -36,6 +41,19 @@ export function UpcomingMealsCard({
   today: string;
   className?: string;
 }) {
+  // A SW-cached snapshot may be days old: re-filter with the device clock so
+  // past days never render. Effect-based (not render-time) to avoid a
+  // hydration mismatch with the cached HTML; also re-checks when the PWA
+  // resumes from the background (visibilitychange).
+  const [clientToday, setClientToday] = React.useState(today);
+  React.useEffect(() => {
+    const update = () => setClientToday(todayIso());
+    update();
+    document.addEventListener("visibilitychange", update);
+    return () => document.removeEventListener("visibilitychange", update);
+  }, []);
+  const visibleDates = filterUpcomingDates(dates, clientToday);
+
   const byDate = new Map<string, MealPlanView[]>();
   for (const meal of meals) {
     const list = byDate.get(meal.date) ?? [];
@@ -47,15 +65,20 @@ export function UpcomingMealsCard({
     <Card className={className}>
       <CardHeader className="flex-row items-baseline justify-between">
         <CardTitle>Nächste Mahlzeiten</CardTitle>
-        <Link
+        <OfflineAwareLink
           href="/plan"
           className="text-sm font-medium text-[var(--color-accent)] hover:underline"
         >
           Zum Plan →
-        </Link>
+        </OfflineAwareLink>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
-        {dates.map((date) => {
+        {visibleDates.length === 0 ? (
+          <p className="text-sm text-[var(--color-muted-fg)]">
+            Keine aktuellen Plandaten — einmal online öffnen.
+          </p>
+        ) : null}
+        {visibleDates.map((date) => {
           const dayMeals = byDate.get(date) ?? [];
           return (
             <div key={date}>
@@ -63,12 +86,12 @@ export function UpcomingMealsCard({
                 <span
                   className={cn(
                     "text-sm font-semibold",
-                    date === today
+                    date === clientToday
                       ? "text-[var(--color-accent)]"
                       : "text-[var(--color-fg)]",
                   )}
                 >
-                  {dayLabel(date, today)}
+                  {dayLabel(date, clientToday)}
                 </span>
                 <span className="text-xs text-[var(--color-muted-fg)]">
                   {formatDayMonthDe(date)}
@@ -82,7 +105,7 @@ export function UpcomingMealsCard({
                 <ul className="flex flex-col gap-1.5">
                   {dayMeals.map((meal) => (
                     <li key={meal.id}>
-                      <Link
+                      <OfflineAwareLink
                         href={`/rezepte/${meal.recipe.id}?meal=${meal.id}`}
                         className="group flex min-h-11 items-center gap-2.5 rounded-md px-2 -mx-2 hover:bg-[var(--color-muted)]/50"
                       >
@@ -116,7 +139,7 @@ export function UpcomingMealsCard({
                         <span className="shrink-0 text-xs tabular-nums text-[var(--color-muted-fg)]">
                           {meal.servings} Port.
                         </span>
-                      </Link>
+                      </OfflineAwareLink>
                     </li>
                   ))}
                 </ul>

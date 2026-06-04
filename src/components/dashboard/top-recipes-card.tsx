@@ -1,10 +1,10 @@
-import Link from "next/link";
 import {
   Card,
   CardContent,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { OfflineAwareLink } from "./offline-aware-link";
 import type { MostEatenRecipe } from "@/lib/meal-plans/service";
 
 /**
@@ -32,7 +32,7 @@ export function TopRecipesCard({
           <ol className="flex flex-col gap-1.5">
             {recipes.map((recipe, i) => (
               <li key={recipe.recipeId}>
-                <Link
+                <OfflineAwareLink
                   href={`/rezepte/${recipe.recipeId}`}
                   className="group flex min-h-11 items-center gap-2.5 rounded-md px-2 -mx-2 hover:bg-[var(--color-muted)]/50"
                 >
@@ -55,7 +55,7 @@ export function TopRecipesCard({
                   <span className="shrink-0 text-xs tabular-nums text-[var(--color-muted-fg)]">
                     {recipe.count}×
                   </span>
-                </Link>
+                </OfflineAwareLink>
               </li>
             ))}
           </ol>
