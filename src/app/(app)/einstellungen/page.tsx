@@ -9,6 +9,7 @@ import {
 } from "@/components/ui/card";
 import { BulkReparseButton } from "@/components/recipes/bulk-reparse-button";
 import { StartPageSetting } from "@/components/settings/start-page-setting";
+import { StandaloneOnly } from "@/components/pwa/standalone-only";
 
 export const dynamic = "force-dynamic";
 
@@ -108,22 +109,28 @@ export default async function EinstellungenPage() {
             ))}
           </div>
         </div>
-        <div>
-          <h2 className="mb-3 text-sm font-medium uppercase tracking-wider text-[var(--color-muted-fg)]">
-            App
-          </h2>
-          <Card>
-            <CardHeader className="flex flex-row items-start justify-between gap-3">
-              <div>
-                <CardTitle>Startseite</CardTitle>
-                <CardDescription>
-                  Mit welcher Seite die App öffnet. Gilt nur für dieses Gerät.
-                </CardDescription>
-              </div>
-              <StartPageSetting />
-            </CardHeader>
-          </Card>
-        </div>
+        {/* Only meaningful inside the installed PWA — and on iOS the
+            installed app has isolated storage, so configuring it from a
+            browser tab wouldn't reach the PWA anyway. */}
+        <StandaloneOnly>
+          <div>
+            <h2 className="mb-3 text-sm font-medium uppercase tracking-wider text-[var(--color-muted-fg)]">
+              App
+            </h2>
+            <Card>
+              <CardHeader className="flex flex-row items-start justify-between gap-3">
+                <div>
+                  <CardTitle>Startseite</CardTitle>
+                  <CardDescription>
+                    Mit welcher Seite die App öffnet. Gilt nur für dieses
+                    Gerät.
+                  </CardDescription>
+                </div>
+                <StartPageSetting />
+              </CardHeader>
+            </Card>
+          </div>
+        </StandaloneOnly>
         <div>
           <h2 className="mb-3 text-sm font-medium uppercase tracking-wider text-[var(--color-muted-fg)]">
             Wartung
