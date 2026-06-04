@@ -11,9 +11,10 @@ import {
   listSupermarkets,
 } from "@/lib/stammdaten/supermarket/service";
 import { listRecipes } from "@/lib/recipes/service";
+import { DashboardRefresher } from "@/components/dashboard/dashboard-refresher";
 import { TodayShoppingWarning } from "@/components/dashboard/today-shopping-warning";
 import { UpcomingMealsCard } from "@/components/dashboard/upcoming-meals-card";
-import { ShoppingSummaryCard } from "@/components/dashboard/shopping-summary-card";
+import { ShoppingSummaryLive } from "@/components/dashboard/shopping-summary-live";
 import { TopRecipesCard } from "@/components/dashboard/top-recipes-card";
 import { NeedsUpdateCard } from "@/components/dashboard/needs-update-card";
 
@@ -50,6 +51,7 @@ export default function Home() {
 
   return (
     <>
+      <DashboardRefresher />
       <div className="flex flex-col gap-2">
         <h1 className="text-2xl font-semibold tracking-tight text-[var(--color-fg)]">
           Willkommen
@@ -67,7 +69,7 @@ export default function Home() {
             today={today}
             className="lg:row-span-2"
           />
-          <ShoppingSummaryCard
+          <ShoppingSummaryLive
             openCount={shoppingSummary.openCount}
             stores={shoppingSummary.stores}
           />
