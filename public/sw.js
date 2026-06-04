@@ -5,7 +5,7 @@
 // - Caches static assets + supermarket/category data only. The shopping
 //   list itself is owned by IndexedDB on the client.
 
-const CACHE_VERSION = "v3";
+const CACHE_VERSION = "v4";
 const SHELL_CACHE  = `nomly-shell-${CACHE_VERSION}`;
 const DATA_CACHE   = `nomly-data-${CACHE_VERSION}`;
 const STATIC_CACHE = `nomly-static-${CACHE_VERSION}`;
@@ -30,6 +30,17 @@ self.addEventListener("install", (event) => {
       if (shellRes.ok) await cache.put("/einkauf", shellRes.clone());
     } catch (e) {
       console.warn("[sw] shell pre-cache failed", e);
+    }
+
+    // Best-effort seed of the dashboard snapshot so even a first launch
+    // offline has something to show. `redirect: "error"` keeps a login
+    // redirect from being cached when the session is dead at install time;
+    // normal visits keep the snapshot fresh via stale-while-revalidate.
+    try {
+      const dashRes = await fetch("/", { cache: "no-store", redirect: "error" });
+      if (dashRes.ok) await cache.put("/", dashRes.clone());
+    } catch (e) {
+      console.warn("[sw] dashboard pre-cache failed", e);
     }
 
     // Pre-cache static asset list from the build manifest.
@@ -103,6 +114,14 @@ function isStaticAsset(url) {
 function isShellNavigation(req, url) {
   return req.mode === "navigate" && url.pathname === "/einkauf";
 }
+function isDashboardNavigation(req, url) {
+  return req.mode === "navigate" && url.pathname === "/";
+}
+// Recipe photos render on the dashboard and in lists; cache-first keeps them
+// visible offline (bounded: one household's recipe images).
+function isRecipePhoto(req, url) {
+  return req.destination === "image" && url.pathname.startsWith("/api/v1/");
+}
 function isNavigation(req) {
   return req.mode === "navigate";
 }
@@ -117,8 +136,16 @@ self.addEventListener("fetch", (event) => {
     event.respondWith(shellNavigationStrategy(req));
     return;
   }
+  if (isDashboardNavigation(req, url)) {
+    event.respondWith(dashboardNavigationStrategy(event));
+    return;
+  }
   if (isNavigation(req)) {
     event.respondWith(navigationFallbackStrategy(req));
+    return;
+  }
+  if (isRecipePhoto(req, url)) {
+    event.respondWith(cacheFirst(req, STATIC_CACHE));
     return;
   }
   if (isDataPath(url)) {
@@ -152,11 +179,64 @@ async function shellNavigationStrategy(req) {
   }
 }
 
+async function dashboardNavigationStrategy(event) {
+  // Stale-while-revalidate for the dashboard: respond from cache instantly,
+  // refresh the cache in the background. The page itself re-fetches fresh
+  // data via router.refresh() when online, so what the user *sees* never
+  // stays stale — this cache only decides what paints first (and what shows
+  // offline). Unlike /einkauf, caching the data-bearing page is safe: the
+  // dashboard is read-only, nothing can clobber IDB.
+  const req = event.request;
+  try {
+    const cache = await caches.open(SHELL_CACHE);
+    const cached = await cache.match("/");
+
+    const revalidate = (async () => {
+      try {
+        const res = await fetch(req);
+        // Only a good same-origin 200 may overwrite the snapshot — a 500 or
+        // a login redirect must never eat a working offline dashboard.
+        if (res.ok && res.type === "basic" && !res.redirected) {
+          try {
+            await cache.put("/", res.clone());
+          } catch (e) {
+            console.warn("[sw] dashboard cache update failed", e);
+          }
+        }
+        return res;
+      } catch {
+        return null; // offline — caller falls back
+      }
+    })();
+
+    if (cached) {
+      event.waitUntil(revalidate);
+      return cached;
+    }
+    const res = await revalidate;
+    if (res) return res;
+    const offline = await cache.match("/offline");
+    if (offline) return offline;
+    return new Response(
+      "<!doctype html><meta charset=utf-8><title>nomly offline</title><p>Offline — das Dashboard konnte nicht geladen werden. Öffne die Seite einmal online, dann steht sie auch offline bereit.</p>",
+      { headers: { "content-type": "text/html;charset=utf-8" }, status: 503 },
+    );
+  } catch (e) {
+    // Any unexpected SW bug must never take the app down — go to network.
+    console.warn("[sw] dashboard strategy failed, falling through", e);
+    return fetch(req);
+  }
+}
+
 async function navigationFallbackStrategy(req) {
   const cache = await caches.open(SHELL_CACHE);
   try {
     return await fetch(req);
   } catch {
+    // Serve the page itself when it was precached (e.g. /start), else the
+    // generic offline fallback.
+    const cached = await cache.match(new URL(req.url).pathname);
+    if (cached) return cached;
     const offline = await cache.match("/offline");
     if (offline) return offline;
     return new Response(
