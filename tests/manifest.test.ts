@@ -7,7 +7,7 @@ describe("web manifest", () => {
   it("declares the standalone PWA basics", () => {
     expect(m.name).toBe("nomly");
     expect(m.short_name).toBe("nomly");
-    expect(m.start_url).toBe("/einkauf");
+    expect(m.start_url).toBe("/start");
     expect(m.scope).toBe("/");
     expect(m.display).toBe("standalone");
     expect(m.lang).toBe("de");
@@ -22,8 +22,8 @@ describe("web manifest", () => {
     expect(m.icons!.some((i) => i.purpose === "maskable")).toBe(true);
   });
 
-  it("declares the four shortcut targets", () => {
+  it("declares the five shortcut targets, dashboard first", () => {
     const urls = m.shortcuts!.map((s) => s.url);
-    expect(urls).toEqual(["/einkauf", "/plan", "/rezepte", "/rezepte/neu"]);
+    expect(urls).toEqual(["/", "/einkauf", "/plan", "/rezepte", "/rezepte/neu"]);
   });
 });

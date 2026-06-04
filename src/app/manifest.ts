@@ -5,7 +5,7 @@ export default function manifest(): MetadataRoute.Manifest {
     name: "nomly",
     short_name: "nomly",
     description: "Kochbuch, Wochenplan, Einkaufsliste",
-    start_url: "/einkauf",
+    start_url: "/start",
     scope: "/",
     display: "standalone",
     background_color: "#13110F",
@@ -21,6 +21,7 @@ export default function manifest(): MetadataRoute.Manifest {
       { src: "/icons/icon.svg",              sizes: "any",     type: "image/svg+xml" },
     ],
     shortcuts: [
+      { name: "Start",        short_name: "Start",   url: "/",            icons: [{ src: "/icons/shortcut-start-96.png",    sizes: "96x96", type: "image/png" }] },
       { name: "Einkauf",      short_name: "Einkauf", url: "/einkauf",     icons: [{ src: "/icons/shortcut-einkauf-96.png", sizes: "96x96", type: "image/png" }] },
       { name: "Planer",       short_name: "Planer",  url: "/plan",        icons: [{ src: "/icons/shortcut-plan-96.png",     sizes: "96x96", type: "image/png" }] },
       { name: "Rezepte",      short_name: "Rezepte", url: "/rezepte",     icons: [{ src: "/icons/shortcut-rezepte-96.png",  sizes: "96x96", type: "image/png" }] },

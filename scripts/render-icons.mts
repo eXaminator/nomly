@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { dirname } from "node:path";
 
 const ICON_SIZES = [180, 192, 384, 512] as const;
-const SHORTCUT_KEYS = ["einkauf", "plan", "rezepte", "neu"] as const;
+const SHORTCUT_KEYS = ["einkauf", "plan", "rezepte", "neu", "start"] as const;
 
 async function renderTo(svgPath: string, outPath: string, size: number): Promise<void> {
   const buf = await readFile(svgPath);
