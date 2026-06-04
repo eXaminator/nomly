@@ -1198,7 +1198,10 @@ export function parseIngredientString(
   // is a parenthetical alternative the user dropped the parens around)
   // or "1½ tsp. plus ¼ cup cornstarch" (where "plus" is filler-stripped
   // but the secondary "¼ cup" is left behind). Walk the name tokens and
-  // peel any "number (UNIT)?" run, pushing it to notes verbatim.
+  // peel any "number UNIT" run, pushing it to notes verbatim. A number with
+  // NO unit attached stays in the name — it's product identity, not a
+  // measurement ("Weizenmehl Typ 405" must keep "405" so the matcher can
+  // align it against the full catalog alias).
   const secondaryAmounts: string[] = [];
   {
     const kept: string[] = [];
@@ -1208,26 +1211,29 @@ export function parseIngredientString(
         const run = [t];
         let j = i + 1;
         // Consume any trailing fraction glyph attached to the run
-        // ("1 ½" tokens) plus an optional unit-like token.
+        // ("1 ½" tokens) plus the unit-like token that qualifies the run
+        // as a secondary measurement.
         if (j < nameTokens.length && NUMERIC_TOKEN_RE.test(nameTokens[j])) {
           run.push(nameTokens[j]);
           j += 1;
         }
+        let hasUnit = false;
         if (j < nameTokens.length) {
           const next = nameTokens[j];
           const lower = next.toLowerCase();
           const stripped = lower.replace(/\.$/, "");
-          const isUnit =
+          hasUnit =
             knownUnitTokens.has(lower) ||
             knownUnitTokens.has(stripped) ||
             knownUnitTokens.has(`${stripped}.`) ||
             SIZE_UNIT_TOKENS_RE.test(next);
-          if (isUnit) {
+          if (hasUnit) {
             run.push(next);
             j += 1;
           }
         }
-        secondaryAmounts.push(run.join(" "));
+        if (hasUnit) secondaryAmounts.push(run.join(" "));
+        else kept.push(...run);
         i = j;
       } else {
         kept.push(t);

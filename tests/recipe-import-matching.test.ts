@@ -522,6 +522,36 @@ describe("parseIngredientLines — substring matcher + threshold", () => {
     expect(out[0].name).toBe("Tomate");
     expect(out[0].notes).toBe("Cherry");
   });
+
+  it("keeps a unit-less trailing number in the name ('Weizenmehl Typ 405' matches its alias)", () => {
+    // The secondary-amounts peel must not strip a bare number that has no
+    // unit attached — "405" is product identity ("Weizenmehl Typ 405"), not a
+    // parallel measurement. With the number kept, the 3-token alias covers the
+    // whole candidate and beats the bare canonical.
+    const catalog: IngredientCatalog = [
+      {
+        ingredientId: 7,
+        canonicalName: "Weizenmehl",
+        aliasName: "Weizenmehl",
+        tokens: ["weizenmehl"],
+      },
+      {
+        ingredientId: 7,
+        canonicalName: "Weizenmehl",
+        aliasName: "Weizenmehl Typ 405",
+        tokens: ["weizenmehl", "typ", "405"],
+      },
+    ];
+    const out = parseIngredientLines(
+      ["200 g Weizenmehl Typ 405"],
+      makeLookups(catalog),
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0].ingredientId).toBe(7);
+    expect(out[0].ingredientMatch).toBe("existing");
+    expect(out[0].name).toBe("Weizenmehl Typ 405");
+    expect(out[0].notes).toBeNull();
+  });
 });
 
 describe("colon-in-name treated as section + listed items", () => {
