@@ -4,7 +4,7 @@ import {
 } from "@/lib/meal-plans/service";
 import { addDays, todayIso } from "@/lib/meal-plans/dates";
 import { listShoppingItems } from "@/lib/shopping/items";
-import { countNeededItemsPerSupermarket } from "@/lib/shopping/supermarket-availability";
+import { computeShoppingSummary } from "@/lib/shopping/shopping-summary";
 import { getTodayMealShoppingStatus } from "@/lib/shopping/today-meal-shopping";
 import {
   getSupermarketDetail,
@@ -32,7 +32,6 @@ export default function Home() {
   const todayStatus = getTodayMealShoppingStatus();
 
   const items = listShoppingItems();
-  const openCount = items.filter((i) => !i.checked).length;
   const supermarkets = listSupermarkets()
     .map((s) => getSupermarketDetail(s.id))
     .filter((s): s is NonNullable<typeof s> => s != null)
@@ -41,11 +40,7 @@ export default function Home() {
       name: s.name,
       categories: s.orderedCategories.map((c) => ({ categoryId: c.categoryId })),
     }));
-  const storeCounts = countNeededItemsPerSupermarket(items, supermarkets);
-  const stores = supermarkets
-    .map((s) => ({ id: s.id, name: s.name, count: storeCounts.get(s.id) ?? 0 }))
-    .filter((s) => s.count > 0)
-    .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, "de"));
+  const shoppingSummary = computeShoppingSummary(items, supermarkets);
 
   const topRecipes = getMostEatenRecipes(today, TOP_RECIPES_LIMIT);
   const needsUpdateRecipes = listRecipes({ needsUpdate: true }).map((r) => ({
@@ -72,7 +67,10 @@ export default function Home() {
             today={today}
             className="lg:row-span-2"
           />
-          <ShoppingSummaryCard openCount={openCount} stores={stores} />
+          <ShoppingSummaryCard
+            openCount={shoppingSummary.openCount}
+            stores={shoppingSummary.stores}
+          />
           <TopRecipesCard recipes={topRecipes} />
           <NeedsUpdateCard recipes={needsUpdateRecipes} />
         </div>
