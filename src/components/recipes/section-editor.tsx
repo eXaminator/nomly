@@ -7,6 +7,7 @@ import {
   ClipboardPaste,
   Loader2,
   Plus,
+  Split,
   Trash2,
 } from "lucide-react";
 import { useDroppable } from "@dnd-kit/core";
@@ -85,6 +86,10 @@ type Props = {
    *  headers ("Für den Teig:", "FÜR DIE FÜLLUNG"). Receives one DraftSection
    *  per additional section to append AFTER this one. */
   onAppendSections?: (sections: DraftSection[]) => void;
+  /** Split this section before the given flat ingredient index: that row and
+   *  everything below it move into a fresh section inserted right after this
+   *  one. Triggered from the affordance on the border between two groups. */
+  onSplit?: (ingredientIndex: number) => void;
 };
 
 /**
@@ -105,6 +110,7 @@ export function SectionEditor({
   onRemove,
   onMove,
   onAppendSections,
+  onSplit,
 }: Props) {
   const [pasteOpen, setPasteOpen] = React.useState(false);
   const [pasteText, setPasteText] = React.useState("");
@@ -443,6 +449,11 @@ export function SectionEditor({
                   }
                   onPromote={promoteAlternative}
                   onDetach={detachAlternative}
+                  onSplitAbove={
+                    onSplit && g.primaryIdx > 0
+                      ? () => onSplit(g.primaryIdx)
+                      : undefined
+                  }
                 />
               );
             })}
@@ -614,6 +625,7 @@ function IngredientGroup({
   onDemote,
   onPromote,
   onDetach,
+  onSplitAbove,
 }: {
   group: IngredientGroupShape;
   onChange: (flatIdx: number, next: DraftIngredient) => void;
@@ -631,6 +643,9 @@ function IngredientGroup({
   /** Detach an alternative to become its own primary, leaving the old
    *  group intact and stepping out to a position right after it. */
   onDetach: (flatIdx: number) => void;
+  /** Split the section right above this group. Undefined on the first
+   *  group (nothing above to split off). */
+  onSplitAbove?: () => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({ id: group.primary.uid });
@@ -643,10 +658,38 @@ function IngredientGroup({
       ref={setNodeRef}
       style={style}
       className={cn(
-        "divide-y divide-[var(--color-border)]",
-        isDragging && "relative z-10 opacity-40",
+        // py-2 widens only the gaps at the group's outer edges — i.e. around
+        // the between-groups divider where the split button sits — while the
+        // primary↔alternative dividers inside the group keep the tighter
+        // row padding.
+        "relative divide-y divide-[var(--color-border)] py-2",
+        isDragging && "z-10 opacity-40",
       )}
     >
+      {/* Split affordance, always visible, straddling the divider above
+          this group as an absolute overlay — out of flow, so it can never
+          reflow the list (cf. the candidate-pill hover-flicker fix).
+          Rendered as the FIRST child: Tailwind v4's divide-y puts a
+          border-BOTTOM on every non-last child, so as last child it would
+          strip the rows' :last-child status and paint a stray second line
+          under the final row; as first child the only side effect is a
+          border-bottom on the button itself, which its own 1px full border
+          makes a visual no-op. Hidden while the group is being dragged. */}
+      {onSplitAbove && !isDragging ? (
+        <button
+          type="button"
+          onClick={onSplitAbove}
+          className={cn(
+            "absolute right-3 top-0 z-10 -translate-y-1/2",
+            "inline-flex items-center justify-center rounded-full border border-[var(--color-border)] bg-[var(--color-card)] p-1.5 text-[var(--color-muted-fg)]",
+            "transition-colors hover:border-[var(--color-accent)] hover:text-[var(--color-fg)]",
+          )}
+          title="Abschnitt hier teilen — die Zeilen ab hier wandern in einen neuen Abschnitt."
+          aria-label="Abschnitt hier teilen"
+        >
+          <Split className="size-3.5 rotate-90" aria-hidden />
+        </button>
+      ) : null}
       <IngredientRow
         value={group.primary}
         onChange={(next) => onChange(group.primaryIdx, next)}

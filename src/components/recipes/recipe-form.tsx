@@ -22,6 +22,7 @@ import { MarkdownEditor } from "@/components/ui/markdown-editor";
 import { NewIngredientsDialog } from "./new-ingredients-dialog";
 import { PhotoUpload } from "./photo-upload";
 import { SectionEditor } from "./section-editor";
+import { splitSectionAt } from "./split-section";
 import { TagInput } from "./tag-input";
 import { hasReparsableRows, reparseAll } from "./reparse";
 import { ingredientToPayload, toNumberOrNull } from "./payload";
@@ -145,6 +146,16 @@ export function RecipeForm({ initial, recipeId, tagSuggestions }: Props) {
     const fresh = emptySection();
     setDraft({ ...draft, sections: [...draft.sections, fresh] });
     setScrollToSectionUid(fresh.uid);
+  }
+
+  /** Split section `i` before flat ingredient index `at` — the rows from
+   *  there down move into a fresh section inserted right after it, whose
+   *  title input then scrolls into view for naming. */
+  function splitSection(i: number, at: number) {
+    const result = splitSectionAt(draft.sections, i, at);
+    if (!result) return;
+    setDraft({ ...draft, sections: result.sections });
+    setScrollToSectionUid(result.newSectionUid);
   }
 
   function appendSectionsAfter(i: number, extras: DraftSection[]) {
@@ -545,6 +556,7 @@ export function RecipeForm({ initial, recipeId, tagSuggestions }: Props) {
               onRemove={() => removeSection(i)}
               onMove={(dir) => moveSection(i, dir)}
               onAppendSections={(extras) => appendSectionsAfter(i, extras)}
+              onSplit={(at) => splitSection(i, at)}
             />
           ))}
           <DragOverlay dropAnimation={null}>
