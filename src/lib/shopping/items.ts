@@ -107,6 +107,11 @@ export type ShoppingItemView = {
   refId: number;
   name: string;
   amounts: ShoppingItemAmount[];
+  /** Aggregated gross demand *before* the stock subtraction (and without the
+   *  ≤ 0 drop). The stock-check dialog shows this as "Benötigt" so entered
+   *  stock is compared against the absolute need. Equals `amounts` when no
+   *  stock is set. */
+  requiredAmounts: ShoppingItemAmount[];
   categoryId: number | null;
   categoryName: string | null;
   checked: boolean;
@@ -398,12 +403,19 @@ export function listShoppingItems(
       stock && stock.quantity != null && stock.unitId != null
         ? [{ quantity: stock.quantity, unitId: stock.unitId }]
         : [];
+    const edges = conversionsByIngredient.get(r.refId as number) ?? [];
     const rawAmounts = buildAggregatedAmounts(
       contributions,
-      conversionsByIngredient.get(r.refId as number) ?? [],
+      edges,
       unitsById,
       subtractions,
     );
+    // Gross demand before the stock subtraction; identical to rawAmounts when
+    // nothing is subtracted, so only re-aggregate for items with stock.
+    const requiredAmounts =
+      subtractions.length > 0
+        ? buildAggregatedAmounts(contributions, edges, unitsById)
+        : rawAmounts;
     // A line whose total resolved to ≤ 0 (stock covers it) is disregarded;
     // when *every* line of an item with demand is covered, the item is
     // flagged so the stock write paths can drop it from the list entirely.
@@ -418,6 +430,7 @@ export function listShoppingItems(
       refId: r.refId as number,
       name: r.name,
       amounts,
+      requiredAmounts,
       categoryId: r.categoryId,
       categoryName: r.categoryName,
       checked: !!r.checked,

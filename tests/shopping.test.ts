@@ -681,6 +681,22 @@ describe("shopping stock (Auf Lager)", () => {
     expect(after.stock).toMatchObject({ quantity: 300, unitId: ctx.unitIds.g });
   });
 
+  it("exposes the gross demand in requiredAmounts, unaffected by stock", async () => {
+    const { setItemStock } = await import("@/lib/shopping/items");
+    const before = await tomateItem();
+    // Without stock, the gross demand mirrors the net list amounts.
+    expect(before.requiredAmounts).toEqual(before.amounts);
+
+    setItemStock(before.id, { quantity: 300, unitId: ctx.unitIds.g });
+    const after = await tomateItem();
+    // The net list amount shrinks, the gross demand stays at 1000 g.
+    expect(massGrams(after)).toBe(700);
+    const gross = after.requiredAmounts.find((a) => a.dimension === "mass");
+    expect(gross).toBeDefined();
+    const factor = gross!.unitId === ctx.unitIds.kg ? 1000 : 1;
+    expect(gross!.quantity! * factor).toBe(1000);
+  });
+
   it("removes the item when stock covers the whole demand", async () => {
     const { setItemStock, listShoppingItems } = await import("@/lib/shopping/items");
     const item = await tomateItem();

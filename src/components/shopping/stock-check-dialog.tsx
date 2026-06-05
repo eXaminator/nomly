@@ -4,6 +4,7 @@ import * as React from "react";
 import { Trash2, Undo2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { type ComboboxItem } from "@/components/ui/combobox";
+import { AmountList } from "./amount-list";
 import { UnitSelect } from "./unit-select";
 import {
   Dialog,
@@ -158,14 +159,24 @@ function StockCheckBody({
               return (
                 <li key={i.id} className="flex flex-col gap-0.5">
                   <div className="flex items-center gap-2">
-                    <span
-                      className={cn(
-                        "min-w-0 flex-1 truncate text-sm",
-                        isRemoved && "text-[var(--color-muted-fg)] line-through",
-                      )}
-                    >
-                      {i.name}
-                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p
+                        className={cn(
+                          "truncate text-sm",
+                          isRemoved && "text-[var(--color-muted-fg)] line-through",
+                        )}
+                      >
+                        {i.name}
+                      </p>
+                      {i.requiredAmounts.some(
+                        (a) => a.quantity != null || a.unitName != null,
+                      ) ? (
+                        <p className="truncate text-xs text-[var(--color-muted-fg)]">
+                          Benötigt:{" "}
+                          <AmountList amounts={i.requiredAmounts} className="text-xs" />
+                        </p>
+                      ) : null}
+                    </div>
                     <Input
                       type="text"
                       inputMode="decimal"

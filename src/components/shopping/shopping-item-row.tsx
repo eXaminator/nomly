@@ -1,6 +1,5 @@
 "use client";
 
-import * as React from "react";
 import { Ban, BookOpen, Check, MoreVertical, Pencil, Tags, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -14,13 +13,13 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import type {
-  ShoppingItemAmount,
   ShoppingItemManualAmount,
   ShoppingItemSourceView,
   ShoppingItemStapleSourceView,
   ShoppingItemStock,
   ShoppingItemView,
 } from "@/lib/shopping/items";
+import { AmountList } from "./amount-list";
 import { formatQty } from "@/lib/shopping/format";
 import { cn } from "@/lib/cn";
 
@@ -181,29 +180,6 @@ export function ShoppingItemRow({
         </DropdownMenu>
       </div>
     </div>
-  );
-}
-
-function AmountList({ amounts }: { amounts: ShoppingItemAmount[] }) {
-  const visible = amounts.filter(
-    (a) => a.quantity != null || a.unitName != null,
-  );
-  if (visible.length === 0) return null;
-  return (
-    <span className="text-sm text-[var(--color-muted-fg)]">
-      {visible.map((a, i) => (
-        <React.Fragment key={i}>
-          {i > 0 ? <span className="mx-1">+</span> : null}
-          <span>
-            {a.quantity != null ? formatQty(a.quantity) : ""}
-            {a.unitName ? `${a.quantity != null ? " " : ""}${a.unitName}` : ""}
-            {a.baseQuantity != null && a.baseUnitName
-              ? ` (${formatQty(a.baseQuantity)} ${a.baseUnitName})`
-              : ""}
-          </span>
-        </React.Fragment>
-      ))}
-    </span>
   );
 }
 

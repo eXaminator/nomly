@@ -9,7 +9,7 @@ function makeItem(overrides: Partial<ShoppingItemView> = {}): ShoppingItemView {
     refType: "ingredient",
     refId: 1,
     name: "Mehl",
-    amounts: [],
+    amounts: [], requiredAmounts: [],
     categoryId: null,
     categoryName: null,
     checked: false,

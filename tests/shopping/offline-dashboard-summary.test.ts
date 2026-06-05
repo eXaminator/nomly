@@ -6,7 +6,7 @@ import type { ShoppingItemView } from "@/lib/shopping/items";
 function makeItem(over: Partial<ShoppingItemView> = {}): ShoppingItemView {
   return {
     id: 1, refType: "ingredient", refId: 1, name: "Mehl",
-    amounts: [], categoryId: null, categoryName: null,
+    amounts: [], requiredAmounts: [], categoryId: null, categoryName: null,
     checked: false, checkedAt: null, note: null,
     sortOrder: 0, version: 1, createdAt: 0, updatedAt: 0,
     unavailableSupermarketIds: [], sources: [], stapleSources: [], manualAmounts: [],
