@@ -1176,7 +1176,7 @@ function CandidatePill({
   return (
     <span
       className={cn(
-        "group inline-flex max-w-full items-center overflow-hidden rounded-full text-xs transition-colors",
+        "group relative inline-flex max-w-full items-center overflow-hidden rounded-full text-xs transition-colors",
         isSelected
           ? "bg-[var(--color-accent)] text-[var(--color-accent-fg)]"
           : "bg-[var(--color-muted)] text-[var(--color-fg)]",
@@ -1207,16 +1207,22 @@ function CandidatePill({
           />
         ) : null}
       </button>
-      {/* Edit-article: hidden at rest, revealed on hover (it widens the chip —
-          a small reflow is fine). On touch (no hover) it stays visible. */}
+      {/* Edit-article: revealed on hover as an OVERLAY over the chip's right
+          end (out of flow, painted on the chip's own background). It must
+          never widen the chip: on the last pill of a wrapped line the extra
+          width pushes the pill to the next line, out from under the cursor —
+          an endless wrap/unwrap flicker. On touch (no hover) it sits
+          statically in the row and stays visible; the background matches the
+          chip there, so the explicit bg classes are harmless. */}
       <button
         type="button"
         onClick={() => onEditArticle(ingredientId)}
         className={cn(
-          "hidden shrink-0 py-1 pl-1 pr-2 group-hover:inline-flex [@media(hover:none)]:inline-flex",
+          "absolute inset-y-0 right-0 hidden items-center pl-1.5 pr-2 group-hover:flex",
+          "[@media(hover:none)]:static [@media(hover:none)]:flex [@media(hover:none)]:shrink-0",
           isSelected
-            ? "hover:bg-[color-mix(in_srgb,var(--color-accent-fg),var(--color-accent)_75%)]"
-            : "hover:bg-[color-mix(in_srgb,var(--color-accent),var(--color-bg)_75%)]",
+            ? "bg-[var(--color-accent)] hover:bg-[color-mix(in_srgb,var(--color-accent-fg),var(--color-accent)_75%)]"
+            : "bg-[var(--color-muted)] hover:bg-[color-mix(in_srgb,var(--color-accent),var(--color-bg)_75%)]",
         )}
         title={`„${canonicalName}" bearbeiten.`}
         aria-label={`„${canonicalName}" bearbeiten`}
