@@ -9,12 +9,17 @@ import {
 import { fetchUrl, FetchError } from "./fetch.ts";
 import {
   asImageUrl,
+  asInstructionGroups,
   asServings,
   asString,
   asStringList,
   extractJsonLdRecipe,
   type JsonLdRecipe,
 } from "./json-ld.ts";
+import {
+  alignHtmlGroupsToLines,
+  extractIngredientGroupsFromHtml,
+} from "./html-groups.ts";
 import { parseIsoDurationToMinutes } from "./duration.ts";
 import {
   detectSectionHeader,
@@ -1531,6 +1536,47 @@ function pickTags(recipe: JsonLdRecipe): string[] {
   return Array.from(out).slice(0, 12);
 }
 
+/**
+ * Build ingredient + instruction section groups for a URL import from the
+ * two available signals:
+ *
+ * - Ingredients: schema.org has no group concept, so boundaries come from
+ *   recipe-plugin HTML markup when present. The JSON-LD strings stay
+ *   canonical — HTML contributes titles and counts only, and only when the
+ *   counts line up exactly. Otherwise: the flat text-heuristic path.
+ * - Instructions: JSON-LD `HowToSection` names are authoritative when
+ *   present. Otherwise the extracted step lines run through the
+ *   text-heuristic header splitter ("Für den Teig:", ALL-CAPS headers
+ *   hiding inside the step list), as before.
+ */
+export function buildImportSections(
+  recipe: JsonLdRecipe,
+  html: string,
+  lookups: ParseLookups,
+): {
+  ingredientGroups: ParsedSectionGroup[];
+  instructionGroups: ParsedInstructionGroup[];
+} {
+  const ingredientStrings = asStringList(recipe.recipeIngredient);
+  const htmlGroups = extractIngredientGroupsFromHtml(html);
+  const aligned = htmlGroups
+    ? alignHtmlGroupsToLines(htmlGroups, ingredientStrings)
+    : null;
+  const ingredientGroups = aligned
+    ? parseIngredientGroupsIntoSections(aligned, lookups)
+    : parseIngredientLinesIntoSections(ingredientStrings, lookups);
+
+  const rawInstructionGroups = asInstructionGroups(recipe.recipeInstructions);
+  const instructionGroups: ParsedInstructionGroup[] =
+    rawInstructionGroups.some((g) => g.title !== null)
+      ? rawInstructionGroups
+      : parseInstructionsIntoSections(
+          rawInstructionGroups.flatMap((g) => g.lines),
+        );
+
+  return { ingredientGroups, instructionGroups };
+}
+
 export async function importRecipeFromUrl(
   rawUrl: string,
 ): Promise<ImportedRecipe> {
@@ -1566,23 +1612,21 @@ export async function importRecipeFromUrl(
     prepTimeMin = totalTimeMin;
   }
 
-  const ingredientStrings = asStringList(recipe.recipeIngredient);
   const unitLookup = buildUnitLookup();
   const ingredientLookup = buildIngredientLookup();
   const ingredientCatalog = buildIngredientCatalog();
 
-  // Section-aware: ingredients and instructions both get split on shared
-  // section headers ("Für den Teig:", "FÜR DIE FÜLLUNG"). Matching titles
-  // land in the same merged section. Unmatched leftovers either prepend
-  // to the first section (unnamed lead-in) or become their own ingredient-
-  // less sections (named).
-  const ingredientGroups = parseIngredientLinesIntoSections(ingredientStrings, {
-    units: unitLookup,
-    ingredients: ingredientLookup,
-    ingredientCatalog,
-  });
-  const instructionGroups = parseInstructionsIntoSections(
-    asStringList(recipe.recipeInstructions),
+  // Section-aware: structural signals first (plugin HTML ingredient groups,
+  // JSON-LD HowToSection names), text heuristics as fallback. Matching
+  // titles land in the same merged section; see buildImportSections.
+  const { ingredientGroups, instructionGroups } = buildImportSections(
+    recipe,
+    html,
+    {
+      units: unitLookup,
+      ingredients: ingredientLookup,
+      ingredientCatalog,
+    },
   );
   const merged = mergeIngredientAndInstructionSections(
     ingredientGroups,
