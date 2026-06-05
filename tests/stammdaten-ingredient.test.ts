@@ -113,17 +113,32 @@ describe("ingredient stammdaten service", () => {
       ).toThrow(/bereits vergeben/);
     });
 
-    it("rejects alias matching an existing canonical name", async () => {
+    it("allows an alias matching another ingredient's canonical name (advisory)", async () => {
       const { service } = await loadModules();
-      expect(() =>
-        service.createIngredient({
-          name: "Cherrytomate",
-          aliases: ["Tomate"],
-          defaultCategoryId: null,
-          excludeFromShoppingList: false,
-          dietaryClass: null,
-        }),
-      ).toThrow(/bereits vergeben/);
+      // "Tomate" exists as a canonical name — an alias may shadow it; the
+      // line's unit decides at match time.
+      const created = service.createIngredient({
+        name: "Cherrytomate",
+        aliases: ["Tomate"],
+        defaultCategoryId: null,
+        excludeFromShoppingList: false,
+        dietaryClass: null,
+      });
+      expect(created.aliases).toContain("Tomate");
+    });
+
+    it("allows a canonical name matching another ingredient's alias (advisory)", async () => {
+      const { service } = await loadModules();
+      // "Strauchtomate" exists as an alias of Tomate — a new canonical name
+      // may shadow an alias; only canonical-vs-canonical stays blocked.
+      const created = service.createIngredient({
+        name: "Strauchtomate",
+        aliases: [],
+        defaultCategoryId: null,
+        excludeFromShoppingList: false,
+        dietaryClass: null,
+      });
+      expect(created.name).toBe("Strauchtomate");
     });
 
     it("allows two ingredients to SHARE an alias (advisory, not blocked)", async () => {

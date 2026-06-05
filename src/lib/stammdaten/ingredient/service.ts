@@ -443,51 +443,26 @@ function validateInput(
   if (aliasResult.error) throw new StammdatenError(aliasResult.error);
   const cleanedAliases = aliasResult.aliases;
 
-  // Cross-namespace check: canonical name unique across canonical + alias.
+  // Only canonical-vs-canonical collisions are blocked (also enforced by the
+  // unique index on ingredient.name). Every cross-namespace overlap — an alias
+  // shadowing another ingredient's canonical name or vice versa, and shared
+  // aliases — is allowed: the line's unit decides at match time, and the
+  // management UI surfaces overlaps as an advisory note instead of erroring.
   const nameCollision = findNameCollision({
     name: cleanedName,
     canonicalTable: ingredient,
     canonicalIdColumn: ingredient.id,
     canonicalNameColumn: ingredient.name,
-    aliasTable: ingredientAlias,
-    aliasParentColumn: ingredientAlias.ingredientId,
-    aliasNameColumn: ingredientAlias.name,
+    aliasTable: null,
+    aliasParentColumn: null,
+    aliasNameColumn: null,
     excludeCanonicalId: excludeId,
-    excludeAliasParentId: excludeId,
   });
   if (nameCollision) {
     throw new StammdatenError(
-      `Der Name "${cleanedName}" ist bereits vergeben (${
-        nameCollision.kind === "canonical" ? "als Zutat" : "als Alias"
-      }: "${nameCollision.name}").`,
+      `Der Name "${cleanedName}" ist bereits vergeben (als Zutat: "${nameCollision.name}").`,
       409,
     );
-  }
-
-  // Alias-vs-alias collisions are intentionally NOT blocked: two ingredients
-  // may share an alias (e.g. "tomatoes" on fresh Tomate and canned
-  // Dosentomate), with the line's unit deciding at match time — the management
-  // UI surfaces those as an advisory warning rather than erroring. An alias
-  // matching an existing CANONICAL name is still rejected, so canonical names
-  // stay sacrosanct in the namespace.
-  for (const alias of cleanedAliases) {
-    const collision = findNameCollision({
-      name: alias,
-      canonicalTable: ingredient,
-      canonicalIdColumn: ingredient.id,
-      canonicalNameColumn: ingredient.name,
-      aliasTable: ingredientAlias,
-      aliasParentColumn: ingredientAlias.ingredientId,
-      aliasNameColumn: ingredientAlias.name,
-      excludeCanonicalId: excludeId,
-      excludeAliasParentId: excludeId,
-    });
-    if (collision && collision.kind === "canonical") {
-      throw new StammdatenError(
-        `Alias "${alias}" ist bereits vergeben (als Zutat: "${collision.name}").`,
-        409,
-      );
-    }
   }
 
   return { name: cleanedName, aliases: cleanedAliases };
