@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { Trash2, Undo2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { type ComboboxItem } from "@/components/ui/combobox";
 import { UnitSelect } from "./unit-select";
@@ -14,8 +15,9 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { cn } from "@/lib/cn";
 import type { ShoppingItemView } from "@/lib/shopping/items";
-import { setStockBatch } from "./api";
+import { previewStockCoverage, setStockBatch } from "./api";
 
 type Props = {
   open: boolean;
@@ -69,23 +71,61 @@ function StockCheckBody({
   const [units, setUnits] = React.useState<Record<number, ComboboxItem | null>>(() =>
     Object.fromEntries(rows.map((i) => [i.id, initialUnit(i)])),
   );
+  const [removed, setRemoved] = React.useState<Record<number, boolean>>({});
+  // Items whose demand the current inputs would fully cover — the server
+  // removes those on save, so the row shows it up front (debounced dry-run).
+  const [covered, setCovered] = React.useState<Set<number>>(new Set());
   const [saving, setSaving] = React.useState(false);
+
+  React.useEffect(() => {
+    if (rows.length === 0) return;
+    let cancelled = false;
+    const handle = setTimeout(async () => {
+      const entries = rows
+        .filter((i) => !removed[i.id])
+        .map((i) => ({
+          itemId: i.id,
+          quantity: parseInput(qty[i.id] ?? ""),
+          unitId: units[i.id]?.id ?? null,
+        }));
+      try {
+        const ids = await previewStockCoverage(entries);
+        if (!cancelled) setCovered(new Set(ids));
+      } catch {
+        // Best-effort hint only — save still applies the removal server-side.
+      }
+    }, 300);
+    return () => {
+      cancelled = true;
+      clearTimeout(handle);
+    };
+  }, [rows, qty, units, removed]);
 
   async function commit() {
     setSaving(true);
     try {
-      const entries = rows
-        .map((i) => {
-          const next = parseInput(qty[i.id] ?? "");
-          const prev = i.stock?.quantity ?? null;
-          const nextUnit = units[i.id]?.id ?? null;
-          const prevUnit = i.stock?.unitId ?? null;
-          const changed = next !== prev || (next != null && nextUnit !== prevUnit);
-          if (!changed) return null;
-          return { itemId: i.id, quantity: next, unitId: next == null ? null : nextUnit };
-        })
-        .filter((e): e is { itemId: number; quantity: number | null; unitId: number | null } => e != null);
-      if (entries.length === 0) {
+      const entries: Array<{
+        itemId: number;
+        quantity: number | null;
+        unitId: number | null;
+        remove?: boolean;
+      }> = [];
+      for (const i of rows) {
+        if (removed[i.id]) {
+          entries.push({ itemId: i.id, quantity: null, unitId: null, remove: true });
+          continue;
+        }
+        const next = parseInput(qty[i.id] ?? "");
+        const prev = i.stock?.quantity ?? null;
+        const nextUnit = units[i.id]?.id ?? null;
+        const prevUnit = i.stock?.unitId ?? null;
+        const changed = next !== prev || (next != null && nextUnit !== prevUnit);
+        if (!changed) continue;
+        entries.push({ itemId: i.id, quantity: next, unitId: next == null ? null : nextUnit });
+      }
+      // An empty batch still runs the server-side coverage sweep, so don't
+      // skip the call while covered rows are showing a removal hint.
+      if (entries.length === 0 && covered.size === 0) {
         onClose();
         return;
       }
@@ -112,27 +152,68 @@ function StockCheckBody({
           </p>
         ) : (
           <ul className="flex flex-col gap-2">
-            {rows.map((i) => (
-              <li key={i.id} className="flex items-center gap-2">
-                <span className="min-w-0 flex-1 truncate text-sm">{i.name}</span>
-                <Input
-                  type="text"
-                  inputMode="decimal"
-                  value={qty[i.id] ?? ""}
-                  onChange={(e) =>
-                    setQty((prev) => ({ ...prev, [i.id]: e.target.value }))
-                  }
-                  placeholder="Menge"
-                  className="w-20"
-                  aria-label={`Auf Lager: ${i.name}`}
-                />
-                <UnitSelect
-                  value={units[i.id] ?? null}
-                  onChange={(u) => setUnits((prev) => ({ ...prev, [i.id]: u }))}
-                  className="w-28"
-                />
-              </li>
-            ))}
+            {rows.map((i) => {
+              const isRemoved = !!removed[i.id];
+              const isCovered = !isRemoved && covered.has(i.id);
+              return (
+                <li key={i.id} className="flex flex-col gap-0.5">
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={cn(
+                        "min-w-0 flex-1 truncate text-sm",
+                        isRemoved && "text-[var(--color-muted-fg)] line-through",
+                      )}
+                    >
+                      {i.name}
+                    </span>
+                    <Input
+                      type="text"
+                      inputMode="decimal"
+                      value={qty[i.id] ?? ""}
+                      onChange={(e) =>
+                        setQty((prev) => ({ ...prev, [i.id]: e.target.value }))
+                      }
+                      placeholder="Menge"
+                      className="w-20"
+                      disabled={isRemoved}
+                      aria-label={`Auf Lager: ${i.name}`}
+                    />
+                    <UnitSelect
+                      value={units[i.id] ?? null}
+                      onChange={(u) => setUnits((prev) => ({ ...prev, [i.id]: u }))}
+                      className="w-28"
+                      disabled={isRemoved}
+                    />
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() =>
+                        setRemoved((prev) => ({ ...prev, [i.id]: !prev[i.id] }))
+                      }
+                      aria-label={
+                        isRemoved
+                          ? `Entfernen rückgängig: ${i.name}`
+                          : `Von der Liste entfernen: ${i.name}`
+                      }
+                      title={isRemoved ? "Entfernen rückgängig" : "Von der Liste entfernen"}
+                    >
+                      {isRemoved ? (
+                        <Undo2 className="size-4" />
+                      ) : (
+                        <Trash2 className="size-4 text-[var(--color-danger)]" />
+                      )}
+                    </Button>
+                  </div>
+                  {isRemoved || isCovered ? (
+                    <p className="text-xs text-[var(--color-danger)]">
+                      {isRemoved
+                        ? "Wird beim Speichern von der Liste entfernt."
+                        : "Bedarf gedeckt — wird beim Speichern von der Liste entfernt."}
+                    </p>
+                  ) : null}
+                </li>
+              );
+            })}
           </ul>
         )}
       </DialogBody>

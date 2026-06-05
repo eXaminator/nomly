@@ -681,12 +681,77 @@ describe("shopping stock (Auf Lager)", () => {
     expect(after.stock).toMatchObject({ quantity: 300, unitId: ctx.unitIds.g });
   });
 
-  it("clamps the total at zero when stock covers everything", async () => {
-    const { setItemStock } = await import("@/lib/shopping/items");
+  it("removes the item when stock covers the whole demand", async () => {
+    const { setItemStock, listShoppingItems } = await import("@/lib/shopping/items");
     const item = await tomateItem();
-    setItemStock(item.id, { quantity: 5, unitId: ctx.unitIds.kg });
+    const result = setItemStock(item.id, { quantity: 5, unitId: ctx.unitIds.kg });
+    expect(result).toBeNull();
+    expect(listShoppingItems().find((i) => i.name === "Tomate")).toBeUndefined();
+  });
+
+  it("hides a covered line but keeps the item while another dimension remains", async () => {
+    const { addItemAmount, setItemStock } = await import("@/lib/shopping/items");
+    const item = await tomateItem();
+    addItemAmount(item.id, { quantity: 2, unitId: ctx.unitIds.stk });
+    const result = setItemStock(item.id, { quantity: 5, unitId: ctx.unitIds.kg });
+    expect(result).not.toBeNull();
     const after = await tomateItem();
-    expect(massGrams(after)).toBe(0);
+    // The fully covered mass line is disregarded; the count line survives.
+    expect(massGrams(after)).toBeNull();
+    expect(
+      after.amounts.find((a) => a.dimension === "count"),
+    ).toMatchObject({ quantity: 2 });
+  });
+
+  it("batch: removes entries flagged remove and auto-removes covered items", async () => {
+    const { setStockBatch, listShoppingItems, addItemAmount } = await import(
+      "@/lib/shopping/items"
+    );
+    const tomate = await tomateItem();
+    const mehl = listShoppingItems().find((i) => i.name === "Mehl");
+    if (!mehl) throw new Error("Mehl missing");
+    addItemAmount(mehl.id, { quantity: 1, unitId: ctx.unitIds.stk });
+
+    const items = setStockBatch([
+      // Explicit removal, applied on save.
+      { itemId: tomate.id, quantity: null, unitId: null, remove: true },
+      // Covers Mehl's mass demand but not the count amount — item stays.
+      { itemId: mehl.id, quantity: 10, unitId: ctx.unitIds.kg },
+    ]);
+    expect(items.find((i) => i.id === tomate.id)).toBeUndefined();
+    const mehlAfter = items.find((i) => i.id === mehl.id);
+    expect(mehlAfter).toBeDefined();
+    expect(mehlAfter!.amounts.find((a) => a.dimension === "mass")).toBeUndefined();
+  });
+
+  it("batch: auto-removes an item once stock covers all of its demand", async () => {
+    const { setStockBatch } = await import("@/lib/shopping/items");
+    const item = await tomateItem();
+    const items = setStockBatch([
+      { itemId: item.id, quantity: 5, unitId: ctx.unitIds.kg },
+    ]);
+    expect(items.find((i) => i.id === item.id)).toBeUndefined();
+  });
+
+  it("previews coverage without writing anything", async () => {
+    const { previewStockCoverage } = await import("@/lib/shopping/items");
+    const item = await tomateItem();
+    // 300 g of 1000 g — not covered.
+    expect(
+      previewStockCoverage([
+        { itemId: item.id, quantity: 300, unitId: ctx.unitIds.g },
+      ]),
+    ).toEqual([]);
+    // 5 kg covers the 1 kg demand.
+    expect(
+      previewStockCoverage([
+        { itemId: item.id, quantity: 5, unitId: ctx.unitIds.kg },
+      ]),
+    ).toEqual([item.id]);
+    // Pure read: nothing persisted, the item still has its full demand.
+    const after = await tomateItem();
+    expect(after.stock).toBeNull();
+    expect(massGrams(after)).toBe(1000);
   });
 
   it("ignores stock in a non-matching dimension", async () => {

@@ -339,7 +339,12 @@ export function ShoppingListView({
   ) {
     try {
       const updated = await apiSetStock(id, stock);
-      setItems((prev) => prev.map((i) => (i.id === updated.id ? updated : i)));
+      // null = the stock covers the whole demand; the server removed the item.
+      setItems((prev) =>
+        updated == null
+          ? prev.filter((i) => i.id !== id)
+          : prev.map((i) => (i.id === updated.id ? updated : i)),
+      );
     } catch {
       router.refresh();
     }

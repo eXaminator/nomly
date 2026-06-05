@@ -12,6 +12,7 @@ const batchSchema = z
             itemId: z.number().int().positive(),
             quantity: z.number().nullable(),
             unitId: z.number().int().positive().nullable(),
+            remove: z.boolean().optional(),
           })
           .strict(),
       )

@@ -201,16 +201,18 @@ export async function deleteItemAmount(
   return data.item;
 }
 
+/** Returns null when the stock covers the item's entire demand — the server
+ *  removed the item from the list. */
 export async function setItemStock(
   id: number,
   stock: { quantity: number | null; unitId: number | null },
-): Promise<ShoppingItemView> {
+): Promise<ShoppingItemView | null> {
   const res = await fetch(`/api/v1/shopping/items/${id}/stock`, {
     method: "PUT",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(stock),
   });
-  const data = (await jsonOrThrow(res)) as { item: ShoppingItemView };
+  const data = (await jsonOrThrow(res)) as { item: ShoppingItemView | null };
   return data.item;
 }
 
@@ -223,7 +225,12 @@ export async function clearItemStock(id: number): Promise<ShoppingItemView> {
 }
 
 export async function setStockBatch(
-  entries: Array<{ itemId: number; quantity: number | null; unitId: number | null }>,
+  entries: Array<{
+    itemId: number;
+    quantity: number | null;
+    unitId: number | null;
+    remove?: boolean;
+  }>,
 ): Promise<ShoppingItemView[]> {
   const res = await fetch("/api/v1/shopping/stock", {
     method: "POST",
@@ -232,6 +239,20 @@ export async function setStockBatch(
   });
   const data = (await jsonOrThrow(res)) as { items: ShoppingItemView[] };
   return data.items;
+}
+
+/** Dry-run of {@link setStockBatch}: ids of items the given stock values
+ *  would fully cover (removed on save). Writes nothing. */
+export async function previewStockCoverage(
+  entries: Array<{ itemId: number; quantity: number | null; unitId: number | null }>,
+): Promise<number[]> {
+  const res = await fetch("/api/v1/shopping/stock/preview", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ entries }),
+  });
+  const data = (await jsonOrThrow(res)) as { coveredItemIds: number[] };
+  return data.coveredItemIds;
 }
 
 export async function deleteItem(id: number): Promise<void> {

@@ -16,7 +16,7 @@ function makeItem(over: Partial<ShoppingItemView> = {}): ShoppingItemView {
     checked: false, checkedAt: null, note: null,
     sortOrder: 0, version: 1, createdAt: 0, updatedAt: 0,
     unavailableSupermarketIds: [], sources: [], stapleSources: [], manualAmounts: [],
-    stock: null, defaultUnitId: null, defaultUnitName: null,
+    stock: null, fullyStocked: false, defaultUnitId: null, defaultUnitName: null,
     ...over,
   };
 }

@@ -24,6 +24,7 @@ function item(overrides: Partial<ShoppingItemView>): ShoppingItemView {
     stapleSources: [],
     manualAmounts: [],
     stock: null,
+    fullyStocked: false,
     defaultUnitId: null,
     defaultUnitName: null,
     ...overrides,

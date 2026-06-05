@@ -123,6 +123,10 @@ export type ShoppingItemView = {
   manualAmounts: ShoppingItemManualAmount[];
   /** The "Auf Lager" line, subtracted from the matching-dimension total. */
   stock: ShoppingItemStock | null;
+  /** True when the item *had* aggregated demand but every line resolved to
+   *  ≤ 0 (stock covers everything). Such lines are dropped from `amounts`,
+   *  and the stock write paths delete fully stocked items outright. */
+  fullyStocked: boolean;
   /** The linked article's default unit (own default unit with its display
    *  spelling, else the generic "Stück" fallback). Seeds the unit pickers for
    *  new manual amounts and the "Auf Lager" stock line. */
@@ -131,7 +135,16 @@ export type ShoppingItemView = {
 };
 
 export function listShoppingItems(
-  options: { skipSweep?: boolean } = {},
+  options: {
+    skipSweep?: boolean;
+    /**
+     * Hypothetical "Auf Lager" values keyed by item id, replacing that item's
+     * persisted stock for this read (a null value means "no stock"). Used by
+     * the stock-check preview to compute coverage without writing; the
+     * returned `stock` field is not meaningful for overridden items.
+     */
+    stockOverrides?: Map<number, SetStockInput | null>;
+  } = {},
 ): ShoppingItemView[] {
   // Sweep on read so stale checked items never display even when the
   // server.mts interval hasn't fired (between ticks, or in tests / one-off
@@ -375,17 +388,29 @@ export function listShoppingItems(
       })),
       ...manuals.map((m) => ({ quantity: m.quantity, unitId: m.unitId })),
     ];
-    const stock = stockByItem.get(r.id) ?? null;
+    const override = options.stockOverrides?.get(r.id);
+    const stock: ShoppingItemStock | null = options.stockOverrides?.has(r.id)
+      ? override
+        ? { quantity: override.quantity, unitId: override.unitId, unitName: null, dimension: "none" }
+        : null
+      : stockByItem.get(r.id) ?? null;
     const subtractions: ContributionInput[] =
       stock && stock.quantity != null && stock.unitId != null
         ? [{ quantity: stock.quantity, unitId: stock.unitId }]
         : [];
-    const amounts = buildAggregatedAmounts(
+    const rawAmounts = buildAggregatedAmounts(
       contributions,
       conversionsByIngredient.get(r.refId as number) ?? [],
       unitsById,
       subtractions,
     );
+    // A line whose total resolved to ≤ 0 (stock covers it) is disregarded;
+    // when *every* line of an item with demand is covered, the item is
+    // flagged so the stock write paths can drop it from the list entirely.
+    const amounts = rawAmounts.filter(
+      (a) => !(a.quantity != null && a.quantity <= 0),
+    );
+    const fullyStocked = rawAmounts.length > 0 && amounts.length === 0;
     const unavailable = ingredientUnavailable.get(r.refId as number) ?? [];
     return {
       id: r.id,
@@ -425,6 +450,7 @@ export function listShoppingItems(
         dimension: m.dimension,
       })),
       stock,
+      fullyStocked,
       defaultUnitId: r.defaultUnitId ?? stueck.unitId,
       defaultUnitName: r.defaultUnitId != null
         ? (r.defaultUnitDisplay ?? r.defaultUnitName)
@@ -1070,8 +1096,14 @@ function upsertStock(tx: Tx, itemId: number, input: SetStockInput): void {
  * Set the "Auf Lager" (in‑stock) amount for an item. The amount is subtracted
  * from the matching-dimension aggregated total on read. A null `quantity`
  * clears the stock row instead (same as {@link clearItemStock}).
+ *
+ * When the new stock covers the item's entire demand (every aggregated line
+ * ≤ 0), the item is deleted from the list and null is returned.
  */
-export function setItemStock(itemId: number, input: SetStockInput): ShoppingItemView {
+export function setItemStock(
+  itemId: number,
+  input: SetStockInput,
+): ShoppingItemView | null {
   const exists = db
     .select({ id: shoppingItem.id })
     .from(shoppingItem)
@@ -1092,6 +1124,10 @@ export function setItemStock(itemId: number, input: SetStockInput): ShoppingItem
   });
   const view = getItemView(itemId);
   if (!view) throw new ShoppingApiError("item not found", 404);
+  if (view.fullyStocked) {
+    db.delete(shoppingItem).where(eq(shoppingItem.id, itemId)).run();
+    return null;
+  }
   return view;
 }
 
@@ -1119,12 +1155,16 @@ export type StockBatchEntry = {
   itemId: number;
   quantity: number | null;
   unitId: number | null;
+  /** Delete the item from the list instead of touching its stock. */
+  remove?: boolean;
 };
 
 /**
  * Apply many "Auf Lager" edits at once (the whole-list stock check). An entry
- * with a null quantity clears that item's stock; others upsert. Items that
- * don't exist are skipped. Returns the refreshed list.
+ * with a null quantity clears that item's stock; one with `remove` deletes
+ * the item outright; others upsert. Items that don't exist are skipped.
+ * Afterwards every item whose demand is now fully covered by stock is
+ * deleted too. Returns the refreshed list.
  */
 export function setStockBatch(entries: StockBatchEntry[]): ShoppingItemView[] {
   db.transaction((tx) => {
@@ -1136,6 +1176,10 @@ export function setStockBatch(entries: StockBatchEntry[]): ShoppingItemView[] {
         .where(eq(shoppingItem.id, e.itemId))
         .get();
       if (!exists) continue;
+      if (e.remove) {
+        tx.delete(shoppingItem).where(eq(shoppingItem.id, e.itemId)).run();
+        continue;
+      }
       if (e.quantity == null) {
         tx.delete(shoppingItemStock).where(eq(shoppingItemStock.itemId, e.itemId)).run();
       } else {
@@ -1150,7 +1194,36 @@ export function setStockBatch(entries: StockBatchEntry[]): ShoppingItemView[] {
         .run();
     }
   });
+  removeFullyStockedItems();
   return listShoppingItems();
+}
+
+/** Delete every item whose aggregated demand is fully covered by its stock. */
+function removeFullyStockedItems(): void {
+  const covered = listShoppingItems({ skipSweep: true })
+    .filter((i) => i.fullyStocked)
+    .map((i) => i.id);
+  if (covered.length > 0) {
+    db.delete(shoppingItem).where(inArray(shoppingItem.id, covered)).run();
+  }
+}
+
+/**
+ * Dry-run of a stock batch: which items would end up fully covered (and thus
+ * removed from the list) if these "Auf Lager" values were saved? Pure read —
+ * nothing is written. Drives the live hint in the stock-check dialog.
+ */
+export function previewStockCoverage(entries: StockBatchEntry[]): number[] {
+  const overrides = new Map<number, SetStockInput | null>();
+  for (const e of entries) {
+    overrides.set(
+      e.itemId,
+      e.quantity == null ? null : { quantity: e.quantity, unitId: e.unitId },
+    );
+  }
+  return listShoppingItems({ skipSweep: true, stockOverrides: overrides })
+    .filter((i) => i.fullyStocked)
+    .map((i) => i.id);
 }
 
 /**
