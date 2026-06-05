@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest";
 import {
   parseIngredientLines,
   parseIngredientLinesIntoSections,
+  parseIngredientGroupsIntoSections,
   type IngredientLookup,
   type ParseLookups,
   type UnitLookup,
@@ -1402,5 +1403,54 @@ describe("note fragments keep source order, comma-separated", () => {
     );
     expect(out[0].ingredientId).toBe(7);
     expect(out[0].name).toBe("Olivenöl extra virgin");
+  });
+});
+
+describe("parseIngredientGroupsIntoSections", () => {
+  it("turns pre-grouped lines into one section per group", () => {
+    const out = parseIngredientGroupsIntoSections(
+      [
+        { title: "Quick Pickled Cabbage", lines: ["1 g Kraut", "2 g Salz"] },
+        { title: "Horseradish Sauce", lines: ["3 g Ketchup"] },
+      ],
+      makeLookups([]),
+    );
+    expect(out.map((g) => g.title)).toEqual([
+      "Quick Pickled Cabbage",
+      "Horseradish Sauce",
+    ]);
+    expect(out[0].ingredients.map((i) => i.name)).toEqual(["Kraut", "Salz"]);
+    expect(out[1].ingredients.map((i) => i.name)).toEqual(["Ketchup"]);
+  });
+
+  it("keeps an unnamed lead group as the first untitled section", () => {
+    const out = parseIngredientGroupsIntoSections(
+      [
+        { title: null, lines: ["1 g Butter"] },
+        { title: "Frosting", lines: ["2 g Zucker"] },
+      ],
+      makeLookups([]),
+    );
+    expect(out.map((g) => g.title)).toEqual([null, "Frosting"]);
+    expect(out[0].ingredients).toHaveLength(1);
+  });
+
+  it("does NOT re-split trusted groups on header-looking lines", () => {
+    // In the flat heuristic path an ALL-CAPS word like "MARINADE" would start
+    // a new section; inside a structurally-known group it must stay put and
+    // never create a section.
+    const out = parseIngredientGroupsIntoSections(
+      [{ title: "Sauce", lines: ["1 g Ketchup", "MARINADE"] }],
+      makeLookups([]),
+    );
+    expect(out.map((g) => g.title)).toEqual(["Sauce"]);
+  });
+
+  it("flat wrapper still detects text headers (behavior unchanged)", () => {
+    const out = parseIngredientLinesIntoSections(
+      ["1 g Butter", "Frosting:", "2 g Zucker"],
+      makeLookups([]),
+    );
+    expect(out.map((g) => g.title)).toEqual([null, "Frosting"]);
   });
 });

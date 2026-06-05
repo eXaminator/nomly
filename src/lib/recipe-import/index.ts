@@ -1187,6 +1187,12 @@ export type ParsedSectionGroup = {
   ingredients: ImportedIngredient[];
 };
 
+export type PreGroupedLines = {
+  /** Group title (null = unnamed lead-in group). */
+  title: string | null;
+  lines: readonly string[];
+};
+
 /**
  * Section-aware variant for the clipboard-paste flow: scans for section
  * headers (lines like "Für den Teig:", "FÜR DIE FÜLLUNG", "--- Sauce ---"),
@@ -1199,6 +1205,36 @@ export function parseIngredientLinesIntoSections(
   lookups: ParseLookups,
   options: ParseIngredientsOptions = {},
 ): ParsedSectionGroup[] {
+  return parseGroupedIngredientLines(
+    [{ title: null, lines }],
+    lookups,
+    options,
+    true,
+  );
+}
+
+/**
+ * Pre-grouped variant for sources whose section boundaries are known from
+ * structure (plugin HTML markup) rather than text heuristics. Lines inside a
+ * trusted group are NOT run through `detectSectionHeader` — an item that
+ * merely looks like a header ("Salz:", ALL-CAPS) cannot break up a group the
+ * source explicitly declared. The inner expansion machinery (Optional:,
+ * alternativ:, colon fallback) stays active in both modes.
+ */
+export function parseIngredientGroupsIntoSections(
+  groups: readonly PreGroupedLines[],
+  lookups: ParseLookups,
+  options: ParseIngredientsOptions = {},
+): ParsedSectionGroup[] {
+  return parseGroupedIngredientLines(groups, lookups, options, false);
+}
+
+function parseGroupedIngredientLines(
+  inputGroups: readonly PreGroupedLines[],
+  lookups: ParseLookups,
+  options: ParseIngredientsOptions,
+  detectHeaders: boolean,
+): ParsedSectionGroup[] {
   const knownUnitTokens = new Set<string>([
     ...lookups.units.byNameOrAlias.keys(),
   ]);
@@ -1209,105 +1245,115 @@ export function parseIngredientLinesIntoSections(
   };
   const threshold = options.autoMatchScoreThreshold ?? MIN_AUTO_MATCH_SCORE;
   const useFirstWins = options.alternativesMode === "first-wins";
-  const groups: ParsedSectionGroup[] = [{ title: null, ingredients: [] }];
+  const groups: ParsedSectionGroup[] = [];
 
-  for (const rawLine of lines) {
-    const header = detectSectionHeader(rawLine);
-    if (header) {
-      groups.push({ title: header, ingredients: [] });
-      continue;
+  for (const input of inputGroups) {
+    // Unnamed non-first input groups continue the current section rather
+    // than opening an indistinguishable second untitled one.
+    if (input.title !== null || groups.length === 0) {
+      groups.push({ title: input.title, ingredients: [] });
     }
-    if (!/\p{L}/u.test(rawLine)) continue;
-
-    // Mirror parseIngredientLines: track the most recent primary emitted
-    // FROM THIS INPUT LINE so unmatched alternatives fold back into it
-    // rather than into a primary from a previous line. Cleared each new line.
-    let lastPrimaryIndex: number | null = null;
-
-    for (const row of expandIngredientLine(rawLine)) {
-      if (row.kind === "header") {
-        groups.push({ title: row.title, ingredients: [] });
-        lastPrimaryIndex = null;
-        continue;
+    for (const rawLine of input.lines) {
+      if (detectHeaders) {
+        const header = detectSectionHeader(rawLine);
+        if (header) {
+          groups.push({ title: header, ingredients: [] });
+          continue;
+        }
       }
-      const raw = useFirstWins
-        ? preprocessAlternatives(row.text, knownIngredientKeys)
-        : row.text;
-      for (const piece of splitConjunctions(raw, splitOpts)) {
-        const parsed = parseIngredientString(piece, knownUnitTokens);
-        if (parsed.name.trim().length === 0) continue;
-        // Defensive fallback: a colon still in the parsed name means none
-        // of the expansion rules above caught this line. Use the WHOLE
-        // original input as the new section title so no information is
-        // silently dropped on its way through the parser.
-        if (parsed.name.includes(":")) {
-          groups.push({ title: row.rawText, ingredients: [] });
+      if (!/\p{L}/u.test(rawLine)) continue;
+
+      // Mirror parseIngredientLines: track the most recent primary emitted
+      // FROM THIS INPUT LINE so unmatched alternatives fold back into it
+      // rather than into a primary from a previous line. Cleared each new line.
+      let lastPrimaryIndex: number | null = null;
+
+      for (const row of expandIngredientLine(rawLine)) {
+        if (row.kind === "header") {
+          groups.push({ title: row.title, ingredients: [] });
+          lastPrimaryIndex = null;
           continue;
         }
-        // Familywall opt-in: drop bare-descriptor rows — see comment in
-        // {@link parseIngredientLines} for the cascade this prevents.
-        if (useFirstWins && isStandaloneDescriptor(parsed.name)) continue;
-        const currentGroup = groups[groups.length - 1];
-        const leadingOr = /^(?:or|oder)\s+(.+)/i.exec(parsed.name.trim());
-        if (leadingOr && currentGroup.ingredients.length > 0) {
-          const alt = leadingOr[1];
-          const prev = currentGroup.ingredients[currentGroup.ingredients.length - 1];
-          prev.notes = prev.notes ? `${prev.notes}, oder ${alt}` : `oder ${alt}`;
-          if (parsed.isOptional || row.forceOptional) prev.isOptional = true;
-          continue;
-        }
-        const initialUnit = resolveUnit(
-          lookups.units,
-          parsed.unitName,
-          parsed.quantity,
-        );
-        const resolved = resolveIngredientForRow(parsed, piece, lookups, threshold);
-        // See parseIngredientLines: unmatched alternatives fold back into
-        // the primary's notes instead of becoming orphan new-ingredient rows.
-        if (
-          row.isAlternative &&
-          resolved.match === "new" &&
-          lastPrimaryIndex !== null
-        ) {
-          appendAlternativeToNotes(
-            currentGroup.ingredients[lastPrimaryIndex],
-            row.alternativeConnector,
-            piece.trim(),
+        const raw = useFirstWins
+          ? preprocessAlternatives(row.text, knownIngredientKeys)
+          : row.text;
+        for (const piece of splitConjunctions(raw, splitOpts)) {
+          const parsed = parseIngredientString(piece, knownUnitTokens);
+          if (parsed.name.trim().length === 0) continue;
+          // Defensive fallback: a colon still in the parsed name means none
+          // of the expansion rules above caught this line. Use the WHOLE
+          // original input as the new section title so no information is
+          // silently dropped on its way through the parser.
+          if (parsed.name.includes(":")) {
+            groups.push({ title: row.rawText, ingredients: [] });
+            continue;
+          }
+          // Familywall opt-in: drop bare-descriptor rows — see comment in
+          // {@link parseIngredientLines} for the cascade this prevents.
+          if (useFirstWins && isStandaloneDescriptor(parsed.name)) continue;
+          const currentGroup = groups[groups.length - 1];
+          const leadingOr = /^(?:or|oder)\s+(.+)/i.exec(parsed.name.trim());
+          if (leadingOr && currentGroup.ingredients.length > 0) {
+            const alt = leadingOr[1];
+            const prev = currentGroup.ingredients[currentGroup.ingredients.length - 1];
+            prev.notes = prev.notes ? `${prev.notes}, oder ${alt}` : `oder ${alt}`;
+            if (parsed.isOptional || row.forceOptional) prev.isOptional = true;
+            continue;
+          }
+          const initialUnit = resolveUnit(
+            lookups.units,
+            parsed.unitName,
+            parsed.quantity,
           );
-          continue;
-        }
-        const final = pickFinalUnit(initialUnit, resolved.defaultUnit);
-        currentGroup.ingredients.push({
-          quantity: parsed.quantity,
-          unit: final.resolved,
-          unitMatch: final.match,
-          rawUnit: final.rawUnit,
-          name: resolved.name,
-          ingredientId: resolved.ingredientId,
-          ingredientMatch: resolved.match,
-          canonicalIngredientName: resolved.canonicalIngredientName,
-          sourceName: resolved.sourceName,
-          notes: resolved.notes,
-          // Mirror parseIngredientLines: equipment items (Backpapier,
-          // Einmachgläser …) auto-default to optional. `forceOptional`
-          // carries through Optional:/alternativ:/optional-garnish-title
-          // wrappers from the expansion pass.
-          isOptional: parsed.isOptional || resolved.isEquipment || row.forceOptional,
-          isAlternative: row.isAlternative,
-          fixedAmount: parsed.quantity === null,
-          // Expanded rows surface the user's ORIGINAL full line so the
-          // import-review UI can show where each row came from.
-          rawText: row.rawText !== row.text ? row.rawText : piece.trim(),
-          candidateMatches: resolved.candidateMatches,
-          newNameProposals: resolved.newNameProposals,
-        });
-        if (!row.isAlternative) {
-          lastPrimaryIndex = currentGroup.ingredients.length - 1;
+          const resolved = resolveIngredientForRow(parsed, piece, lookups, threshold);
+          // See parseIngredientLines: unmatched alternatives fold back into
+          // the primary's notes instead of becoming orphan new-ingredient rows.
+          if (
+            row.isAlternative &&
+            resolved.match === "new" &&
+            lastPrimaryIndex !== null
+          ) {
+            appendAlternativeToNotes(
+              currentGroup.ingredients[lastPrimaryIndex],
+              row.alternativeConnector,
+              piece.trim(),
+            );
+            continue;
+          }
+          const final = pickFinalUnit(initialUnit, resolved.defaultUnit);
+          currentGroup.ingredients.push({
+            quantity: parsed.quantity,
+            unit: final.resolved,
+            unitMatch: final.match,
+            rawUnit: final.rawUnit,
+            name: resolved.name,
+            ingredientId: resolved.ingredientId,
+            ingredientMatch: resolved.match,
+            canonicalIngredientName: resolved.canonicalIngredientName,
+            sourceName: resolved.sourceName,
+            notes: resolved.notes,
+            // Mirror parseIngredientLines: equipment items (Backpapier,
+            // Einmachgläser …) auto-default to optional. `forceOptional`
+            // carries through Optional:/alternativ:/optional-garnish-title
+            // wrappers from the expansion pass.
+            isOptional: parsed.isOptional || resolved.isEquipment || row.forceOptional,
+            isAlternative: row.isAlternative,
+            fixedAmount: parsed.quantity === null,
+            // Expanded rows surface the user's ORIGINAL full line so the
+            // import-review UI can show where each row came from.
+            rawText: row.rawText !== row.text ? row.rawText : piece.trim(),
+            candidateMatches: resolved.candidateMatches,
+            newNameProposals: resolved.newNameProposals,
+          });
+          if (!row.isAlternative) {
+            lastPrimaryIndex = currentGroup.ingredients.length - 1;
+          }
         }
       }
     }
   }
 
+  if (groups.length === 0) groups.push({ title: null, ingredients: [] });
   // Drop the leading unnamed section if empty — keeps the response clean
   // when the paste starts with a section header.
   if (groups.length > 1 && groups[0].title === null && groups[0].ingredients.length === 0) {
