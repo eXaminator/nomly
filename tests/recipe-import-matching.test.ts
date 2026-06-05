@@ -1446,6 +1446,30 @@ describe("parseIngredientGroupsIntoSections", () => {
     expect(out.map((g) => g.title)).toEqual(["Sauce"]);
   });
 
+  it("keeps a bare colon-suffixed item inside a trusted group", () => {
+    // "Salz:" would fire detectSectionHeader in the flat path; in a trusted
+    // group it stays an ingredient row of the declared section.
+    const out = parseIngredientGroupsIntoSections(
+      [{ title: "Sauce", lines: ["200 g Tomaten", "Salz:"] }],
+      makeLookups([]),
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0].title).toBe("Sauce");
+    expect(out[0].ingredients.map((i) => i.name)).toEqual(["Tomaten", "Salz"]);
+  });
+
+  it("still expands 'Title: item' lines inside trusted groups (inner machinery)", () => {
+    // The expansion pass (list-after-colon, Optional:, alternativ:) is NOT
+    // gated by trust — only raw-line detectSectionHeader is. A combined
+    // header+item line therefore still opens a section in both modes.
+    const out = parseIngredientGroupsIntoSections(
+      [{ title: "Sauce", lines: ["200 g Tomaten", "Topping: Käse"] }],
+      makeLookups([]),
+    );
+    expect(out.map((g) => g.title)).toEqual(["Sauce", "Topping"]);
+    expect(out[1].ingredients.map((i) => i.name)).toEqual(["Käse"]);
+  });
+
   it("flat wrapper still detects text headers (behavior unchanged)", () => {
     const out = parseIngredientLinesIntoSections(
       ["1 g Butter", "Frosting:", "2 g Zucker"],
