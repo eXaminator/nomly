@@ -159,4 +159,80 @@ describe("buildImportSections", () => {
       { title: "Für den Teig", lines: ["Kneten.", "Backen."] },
     ]);
   });
+
+  it("drops a lone generic instruction-section title (chefkoch-style)", () => {
+    // chefkoch wraps ALL steps in one HowToSection named "Zubereitung" — a
+    // card heading, not a grouping. With no matching ingredient group the
+    // title is demoted so instructions attach to the ingredient section,
+    // exactly like the pre-section-aware behavior.
+    const flat = {
+      ...JSON_LD,
+      recipeIngredient: ["100 g Nudeln", "1 Zwiebel"],
+      recipeInstructions: [
+        {
+          "@type": "HowToSection",
+          name: "Zubereitung",
+          itemListElement: [
+            { "@type": "HowToStep", text: "Nudeln kochen." },
+            { "@type": "HowToStep", text: "Zwiebel würfeln." },
+          ],
+        },
+      ],
+    };
+    const html = `<html><head><script type="application/ld+json">${JSON.stringify(
+      flat,
+    )}</script></head><body></body></html>`;
+    const recipe = extractJsonLdRecipe(html)!;
+    const { ingredientGroups, instructionGroups } = buildImportSections(
+      recipe,
+      html,
+      makeLookups(),
+    );
+    expect(instructionGroups).toEqual([
+      { title: null, lines: ["Nudeln kochen.", "Zwiebel würfeln."] },
+    ]);
+    const merged = mergeIngredientAndInstructionSections(
+      ingredientGroups,
+      instructionGroups,
+      joinLines,
+    );
+    expect(merged).toHaveLength(1);
+    expect(merged[0].ingredients).toHaveLength(2);
+    expect(merged[0].instructions).toBe("Nudeln kochen.\nZwiebel würfeln.");
+  });
+
+  it("keeps a lone instruction-section title that names an ingredient group", () => {
+    const data = {
+      ...JSON_LD,
+      recipeIngredient: ["3 tablespoons ketchup", "5 ounces yogurt"],
+      recipeInstructions: [
+        {
+          "@type": "HowToSection",
+          name: "Sauce",
+          itemListElement: [{ "@type": "HowToStep", text: "Whisk." }],
+        },
+      ],
+    };
+    const html = `<html><head>
+<script type="application/ld+json">${JSON.stringify(data)}</script>
+</head><body><div class="wprm-recipe-container">
+${wprmGroup("Sauce", ["ketchup", "yogurt"])}
+</div></body></html>`;
+    const recipe = extractJsonLdRecipe(html)!;
+    const { ingredientGroups, instructionGroups } = buildImportSections(
+      recipe,
+      html,
+      makeLookups(),
+    );
+    expect(instructionGroups).toEqual([{ title: "Sauce", lines: ["Whisk."] }]);
+    const merged = mergeIngredientAndInstructionSections(
+      ingredientGroups,
+      instructionGroups,
+      joinLines,
+    );
+    expect(merged).toHaveLength(1);
+    expect(merged[0].title).toBe("Sauce");
+    expect(merged[0].ingredients).toHaveLength(2);
+    expect(merged[0].instructions).toBe("Whisk.");
+  });
 });

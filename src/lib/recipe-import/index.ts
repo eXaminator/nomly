@@ -1567,8 +1567,20 @@ export function buildImportSections(
     : parseIngredientLinesIntoSections(ingredientStrings, lookups);
 
   const rawInstructionGroups = asInstructionGroups(recipe.recipeInstructions);
+  // A LONE titled section ("Zubereitung", "Instructions") is just the card's
+  // step heading, not real grouping — chefkoch wraps all steps that way.
+  // Demote it to the flat path unless it names an ingredient group, so the
+  // steps attach to the ingredient section instead of splitting off.
+  const lone = rawInstructionGroups.length === 1 ? rawInstructionGroups[0] : null;
+  const loneGenericTitle =
+    lone?.title != null &&
+    !ingredientGroups.some(
+      (g) =>
+        g.title !== null &&
+        normalizeForMatch(g.title) === normalizeForMatch(lone.title!),
+    );
   const instructionGroups: ParsedInstructionGroup[] =
-    rawInstructionGroups.some((g) => g.title !== null)
+    rawInstructionGroups.some((g) => g.title !== null) && !loneGenericTitle
       ? rawInstructionGroups
       : parseInstructionsIntoSections(
           rawInstructionGroups.flatMap((g) => g.lines),
