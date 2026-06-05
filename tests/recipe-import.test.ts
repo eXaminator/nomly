@@ -8,6 +8,7 @@ import {
 } from "@/lib/recipe-import/ingredient";
 import {
   asImageUrl,
+  asInstructionGroups,
   asServings,
   asString,
   asStringList,
@@ -830,5 +831,118 @@ describe("JSON-LD field coercion", () => {
     expect(asServings("4 Portionen")).toBe(4);
     expect(asServings(["6"])).toBe(6);
     expect(asServings("none")).toBe(1);
+  });
+});
+
+describe("asInstructionGroups", () => {
+  it("preserves HowToSection names that asStringList drops", () => {
+    expect(
+      asInstructionGroups([
+        {
+          "@type": "HowToSection",
+          name: "Quick Pickled Cabbage",
+          itemListElement: [
+            { "@type": "HowToStep", text: "Slice the cabbage." },
+            { "@type": "HowToStep", text: "Add garlic." },
+          ],
+        },
+        {
+          "@type": "HowToSection",
+          name: "Horseradish Sauce",
+          itemListElement: [{ "@type": "HowToStep", text: "Whisk to combine." }],
+        },
+      ]),
+    ).toEqual([
+      {
+        title: "Quick Pickled Cabbage",
+        lines: ["Slice the cabbage.", "Add garlic."],
+      },
+      { title: "Horseradish Sauce", lines: ["Whisk to combine."] },
+    ]);
+  });
+
+  it("returns a single unnamed group for flat step lists", () => {
+    expect(
+      asInstructionGroups([
+        { "@type": "HowToStep", text: "Mix" },
+        { "@type": "HowToStep", text: "Bake" },
+      ]),
+    ).toEqual([{ title: null, lines: ["Mix", "Bake"] }]);
+    expect(asInstructionGroups(["A", "B"])).toEqual([
+      { title: null, lines: ["A", "B"] },
+    ]);
+    expect(asInstructionGroups("Just do it")).toEqual([
+      { title: null, lines: ["Just do it"] },
+    ]);
+  });
+
+  it("collects loose steps before a section into an unnamed lead group", () => {
+    expect(
+      asInstructionGroups([
+        { "@type": "HowToStep", text: "Preheat the oven." },
+        {
+          "@type": "HowToSection",
+          name: "Dough",
+          itemListElement: [{ "@type": "HowToStep", text: "Knead." }],
+        },
+      ]),
+    ).toEqual([
+      { title: null, lines: ["Preheat the oven."] },
+      { title: "Dough", lines: ["Knead."] },
+    ]);
+  });
+
+  it("treats a nameless HowToSection as an unnamed group", () => {
+    expect(
+      asInstructionGroups([
+        {
+          "@type": "HowToSection",
+          itemListElement: [{ "@type": "HowToStep", text: "Stir." }],
+        },
+      ]),
+    ).toEqual([{ title: null, lines: ["Stir."] }]);
+  });
+
+  it("returns [] for null/empty input", () => {
+    expect(asInstructionGroups(null)).toEqual([]);
+    expect(asInstructionGroups([])).toEqual([]);
+  });
+
+  it("cleans HTML entities in names and steps", () => {
+    expect(
+      asInstructionGroups([
+        {
+          "@type": "HowToSection",
+          name: "F&uuml;r den Teig",
+          itemListElement: [{ "@type": "HowToStep", text: "R&uuml;hren" }],
+        },
+      ]),
+    ).toEqual([{ title: "Für den Teig", lines: ["Rühren"] }]);
+  });
+
+  it("flattens nested HowToSections into sequential groups (documented limitation)", () => {
+    // schema.org allows section-in-section nesting; there is no hierarchy in
+    // the output, so an inner section simply starts the next group. Steps of
+    // the OUTER section that follow the inner one land in the inner group.
+    expect(
+      asInstructionGroups([
+        {
+          "@type": "HowToSection",
+          name: "Outer",
+          itemListElement: [
+            { "@type": "HowToStep", text: "Outer step." },
+            {
+              "@type": "HowToSection",
+              name: "Inner",
+              itemListElement: [{ "@type": "HowToStep", text: "Inner step." }],
+            },
+            { "@type": "HowToStep", text: "Trailing outer step." },
+          ],
+        },
+      ]),
+    ).toEqual([
+      { title: "Outer", lines: ["Outer step."] },
+      { title: "Inner", lines: ["Inner step.", "Trailing outer step."] },
+    ]);
   });
 });

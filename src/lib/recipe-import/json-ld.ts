@@ -152,6 +152,52 @@ export function asStringList(v: unknown): string[] {
   return out;
 }
 
+export type InstructionGroup = { title: string | null; lines: string[] };
+
+/**
+ * Structure-aware variant of {@link asStringList} for `recipeInstructions`:
+ * preserves `HowToSection` boundaries (title = the section's `name`) instead
+ * of flattening them away. Loose steps/strings before or between sections
+ * accumulate into unnamed groups. A flat step list yields a single
+ * `{ title: null }` group, so downstream behavior matches today's exactly.
+ */
+export function asInstructionGroups(v: unknown): InstructionGroup[] {
+  const groups: InstructionGroup[] = [{ title: null, lines: [] }];
+  function visit(node: unknown) {
+    if (node == null) return;
+    if (typeof node === "string") {
+      const s = clean(node);
+      if (s.length > 0) groups[groups.length - 1].lines.push(s);
+      return;
+    }
+    if (Array.isArray(node)) {
+      for (const item of node) visit(item);
+      return;
+    }
+    if (typeof node === "object") {
+      const obj = node as Record<string, unknown>;
+      // HowToSection: its name becomes a group title, its steps the lines.
+      if (Array.isArray(obj.itemListElement)) {
+        const title =
+          typeof obj.name === "string" ? asString(obj.name) : null;
+        groups.push({ title, lines: [] });
+        visit(obj.itemListElement);
+        return;
+      }
+      if (typeof obj.text === "string") {
+        visit(obj.text);
+        return;
+      }
+      if (typeof obj.name === "string") {
+        visit(obj.name);
+        return;
+      }
+    }
+  }
+  visit(v);
+  return groups.filter((g) => g.title !== null || g.lines.length > 0);
+}
+
 /**
  * Recipe.image is one of:
  *   - "https://…/img.jpg"
