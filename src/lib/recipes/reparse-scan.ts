@@ -494,9 +494,12 @@ export async function scanAllRecipesForReparse(
         ingredientId: g.ingredientId,
         name: g.name ?? "",
         canonicalName: g.canonicalName ?? null,
-        quantity: g.quantity,
+        // Unassigned lines are pure text — mask any stale amount/unit left
+        // over from before the unlink, matching the recipe read view.
+        quantity: g.ingredientId == null ? null : g.quantity,
         // Match the recipe read view: display_unit, then the canonical unit name.
-        unitLabel: g.displayUnit ?? g.unitName ?? null,
+        unitLabel:
+          g.ingredientId == null ? null : (g.displayUnit ?? g.unitName ?? null),
         displayFraction: g.displayFraction ?? false,
         notes: g.notes,
         isOptional: g.isOptional,

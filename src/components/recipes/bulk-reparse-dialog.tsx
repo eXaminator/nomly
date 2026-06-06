@@ -98,12 +98,16 @@ function computeHighlights(
       // Compare the quantity-inflected unit label on both sides, so a pure
       // singular/plural difference collapses to the same string (no highlight)
       // while a real quantity or unit/alias change still differs.
+      // An unassigned draft is pure text — its amount is dropped on save, so
+      // compare it as amountless (mirrors the masked current side).
       amount:
         amountStr(c.quantity, inflect(c.unitLabel, c.quantity)) !==
-        amountStr(
-          toNumberOrNull(d.quantity),
-          inflect(d.unit?.name ?? null, toNumberOrNull(d.quantity)),
-        ),
+        (d.unassigned
+          ? ""
+          : amountStr(
+              toNumberOrNull(d.quantity),
+              inflect(d.unit?.name ?? null, toNumberOrNull(d.quantity)),
+            )),
       name: c.name.trim() !== d.name.trim(),
       notes: (c.notes ?? "").trim() !== d.notes.trim(),
       // Identity comparison, not label text: "Brauner Zucker" vs the lowercased
@@ -735,11 +739,22 @@ export function BulkReparseDialog({
                                                 className="flex flex-col gap-0.5"
                                               >
                                                 <RecipeIngredientReadLine
-                                                  quantity={toNumberOrNull(d.quantity)}
-                                                  unitLabel={inflect(
-                                                    d.unit?.name ?? null,
-                                                    toNumberOrNull(d.quantity),
-                                                  )}
+                                                  // Unassigned drafts are pure
+                                                  // text — the amount is dropped
+                                                  // on save, so don't preview it.
+                                                  quantity={
+                                                    d.unassigned
+                                                      ? null
+                                                      : toNumberOrNull(d.quantity)
+                                                  }
+                                                  unitLabel={
+                                                    d.unassigned
+                                                      ? null
+                                                      : inflect(
+                                                          d.unit?.name ?? null,
+                                                          toNumberOrNull(d.quantity),
+                                                        )
+                                                  }
                                                   displayFraction={
                                                     d.unit?.id != null
                                                       ? (fractionByUnitId.get(
