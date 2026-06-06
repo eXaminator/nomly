@@ -413,8 +413,110 @@ describe("createRecipe + getRecipe with alternatives", () => {
     expect(line.ingredientId).toBeNull();
     expect(line.canonicalIngredientName).toBeNull();
     expect(line.ingredientName).toBe("übrige gehackte Gazpacho-Zutaten");
-    expect(line.quantity).toBe(2);
+    // Unassigned lines are pure text: a stale amount from before the unlink
+    // is dropped at save time, the note survives.
+    expect(line.quantity).toBeNull();
     expect(line.notes).toBe("zum Garnieren");
+  });
+
+  it("clears amount and unit when saving an unassigned line", async () => {
+    const { db } = await import("@/db");
+    const { recipeIngredient, unit } = await import("@/db/schema");
+    const { eq } = await import("drizzle-orm");
+    const { createRecipe, getRecipe } = await import("@/lib/recipes/service");
+    const elId = db
+      .insert(unit)
+      .values({ name: "EL", dimension: "volume" })
+      .returning({ id: unit.id })
+      .all()[0].id;
+    const id = createRecipe({
+      title: "Unlink behält keine Menge",
+      description: null,
+      servings: 2,
+      prepTimeMin: null,
+      cookTimeMin: null,
+      sourceUrl: null,
+      photoPath: null,
+      tags: [],
+      sections: [
+        {
+          title: null,
+          instructions: "",
+          ingredients: [
+            {
+              // The row was unlinked in the editor, but the draft still
+              // carries the amount/unit from the earlier parse.
+              ingredientName: "ein Schuss Weißwein",
+              ingredientId: null,
+              unassigned: true,
+              quantity: 2,
+              unitId: elId,
+              displayUnit: "EL",
+              notes: null,
+              isOptional: false,
+              fixedAmount: false,
+              isAlternative: false,
+            },
+          ],
+        },
+      ],
+    });
+    const view = getRecipe(id)!.sections[0].ingredients[0];
+    expect(view.quantity).toBeNull();
+    expect(view.unitId).toBeNull();
+    expect(view.unitName).toBeNull();
+    expect(view.unitLabel).toBeNull();
+    // The clearing happens at persistence time, not only in the view.
+    const stored = db
+      .select()
+      .from(recipeIngredient)
+      .where(eq(recipeIngredient.id, view.id))
+      .all()[0];
+    expect(stored.quantity).toBeNull();
+    expect(stored.unitId).toBeNull();
+    expect(stored.displayUnit).toBeNull();
+  });
+
+  it("hides a stale amount/unit on unassigned lines persisted before the clearing fix", async () => {
+    const { db } = await import("@/db");
+    const { recipe, recipeSection, recipeIngredient, unit } = await import(
+      "@/db/schema"
+    );
+    const { getRecipe } = await import("@/lib/recipes/service");
+    const gId = db
+      .insert(unit)
+      .values({ name: "g", dimension: "mass" })
+      .returning({ id: unit.id })
+      .all()[0].id;
+    const rid = db
+      .insert(recipe)
+      .values({ title: "Altbestand", servings: 2 })
+      .returning({ id: recipe.id })
+      .all()[0].id;
+    const sid = db
+      .insert(recipeSection)
+      .values({ recipeId: rid, instructions: "" })
+      .returning({ id: recipeSection.id })
+      .all()[0].id;
+    // Legacy row: unlinked before the save path cleared amount/unit, so the
+    // stale values are still stored.
+    db.insert(recipeIngredient)
+      .values({
+        sectionId: sid,
+        ingredientId: null,
+        displayName: "Reste vom Buffet",
+        quantity: 200,
+        unitId: gId,
+        displayUnit: "g",
+        sortOrder: 0,
+      })
+      .run();
+    const line = getRecipe(rid)!.sections[0].ingredients[0];
+    expect(line.ingredientId).toBeNull();
+    expect(line.quantity).toBeNull();
+    expect(line.unitId).toBeNull();
+    expect(line.unitName).toBeNull();
+    expect(line.unitLabel).toBeNull();
   });
 
   it("preserves an unassigned line across an updateRecipe round-trip", async () => {

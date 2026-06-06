@@ -247,12 +247,16 @@ function writeSections(
           // Preserve the exact name the user picked (canonical OR alias)
           // so it survives the round-trip on the recipe view + edit page.
           displayName: trimmedName,
-          quantity: ing.quantity,
-          unitId: ing.unitId,
+          // Unassigned lines are pure text: drop any amount/unit the draft
+          // still carries from before the unlink so it can't resurface.
+          quantity: ing.unassigned ? null : ing.quantity,
+          unitId: ing.unassigned ? null : ing.unitId,
           // Same alias-preservation as displayName, but for units. Stored
           // only when it differs from the canonical unit name — keeps a
           // unit rename in Stammdaten flowing through to existing recipes.
-          displayUnit: resolveDisplayUnit(tx, ing.unitId, ing.displayUnit),
+          displayUnit: ing.unassigned
+            ? null
+            : resolveDisplayUnit(tx, ing.unitId, ing.displayUnit),
           notes: ing.notes,
           // Alternatives are always optional, regardless of what the
           // caller sent. Mirrors the parser's `forceOptional` invariant.
@@ -526,10 +530,13 @@ export function getRecipe(id: number): RecipeView | null {
           ingredientId: i.ingredientId,
           ingredientName: i.ingredientName,
           canonicalIngredientName: i.canonicalIngredientName,
-          quantity: i.quantity,
-          unitId: i.unitId,
-          unitName: i.unitName,
-          unitLabel: unitLabelFor(i),
+          // Unassigned lines are pure text. The save path clears amount/unit
+          // on unlink nowadays, but rows persisted before that fix may still
+          // carry stale values — mask them here so no consumer shows them.
+          quantity: i.ingredientId == null ? null : i.quantity,
+          unitId: i.ingredientId == null ? null : i.unitId,
+          unitName: i.ingredientId == null ? null : i.unitName,
+          unitLabel: i.ingredientId == null ? null : unitLabelFor(i),
           displayFraction: i.displayFraction ?? false,
           notes: i.notes,
           isOptional: i.isOptional,

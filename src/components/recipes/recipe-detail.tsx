@@ -226,7 +226,13 @@ export function RecipeDetail({
             const renderIngredient = (
               ing: IngredientRow,
               asAlternative = false,
-            ) => (
+            ) => {
+              // "Nicht zugeordnet": pure-text line with no article. Rendered
+              // as optional (free-text lines are garnish/leftover-style
+              // suggestions) and without the qty/unit column — the text
+              // starts where the amount would.
+              const unassigned = ing.ingredientId == null;
+              return (
               <li
                 key={ing.id}
                 // `items-start` keeps the qty/unit column anchored to the
@@ -236,7 +242,7 @@ export function RecipeDetail({
                 // optionals (italic + 65% opacity).
                 className={cn(
                   "flex items-start gap-2",
-                  isOptionalIngredient(ing) && "italic opacity-65",
+                  (isOptionalIngredient(ing) || unassigned) && "italic opacity-65",
                 )}
               >
                 <UpcomingUsesButton
@@ -244,10 +250,10 @@ export function RecipeDetail({
                   ingredientName={ing.canonicalIngredientName ?? ing.ingredientName}
                 />
                 <FixedAmountMarker fixed={ing.fixedAmount} />
-                {/* Alternatives reuse the diet-marker column (same `h-[1lh] w-3`
-                    slot) rather than adding a leading column of their own, so
-                    the row stays aligned with its primary and the arrow simply
-                    takes the diet icon's place. */}
+                {/* Alternatives get a leading arrow column (same `h-[1lh] w-3`
+                    slot as the diet marker), then their own diet marker — the
+                    arrow indents the row slightly under its primary while the
+                    diet icon stays visible. */}
                 {asAlternative ? (
                   <span className="inline-flex h-[1lh] w-3 shrink-0 items-center justify-center">
                     <CornerDownRight
@@ -255,13 +261,17 @@ export function RecipeDetail({
                       aria-hidden="true"
                     />
                   </span>
-                ) : (
-                  <DietMarker kind={ing.isEquipment ? null : ing.dietaryClass} />
+                ) : null}
+                <DietMarker kind={ing.isEquipment ? null : ing.dietaryClass} />
+                {/* Unassigned lines have no amount/unit by definition — skip
+                    the column entirely so the text starts at the amount
+                    column instead of being indented past it. */}
+                {unassigned ? null : (
+                  <span className="inline-flex min-w-12 shrink-0 items-center font-mono text-[var(--color-muted-fg)]">
+                    {formatQuantity(ing.quantity, { fraction: ing.displayFraction })}{" "}
+                    {ing.unitLabel ?? ""}
+                  </span>
                 )}
-                <span className="inline-flex min-w-12 shrink-0 items-center font-mono text-[var(--color-muted-fg)]">
-                  {formatQuantity(ing.quantity, { fraction: ing.displayFraction })}{" "}
-                  {ing.unitLabel ?? ""}
-                </span>
                 <span className="flex-1">
                   <IngredientLine
                     displayName={ing.ingredientName}
@@ -270,6 +280,9 @@ export function RecipeDetail({
                   {ing.notes ? (
                     <span className="text-[var(--color-muted-fg)]"> – {ing.notes}</span>
                   ) : null}
+                  {/* Unassigned lines are only *styled* as optional — the
+                      literal "(optional)" suffix stays reserved for rows
+                      explicitly flagged optional. */}
                   {!asAlternative && isOptionalIngredient(ing) ? (
                     <span className="ml-1 text-xs text-[var(--color-muted-fg)]">
                       (optional)
@@ -277,7 +290,8 @@ export function RecipeDetail({
                   ) : null}
                 </span>
               </li>
-            );
+              );
+            };
 
             // Group consecutive alternative rows under their preceding
             // non-alternative primary. The service layer already returns
