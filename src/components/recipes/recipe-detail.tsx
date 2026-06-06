@@ -262,7 +262,10 @@ export function RecipeDetail({
                     />
                   </span>
                 ) : null}
-                <DietMarker kind={ing.isEquipment ? null : ing.dietaryClass} />
+                {/* Equipment gets no marker at all; food rows with no
+                    classification (including unlinked lines) show the
+                    muted "unknown" question mark. */}
+                <DietMarker kind={ing.isEquipment ? "none" : ing.dietaryClass} />
                 {/* Unassigned lines have no amount/unit by definition — skip
                     the column entirely so the text starts at the amount
                     column instead of being indented past it. */}
