@@ -558,6 +558,9 @@ export function IngredientRow({
 
   return (
     <div
+      // Stable DOM handle so the section editor can focus a freshly
+      // inserted row's first input after it mounts.
+      id={`ingredient-row-${value.uid}`}
       className={cn(
         // Each row carries its own vertical breathing room; the divider
         // line is drawn by the parent's `divide-y`. Symmetric `py-3` on

@@ -145,6 +145,34 @@ export function SectionEditor({
     });
   }
 
+  // Pending uid of a row inserted via the divider button, focused once its
+  // IngredientRow has mounted. Mirrors recipe-form's scrollToSectionUid.
+  const [focusIngredientUid, setFocusIngredientUid] = React.useState<
+    string | null
+  >(null);
+  React.useEffect(() => {
+    if (!focusIngredientUid) return;
+    const row = document.getElementById(`ingredient-row-${focusIngredientUid}`);
+    if (row) {
+      row.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      row.querySelector("input")?.focus();
+    }
+    // Consume the trigger so a re-render doesn't steal focus again.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setFocusIngredientUid(null);
+  }, [focusIngredientUid]);
+
+  /** Insert an empty row before the primary at `i` — i.e. on the divider
+   *  between two groups, where the button sits. Inserting before a primary
+   *  can never land inside an alternatives group. */
+  function insertIngredientAt(i: number) {
+    const fresh = emptyIngredient();
+    const ings = section.ingredients.slice();
+    ings.splice(i, 0, fresh);
+    onChange({ ...section, ingredients: ings });
+    setFocusIngredientUid(fresh.uid);
+  }
+
   /**
    * Find the row index of the primary that owns the row at `i`. Returns `i`
    * itself when the row is already a primary. Maintains the invariant that
@@ -454,6 +482,11 @@ export function SectionEditor({
                       ? () => onSplit(g.primaryIdx)
                       : undefined
                   }
+                  onInsertAbove={
+                    g.primaryIdx > 0
+                      ? () => insertIngredientAt(g.primaryIdx)
+                      : undefined
+                  }
                 />
               );
             })}
@@ -626,6 +659,7 @@ function IngredientGroup({
   onPromote,
   onDetach,
   onSplitAbove,
+  onInsertAbove,
 }: {
   group: IngredientGroupShape;
   onChange: (flatIdx: number, next: DraftIngredient) => void;
@@ -646,6 +680,9 @@ function IngredientGroup({
   /** Split the section right above this group. Undefined on the first
    *  group (nothing above to split off). */
   onSplitAbove?: () => void;
+  /** Insert a fresh ingredient row right above this group — on the same
+   *  divider as the split button. Undefined on the first group. */
+  onInsertAbove?: () => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({ id: group.primary.uid });
@@ -666,15 +703,30 @@ function IngredientGroup({
         isDragging && "z-10 opacity-40",
       )}
     >
-      {/* Split affordance, always visible, straddling the divider above
-          this group as an absolute overlay — out of flow, so it can never
-          reflow the list (cf. the candidate-pill hover-flicker fix).
-          Rendered as the FIRST child: Tailwind v4's divide-y puts a
-          border-BOTTOM on every non-last child, so as last child it would
-          strip the rows' :last-child status and paint a stray second line
-          under the final row; as first child the only side effect is a
-          border-bottom on the button itself, which its own 1px full border
-          makes a visual no-op. Hidden while the group is being dragged. */}
+      {/* Insert + split affordances, always visible, straddling the divider
+          above this group as absolute overlays — out of flow, so they can
+          never reflow the list (cf. the candidate-pill hover-flicker fix).
+          Rendered as the FIRST children: Tailwind v4's divide-y puts a
+          border-BOTTOM on every non-last child, so as last children they
+          would strip the rows' :last-child status and paint a stray second
+          line under the final row; as first children the only side effect is
+          a border-bottom on the buttons themselves, which their own 1px full
+          border makes a visual no-op. Hidden while the group is dragged. */}
+      {onInsertAbove && !isDragging ? (
+        <button
+          type="button"
+          onClick={onInsertAbove}
+          className={cn(
+            "absolute right-12 top-0 z-10 -translate-y-1/2",
+            "inline-flex items-center justify-center rounded-full border border-[var(--color-border)] bg-[var(--color-card)] p-1.5 text-[var(--color-muted-fg)]",
+            "transition-colors hover:border-[var(--color-accent)] hover:text-[var(--color-fg)]",
+          )}
+          title="Zutat hier einfügen — eine leere Zeile erscheint an dieser Stelle."
+          aria-label="Zutat hier einfügen"
+        >
+          <Plus className="size-3.5" aria-hidden />
+        </button>
+      ) : null}
       {onSplitAbove && !isDragging ? (
         <button
           type="button"
