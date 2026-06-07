@@ -704,6 +704,15 @@ export function findIngredientCandidates(
   };
   const worstKind = (m: IngredientCandidateMatch): number =>
     m.perTokenKinds.reduce((w, k) => Math.max(w, KIND_RANK[k]), 0);
+  // Position: where the match's covered span starts in the input. Trailing
+  // content in ingredient lines is overwhelmingly annotation ("z.B.
+  // Olivenöl", "for garnish"), so at equal score and exactness the EARLIER
+  // match is the product term ("Öl z.B. Olivenöl" → Öl). Purely structural —
+  // replaces the ranking role the z.B./zum boundary word-lists used to play.
+  const startPos = (m: IngredientCandidateMatch): number =>
+    m.coveredCandidateTokens.length > 0
+      ? Math.min(...m.coveredCandidateTokens)
+      : Number.MAX_SAFE_INTEGER;
   const sorted = Array.from(bestById.values()).sort((a, b) => {
     const aw = rankWeight(a.match);
     const bw = rankWeight(b.match);
@@ -711,8 +720,12 @@ export function findIngredientCandidates(
     const ak = worstKind(a.match);
     const bk = worstKind(b.match);
     if (ak !== bk) return ak - bk;
-    // Equally-exact: prefer the candidate whose winning row is the canonical.
-    // This is THE canonical preference now — scores carry no canonical boost.
+    const ap = startPos(a.match);
+    const bp = startPos(b.match);
+    if (ap !== bp) return ap - bp;
+    // Equally-exact and equally-positioned: prefer the candidate whose
+    // winning row is the canonical. This is THE canonical preference now —
+    // scores carry no canonical boost.
     if (a.match.isCanonical !== b.match.isCanonical) {
       return a.match.isCanonical ? -1 : 1;
     }

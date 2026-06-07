@@ -30,6 +30,7 @@ import {
   isStandaloneDescriptor,
   preprocessAlternatives,
   splitConjunctions,
+  stripVocabTail,
   tokenizeEntryNameForCatalog,
   type ParsedIngredient,
 } from "./ingredient.ts";
@@ -762,16 +763,30 @@ function resolveIngredientForRow(
   const commaTailIsAllPrepLike =
     parsed.commaTailText.trim().length > 0 &&
     isAllPrepLikeText(parsed.commaTailText);
-  const newName =
+  const foldedName =
     parsed.commaTailText.trim().length > 0 && !commaTailIsAllPrepLike
       ? commaTailGoesAsPrefix(parsed.commaTailText)
         ? [parsed.commaTailText, cleaned.name].map((s) => s.trim()).join(" ")
         : [cleaned.name, parsed.commaTailText].map((s) => s.trim()).join(" ")
       : cleaned.name;
-  const newNotes =
+  const foldedNotes =
     parsed.commaTailText.trim().length > 0 && !commaTailIsAllPrepLike
       ? subtractCommaTail(cleaned.notes, parsed.commaTailText)
       : cleaned.notes;
+  // Vocabulary cleanup — the ONLY place the to-taste / usage-boundary
+  // word-lists apply. Runs after the comma-tail fold so a vocab phrase that
+  // arrived via the tail ("Puderzucker, zum Bestreuen") is cleaned too. The
+  // matched path above never consults these lists (pristine matching); a
+  // matched line's phrase words reach the notes via uncovered tokens.
+  const vocab = stripVocabTail(foldedName);
+  const newName = vocab.name.length > 0 ? vocab.name : foldedName;
+  const newNotes =
+    vocab.name.length > 0 && vocab.notes.length > 0
+      ? [foldedNotes, ...vocab.notes]
+          .map((s) => (s ?? "").trim())
+          .filter((s) => s.length > 0)
+          .join(", ") || null
+      : foldedNotes;
   const proposals: ImportedNameProposal[] = [];
   proposals.push({
     name: newName,

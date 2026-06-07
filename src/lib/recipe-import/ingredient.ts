@@ -679,32 +679,12 @@ function preprocess(raw: string): {
     return " ";
   });
 
-  // Capture and strip case-insensitive "to taste" / "nach Geschmack" phrases —
-  // but ONLY when they're not inside a parenthetical. "(more or less to taste)"
-  // should stay one verbatim note ("more or less to taste"), handled by the
-  // inline parens path, not split into "to taste" + "more or less". Mask
-  // paren spans before the scan and restore them after.
-  const protectedParens: string[] = [];
-  text = text.replace(/\([^()]*\)/g, (m) => {
-    protectedParens.push(m);
-    return `${protectedParens.length - 1}`;
-  });
-  for (const phrase of TO_TASTE_PHRASES) {
-    const re = new RegExp(
-      `(?:[-–—,]\\s*)?\\b${escapeRegExp(phrase)}\\b`,
-      "gi",
-    );
-    if (re.test(text)) {
-      capturedNotes.push(phrase);
-      text = text.replace(re, " ");
-    }
-  }
-  if (protectedParens.length > 0) {
-    text = text.replace(
-      /(\d+)/g,
-      (_, i: string) => protectedParens[Number(i)],
-    );
-  }
+  // NOTE: "to taste" / "nach Geschmack" phrases are deliberately NOT
+  // stripped here anymore. The matcher must see the pristine line (vocab
+  // rules apply only on the no-match path — see {@link stripVocabTail});
+  // for matched lines the uncovered-tokens→notes fallback routes the
+  // phrase to notes. Stripping mid-line text here also stranded
+  // surrounding punctuation ("salt- adjust to taste!" left a lone "!").
 
   // Drop stray "*" anywhere (often used as a formatting marker by recipe
   // sites: "*Hackfleisch", "Salz*").
@@ -718,8 +698,9 @@ function preprocess(raw: string): {
   // that's a decimal like ".5 cup" / ",5 l".
   text = text.replace(/^(?:[^\p{L}\p{N}.,]|[.,](?!\d))+/u, "");
   // Trailing: keep parens / brackets which the bracketed-note logic
-  // already handled, just drop punctuation/whitespace.
-  text = text.replace(/[\s+&·•|.,;:]+$/u, "");
+  // already handled, just drop punctuation/whitespace (incl. !/? so
+  // "salt- adjust to taste!" can't carry the "!" into the name area).
+  text = text.replace(/[\s+&·•|.,;:!?]+$/u, "");
 
   // Strip leading filler conjunctions/articles: "und ", "and ", "the ", and
   // chained-recipe leaders like "plus" / "to" / "or" — those are usually
@@ -793,6 +774,63 @@ function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+/**
+ * Vocabulary cleanup for the NO-MATCH path only. When a line resolves to a
+ * catalog ingredient, the matcher's uncovered-tokens fallback routes phrase
+ * words to notes structurally — but when a NEW ingredient is created, the
+ * proposed name must not carry usage phrases ("Wasabipulver zum Bestreuen")
+ * or fixed to-taste phrases ("Sumac to taste"). This is the single place the
+ * TO_TASTE_PHRASES / USAGE_PREFIX_TOKENS / NOTE_BOUNDARY_TOKENS vocabulary
+ * still applies; nothing pre-match consults it.
+ *
+ * Returns the cleaned name plus the extracted note fragments (in source
+ * order: boundary tail last). Pure string function — no lookups.
+ */
+export function stripVocabTail(name: string): { name: string; notes: string[] } {
+  const notes: string[] = [];
+  let text = name;
+  // Fixed "to taste" / "nach Geschmack" phrases anywhere in the name.
+  for (const phrase of TO_TASTE_PHRASES) {
+    const re = new RegExp(`(?:[-–—,]\\s*)?\\b${escapeRegExp(phrase)}\\b`, "gi");
+    if (re.test(text)) {
+      notes.push(phrase);
+      text = text.replace(re, " ");
+    }
+  }
+  text = text.replace(/\s+/g, " ").trim();
+  // Usage / annotation boundary: everything from the first "zum"/"für" or
+  // "z.B."/"bzw." token onward is a note about how the ingredient is used.
+  // Guards mirror the old name-area walk: at least one name token must
+  // precede the split, and a dash-compound ("Weizen- oder Dinkelmehl")
+  // keeps its conjunction in the name.
+  // Drop tokens a phrase removal may have stranded (pure punctuation),
+  // mirroring tokenize()'s standalone-noise filter.
+  const tokens = text
+    .split(/\s+/)
+    .filter((t) => t.length > 0 && !/^[-–—!?]+$/.test(t));
+  let split = -1;
+  for (let i = 1; i < tokens.length; i++) {
+    const lower = tokens[i].toLowerCase();
+    if (USAGE_PREFIX_TOKENS.has(lower)) {
+      split = i;
+      break;
+    }
+    if (NOTE_BOUNDARY_TOKENS.has(lower)) {
+      const prev = tokens[i - 1];
+      if (prev.endsWith("-") || prev.endsWith("–")) continue;
+      split = i;
+      break;
+    }
+  }
+  if (split > 0) {
+    notes.push(tokens.slice(split).join(" "));
+    text = tokens.slice(0, split).join(" ");
+  } else {
+    text = tokens.join(" ");
+  }
+  return { name: text, notes };
+}
+
 function normalize(s: string): string {
   return (
     s
@@ -847,20 +885,27 @@ function tokenize(input: string): string[] {
       "$1 $2 $3",
     )
     .replace(/(\s)([-–])([\p{L}\(])/gu, "$1$2 $3");
-  // Drop standalone dash tokens entirely. They show up when the source
-  // had whitespace around a dash ("Bio - Honig", "Salz – nach Geschmack")
-  // and don't carry information the downstream parser needs:
+  // Drop standalone dash / punctuation tokens entirely. Dashes show up when
+  // the source had whitespace around one ("Bio - Honig", "Salz – nach
+  // Geschmack"); other sentence punctuation gets stranded when a phrase
+  // capture removes the words around it ("salt- adjust to taste!" → the "!"
+  // stays behind once "to taste" moves to notes — it once even accrued into
+  // a catalog alias "salt adjust !"). None of them carry information the
+  // downstream parser needs:
   //   - "to taste" / "nach Geschmack" follow-ups are already captured by
   //     {@link TO_TASTE_PHRASES} in preprocess (which strips the leading
   //     dash with them);
   //   - intra-name compounds ("Bio - Honig") should collapse to a single
   //     name "Bio Honig" rather than splitting "Bio" off as its own
   //     ingredient with the noun shoved into notes.
-  // We keep dashes that stay glued inside a multi-char token
-  // ("Bio-Honig", "Weizen-Vollkornmehl") — those are part of the name.
+  // We keep dashes that stay glued inside a multi-char token ("Bio-Honig",
+  // "Weizen-Vollkornmehl") — those are part of the name — and deliberately
+  // leave structural tokens alone: "," / ";" / ":" drive the comma-tail →
+  // notes split downstream, "&" joins names ("Mac & Cheese"), "+" adds
+  // quantities. Only pure exclamation/question marks are noise.
   return padded
     .split(/\s+/)
-    .filter((t) => t.length > 0 && !/^[-–—]+$/.test(t));
+    .filter((t) => t.length > 0 && !/^[-–—!?]+$/.test(t));
 }
 
 /**
@@ -1116,27 +1161,13 @@ export function parseIngredientString(
       inCommaTail = false;
       continue;
     }
-    if (!inNotes && USAGE_PREFIX_TOKENS.has(lower) && nameTokens.length > 0) {
-      inNotes = true;
-      if (noteTokens.length > 0) noteTokens.push(",");
-      noteTokens.push(t);
-      continue;
-    }
-    if (!inNotes && NOTE_BOUNDARY_TOKENS.has(lower)) {
-      // Dash-compound exception: "Weizen- oder Dinkelmehl" — when the
-      // preceding name token ends with a hyphen, keep the conjunction (and
-      // everything after it) in the name. Splitting here would orphan the
-      // half-word "Weizen-".
-      const prev = nameTokens[nameTokens.length - 1];
-      if (prev && (prev.endsWith("-") || prev.endsWith("–"))) {
-        nameTokens.push(t);
-        continue;
-      }
-      inNotes = true;
-      if (noteTokens.length > 0) noteTokens.push(",");
-      noteTokens.push(t);
-      continue;
-    }
+    // NOTE: the USAGE_PREFIX_TOKENS ("zum", "für", …) and
+    // NOTE_BOUNDARY_TOKENS ("z.B.", "bzw.", …) name→notes splits used to
+    // live here — removed on purpose. The matcher must see the pristine
+    // name area (vocab rules apply only on the no-match path, see
+    // {@link stripVocabTail}); a matched line routes those tokens to notes
+    // via the uncovered-tokens fallback, and ranking ties like
+    // "Öl z.B. Olivenöl" are settled by the matcher's position tiebreak.
     if (inNotes) {
       noteTokens.push(t);
       if (inCommaTail) commaTailTokens.push(t);

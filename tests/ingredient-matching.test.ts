@@ -869,3 +869,41 @@ describe("exact alias vs close-compound canonical (Erdnuss regression)", () => {
     expect(matches[0].isCanonical).toBe(true);
   });
 });
+
+describe("position tiebreak — earlier match wins ties", () => {
+  // Trailing content in ingredient lines is overwhelmingly annotation
+  // ("z.B. Olivenöl", "for garnish"). With NO vocabulary involved, the
+  // structural rule is: at equal score and exactness, the match that starts
+  // EARLIER in the line wins. This replaces the old z.B./zum boundary
+  // word-lists' ranking role now that the matcher sees the pristine line.
+  const cat: IngredientCatalog = [
+    { ingredientId: 1, canonicalName: "Öl", aliasName: "Öl", tokens: ["ol"] },
+    {
+      ingredientId: 2,
+      canonicalName: "Olivenöl",
+      aliasName: "Olivenöl",
+      tokens: ["olivenol"],
+    },
+  ];
+
+  it("'Öl z.B. Olivenöl' maps to the earlier Öl, not the trailing example", () => {
+    const { matches } = findIngredientCandidates("Öl z.B. Olivenöl", cat);
+    expect(matches[0].ingredientId).toBe(1);
+    expect(matches[0].score).toBeGreaterThanOrEqual(MIN_AUTO_MATCH_SCORE);
+    expect(matches[1].ingredientId).toBe(2);
+  });
+
+  it("a later match with a HIGHER score still wins — position only breaks ties", () => {
+    const withAlias: IngredientCatalog = [
+      ...cat,
+      {
+        ingredientId: 3,
+        canonicalName: "Bratöl",
+        aliasName: "Öl zum Braten",
+        tokens: ["ol", "zum", "braten"],
+      },
+    ];
+    const { matches } = findIngredientCandidates("Öl zum Braten", withAlias);
+    expect(matches[0].ingredientId).toBe(3); // 3-token full coverage beats 1-token
+  });
+});

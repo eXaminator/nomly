@@ -5,6 +5,7 @@ import {
   normalizeForMatch,
   parseIngredientString,
   splitConjunctions,
+  stripVocabTail,
 } from "@/lib/recipe-import/ingredient";
 import {
   asImageUrl,
@@ -167,15 +168,17 @@ describe("parseIngredientString", () => {
       altWithPrepStripped: null,
     });
   });
-  it("treats 'nach Geschmack' as a note", () => {
+  it("keeps 'nach Geschmack' in the name — vocab applies only on no-match", () => {
+    // The phrase is NOT stripped at string level anymore: the matcher must
+    // see the pristine line. A matched line routes the phrase to notes via
+    // uncovered tokens; an unmatched one via stripVocabTail.
     expect(parse("Salz nach Geschmack")).toMatchObject({
       quantity: null,
       unitName: null,
-      name: "Salz",
+      name: "Salz nach Geschmack",
       commaTailText: "",
-      notes: "nach geschmack",
+      notes: null,
       isOptional: false,
-      altWithPrepStripped: null,
     });
   });
   it("accepts a DB-added alias like 'Pck.' without parser changes", () => {
@@ -223,15 +226,14 @@ describe("parseIngredientString — extended cases", () => {
     expect(r.name).toBe("Puderzucker");
     expect(r.notes?.toLowerCase()).toContain("etwas");
   });
-  it("usage suffix 'zum Bestreuen' goes to notes", () => {
+  it("usage suffix 'zum Bestreuen' stays in the name at string level", () => {
+    // Pristine for the matcher; stripVocabTail cleans it on the no-match path.
     const r = parse("Etwas Puderzucker zum Bestreuen");
-    expect(r.name).toBe("Puderzucker");
-    expect(r.notes?.toLowerCase()).toContain("zum bestreuen");
+    expect(r.name).toBe("Puderzucker zum Bestreuen");
   });
-  it("dash-separated note 'Flaked Almond - to taste'", () => {
+  it("dash-separated 'Flaked Almond - to taste' keeps the phrase in the name", () => {
     const r = parse("Flaked Almond - to taste");
-    expect(r.name).toBe("Flaked Almond");
-    expect(r.notes?.toLowerCase()).toContain("to taste");
+    expect(r.name).toBe("Flaked Almond to taste");
   });
   it("amount at the end via colon: 'Flohsamenschalenpulver: 30 g'", () => {
     const r = parse("Flohsamenschalenpulver: 30 g");
@@ -294,10 +296,18 @@ describe("parseIngredientString — extended cases", () => {
     expect(r.notes).toMatch(/28 oz/i);
     expect(r.name).toMatch(/crushed tomatoes/i);
   });
-  it("'to taste' anywhere is captured to notes", () => {
+  it("'to taste' stays in the name at string level", () => {
     const r = parse("Black pepper to taste");
-    expect(r.name).toBe("Black pepper");
-    expect(r.notes?.toLowerCase()).toContain("to taste");
+    expect(r.name).toBe("Black pepper to taste");
+    expect(r.notes).toBeNull();
+  });
+  it("trailing '!' never reaches the name ('salt- adjust to taste!')", () => {
+    // The stray "!" once stranded into name/notes and even accrued into a
+    // catalog alias "salt adjust !". Preprocess strips trailing !/? and the
+    // tokenizer drops standalone punctuation tokens.
+    const r = parse("salt- adjust to taste!");
+    expect(r.name).toBe("salt adjust to taste");
+    expect(r.name).not.toContain("!");
   });
   it("leading filler 'and Salz' is stripped", () => {
     const r = parse("and Salz");
@@ -366,13 +376,48 @@ describe("parseIngredientString — extended cases", () => {
     expect(r.notes).toBeNull();
   });
   // "to taste" / "nach Geschmack" remains a notes annotation because the
-  // TO_TASTE_PHRASES preprocess (which also handles the leading dash)
-  // strips it BEFORE tokenisation runs. So dropping the standalone dash
-  // here doesn't regress.
-  it("'Salz - nach Geschmack' still routes 'nach Geschmack' to notes", () => {
+  // The standalone dash is dropped by the tokenizer; the phrase itself stays
+  // in the name at string level (vocab applies only on the no-match path).
+  it("'Salz - nach Geschmack' collapses the dash, keeps the phrase", () => {
     const r = parse("Salz - nach Geschmack");
-    expect(r.name).toBe("Salz");
-    expect(r.notes).toMatch(/nach geschmack/i);
+    expect(r.name).toBe("Salz nach Geschmack");
+  });
+
+  describe("stripVocabTail — no-match-only vocabulary cleanup", () => {
+    it("strips a to-taste phrase to notes", () => {
+      expect(stripVocabTail("Sumac to taste")).toEqual({
+        name: "Sumac",
+        notes: ["to taste"],
+      });
+      expect(stripVocabTail("Salz nach Geschmack")).toEqual({
+        name: "Salz",
+        notes: ["nach geschmack"],
+      });
+    });
+    it("splits at a usage prefix", () => {
+      expect(stripVocabTail("Wasabipulver zum Bestreuen")).toEqual({
+        name: "Wasabipulver",
+        notes: ["zum Bestreuen"],
+      });
+    });
+    it("splits at a note boundary, honoring the dash-compound exception", () => {
+      expect(stripVocabTail("Öl z.B. Olivenöl")).toEqual({
+        name: "Öl",
+        notes: ["z.B. Olivenöl"],
+      });
+      // "Weizen- oder …" style: boundary glued to a half-word stays put.
+      expect(stripVocabTail("Spätzle- bzw. Eiernudeln").name).toBe(
+        "Spätzle- bzw. Eiernudeln",
+      );
+    });
+    it("never empties the name and drops stranded punctuation", () => {
+      // Boundary token first → no split (a name must precede it).
+      expect(stripVocabTail("zum Bestreuen").name).toBe("zum Bestreuen");
+      expect(stripVocabTail("salt adjust to taste !")).toEqual({
+        name: "salt adjust",
+        notes: ["to taste"],
+      });
+    });
   });
   it("'viertel TL Salz' → quantity 0.25, unit TL", () => {
     const r = parse("viertel TL Salz");

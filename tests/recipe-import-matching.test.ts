@@ -1478,3 +1478,85 @@ describe("parseIngredientGroupsIntoSections", () => {
     expect(out.map((g) => g.title)).toEqual([null, "Frosting"]);
   });
 });
+
+describe("vocab rules apply only on the no-match path", () => {
+  // Matching sees the pristine line; "to taste" / "zum X" / "z.B. X" words
+  // reach the notes of a MATCHED row via the uncovered-tokens fallback
+  // (verbatim, source order) and are stripped from a NEW ingredient's
+  // proposed name via stripVocabTail.
+  const catalog: IngredientCatalog = [
+    {
+      ingredientId: 1,
+      canonicalName: "Pfeffer",
+      aliasName: "Pfeffer",
+      tokens: ["pfeffer"],
+    },
+    {
+      ingredientId: 2,
+      canonicalName: "Puderzucker",
+      aliasName: "Puderzucker",
+      tokens: ["puderzucker"],
+    },
+    {
+      ingredientId: 3,
+      canonicalName: "Salz",
+      aliasName: "salt",
+      tokens: ["salt"],
+    },
+    { ingredientId: 4, canonicalName: "Öl", aliasName: "Öl", tokens: ["ol"] },
+    {
+      ingredientId: 5,
+      canonicalName: "Olivenöl",
+      aliasName: "Olivenöl",
+      tokens: ["olivenol"],
+    },
+  ];
+
+  it("matched: 'Pfeffer nach Geschmack' → phrase becomes a verbatim note", () => {
+    const out = parseIngredientLines(["Pfeffer nach Geschmack"], makeLookups(catalog));
+    expect(out[0].ingredientId).toBe(1);
+    expect(out[0].name).toBe("Pfeffer");
+    expect(out[0].notes).toBe("nach Geschmack");
+  });
+
+  it("matched: 'Etwas Puderzucker zum Bestreuen' → usage suffix becomes a note", () => {
+    const out = parseIngredientLines(
+      ["Etwas Puderzucker zum Bestreuen"],
+      makeLookups(catalog),
+    );
+    expect(out[0].ingredientId).toBe(2);
+    expect(out[0].name).toBe("Puderzucker");
+    expect(out[0].notes).toContain("zum Bestreuen");
+  });
+
+  it("matched: 'salt- adjust to taste!' → clean notes, no stranded punctuation", () => {
+    const out = parseIngredientLines(["salt- adjust to taste!"], makeLookups(catalog));
+    expect(out[0].ingredientId).toBe(3);
+    expect(out[0].name).toBe("salt");
+    expect(out[0].notes).toBe("adjust to taste");
+  });
+
+  it("matched: 'Öl z.B. Olivenöl' → the earlier generic wins; example → notes", () => {
+    const out = parseIngredientLines(["Öl z.B. Olivenöl"], makeLookups(catalog));
+    expect(out[0].ingredientId).toBe(4);
+    expect(out[0].name).toBe("Öl");
+    expect(out[0].notes?.toLowerCase()).toContain("olivenöl");
+  });
+
+  it("unmatched: 'Sumac to taste' → proposal name without the phrase", () => {
+    const out = parseIngredientLines(["Sumac to taste"], makeLookups(catalog));
+    expect(out[0].ingredientMatch).toBe("new");
+    expect(out[0].name).toBe("Sumac");
+    expect(out[0].notes?.toLowerCase()).toContain("to taste");
+  });
+
+  it("unmatched: 'Wasabipulver zum Bestreuen' → usage tail never folds into the new name", () => {
+    const out = parseIngredientLines(
+      ["Wasabipulver zum Bestreuen"],
+      makeLookups(catalog),
+    );
+    expect(out[0].ingredientMatch).toBe("new");
+    expect(out[0].name).toBe("Wasabipulver");
+    expect(out[0].notes).toContain("zum Bestreuen");
+  });
+});
