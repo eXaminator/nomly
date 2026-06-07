@@ -611,9 +611,22 @@ function computeNameAndNotes(
   for (const c of parsed.frontCaptures) {
     frontText += c.text.trim() + (c.gluedToNext ? " " : ", ");
   }
-  const frontAndBefore = tidyRemainderFragment(
-    frontText + spanText(0, lo - 1, true),
-  );
+  // Size modifiers are prepended to matchText, so they head the before-span.
+  // When a UNIT was consumed between the size note and the following
+  // descriptor ("1 small bunch fresh parsley" → "small" | bunch | "fresh"),
+  // comma-separate them in notes: the unit that split them in the source is
+  // gone, so "small fresh" should read as two notes "small, fresh". When no
+  // unit was consumed the size word sits directly against the rest
+  // ("1 small head cauliflower …" → "small head" stays one phrase).
+  let beforeSpan = spanText(0, lo - 1, true);
+  if (parsed.sizeNote && parsed.unitName) {
+    const re = new RegExp(
+      `^(${parsed.sizeNote.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})\\s+(?=\\S)`,
+      "i",
+    );
+    beforeSpan = beforeSpan.replace(re, "$1, ");
+  }
+  const frontAndBefore = tidyRemainderFragment(frontText + beforeSpan);
   const afterRaw = [interior.join(" "), spanText(hi + 1, candidate.length - 1, true)]
     .filter((s) => s.length > 0)
     .join(" ");
@@ -903,6 +916,7 @@ function subtractCommaTail(
 function pickFinalUnit(
   initial: ResolveUnitResult,
   aliasDefaultUnit: { id: number; name: string } | null,
+  quantity: number | null,
 ): {
   resolved: { id: number; name: string } | null;
   match: UnitMatch;
@@ -917,7 +931,13 @@ function pickFinalUnit(
   }
   if (
     (initial.match === "defaulted" || initial.match === "empty") &&
-    aliasDefaultUnit
+    aliasDefaultUnit &&
+    // Only attach a default unit when there is an amount for it to qualify.
+    // A quantity-less line ("n. B. Eisbergsalat", "Salz") has no slot for a
+    // unit — "Kopf Eisbergsalat" makes no sense. This mirrors the global
+    // default in {@link resolveUnit}, which also requires a positive amount.
+    quantity !== null &&
+    quantity > 0
   ) {
     // An alias/ingredient default supplies a *resolved* unit — treat it as a
     // clean match so the import-review UI shows the picked unit as the actual
@@ -1049,7 +1069,7 @@ export function parseIngredientLines(
           );
           continue;
         }
-        const final = pickFinalUnit(initialUnit, resolved.defaultUnit);
+        const final = pickFinalUnit(initialUnit, resolved.defaultUnit, parsed.quantity);
         out.push({
           quantity: parsed.quantity,
           unit: final.resolved,
@@ -1320,7 +1340,7 @@ function parseGroupedIngredientLines(
             );
             continue;
           }
-          const final = pickFinalUnit(initialUnit, resolved.defaultUnit);
+          const final = pickFinalUnit(initialUnit, resolved.defaultUnit, parsed.quantity);
           currentGroup.ingredients.push({
             quantity: parsed.quantity,
             unit: final.resolved,

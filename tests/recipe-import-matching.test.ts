@@ -711,6 +711,46 @@ describe("colon-in-name treated as section + listed items", () => {
     expect(out[2].isAlternative).toBe(true);
   });
 
+  it("comma-separates a leading size modifier from a post-unit descriptor in notes", () => {
+    // "1 small bunch fresh parsley": "small" describes the bunch (pre-unit
+    // size note), "fresh" describes the parsley (post-unit). The unit between
+    // them is consumed, so the two distinct notes must stay comma-separated —
+    // "small, fresh", not glued into "small fresh".
+    const catalog: IngredientCatalog = [
+      { ingredientId: 1, canonicalName: "Petersilie", aliasName: "parsley", tokens: ["parsley"] },
+    ];
+    const out = parseIngredientLines(
+      ["1 small bunch fresh parsley"],
+      makeLookups(catalog, ["bunch"]),
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0].ingredientId).toBe(1);
+    expect(out[0].unit?.name).toBe("bunch");
+    expect(out[0].notes).toBe("small, fresh");
+  });
+
+  it("'(or substitute X)' parens yields X as an alternative; size compound → notes", () => {
+    const catalog: IngredientCatalog = [
+      { ingredientId: 1, canonicalName: "Weißkohl", aliasName: "shredded cabbage", tokens: ["shredded", "cabbage"] },
+      { ingredientId: 2, canonicalName: "Krautsalat", aliasName: "coleslaw mix", tokens: ["coleslaw", "mix"] },
+    ];
+    const out = parseIngredientLines(
+      ["6 cups shredded cabbage (or substitute a 10-ounce bag of coleslaw mix)"],
+      makeLookups(catalog, ["cup", "cups", "ounce", "bag"]),
+    );
+    expect(out).toHaveLength(2);
+    expect(out[0].ingredientId).toBe(1);
+    expect(out[0].isAlternative).toBe(false);
+    // The alternative is a real row (matched), NOT folded into the primary's
+    // notes. "10-ounce" rides along as a note; "bag" is the unit.
+    expect(out[1].ingredientId).toBe(2);
+    expect(out[1].isAlternative).toBe(true);
+    expect(out[1].isOptional).toBe(true);
+    expect(out[1].unit?.name).toBe("bag");
+    expect(out[1].notes).toMatch(/10-ounce/i);
+    expect(out[0].notes ?? "").not.toMatch(/coleslaw/i);
+  });
+
   it("'alternativ: A oder B' separator yields one alternative row per option", () => {
     const catalog: IngredientCatalog = [
       { ingredientId: 1, canonicalName: "Tahin", aliasName: "Tahin", tokens: ["tahin"] },
@@ -1367,6 +1407,31 @@ describe("note fragments keep source order, comma-separated", () => {
     // Configured rename → "Knoblauch" (== canonical, so no badge).
     expect(out[0].name).toBe("Knoblauch");
     expect(out[0].canonicalIngredientName).toBeNull();
+  });
+
+  it("applies a matched ingredient's default unit only when the line carries a quantity", () => {
+    const catalog: IngredientCatalog = [
+      {
+        ingredientId: 8,
+        canonicalName: "Eisbergsalat",
+        aliasName: "Eisbergsalat",
+        tokens: ["eisbergsalat"],
+        defaultUnit: { id: 42, name: "Kopf" },
+      },
+    ];
+    // With a quantity, the default unit fills in the missing unit slot.
+    const withQty = parseIngredientLines(["2 Eisbergsalat"], makeLookups(catalog));
+    expect(withQty[0].ingredientId).toBe(8);
+    expect(withQty[0].quantity).toBe(2);
+    expect(withQty[0].unit?.id).toBe(42);
+
+    // No amount ("n. B." = nach Belieben) → no quantity → the default unit
+    // must NOT be applied; a bare "Kopf Eisbergsalat" makes no sense.
+    const noQty = parseIngredientLines(["n. B. Eisbergsalat"], makeLookups(catalog));
+    expect(noQty[0].ingredientId).toBe(8);
+    expect(noQty[0].quantity).toBeNull();
+    expect(noQty[0].isOptional).toBe(true);
+    expect(noQty[0].unit).toBeNull();
   });
 
   it("displayName can be any language/text, independent of the canonical", () => {

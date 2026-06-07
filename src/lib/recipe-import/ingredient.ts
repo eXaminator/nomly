@@ -71,6 +71,12 @@ export type ParsedIngredient = {
    *   - `nameTokenCount`: number of tokens in the final name area.
    */
   leadingNotes: string[];
+  /** The size-modifier note ("small", "große", "kleine/mittlere") — the words
+   *  peeled off between the amount and the unit. These are ALSO prepended to
+   *  {@link matchText}, so the matched path uses this to split them back out
+   *  as their own note fragment (the unit that separated them in the source is
+   *  gone). Empty when no size modifier was present. */
+  sizeNote: string;
   nameAreaNotes: { afterText: string; text: string }[];
   postCommaNotes: string;
   trailingNotes: string[];
@@ -330,6 +336,41 @@ export const SIZE_MODIFIER_TOKENS = new Set([
   "heaped",
   "heaping",
 ]);
+
+/**
+ * True when a leading token is a slash-joined run of size modifiers
+ * ("kleine/mittlere"). The tokenizer no longer splits letter-slashes (they
+ * must survive verbatim in notes), so the size-modifier loops split such a
+ * token here instead. Requires ≥2 parts and EVERY part to be a size modifier
+ * so an ordinary "Öl/Butter" name token is left untouched. `lower` is already
+ * lower-cased; a trailing dot on a part ("kl.") is tolerated.
+ */
+function allSlashPartsAreSizeModifiers(lower: string): boolean {
+  if (!lower.includes("/")) return false;
+  const parts = lower
+    .split("/")
+    .map((p) => p.replace(/\.$/, "").trim())
+    .filter((p) => p.length > 0);
+  return parts.length >= 2 && parts.every((p) => SIZE_MODIFIER_TOKENS.has(p));
+}
+
+/**
+ * True when a token is a hyphenated size compound whose unit half is a known
+ * unit — "10-ounce", "28-ounce", "5-inch". These describe the container that
+ * follows ("a 10-ounce bag …"), so between the amount and the real unit they
+ * behave like a size modifier: peeled off into a note so the container unit
+ * ("bag") and the bare name ("coleslaw mix") surface cleanly. Requiring the
+ * unit half to be a real unit keeps dish names like "3-bean salad" untouched.
+ */
+function isHyphenatedSizeCompound(
+  token: string,
+  knownUnitTokens: ReadonlySet<string>,
+): boolean {
+  const m = /^[\d.,/]+[-–](\p{L}+)\.?$/u.exec(token);
+  if (!m) return false;
+  const w = m[1].toLowerCase();
+  return knownUnitTokens.has(w) || knownUnitTokens.has(`${w}.`);
+}
 
 /**
  * Fixed "to taste" / "nach Geschmack" phrases. When the parser sees one of
@@ -803,8 +844,12 @@ function preprocess(raw: string): {
   // non-letter chars may precede it): a size paren further into the line
   // ("2 shallots (chopped (⅔ cup))") is part of an annotation and stays in
   // place so the notes keep the source order ("chopped, ⅔ cup").
+  // The number and unit may be joined by a hyphen rather than a space
+  // ("(28-ounce) can") — the separator class allows both. The number-part
+  // class also contains a dash (for ranges like "2-3"), so the engine
+  // backtracks the trailing hyphen of "28-" into the separator.
   text = text.replace(
-    /^([^\p{L}]*)\(\s*([\d\s./,\-–½¼¾⅓⅔⅛⅜⅝⅞]+\s+\p{L}{1,30}\.?)\s*\)/u,
+    /^([^\p{L}]*)\(\s*([\d\s./,\-–½¼¾⅓⅔⅛⅜⅝⅞]+[\s\-–]+\p{L}{1,30}\.?)\s*\)/u,
     (_match, lead: string, inner: string) => {
       frontCaptures.push(inner.trim());
       return `${lead} `;
@@ -951,14 +996,13 @@ function tokenize(input: string): string[] {
     .replace(/(\d)([½¼¾⅓⅔⅛⅜⅝⅞])/g, "$1 $2")
     .replace(/(\d)([a-zA-ZäöüÄÖÜß])/g, "$1 $2")
     .replace(/([½¼¾⅓⅔⅛⅜⅝⅞])([a-zA-ZäöüÄÖÜß])/g, "$1 $2")
-    // Slash between two letters splits into separate tokens
-    // ("kleine/mittlere Paprika" → "kleine mittlere Paprika"). The size-
-    // modifier loop can then strip each adjective independently. Numeric
-    // fractions ("1/2", "1/4") survive because both sides need to be
-    // letters. Short suffix shorthands ("Dose/n", "Tomate(n)/T/n") are
-    // already collapsed in `preprocess` before this point, so they don't
-    // reach the tokenizer.
-    .replace(/(\p{L})\/(\p{L})/gu, "$1 $2")
+    // NOTE: a slash between two letters is intentionally NOT split here. It
+    // must survive verbatim into notes ("…in height/bundle…") like every
+    // other special character. The only consumer that needs the parts —
+    // the size-modifier loop ("kleine/mittlere Paprika") — splits a leading
+    // slash-joined token itself (see {@link allSlashPartsAreSizeModifiers}).
+    // Numeric fractions ("1/2") never reached this rule (both sides letters)
+    // and short shorthands ("Dose/n") are already collapsed in `preprocess`.
     // A dash adjacent to whitespace acts as a note separator
     // ("bell pepper- thinly sliced" → pad to a standalone "-" token). Don't
     // touch dashes inside compounds where neither side has whitespace
@@ -1052,6 +1096,7 @@ export function parseIngredientString(
       isOptional,
       altWithPrepStripped: null,
       leadingNotes: [],
+      sizeNote: "",
       nameAreaNotes: [],
       postCommaNotes: "",
       trailingNotes: [...capturedNotes],
@@ -1099,7 +1144,10 @@ export function parseIngredientString(
       knownUnitTokens.has(raw) ||
       knownUnitTokens.has(lower) ||
       knownUnitTokens.has(`${lower}.`);
-    if (SIZE_MODIFIER_TOKENS.has(lower) && !isUnit) {
+    if (
+      (SIZE_MODIFIER_TOKENS.has(lower) || allSlashPartsAreSizeModifiers(lower)) &&
+      !isUnit
+    ) {
       sizeModifiers.push(tokens.shift()!);
     } else {
       break;
@@ -1171,6 +1219,9 @@ export function parseIngredientString(
 
   // Post-quantity size modifiers ("1 kl. Dose", "2 große Eier") — these
   // sit between the quantity and the unit. Both paths share `sizeModifiers`.
+  // A hyphenated size compound ("a 10-ounce bag …") is treated the same: it
+  // describes the container that follows, so it's peeled into a note here so
+  // the real unit ("bag") and bare name surface cleanly.
   while (tokens.length > 0) {
     const raw = tokens[0].toLowerCase();
     const lower = raw.replace(/\.$/, "");
@@ -1183,7 +1234,11 @@ export function parseIngredientString(
       knownUnitTokens.has(raw) ||
       knownUnitTokens.has(lower) ||
       knownUnitTokens.has(`${lower}.`);
-    if (SIZE_MODIFIER_TOKENS.has(lower) && !isUnit) {
+    if (
+      ((SIZE_MODIFIER_TOKENS.has(lower) || allSlashPartsAreSizeModifiers(lower)) &&
+        !isUnit) ||
+      isHyphenatedSizeCompound(tokens[0], knownUnitTokens)
+    ) {
       sizeModifiers.push(tokens.shift()!);
     } else {
       break;
@@ -1549,6 +1604,7 @@ export function parseIngredientString(
     isOptional,
     altWithPrepStripped,
     leadingNotes,
+    sizeNote,
     nameAreaNotes,
     postCommaNotes: noteBody,
     trailingNotes,
@@ -2058,8 +2114,17 @@ const OPTIONAL_PREFIX_RE =
  */
 const ALTERNATIV_SEP_RE =
   /\s+(?:alternativ|alternative|alternatively|alternativly)\s*:?\s+/i;
-const PARENS_ALTERNATIV_RE =
-  /\s*\(\s*(?:(?:or|oder)\s+)?(alternativ|alternative|alternatively|alternativly|substituted?(?:\s+with)?|sub\.?|ersatzweise|notfalls)(?:\s*:\s*|\s+)([^)]+)\)\s*$/i;
+/**
+ * Leader of a trailing alternative parenthetical, matched against the paren's
+ * INNER text. Group 1 = the marker word ("alternativ", "sub", …), group 2 =
+ * the alternative content (which may itself contain nested parens). A leading
+ * "or"/"oder" before the marker is tolerated ("(or alternative X)").
+ */
+const ALT_PAREN_LEADER_RE =
+  /^(?:(?:or|oder)\s+)?(alternativ|alternative|alternatively|alternativly|substituted?(?:\s+with)?|sub\.?|ersatzweise|notfalls)(?:\s*:\s*|\s+)([\s\S]+)$/i;
+/** A trailing paren that simply opens with "oder"/"or" — "(oder X)" — is an
+ *  alternative too, even without an "alternativ" marker. Group 1 = content. */
+const BARE_OR_PAREN_LEADER_RE = /^(?:or|oder)(?:\s*:\s*|\s+)([\s\S]+)$/i;
 /**
  * Leading substitute marker on an alternative SEGMENT ("or sub sour cream"
  * → strip "sub" so the alternative's name stays clean). Same line-structure
@@ -2107,6 +2172,52 @@ function splitColonListItems(text: string): string[] {
   }
   if (current.trim().length > 0) out.push(current.trim());
   return out.filter((s) => s.length > 0);
+}
+
+/**
+ * Detect a trailing alternative parenthetical — "(Alternativ: X)",
+ * "(alternativ X)", or a bare "(oder X)" / "(or X)" — and split it from the
+ * primary. The closing paren is matched to its opener by a balanced backward
+ * scan, so a nested prep paren rides along with the alternative content
+ * ("Kidneybohnen (oder schwarze Bohnen (abgetropft))" → content keeps the
+ * inner paren). Returns null when the line has no trailing paren or the paren
+ * isn't an alternative (an ordinary note like "(gehackt)").
+ *
+ * `connector` is the word the first alternative folds back with when it
+ * doesn't match a catalog article: "<marker>:" for an explicit marker, "oder"
+ * for a bare or-paren. Further items from an inner "A oder B" list connect
+ * with "oder" (decided by the caller).
+ */
+function extractTrailingParenAlternative(
+  body: string,
+): { primary: string; content: string; connector: string } | null {
+  const trimmed = body.trimEnd();
+  if (!trimmed.endsWith(")")) return null;
+  let depth = 0;
+  let open = -1;
+  for (let i = trimmed.length - 1; i >= 0; i--) {
+    const ch = trimmed[i];
+    if (ch === ")") depth += 1;
+    else if (ch === "(") {
+      depth -= 1;
+      if (depth === 0) {
+        open = i;
+        break;
+      }
+    }
+  }
+  if (open < 0) return null; // unbalanced — leave it to the note path
+  const inner = trimmed.slice(open + 1, trimmed.length - 1).trim();
+  const primary = trimmed.slice(0, open).trim();
+  const altMatch = ALT_PAREN_LEADER_RE.exec(inner);
+  if (altMatch) {
+    return { primary, content: altMatch[2].trim(), connector: `${altMatch[1]}:` };
+  }
+  const orMatch = BARE_OR_PAREN_LEADER_RE.exec(inner);
+  if (orMatch) {
+    return { primary, content: orMatch[1].trim(), connector: "oder" };
+  }
+  return null;
 }
 
 /**
@@ -2235,15 +2346,17 @@ export function expandIngredientLine(rawLine: string): ExpandedIngredientRow[] {
     }
   }
 
-  // 3. Inline parens alternative. Matches a trailing "(Alternativ: …)".
-  //    The content may itself list several options ("(Alternativ Honig oder
-  //    Zucker)") — split it into one alternative row per item so each gets
-  //    matched/folded on its own.
-  const parensAlt = PARENS_ALTERNATIV_RE.exec(body);
+  // 3. Inline parens alternative. Matches a trailing "(Alternativ: …)" or a
+  //    bare "(oder …)" / "(or …)". The content may itself list several
+  //    options ("(Alternativ Honig oder Zucker)") — split it into one
+  //    alternative row per item so each gets matched/folded on its own. A
+  //    nested prep paren stays with the content ("(oder schwarze Bohnen
+  //    (abgetropft))").
+  const parensAlt = extractTrailingParenAlternative(body);
   if (parensAlt) {
-    const primary = body.slice(0, parensAlt.index).trim();
-    const altLeader = parensAlt[1];
-    const altItems = splitColonListItems(parensAlt[2].trim());
+    const primary = parensAlt.primary;
+    const altLeader = parensAlt.connector;
+    const altItems = splitColonListItems(parensAlt.content);
     const rows: ExpandedIngredientRow[] = [];
     if (primary.length > 0) {
       rows.push({
@@ -2266,12 +2379,13 @@ export function expandIngredientLine(rawLine: string): ExpandedIngredientRow[] {
         rawText: original,
         forceOptional: true,
         isAlternative: isAlt,
-        // The first alternative carries the "Alternativ" leader; further items
-        // (from "A oder B" inside the parens) connect with "oder".
+        // The first alternative carries the paren's leader ("Alternativ:" or
+        // "oder"); further items (from "A oder B" inside the parens) connect
+        // with "oder".
         alternativeConnector: !isAlt
           ? null
           : idx === 0 && primary.length > 0
-            ? `${altLeader}:`
+            ? altLeader
             : "oder",
       });
     });

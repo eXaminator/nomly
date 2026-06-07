@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { parseIsoDurationToMinutes } from "@/lib/recipe-import/duration";
 import {
   detectSectionHeader,
+  expandIngredientLine,
   normalizeForMatch,
   parseIngredientString,
   splitConjunctions,
@@ -63,6 +64,7 @@ const TEST_UNITS = new Set(
     "prise", "prisen", "pr", "pinch",
     "messerspitze", "msp",
     "zoll", "inch", "inches", '"',
+    "ounce", "ounces", "bag", "bags",
     "cm", "zentimeter", "centimeter", "centimeters",
     "zehe", "zehen", "clove", "cloves",
     "x", "tin", "tins", "bd", "bd.", "stick", "sticks",
@@ -262,6 +264,14 @@ describe("parseIngredientString — extended cases", () => {
     const r = parse("1 EL Zucker o. Honig");
     expect(r.name).toBe("Zucker or Honig");
   });
+  it("preserves an unspaced slash inside a parenthetical note", () => {
+    // "height/bundle" is not a pluralization shorthand and not a separator —
+    // the slash must survive verbatim into notes, like every other special char.
+    const r = parse(
+      '5 head regular-sized bok choy (quartered, 8-9" in height/bundle, 26.5 oz total)',
+    );
+    expect(r.notes).toMatch(/height\/bundle/);
+  });
   it("'or' alternatives stay in the name", () => {
     const r = parse("6 dried or fresh shiitake mushrooms");
     expect(r.quantity).toBe(6);
@@ -296,6 +306,25 @@ describe("parseIngredientString — extended cases", () => {
     expect(r.unitName?.toLowerCase()).toBe("can");
     expect(r.notes).toMatch(/28 oz/i);
     expect(r.name).toMatch(/crushed tomatoes/i);
+  });
+  it("skips a hyphenated size compound between amount and container unit", () => {
+    // "a 10-ounce bag of coleslaw mix" — "10-ounce" is a size descriptor, not
+    // the unit; the container unit is "bag". The size compound must not block
+    // unit detection nor pollute the name.
+    const r = parse("a 10-ounce bag of coleslaw mix");
+    expect(r.quantity).toBe(1);
+    expect(r.unitName?.toLowerCase()).toBe("bag");
+    expect(r.name).toBe("coleslaw mix");
+    expect(r.notes).toMatch(/10-ounce/i);
+  });
+  it("hyphenated parenthesized size 1 (28-ounce) can whole peeled tomatoes", () => {
+    // "(28-ounce)" uses a hyphen instead of a space between number and unit —
+    // it must still be hoisted as a front size note so "can" reads as the unit.
+    const r = parse("1 (28-ounce) can whole peeled tomatoes");
+    expect(r.quantity).toBe(1);
+    expect(r.unitName?.toLowerCase()).toBe("can");
+    expect(r.notes).toMatch(/28-ounce/i);
+    expect(r.name).toMatch(/whole peeled tomatoes/i);
   });
   it("'to taste' stays in the name at string level", () => {
     const r = parse("Black pepper to taste");
@@ -1041,5 +1070,28 @@ describe("asInstructionGroups", () => {
       { title: "Outer", lines: ["Outer step."] },
       { title: "Inner", lines: ["Inner step.", "Trailing outer step."] },
     ]);
+  });
+});
+
+describe("expandIngredientLine — parenthetical alternatives", () => {
+  const ingredients = (raw: string) =>
+    expandIngredientLine(raw).filter((r) => r.kind === "ingredient");
+
+  it("splits a trailing '(oder X)' paren into a primary + alternative", () => {
+    const rows = ingredients(
+      "400 g Kidneybohnen (oder schwarze Bohnen aus der Dose (abgespült und abgetropft))",
+    );
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toMatchObject({ text: "400 g Kidneybohnen", isAlternative: false });
+    expect(rows[1].isAlternative).toBe(true);
+    expect(rows[1].text).toMatch(/schwarze Bohnen/);
+    // The nested prep paren rides along with the alternative, not the primary.
+    expect(rows[1].text).toMatch(/abgespült und abgetropft/);
+  });
+
+  it("still treats a plain trailing note paren as a note (not an alternative)", () => {
+    const rows = ingredients("200 g Mehl (gesiebt)");
+    expect(rows).toHaveLength(1);
+    expect(rows[0].isAlternative).toBe(false);
   });
 });
