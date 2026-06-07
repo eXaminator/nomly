@@ -2123,8 +2123,10 @@ const ALTERNATIV_SEP_RE =
 const ALT_PAREN_LEADER_RE =
   /^(?:(?:or|oder)\s+)?(alternativ|alternative|alternatively|alternativly|substituted?(?:\s+with)?|sub\.?|ersatzweise|notfalls)(?:\s*:\s*|\s+)([\s\S]+)$/i;
 /** A trailing paren that simply opens with "oder"/"or" — "(oder X)" — is an
- *  alternative too, even without an "alternativ" marker. Group 1 = content. */
-const BARE_OR_PAREN_LEADER_RE = /^(?:or|oder)(?:\s*:\s*|\s+)([\s\S]+)$/i;
+ *  alternative too, even without an "alternativ" marker. Group 1 = the leader
+ *  word (kept verbatim so an English "or" doesn't anglicise to "oder" in
+ *  notes), group 2 = content. */
+const BARE_OR_PAREN_LEADER_RE = /^(or|oder)(?:\s*:\s*|\s+)([\s\S]+)$/i;
 /**
  * Leading substitute marker on an alternative SEGMENT ("or sub sour cream"
  * → strip "sub" so the alternative's name stays clean). Same line-structure
@@ -2152,10 +2154,15 @@ function splitColonListItems(text: string): string[] {
     else if (ch === ")" || ch === "]") depth = Math.max(0, depth - 1);
 
     if (depth === 0 && ch === ",") {
-      out.push(current.trim());
-      current = "";
-      i += 1;
-      continue;
+      // A comma between two digits is a decimal point ("1,5"), not a list
+      // separator — keep it glued to the number.
+      const decimal = /\d/.test(trimmed[i - 1] ?? "") && /\d/.test(trimmed[i + 1] ?? "");
+      if (!decimal) {
+        out.push(current.trim());
+        current = "";
+        i += 1;
+        continue;
+      }
     }
     if (depth === 0 && /\s/.test(ch)) {
       const rest = trimmed.slice(i);
@@ -2215,7 +2222,11 @@ function extractTrailingParenAlternative(
   }
   const orMatch = BARE_OR_PAREN_LEADER_RE.exec(inner);
   if (orMatch) {
-    return { primary, content: orMatch[1].trim(), connector: "oder" };
+    return {
+      primary,
+      content: orMatch[2].trim(),
+      connector: orMatch[1].toLowerCase(),
+    };
   }
   return null;
 }

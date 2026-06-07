@@ -1094,4 +1094,24 @@ describe("expandIngredientLine — parenthetical alternatives", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0].isAlternative).toBe(false);
   });
+
+  it("preserves the English 'or' connector (doesn't anglicise to 'oder')", () => {
+    const rows = expandIngredientLine("3/4 teaspoon salt (or to taste)");
+    const alt = rows.find((r) => r.kind === "ingredient" && r.isAlternative);
+    expect(alt?.alternativeConnector).toBe("or");
+  });
+
+  it("keeps a German 'oder' connector as 'oder'", () => {
+    const rows = expandIngredientLine("100 g Zucker (oder Honig)");
+    const alt = rows.find((r) => r.kind === "ingredient" && r.isAlternative);
+    expect(alt?.alternativeConnector).toBe("oder");
+  });
+
+  it("does not split a decimal comma inside a parenthetical alternative", () => {
+    // "1,5 TL Apfelessig" must stay ONE alternative — the comma is a decimal
+    // point, not a list separator.
+    const rows = ingredients("1,5 EL Zitronensaft (oder 1,5 TL Apfelessig)");
+    expect(rows).toHaveLength(2);
+    expect(rows[1].text).toBe("1,5 TL Apfelessig");
+  });
 });
