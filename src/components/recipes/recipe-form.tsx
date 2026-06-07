@@ -22,6 +22,7 @@ import { MarkdownEditor } from "@/components/ui/markdown-editor";
 import { NewIngredientsDialog } from "./new-ingredients-dialog";
 import { PhotoUpload } from "./photo-upload";
 import { SectionEditor } from "./section-editor";
+import { moveAlternativeWithinGroup } from "./alternatives";
 import { splitSectionAt } from "./split-section";
 import { TagInput } from "./tag-input";
 import { hasReparsableRows, reparseAll } from "./reparse";
@@ -232,9 +233,28 @@ export function RecipeForm({ initial, recipeId, tagSuggestions }: Props) {
 
     const source = findIngredient(activeId);
     if (!source) return;
-    // Only primaries carry a drag handle, but defensively snap to the
-    // primary if a stray alternative ever initiates a drag.
     const sourceIngredients = draft.sections[source.sectionIdx].ingredients;
+
+    // An alternative drag reorders WITHIN its own group only — never moves a
+    // group or crosses sections. The helper clamps the target to the group,
+    // so a drop outside it is a harmless no-op.
+    if (sourceIngredients[source.ingredientIdx].isAlternative) {
+      const target = findIngredient(overId);
+      if (!target || target.sectionIdx !== source.sectionIdx) return;
+      const reordered = moveAlternativeWithinGroup(
+        sourceIngredients,
+        source.ingredientIdx,
+        target.ingredientIdx,
+      );
+      setDraft({
+        ...draft,
+        sections: draft.sections.map((s, idx) =>
+          idx === source.sectionIdx ? { ...s, ingredients: reordered } : s,
+        ),
+      });
+      return;
+    }
+
     const [sourceGroupStart, sourceGroupEnd] = groupBounds(
       sourceIngredients,
       source.ingredientIdx,

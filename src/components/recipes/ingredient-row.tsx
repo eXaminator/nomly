@@ -572,16 +572,30 @@ export function IngredientRow({
       )}
     >
       {value.isAlternative ? (
-        // Alternatives ride inside the primary's draggable container, so
-        // no grip on this row. The grip slot is preserved as empty space
-        // so the alt's content starts at the same x as the primary's, and
-        // the trailing arrow sits at the start-of-Qty column for visual
-        // indent ("the arrow IS the indentation").
+        // The whole group rides inside the primary's draggable container.
+        // When the parent also wires this alternative as its own sortable
+        // (drag props present), the leading slot becomes a grip for
+        // reordering alternatives among themselves; otherwise it stays empty
+        // so the alt's content lines up under the primary's. The trailing
+        // arrow sits at the start-of-Qty column for the visual indent.
         <>
-          <span
-            aria-hidden="true"
-            className="mt-1.5 inline-flex h-8 w-6 shrink-0"
-          />
+          {dragListeners ? (
+            <button
+              type="button"
+              {...(dragAttributes ?? {})}
+              {...(dragListeners ?? {})}
+              aria-label="Alternative per Drag-and-Drop umordnen"
+              title="Ziehen, um die Reihenfolge der Alternativen zu ändern"
+              className="mt-1.5 inline-flex h-8 w-6 shrink-0 cursor-grab touch-none items-center justify-center rounded-md text-[var(--color-muted-fg)] hover:bg-[var(--color-muted)] active:cursor-grabbing"
+            >
+              <GripVertical className="size-4" />
+            </button>
+          ) : (
+            <span
+              aria-hidden="true"
+              className="mt-1.5 inline-flex h-8 w-6 shrink-0"
+            />
+          )}
           <span
             aria-hidden="true"
             className="mt-1.5 inline-flex h-8 w-6 shrink-0 items-center justify-center text-[var(--color-muted-fg)]"

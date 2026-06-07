@@ -446,10 +446,11 @@ export function SectionEditor({
       <div className="mt-4 space-y-3">
         <Label htmlFor={`section-ingredients-${section.uid}`}>Zutaten</Label>
         <SortableContext
-          // Each draggable is a GROUP (primary + its alternatives). The
-          // group's own uid is the primary's. Alternatives ride along
-          // inside the same DOM container so the whole block follows the
-          // cursor during a drag.
+          // Each draggable here is a GROUP (primary + its alternatives), keyed
+          // by the primary's uid, so dragging the primary's grip moves the
+          // whole block. Alternatives are a separate nested sortable list
+          // inside the group (see IngredientGroup) so they can be reordered
+          // among themselves without leaving the group.
           items={buildGroups(section.ingredients).map((g) => g.primary.uid)}
           strategy={verticalListSortingStrategy}
         >
@@ -752,20 +753,71 @@ function IngredientGroup({
         dragAttributes={attributes}
         dragListeners={listeners}
       />
-      {group.alternatives.map((alt, j) => {
-        const flatIdx = group.primaryIdx + 1 + j;
-        return (
-          <IngredientRow
-            key={alt.uid}
-            value={alt}
-            onChange={(next) => onChange(flatIdx, next)}
-            onRemove={() => onRemove(flatIdx)}
-            onReparse={() => onReparse(flatIdx)}
-            onPromote={() => onPromote(flatIdx)}
-            onDetach={() => onDetach(flatIdx)}
-          />
-        );
-      })}
+      {/* Alternatives form their own nested sortable list so they can be
+          reordered among themselves (within this group only). The drag is
+          handled by the same DndContext in recipe-form; its onDragEnd routes
+          an alternative `active.id` through moveAlternativeWithinGroup. */}
+      <SortableContext
+        items={group.alternatives.map((alt) => alt.uid)}
+        strategy={verticalListSortingStrategy}
+      >
+        {group.alternatives.map((alt, j) => {
+          const flatIdx = group.primaryIdx + 1 + j;
+          return (
+            <SortableAlternativeRow
+              key={alt.uid}
+              alt={alt}
+              onChange={(next) => onChange(flatIdx, next)}
+              onRemove={() => onRemove(flatIdx)}
+              onReparse={() => onReparse(flatIdx)}
+              onPromote={() => onPromote(flatIdx)}
+              onDetach={() => onDetach(flatIdx)}
+            />
+          );
+        })}
+      </SortableContext>
+    </div>
+  );
+}
+
+/**
+ * One alternative row wired as its own sortable item so its grip can reorder
+ * it within the group. The grip props flow into {@link IngredientRow}, which
+ * renders a handle on the leading slot only when they're present.
+ */
+function SortableAlternativeRow({
+  alt,
+  onChange,
+  onRemove,
+  onReparse,
+  onPromote,
+  onDetach,
+}: {
+  alt: DraftIngredient;
+  onChange: (next: DraftIngredient) => void;
+  onRemove: () => void;
+  onReparse: () => void;
+  onPromote: () => void;
+  onDetach: () => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+    useSortable({ id: alt.uid });
+  return (
+    <div
+      ref={setNodeRef}
+      style={{ transform: CSS.Transform.toString(transform), transition }}
+      className={cn(isDragging && "z-10 opacity-40")}
+    >
+      <IngredientRow
+        value={alt}
+        onChange={onChange}
+        onRemove={onRemove}
+        onReparse={onReparse}
+        onPromote={onPromote}
+        onDetach={onDetach}
+        dragAttributes={attributes}
+        dragListeners={listeners}
+      />
     </div>
   );
 }

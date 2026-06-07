@@ -99,6 +99,29 @@ export function detachAlternative(
 }
 
 /**
+ * Reorder an alternative WITHIN its own group. `fromIdx` must point at an
+ * alternative; `toIdx` is the desired destination index, clamped to the
+ * group's alternative range (after the primary, up to the last sibling) so a
+ * drag can never cross into a neighbouring group nor displace the primary.
+ * Mirrors dnd-kit's `arrayMove` semantics. No-op on a primary row.
+ */
+export function moveAlternativeWithinGroup(
+  rows: readonly DraftIngredient[],
+  fromIdx: number,
+  toIdx: number,
+): DraftIngredient[] {
+  const next = rows.slice();
+  if (!next[fromIdx]?.isAlternative) return next;
+  const primaryIdx = findPrimaryIndex(next, fromIdx);
+  const altStart = primaryIdx + 1;
+  const altEnd = lastInGroup(next, primaryIdx);
+  const to = Math.max(altStart, Math.min(altEnd, toIdx));
+  if (to === fromIdx) return next;
+  next.splice(to, 0, next.splice(fromIdx, 1)[0]);
+  return next;
+}
+
+/**
  * Demote a primary into an alternative of the row immediately above it. No-op
  * when it's the first row, already an alternative, or has its own alternatives
  * (which {@link canDemote} guards against to keep the depth-1 invariant).

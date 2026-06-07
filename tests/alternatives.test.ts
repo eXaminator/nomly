@@ -6,6 +6,7 @@ import {
   detachAlternative,
   findPrimaryIndex,
   lastInGroup,
+  moveAlternativeWithinGroup,
   promoteAlternative,
 } from "@/components/recipes/alternatives";
 import type { DraftIngredient } from "@/components/recipes/types";
@@ -97,6 +98,44 @@ describe("alternative grouping helpers", () => {
     const ownsAlt = [...owns, row("c1", true)];
     expect(canDemote(ownsAlt, 2)).toBe(false);
     expect(shape(demoteToAlternative(rows, 0))).toEqual(shape(rows)); // no-op
+  });
+
+  it("moveAlternativeWithinGroup reorders alternatives among themselves", () => {
+    const rows = [row("A"), row("a1", true, true), row("a2", true, true), row("B")];
+    // a2 (idx 2) → before a1 (idx 1)
+    expect(shape(moveAlternativeWithinGroup(rows, 2, 1))).toEqual([
+      "A",
+      "a2/alt/opt",
+      "a1/alt/opt",
+      "B",
+    ]);
+    // a1 (idx 1) → after a2 (idx 2): same result the other way round
+    expect(shape(moveAlternativeWithinGroup(rows, 1, 2))).toEqual([
+      "A",
+      "a2/alt/opt",
+      "a1/alt/opt",
+      "B",
+    ]);
+    expect(rows).toHaveLength(4); // input untouched
+  });
+
+  it("moveAlternativeWithinGroup clamps to the group, never crossing into a neighbour", () => {
+    const rows = [row("A"), row("a1", true, true), row("a2", true, true), row("B")];
+    // Target the primary slot (0) → clamped to first alt slot (1) = no real move
+    expect(shape(moveAlternativeWithinGroup(rows, 1, 0))).toEqual(shape(rows));
+    // Target B's slot (3) → clamped to the group's last alt (2)
+    expect(shape(moveAlternativeWithinGroup(rows, 1, 3))).toEqual([
+      "A",
+      "a2/alt/opt",
+      "a1/alt/opt",
+      "B",
+    ]);
+  });
+
+  it("moveAlternativeWithinGroup is a no-op on a primary row", () => {
+    const rows = [row("A"), row("a1", true), row("B")];
+    expect(shape(moveAlternativeWithinGroup(rows, 0, 1))).toEqual(shape(rows));
+    expect(shape(moveAlternativeWithinGroup(rows, 2, 0))).toEqual(shape(rows));
   });
 
   it("promote/detach are no-ops on a primary index", () => {

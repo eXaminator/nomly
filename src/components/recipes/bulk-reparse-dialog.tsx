@@ -4,6 +4,22 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import { ChevronDown, ChevronRight, Loader2, Volume2, VolumeX } from "lucide-react";
 import {
+  DndContext,
+  KeyboardSensor,
+  PointerSensor,
+  closestCorners,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import {
   Dialog,
   DialogBody,
   DialogContent,
@@ -22,6 +38,7 @@ import {
   canDemote,
   demoteToAlternative,
   detachAlternative,
+  moveAlternativeWithinGroup,
   promoteAlternative,
 } from "./alternatives";
 import { ingredientToPayload, toNumberOrNull } from "./payload";
@@ -34,6 +51,142 @@ import {
 } from "./ingredient-read-line";
 import { diffNotes, type NotesDiff } from "./notes-diff";
 import type { AliasWarning, NewIngredientDefaults } from "@/lib/recipes/types";
+
+/**
+ * The edit panel's ingredient list with drag-to-reorder for alternatives.
+ * Primaries are not draggable here (the bulk dialog doesn't reorder groups);
+ * each group's alternatives form a nested sortable list, clamped to their own
+ * group via {@link moveAlternativeWithinGroup}. Mirrors the recipe editor's
+ * behaviour so both dialogs feel identical.
+ */
+function DraftEditList({
+  rows,
+  onChangeRow,
+  onRemoveRow,
+  onMutate,
+}: {
+  rows: DraftIngredient[];
+  onChangeRow: (rowIdx: number, next: DraftIngredient) => void;
+  onRemoveRow: (rowIdx: number) => void;
+  onMutate: (fn: (rows: DraftIngredient[]) => DraftIngredient[]) => void;
+}) {
+  // Unique per mounted list: several entries can be in edit mode at once, so a
+  // shared DndContext id would collide on the ARIA description element.
+  const dndId = React.useId();
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+  function onDragEnd(event: DragEndEvent) {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const from = rows.findIndex((r) => r.uid === String(active.id));
+    const to = rows.findIndex((r) => r.uid === String(over.id));
+    if (from < 0 || to < 0 || !rows[from].isAlternative) return;
+    onMutate((rs) => moveAlternativeWithinGroup(rs, from, to));
+  }
+  // Group rows by primary so each group's alternatives are their own sortable
+  // sub-list. An orphan alternative (no preceding primary) starts its own
+  // group and renders with its alternative chrome, matching the prior flat
+  // rendering.
+  const groups: { leaderIdx: number; altIdxs: number[] }[] = [];
+  rows.forEach((r, k) => {
+    if (r.isAlternative && groups.length > 0) {
+      groups[groups.length - 1].altIdxs.push(k);
+    } else {
+      groups.push({ leaderIdx: k, altIdxs: [] });
+    }
+  });
+  const leaderRow = (k: number) => {
+    const d = rows[k];
+    return d.isAlternative ? (
+      <IngredientRow
+        value={d}
+        onChange={(next) => onChangeRow(k, next)}
+        onRemove={() => onRemoveRow(k)}
+        onPromote={() => onMutate((rs) => promoteAlternative(rs, k))}
+        onDetach={() => onMutate((rs) => detachAlternative(rs, k))}
+      />
+    ) : (
+      <IngredientRow
+        value={d}
+        onChange={(next) => onChangeRow(k, next)}
+        onRemove={() => onRemoveRow(k)}
+        onAddAlternative={() => onMutate((rs) => addAlternativeAfter(rs, k))}
+        onDemote={
+          canDemote(rows, k)
+            ? () => onMutate((rs) => demoteToAlternative(rs, k))
+            : undefined
+        }
+      />
+    );
+  };
+  return (
+    <DndContext
+      id={`bulk-reparse-alt-dnd-${dndId}`}
+      sensors={sensors}
+      collisionDetection={closestCorners}
+      onDragEnd={onDragEnd}
+    >
+      {groups.map((g) => (
+        <React.Fragment key={rows[g.leaderIdx].uid}>
+          {leaderRow(g.leaderIdx)}
+          <SortableContext
+            items={g.altIdxs.map((k) => rows[k].uid)}
+            strategy={verticalListSortingStrategy}
+          >
+            {g.altIdxs.map((k) => (
+              <SortableDraftAltRow
+                key={rows[k].uid}
+                alt={rows[k]}
+                onChange={(next) => onChangeRow(k, next)}
+                onRemove={() => onRemoveRow(k)}
+                onPromote={() => onMutate((rs) => promoteAlternative(rs, k))}
+                onDetach={() => onMutate((rs) => detachAlternative(rs, k))}
+              />
+            ))}
+          </SortableContext>
+        </React.Fragment>
+      ))}
+    </DndContext>
+  );
+}
+
+/** A bulk-dialog alternative wired as its own sortable item; the grip props
+ *  flow into {@link IngredientRow}'s leading slot. */
+function SortableDraftAltRow({
+  alt,
+  onChange,
+  onRemove,
+  onPromote,
+  onDetach,
+}: {
+  alt: DraftIngredient;
+  onChange: (next: DraftIngredient) => void;
+  onRemove: () => void;
+  onPromote: () => void;
+  onDetach: () => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+    useSortable({ id: alt.uid });
+  return (
+    <div
+      ref={setNodeRef}
+      style={{ transform: CSS.Transform.toString(transform), transition }}
+      className={cn(isDragging && "z-10 opacity-40")}
+    >
+      <IngredientRow
+        value={alt}
+        onChange={onChange}
+        onRemove={onRemove}
+        onPromote={onPromote}
+        onDetach={onDetach}
+        dragAttributes={attributes}
+        dragListeners={listeners}
+      />
+    </div>
+  );
+}
 
 /** One-line German rendering of a non-fatal alias outcome. */
 function aliasWarningText(w: AliasWarning): string {
@@ -914,46 +1067,12 @@ export function BulkReparseDialog({
                                   // non-selected candidate pills (which use the
                                   // muted background) stay visible.
                                   <div className="flex flex-col gap-2 rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-bg)] p-3">
-                                    {st.draft.map((d, k) =>
-                                      d.isAlternative ? (
-                                        <IngredientRow
-                                          key={d.uid}
-                                          value={d}
-                                          onChange={(next) => setDraftRow(i, k, next)}
-                                          onRemove={() => removeDraftRow(i, k)}
-                                          onPromote={() =>
-                                            mutateDraft(i, (rows) =>
-                                              promoteAlternative(rows, k),
-                                            )
-                                          }
-                                          onDetach={() =>
-                                            mutateDraft(i, (rows) =>
-                                              detachAlternative(rows, k),
-                                            )
-                                          }
-                                        />
-                                      ) : (
-                                        <IngredientRow
-                                          key={d.uid}
-                                          value={d}
-                                          onChange={(next) => setDraftRow(i, k, next)}
-                                          onRemove={() => removeDraftRow(i, k)}
-                                          onAddAlternative={() =>
-                                            mutateDraft(i, (rows) =>
-                                              addAlternativeAfter(rows, k),
-                                            )
-                                          }
-                                          onDemote={
-                                            canDemote(st.draft, k)
-                                              ? () =>
-                                                  mutateDraft(i, (rows) =>
-                                                    demoteToAlternative(rows, k),
-                                                  )
-                                              : undefined
-                                          }
-                                        />
-                                      ),
-                                    )}
+                                    <DraftEditList
+                                      rows={st.draft}
+                                      onChangeRow={(k, next) => setDraftRow(i, k, next)}
+                                      onRemoveRow={(k) => removeDraftRow(i, k)}
+                                      onMutate={(fn) => mutateDraft(i, fn)}
+                                    />
                                   </div>
                                 ) : null}
                               </div>
