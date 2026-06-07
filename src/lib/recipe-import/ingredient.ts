@@ -56,29 +56,41 @@ export type ParsedIngredient = {
    */
   altWithPrepStripped: { name: string; notes: string | null } | null;
   /**
-   * Note fragments split out so the matched path can reassemble notes in the
-   * SOURCE order of the original line:
+   * Categorised note fragments — these feed the legacy `notes` assembly and
+   * the NO-MATCH path only (the matched path derives notes from
+   * {@link matchText}'s raw remainder instead):
    *   - `leadingNotes`: range / size / secondary-amount notes that sit with
    *     the quantity at the front ("2-3", "groß").
    *   - `nameAreaNotes`: parenthetical notes that appeared INSIDE the name
    *     area, each tagged with `afterText` = the name-area prefix that
-   *     preceded it ("…peanut butter-no sugar added (crunchy…)" →
-   *     { afterText: "…peanut butter-no sugar added", text: "crunchy…" }).
-   *     Stored as text (not a token index) so the matched path can re-tokenise
-   *     it the SAME way as the match candidate — the parser and the matcher
-   *     split dashes differently, so a raw index would drift.
+   *     preceded it.
    *   - `postCommaNotes`: notes after the first top-level comma (the
-   *     comma-tail + any parens/usage after it), already in source order.
+   *     comma-tail + any parens after it), already in source order.
    *   - `trailingNotes`: notes hoisted out of position by preprocess
-   *     (brackets, "to taste", optional-parens) — appended last.
-   *   - `nameTokenCount`: number of tokens in the final name area, so the
-   *     matcher's covered indices can be mapped back to name positions.
+   *     (brackets, optional-parens) — appended last.
+   *   - `nameTokenCount`: number of tokens in the final name area.
    */
   leadingNotes: string[];
   nameAreaNotes: { afterText: string; text: string }[];
   postCommaNotes: string;
   trailingNotes: string[];
   nameTokenCount: number;
+  /**
+   * Flavor-1 matcher input: the verbatim reconstruction of everything left
+   * in the line after ONLY amount / unit / flag consumption — size
+   * modifiers, secondary measurements, parens, commas, usage words all stay,
+   * in source order. The matched path runs the catalog matcher over this
+   * and derives notes as the raw remainder around the covered span; all the
+   * categorised fields above serve the NO-MATCH path only.
+   */
+  matchText: string;
+  /** Notes consumed from the line FRONT alongside the amount (range
+   *  expressions, prep-leading noun "Saft", vague amount "etwas") — the
+   *  raw-remainder notes builder prepends these in source order. */
+  frontCaptures: string[];
+  /** Preprocess-hoisted captures (brackets, parenthesized sizes) — appended
+   *  after the remainder fragments, mirroring today's trailing placement. */
+  trailingCaptures: string[];
 };
 
 /**
@@ -831,6 +843,45 @@ export function stripVocabTail(name: string): { name: string; notes: string[] } 
   return { name: text, notes };
 }
 
+/**
+ * Presentation cleanup for a raw-remainder notes fragment (the verbatim
+ * source text around a matched span): iteratively trims edge separators and
+ * whitespace, drops edge-adjacent filler words ("of", "von", "the", … — the
+ * NAME_FILLER set reused for presentation only, never for matching), and
+ * unwraps a fragment that is ENTIRELY enclosed by one balanced paren pair
+ * ("(crunchy)" → "crunchy"; "(natural) smooth" stays). Returns null when
+ * nothing meaningful is left.
+ */
+export function tidyRemainderFragment(s: string): string | null {
+  const unwrap = (t: string): string => {
+    if (!t.startsWith("(") || !t.endsWith(")")) return t;
+    let depth = 0;
+    const inner = t.slice(1, -1);
+    for (const ch of inner) {
+      if (ch === "(") depth += 1;
+      else if (ch === ")") {
+        depth -= 1;
+        if (depth < 0) return t; // the outer pair isn't one balanced wrap
+      }
+    }
+    return depth === 0 ? inner.trim() : t;
+  };
+  let text = s.trim();
+  let prev: string | null = null;
+  while (prev !== text) {
+    prev = text;
+    text = unwrap(text);
+    text = text.replace(/^[\s,;:–—-]+|[\s,;:–—-]+$/g, "");
+    const toks = text.split(/\s+/).filter((t) => t.length > 0);
+    const isFiller = (t: string) =>
+      NAME_FILLER_TOKENS.has(t.toLowerCase().replace(/[.,;]$/, ""));
+    while (toks.length > 0 && isFiller(toks[0])) toks.shift();
+    while (toks.length > 0 && isFiller(toks[toks.length - 1])) toks.pop();
+    text = toks.join(" ");
+  }
+  return text.length > 0 ? text : null;
+}
+
 function normalize(s: string): string {
   return (
     s
@@ -928,6 +979,11 @@ export function parseIngredientString(
   knownUnitTokens: ReadonlySet<string>,
 ): ParsedIngredient {
   const { text: preprocessed, capturedNotes, isOptional } = preprocess(raw);
+  // Preprocess-hoisted captures (brackets, "(28 oz.)" sizes) — snapshot
+  // before the front-consumption pushes below so the two stay separable for
+  // the raw-remainder notes builder.
+  const trailingCaptures = [...capturedNotes];
+  const frontCaptures: string[] = [];
   const cleaned = normalize(preprocessed);
   if (cleaned.length === 0) {
     const notes =
@@ -945,6 +1001,9 @@ export function parseIngredientString(
       postCommaNotes: "",
       trailingNotes: [...capturedNotes],
       nameTokenCount: 0,
+      matchText: "",
+      frontCaptures,
+      trailingCaptures,
     };
   }
   const tokens = tokenize(cleaned);
@@ -960,7 +1019,9 @@ export function parseIngredientString(
     PREP_LEADING_NOUNS.has(tokens[0].toLowerCase()) &&
     PREP_FOLLOWUP_TOKENS.has(tokens[1].toLowerCase().replace(/[.,;]$/, ""))
   ) {
-    capturedNotes.push(tokens.shift()!);
+    const noun = tokens.shift()!;
+    capturedNotes.push(noun);
+    frontCaptures.push(noun);
     // Re-strip filler so the next stage sees the actual quantity / unit
     // token, not "von" / "einer".
     dropLeadingFiller(tokens);
@@ -999,6 +1060,7 @@ export function parseIngredientString(
     const firstLower = tokens[0].toLowerCase();
     if (TEXT_AMOUNT_VAGUE.has(firstLower)) {
       capturedNotes.push(tokens[0]);
+      frontCaptures.push(tokens[0]);
       tokens.shift();
       quantity = null;
     } else if (TEXT_AMOUNT_ONE.has(firstLower)) {
@@ -1036,7 +1098,10 @@ export function parseIngredientString(
       const range = consumeQuantity(tokens);
       if (range) {
         quantity = range.quantity;
-        if (range.rangeExpression) rangeNotes.push(range.rangeExpression);
+        if (range.rangeExpression) {
+          rangeNotes.push(range.rangeExpression);
+          frontCaptures.push(range.rangeExpression);
+        }
       }
     }
   }
@@ -1082,6 +1147,52 @@ export function parseIngredientString(
 
   // Drop a leading filler word between unit and name ("of", "von", "and").
   dropLeadingFiller(tokens);
+
+  // Trailing-unit fallback: when we didn't catch a unit after the quantity
+  // ("1 garlic clove") but the LAST token of the line's head (up to the
+  // first comma / semicolon / paren) IS a known unit, peel it off. Runs
+  // BEFORE the matchText snapshot — unit consumption is the one thing
+  // Flavor 1 allows pre-match. Guard: skip when the head contains an
+  // interior numeric token — then the "unit" is part of an annotation like
+  // "sliced into 1-inch pieces" and must NOT be stolen as the row's unit.
+  if (unitName === null && quantity !== null) {
+    let headEnd = 0;
+    while (
+      headEnd < tokens.length &&
+      ![",", ";", "("].includes(tokens[headEnd])
+    ) {
+      headEnd += 1;
+    }
+    if (headEnd >= 2) {
+      const lastTok = tokens[headEnd - 1];
+      const lower = lastTok.toLowerCase();
+      const stripped = lower.replace(/\.$/, "");
+      const isUnit =
+        knownUnitTokens.has(lower) ||
+        knownUnitTokens.has(stripped) ||
+        knownUnitTokens.has(`${stripped}.`);
+      const hasInteriorNumeric = tokens
+        .slice(0, headEnd - 1)
+        .some((t) => NUMERIC_TOKEN_RE.test(t));
+      if (isUnit && !hasInteriorNumeric) {
+        unitName = lastTok.replace(/\.$/, "");
+        tokens.splice(headEnd - 1, 1);
+      }
+    }
+  }
+
+  // Flavor-1 snapshot: the matcher's input is everything still in the
+  // stream — size modifiers re-inserted at the front (their source position:
+  // they always precede the unit), parens / commas / secondary measurements
+  // untouched. The legacy extraction below keeps running on the stream to
+  // produce the categorised fields, which now serve the NO-MATCH path only.
+  const matchText = [...sizeModifiers, ...tokens]
+    .join(" ")
+    .replace(/\s+([,;])/g, "$1")
+    .replace(/\(\s+/g, "(")
+    .replace(/\s+\)/g, ")")
+    .replace(/\s+/g, " ")
+    .trim();
 
   // Detect a leading "usage" phrase ("zum Bestreuen", "for drizzling") that
   // shouldn't be part of the name.
@@ -1201,27 +1312,9 @@ export function parseIngredientString(
     nameTokens.pop();
   }
 
-  // Trailing-unit fallback: when we didn't catch a unit after the quantity
-  // ("1 garlic clove") but the last name token IS a known unit, peel it
-  // off. This handles English-style "qty NAME UNIT" alongside the more
-  // common "qty UNIT NAME" the main loop already covers.
-  if (
-    unitName === null &&
-    nameTokens.length >= 2 &&
-    quantity !== null
-  ) {
-    const lastToken = nameTokens[nameTokens.length - 1];
-    const lower = lastToken.toLowerCase();
-    const stripped = lower.replace(/\.$/, "");
-    if (
-      knownUnitTokens.has(lower) ||
-      knownUnitTokens.has(stripped) ||
-      knownUnitTokens.has(`${stripped}.`)
-    ) {
-      unitName = lastToken.replace(/\.$/, "");
-      nameTokens.pop();
-    }
-  }
+  // (The trailing-unit fallback used to live here; it moved BEFORE the
+  // matchText snapshot — see above — so a consumed unit token leaves the
+  // matcher's remainder too, and gained the interior-numeric guard.)
 
   // Secondary "N UNIT" runs inside the name area — these come from
   // parallel measurement writeups like "½ cup 1 stick unsalted butter"
@@ -1387,6 +1480,9 @@ export function parseIngredientString(
     postCommaNotes: noteBody,
     trailingNotes,
     nameTokenCount: nameTokens.length,
+    matchText,
+    frontCaptures,
+    trailingCaptures,
   };
 }
 

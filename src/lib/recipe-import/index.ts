@@ -31,13 +31,13 @@ import {
   preprocessAlternatives,
   splitConjunctions,
   stripVocabTail,
+  tidyRemainderFragment,
   tokenizeEntryNameForCatalog,
   type ParsedIngredient,
 } from "./ingredient.ts";
 import {
   findIngredientCandidates,
   MIN_AUTO_MATCH_SCORE,
-  tokenizeCandidate,
   type CandidateToken,
   type CatalogBlockIndex,
   type IngredientCandidateMatch,
@@ -545,15 +545,17 @@ export type ParseLookups = {
 };
 
 /**
- * Derive a row's display name + notes from a matched alias. The name is the
- * matched catalog alias verbatim (`aliasName`) — a curated string, so it's
- * clean and consistent regardless of how the source was spelled or tokenised
- * ("extra-virgin olive oil", not "extra virgin …"; "TK Erbsen", not the source
- * order "Erbsen TK"). Notes are EVERY input token the alias didn't cover —
- * before, interior ("bell" in a "red bell pepper" hit on "red pepper"), and
- * after the matched span — plus the parser's base notes (parens / brackets /
- * usage / range / "to taste"), with the comma-tail content subtracted so
- * post-comma tokens aren't double-counted.
+ * Derive a row's display name + notes from a matched alias — the
+ * RAW-REMAINDER model. The name is the matched catalog alias verbatim
+ * (`aliasName`) — a curated string, so it's clean and consistent regardless
+ * of how the source was spelled. Notes are the VERBATIM source remainder
+ * around the covered span: front captures consumed with the amount (range
+ * expressions, prep nouns, vague amounts) → the raw text BEFORE the span →
+ * the raw text AFTER it → preprocess-hoisted trailing captures (brackets,
+ * paren sizes). Each remainder fragment goes through
+ * {@link tidyRemainderFragment} (edge separators/filler trimmed, whole-paren
+ * fragments unwrapped). No category buckets, no re-ordering — what the user
+ * wrote is what the note says.
  */
 function computeNameAndNotes(
   parsed: ParsedIngredient,
@@ -566,80 +568,46 @@ function computeNameAndNotes(
   }
   // The display name is the matched catalog alias verbatim — a curated string,
   // so it's clean and consistent (no tokenisation artefacts like "extra virgin"
-  // for a "extra-virgin" source). Every input token the alias didn't cover —
-  // leading, interior ("bell" in "red bell pepper" → "red pepper"), or
-  // trailing — falls through to the notes below.
+  // for a "extra-virgin" source).
   const name = aliasName;
-  // The original SOURCE span the alias replaced (first→last covered token,
-  // space-joined; internal commas kept when the alias itself carries one).
-  // Surfaced so the UI can offer "keep my spelling and remember it as an
-  // alias" instead of the parser's substituted name.
+  // Verbatim reconstruction of a candidate-token span, re-inserting the
+  // commas the tokenizer consumed (each token knows whether one preceded it).
+  const spanText = (lo: number, hi: number, commas: boolean): string => {
+    if (lo > hi) return "";
+    let out = candidate[lo].raw;
+    for (let k = lo + 1; k <= hi; k++) {
+      out +=
+        (commas && candidate[k].precededByComma ? ", " : " ") +
+        candidate[k].raw;
+    }
+    return out.replace(/\s+/g, " ").trim();
+  };
   const lo = Math.min(...coveredCandidateTokens);
   const hi = Math.max(...coveredCandidateTokens);
-  const keepCommas = aliasName.includes(",");
-  let sourceName = candidate[lo].raw;
-  for (let k = lo + 1; k <= hi; k++) {
-    sourceName +=
-      (keepCommas && candidate[k].precededByComma ? ", " : " ") +
-      candidate[k].raw;
-  }
-  sourceName = sourceName.replace(/\s+/g, " ").trim();
-  // Reassemble notes in SOURCE order:
-  //   leadingNotes (range/size, front)
-  //   → the name area walked left-to-right, emitting the descriptor runs the
-  //     match DIDN'T take and the in-line paren notes at their recorded
-  //     position (so "…peanut butter-no sugar added (crunchy…) see notes" →
-  //     "no sugar added, crunchy…, see notes")
-  //   → post-comma notes (comma-tail + later parens), minus any comma-tail the
-  //     match folded into the name
-  //   → trailingNotes (hoisted brackets / "to taste")
+  // The original SOURCE span the alias replaced (first→last covered token).
+  // Surfaced so the UI can offer "keep my spelling and remember it as an
+  // alias" instead of the parser's substituted name.
+  const sourceName = spanText(lo, hi, aliasName.includes(","));
+  // Raw remainder: everything before and after the covered span, verbatim
+  // and in source order. (Coverage windows are contiguous; uncovered tokens
+  // INSIDE [lo..hi] shouldn't exist — defensively fold them into the after
+  // fragment so nothing is ever dropped.)
   const covered = new Set(coveredCandidateTokens);
-  const preCommaCount = candidate.filter((t) => !t.postComma).length;
-  // In-line paren notes grouped by their (clamped) name-token position.
-  const notesAtPos = new Map<number, string[]>();
-  for (const n of parsed.nameAreaNotes) {
-    // Re-tokenise the recorded name prefix the SAME way as the match
-    // candidate so the position lands in candidate-token space (the parser
-    // and the matcher split dashes differently).
-    const pos = Math.min(tokenizeCandidate(n.afterText).length, preCommaCount);
-    const list = notesAtPos.get(pos) ?? [];
-    list.push(n.text);
-    notesAtPos.set(pos, list);
+  const interior: string[] = [];
+  for (let k = lo + 1; k < hi; k++) {
+    if (!covered.has(k)) interior.push(candidate[k].raw);
   }
-  const nameAreaFragments: string[] = [];
-  let buffer: string[] = [];
-  const flush = () => {
-    const run = buffer.join(" ").trim();
-    if (run.length > 0) nameAreaFragments.push(run);
-    buffer = [];
-  };
-  for (let j = 0; j <= preCommaCount; j++) {
-    const atPos = notesAtPos.get(j);
-    if (atPos) {
-      flush();
-      for (const t of atPos) nameAreaFragments.push(t);
-    }
-    if (j === preCommaCount) break;
-    if (covered.has(j)) flush();
-    else buffer.push(candidate[j].raw);
-  }
-  flush();
-  // Comma-tail tokens the match folded into the name → drop from postComma.
-  const coveredCommaTail = candidate
-    .filter((t, i) => t.postComma && covered.has(i))
-    .map((t) => t.raw)
-    .join(" ")
-    .trim();
-  const postComma =
-    coveredCommaTail.length > 0
-      ? subtractCommaTail(parsed.postCommaNotes, coveredCommaTail)
-      : parsed.postCommaNotes;
+  const before = tidyRemainderFragment(spanText(0, lo - 1, true));
+  const afterRaw = [interior.join(" "), spanText(hi + 1, candidate.length - 1, true)]
+    .filter((s) => s.length > 0)
+    .join(" ");
+  const after = tidyRemainderFragment(afterRaw);
   const notes =
     [
-      ...parsed.leadingNotes,
-      ...nameAreaFragments,
-      postComma ?? "",
-      ...parsed.trailingNotes,
+      ...parsed.frontCaptures,
+      before ?? "",
+      after ?? "",
+      ...parsed.trailingCaptures,
     ]
       .map((s) => s.trim())
       .filter((s) => s.length > 0)
@@ -689,10 +657,11 @@ function resolveIngredientForRow(
   // ranked matches; the pill UI surfaces the below-threshold ones too.
   let wideMatches: IngredientCandidateMatch[] = [];
   if (catalog && catalog.length > 0) {
-    const wideText = [parsed.name, parsed.commaTailText]
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0)
-      .join(", ");
+    // Flavor-1 match input: the full post-amount/unit remainder verbatim
+    // (size modifiers, parens, ALL post-comma content) — see
+    // ParsedIngredient.matchText. Post-comma tokens are rank-discounted by
+    // the matcher's comma handling as before.
+    const wideText = parsed.matchText;
     if (wideText.length > 0) {
       // Resolve the line's unit so the matcher can use it as the decider:
       // among gate-clearers, a candidate whose resolved unit matches the line's

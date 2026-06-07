@@ -1560,3 +1560,109 @@ describe("vocab rules apply only on the no-match path", () => {
     expect(out[0].notes).toContain("zum Bestreuen");
   });
 });
+
+describe("raw-remainder notes — matched lines keep the source verbatim", () => {
+  // Flavor 1: only amount/unit/flags are consumed before matching; after a
+  // match the notes are the verbatim source remainder before+after the
+  // covered span (edges trimmed, whole-paren fragments unwrapped). No
+  // category buckets, no mid-line peeling.
+  const catalog: IngredientCatalog = [
+    {
+      ingredientId: 1,
+      canonicalName: "cauliflower",
+      aliasName: "cauliflower",
+      tokens: ["cauliflower"],
+    },
+    {
+      ingredientId: 2,
+      canonicalName: "peanut butter",
+      aliasName: "peanut butter",
+      tokens: ["peanut", "butter"],
+    },
+    {
+      ingredientId: 3,
+      canonicalName: "unsalted butter",
+      aliasName: "unsalted butter",
+      tokens: ["unsalted", "butter"],
+    },
+    {
+      ingredientId: 4,
+      canonicalName: "Bohnen",
+      aliasName: "Bohnen",
+      tokens: ["bohnen"],
+    },
+    {
+      ingredientId: 5,
+      canonicalName: "Knoblauch",
+      aliasName: "garlic",
+      tokens: ["garlic"],
+    },
+  ];
+
+  it("cauliflower: prep phrase survives intact, in source order", () => {
+    const out = parseIngredientLines(
+      ["1 small head cauliflower - sliced into 1-inch pieces, or small florets"],
+      makeLookups(catalog),
+    );
+    expect(out[0].ingredientId).toBe(1);
+    expect(out[0].name).toBe("cauliflower");
+    expect(out[0].quantity).toBe(1);
+    // No unit stolen from "pieces" (interior numeric guard).
+    expect(out[0].unit).toBeNull();
+    expect(out[0].notes).toBe(
+      "small head, sliced into 1 inch pieces, or small florets",
+    );
+  });
+
+  it("a fragment ENTIRELY bound by parens is unwrapped", () => {
+    const out = parseIngredientLines(
+      ["500 g peanut butter (natural, no sugar added)"],
+      makeLookups(catalog),
+    );
+    expect(out[0].ingredientId).toBe(2);
+    expect(out[0].name).toBe("peanut butter");
+    expect(out[0].notes).toBe("natural, no sugar added");
+  });
+
+  it("parens NOT bounding the whole fragment stay verbatim", () => {
+    const out = parseIngredientLines(
+      ["500 g peanut butter (natural, no sugar added) smooth"],
+      makeLookups(catalog),
+    );
+    expect(out[0].ingredientId).toBe(2);
+    expect(out[0].notes).toBe("(natural, no sugar added) smooth");
+  });
+
+  it("secondary measurement stays verbatim in the notes (no peel-gutting)", () => {
+    const out = parseIngredientLines(
+      ["1/2 cup 1 stick unsalted butter, room temperature"],
+      makeLookups(catalog, ["cup", "stick"]),
+    );
+    expect(out[0].ingredientId).toBe(3);
+    expect(out[0].quantity).toBe(0.5);
+    expect(out[0].unit?.name.toLowerCase()).toBe("cup");
+    expect(out[0].notes).toBe("1 stick, room temperature");
+  });
+
+  it("size modifier is skipped (not consumed) so the unit is still found", () => {
+    const out = parseIngredientLines(
+      ["1 kl. Dose Bohnen"],
+      makeLookups(catalog, ["Dose"]),
+    );
+    expect(out[0].ingredientId).toBe(4);
+    expect(out[0].quantity).toBe(1);
+    expect(out[0].unit?.name).toBe("Dose");
+    expect(out[0].notes).toBe("kl.");
+  });
+
+  it("trailing-unit fallback still fires for '1 garlic clove' and leaves the remainder", () => {
+    const out = parseIngredientLines(
+      ["1 garlic clove"],
+      makeLookups(catalog, ["clove"]),
+    );
+    expect(out[0].ingredientId).toBe(5);
+    expect(out[0].quantity).toBe(1);
+    expect(out[0].unit?.name).toBe("clove");
+    expect(out[0].notes).toBeNull();
+  });
+});

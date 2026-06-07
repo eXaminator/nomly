@@ -6,6 +6,7 @@ import {
   parseIngredientString,
   splitConjunctions,
   stripVocabTail,
+  tidyRemainderFragment,
 } from "@/lib/recipe-import/ingredient";
 import {
   asImageUrl,
@@ -381,6 +382,34 @@ describe("parseIngredientString — extended cases", () => {
   it("'Salz - nach Geschmack' collapses the dash, keeps the phrase", () => {
     const r = parse("Salz - nach Geschmack");
     expect(r.name).toBe("Salz nach Geschmack");
+  });
+
+  describe("tidyRemainderFragment — raw-remainder edge cleanup", () => {
+    it("trims separators and whitespace at the edges", () => {
+      expect(tidyRemainderFragment("- sliced into pieces,")).toBe(
+        "sliced into pieces",
+      );
+      expect(tidyRemainderFragment(" , – ")).toBeNull();
+    });
+    it("drops edge-adjacent filler words only", () => {
+      expect(tidyRemainderFragment("of the small head")).toBe("small head");
+      // interior filler stays — it's part of the phrase
+      expect(tidyRemainderFragment("sliced into strips of gold")).toBe(
+        "sliced into strips of gold",
+      );
+    });
+    it("unwraps a fragment entirely bound by parens", () => {
+      expect(tidyRemainderFragment("(natural, no sugar added)")).toBe(
+        "natural, no sugar added",
+      );
+      // partial parens stay verbatim
+      expect(tidyRemainderFragment("(natural) smooth")).toBe("(natural) smooth");
+    });
+    it("never returns an empty string", () => {
+      expect(tidyRemainderFragment("")).toBeNull();
+      expect(tidyRemainderFragment("of")).toBeNull();
+      expect(tidyRemainderFragment("()")).toBeNull();
+    });
   });
 
   describe("stripVocabTail — no-match-only vocabulary cleanup", () => {
