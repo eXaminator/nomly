@@ -1887,3 +1887,24 @@ describe("paren sizes are front captures only at the line front", () => {
     expect(out[0].notes).toBe("28 oz.");
   });
 });
+
+describe("optional marker strip preserves the surrounding comma", () => {
+  const catalog: IngredientCatalog = [
+    {
+      ingredientId: 1,
+      canonicalName: "Chilischote",
+      aliasName: "Chilischote",
+      tokens: ["chilischote"],
+    },
+  ];
+
+  it("'(gehackt, optional je nach Schärfe …)' keeps the comma where 'optional' was removed", () => {
+    const out = parseIngredientLines(
+      ["1 kleine Chilischote (gehackt, optional je nach Schärfe der Currypaste)"],
+      makeLookups(catalog),
+    );
+    expect(out[0].ingredientId).toBe(1);
+    expect(out[0].isOptional).toBe(true);
+    expect(out[0].notes).toBe("kleine, gehackt, je nach Schärfe der Currypaste");
+  });
+});

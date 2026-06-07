@@ -662,8 +662,12 @@ function preprocess(raw: string): {
       isOptional = true;
       const cleaned = inner
         .replace(/\b(?:optional|optionally|opt\.)\b/gi, "")
-        .replace(/^[\s,;]+|[\s,;]+$/g, "")
-        .replace(/[\s,;]+/g, " ")
+        // Keep commas that separated content around the removed marker
+        // ("gehackt, optional je nach …" → "gehackt, je nach …") —
+        // collapse separator runs to ", ", sparing decimal commas.
+        .replace(/\s*(?:(?<!\d)[,;]|[,;](?!\d))[\s,;]*/g, ", ")
+        .replace(/\s+/g, " ")
+        .replace(/^[\s,]+|[\s,]+$/g, "")
         .trim();
       if (cleaned.length > 0) capturedNotes.push(cleaned);
       return " ";
@@ -672,10 +676,16 @@ function preprocess(raw: string): {
 
   // "optional" / "optionally" / "opt." appearing ANYWHERE flags the row
   // and is stripped from the text. The user's rule: never let those words
-  // bleed into the name or notes.
+  // bleed into the name or notes. The match swallows surrounding
+  // separators — when a COMMA was among them ("gehackt, optional je nach
+  // …"), keep one so the pieces around the removed marker stay separated
+  // ("gehackt, je nach …").
   if (OPTIONAL_ANYWHERE_RE.test(text)) {
     isOptional = true;
-    text = text.replace(OPTIONAL_ANYWHERE_RE, " ");
+    OPTIONAL_ANYWHERE_RE.lastIndex = 0;
+    text = text.replace(OPTIONAL_ANYWHERE_RE, (m) =>
+      m.includes(",") ? ", " : " ",
+    );
     OPTIONAL_ANYWHERE_RE.lastIndex = 0;
   }
   // Other markers (n. B., evtl., nach Belieben, …) — same strip but they
