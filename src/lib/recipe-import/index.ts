@@ -603,14 +603,16 @@ function computeNameAndNotes(
     if (!covered.has(k)) interior.push(candidate[k].raw);
   }
   // Front captures (range expression, prep noun, vague amount) and the
-  // before-remainder are one contiguous source prefix — "5-6 große Äpfel"
-  // must yield the note "5-6 große", not "5-6, große". Join them with
-  // spaces into a single fragment before tidying.
+  // before-remainder form the source prefix. A capture stays SPACE-glued to
+  // the next piece when nothing was consumed between them ("5-6 große");
+  // when tokens were stripped in between ("Juice of 1 small" — "of 1"
+  // consumed) the pieces separate with a comma ("Juice, small").
+  let frontText = "";
+  for (const c of parsed.frontCaptures) {
+    frontText += c.text.trim() + (c.gluedToNext ? " " : ", ");
+  }
   const frontAndBefore = tidyRemainderFragment(
-    [...parsed.frontCaptures, spanText(0, lo - 1, true)]
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0)
-      .join(" "),
+    frontText + spanText(0, lo - 1, true),
   );
   const afterRaw = [interior.join(" "), spanText(hi + 1, candidate.length - 1, true)]
     .filter((s) => s.length > 0)

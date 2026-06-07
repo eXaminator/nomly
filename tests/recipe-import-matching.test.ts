@@ -1827,3 +1827,26 @@ describe("sub / substitute / ersatzweise mark alternatives", () => {
     expect(out[1].isAlternative).toBe(true);
   });
 });
+
+describe("front-capture gluing follows source contiguity", () => {
+  const catalog: IngredientCatalog = [
+    { ingredientId: 1, canonicalName: "Zitrone", aliasName: "lemon", tokens: ["lemon"] },
+    { ingredientId: 2, canonicalName: "Apfel", aliasName: "Äpfel", tokens: ["apfel"] },
+  ];
+
+  it("'Juice of 1 small lemon' → stripped words between pieces become a comma", () => {
+    const out = parseIngredientLines(
+      ["Juice of 1 small lemon"],
+      makeLookups(catalog),
+    );
+    expect(out[0].ingredientId).toBe(1);
+    expect(out[0].quantity).toBe(1);
+    expect(out[0].notes).toBe("Juice, small");
+  });
+
+  it("'5-6 große Äpfel' stays glued — nothing was stripped between range and word", () => {
+    const out = parseIngredientLines(["5-6 große Äpfel"], makeLookups(catalog));
+    expect(out[0].ingredientId).toBe(2);
+    expect(out[0].notes).toBe("5-6 große");
+  });
+});

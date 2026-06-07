@@ -86,8 +86,12 @@ export type ParsedIngredient = {
   matchText: string;
   /** Notes consumed from the line FRONT alongside the amount (range
    *  expressions, prep-leading noun "Saft", vague amount "etwas") — the
-   *  raw-remainder notes builder prepends these in source order. */
-  frontCaptures: string[];
+   *  raw-remainder notes builder prepends these in source order.
+   *  `gluedToNext` is true when NOTHING was consumed between this capture
+   *  and the next note piece ("5-6 große" reads as one phrase, space-
+   *  joined); false when tokens were stripped in between ("Juice of 1
+   *  small" → "Juice, small"). */
+  frontCaptures: { text: string; gluedToNext: boolean }[];
   /** Preprocess-hoisted captures (brackets, parenthesized sizes) — appended
    *  after the remainder fragments, mirroring today's trailing placement. */
   trailingCaptures: string[];
@@ -981,15 +985,18 @@ function tokenize(input: string): string[] {
  * Drop leading filler tokens that snuck through the preprocess regex (they
  * may appear after a quantity-or-unit prefix has been consumed too).
  */
-function dropLeadingFiller(tokens: string[]): void {
+function dropLeadingFiller(tokens: string[]): boolean {
+  let dropped = false;
   while (tokens.length > 0) {
     const lower = tokens[0].toLowerCase().replace(/[.,;]$/, "");
     if (NAME_FILLER_TOKENS.has(lower)) {
       tokens.shift();
+      dropped = true;
     } else {
       break;
     }
   }
+  return dropped;
 }
 
 export function parseIngredientString(
@@ -1007,7 +1014,17 @@ export function parseIngredientString(
   // noun / vague amount consumed below) — the raw-remainder notes builder
   // leads with the front group and trails with the rest.
   const trailingCaptures = [...capturedNotes];
-  const frontCaptures: string[] = [...preprocessFront];
+  // Preprocess size captures always have consumed text after them
+  // (the container word becomes the unit) → never glued.
+  const frontCaptures: { text: string; gluedToNext: boolean }[] =
+    preprocessFront.map((text) => ({ text, gluedToNext: false }));
+  /** Mark that tokens were CONSUMED after the latest front capture — the
+   *  capture and whatever note piece follows are no longer contiguous in
+   *  the source, so the notes builder separates them with a comma. */
+  const markFrontBoundary = () => {
+    const last = frontCaptures[frontCaptures.length - 1];
+    if (last) last.gluedToNext = false;
+  };
   const cleaned = normalize(preprocessed);
   if (cleaned.length === 0) {
     const allCaptures = [...preprocessFront, ...capturedNotes];
@@ -1032,7 +1049,7 @@ export function parseIngredientString(
   }
   const tokens = tokenize(cleaned);
 
-  dropLeadingFiller(tokens);
+  if (dropLeadingFiller(tokens)) markFrontBoundary();
 
   // Leading preparation nouns — "Saft einer halben Zitrone", "Abrieb einer
   // Bio-Orange", "juice of half a lemon". We only treat the noun as
@@ -1045,10 +1062,10 @@ export function parseIngredientString(
   ) {
     const noun = tokens.shift()!;
     capturedNotes.push(noun);
-    frontCaptures.push(noun);
+    frontCaptures.push({ text: noun, gluedToNext: true });
     // Re-strip filler so the next stage sees the actual quantity / unit
     // token, not "von" / "einer".
-    dropLeadingFiller(tokens);
+    if (dropLeadingFiller(tokens)) markFrontBoundary();
   }
 
   // Pre-quantity size modifiers — "Heaping 1 teaspoon", "Scant ½ cup",
@@ -1084,10 +1101,11 @@ export function parseIngredientString(
     const firstLower = tokens[0].toLowerCase();
     if (TEXT_AMOUNT_VAGUE.has(firstLower)) {
       capturedNotes.push(tokens[0]);
-      frontCaptures.push(tokens[0]);
+      frontCaptures.push({ text: tokens[0], gluedToNext: true });
       tokens.shift();
       quantity = null;
     } else if (TEXT_AMOUNT_ONE.has(firstLower)) {
+      markFrontBoundary();
       tokens.shift();
       quantity = 1;
       // "ein halber TL", "eine halbe Tasse", "ein viertel TL" — indefinite
@@ -1105,6 +1123,7 @@ export function parseIngredientString(
         }
       }
     } else if (TEXT_AMOUNT_HALF.has(firstLower)) {
+      markFrontBoundary();
       tokens.shift();
       quantity = 0.5;
       // "half a teaspoon" — drop the trailing article so the unit detector
@@ -1113,6 +1132,7 @@ export function parseIngredientString(
         tokens.shift();
       }
     } else if (TEXT_AMOUNT_QUARTER.has(firstLower)) {
+      markFrontBoundary();
       tokens.shift();
       quantity = 0.25;
       if (tokens.length > 0 && TEXT_AMOUNT_ONE.has(tokens[0].toLowerCase())) {
@@ -1121,10 +1141,15 @@ export function parseIngredientString(
     } else {
       const range = consumeQuantity(tokens);
       if (range) {
+        // Quantity tokens were consumed — earlier captures (e.g. a prep
+        // noun) are no longer contiguous with what follows.
+        markFrontBoundary();
         quantity = range.quantity;
         if (range.rangeExpression) {
           rangeNotes.push(range.rangeExpression);
-          frontCaptures.push(range.rangeExpression);
+          // The range itself sits exactly where the quantity was — it IS
+          // the consumed text, so it stays glued to the next word.
+          frontCaptures.push({ text: range.rangeExpression, gluedToNext: true });
         }
       }
     }
@@ -1164,13 +1189,14 @@ export function parseIngredientString(
     ) {
       unitName = candidate.replace(/\.$/, "");
       tokens.shift();
+      markFrontBoundary();
       // Fallback: unit present but no amount → default to 1.
       if (quantity === null) quantity = 1;
     }
   }
 
   // Drop a leading filler word between unit and name ("of", "von", "and").
-  dropLeadingFiller(tokens);
+  if (dropLeadingFiller(tokens)) markFrontBoundary();
 
   // Trailing-unit fallback: when we didn't catch a unit after the quantity
   // ("1 garlic clove") but the LAST token of the line's head (up to the
