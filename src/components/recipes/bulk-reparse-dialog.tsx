@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useRouter } from "next/navigation";
 import { ChevronDown, ChevronRight, Loader2, Volume2, VolumeX } from "lucide-react";
 import {
   Dialog,
@@ -31,7 +32,15 @@ import {
   RecipeIngredientReadLine,
   type LineHighlight,
 } from "./ingredient-read-line";
-import type { NewIngredientDefaults } from "@/lib/recipes/types";
+import type { AliasWarning, NewIngredientDefaults } from "@/lib/recipes/types";
+
+/** One-line German rendering of a non-fatal alias outcome. */
+function aliasWarningText(w: AliasWarning): string {
+  const others = w.otherIngredientNames.map((n) => `„${n}“`).join(", ");
+  return w.kind === "canonical"
+    ? `Alias „${w.aliasName}“ nicht angelegt — ist bereits die Zutat ${others}`
+    : `Alias „${w.aliasName}“ angelegt — kollidiert mit einem Alias von ${others}`;
+}
 
 function amountStr(q: number | null, unit: string | null): string {
   return `${formatQuantity(q)} ${unit ?? ""}`.replace(/\s+/g, " ").trim();
@@ -156,6 +165,7 @@ export function BulkReparseDialog({
   open: boolean;
   onOpenChange: (o: boolean) => void;
 }) {
+  const router = useRouter();
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [entries, setEntries] = React.useState<ScanEntry[]>([]);
@@ -478,6 +488,7 @@ export function BulkReparseDialog({
   async function doApply(newIngredientDefaults: NewIngredientDefaults[]) {
     setApplying(true);
     setError(null);
+    setSummary(null);
     try {
       const { recipes } = collectSelection();
       const r = await fetch("/api/v1/recipes/reparse-apply", {
@@ -488,13 +499,59 @@ export function BulkReparseDialog({
           ...(newIngredientDefaults.length > 0 ? { newIngredientDefaults } : {}),
         }),
       });
+      if (r.status === 409) {
+        // Stale: a selected line's rows changed since the scan (recipe edited
+        // elsewhere). The server applied NOTHING. Deselect the stale lines,
+        // name them, and let the user re-apply the still-valid rest.
+        const data = (await r.json().catch(() => null)) as {
+          stale?: { recipeId: number; replaceRowIds: number[] }[];
+        } | null;
+        const staleIds = new Set(
+          (data?.stale ?? []).flatMap((s) => s.replaceRowIds),
+        );
+        const isStale = (e: ScanEntry) =>
+          e.currentRowIds.some((id) => staleIds.has(id));
+        const staleLines = entries
+          .filter(isStale)
+          .map((e) => `${e.title}: „${e.rawLine}“`);
+        setStates((prev) =>
+          prev.map((s, i) =>
+            entries[i] && isStale(entries[i]) ? { ...s, selected: false } : s,
+          ),
+        );
+        setPendingNew(null);
+        setSummary(
+          `Nichts angewendet — diese Zeilen wurden zwischenzeitlich geändert und sind jetzt abgewählt: ${staleLines.join("; ")}. ` +
+            "Den Rest erneut anwenden; für die abgewählten Zeilen den Dialog neu öffnen.",
+        );
+        return;
+      }
       if (!r.ok) throw new Error("apply failed");
+      const data = (await r.json().catch(() => null)) as {
+        aliasWarnings?: AliasWarning[];
+      } | null;
       setPendingNew(null);
+      // The DB changed — drop the router cache so recipe pages re-render.
+      router.refresh();
+      const warnings = data?.aliasWarnings ?? [];
+      if (warnings.length > 0) {
+        // Everything was applied, but some alias requests had conflicts.
+        // Keep the dialog open on the (now empty) list to show them instead
+        // of closing as if nothing were noteworthy.
+        setEntries([]);
+        setStates([]);
+        setSummary(
+          `Änderungen angewendet. ${warnings.map(aliasWarningText).join(" · ")}`,
+        );
+        return;
+      }
       // Saved — close the dialog. Reopening triggers a fresh scan (the open
       // effect resets loadedRef), so there's no need to re-run the parse here.
       onOpenChange(false);
     } catch {
-      setError("Anwenden fehlgeschlagen.");
+      setError(
+        "Anwenden fehlgeschlagen — es wurde nichts gespeichert. Die Auswahl kann erneut angewendet werden.",
+      );
     } finally {
       setApplying(false);
     }
@@ -577,7 +634,7 @@ export function BulkReparseDialog({
               <div className="flex items-center gap-2 py-8 text-[var(--color-muted-fg)]">
                 <Loader2 className="size-4 animate-spin" /> Prüfe Rezepte…
               </div>
-            ) : error ? (
+            ) : error && visibleGroups.length === 0 ? (
               <p className="py-8 text-[var(--color-danger,#c00)]">{error}</p>
             ) : visibleGroups.length === 0 ? (
               <p className="py-8 text-[var(--color-muted-fg)]">
@@ -588,8 +645,13 @@ export function BulkReparseDialog({
               </p>
             ) : (
               <div className="flex flex-col gap-2">
+                {error ? (
+                  <p className="text-sm text-[var(--color-danger,#c00)]">{error}</p>
+                ) : null}
                 {summary ? (
-                  <p className="text-sm text-[var(--color-muted-fg)]">{summary}</p>
+                  // In-list summary = the stale-apply notice (warnings clear
+                  // the list first) — render it as a warning, not muted text.
+                  <p className="text-sm text-[var(--color-danger,#c00)]">{summary}</p>
                 ) : null}
                 <div className="flex items-center gap-3 text-sm">
                   <button

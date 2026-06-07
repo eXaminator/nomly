@@ -14,6 +14,7 @@ import {
 import { resolveUnitLabel, type LabelForm } from "../units/label.ts";
 import type { RecipeDiet } from "./diet.ts";
 import type {
+  AliasWarning,
   RecipeInput,
   RecipeListItem,
   RecipeView,
@@ -114,36 +115,66 @@ function resolveIngredient(
   return inserted[0].id;
 }
 
+type AddIngredientAliasResult =
+  /** Inserted, or the spelling already covers this very ingredient. */
+  | { outcome: "created" | "covered" }
+  /** Spelling is another ingredient's canonical name — NOT inserted
+   *  (canonical lookup would always shadow the alias). */
+  | { outcome: "canonical-conflict"; otherIngredientName: string }
+  /** Spelling is already an alias of other ingredient(s) — inserted anyway
+   *  (cross-ingredient collisions are legal and curated; see schema notes
+   *  on `ingredient_alias.name`), reported so the caller can surface it. */
+  | { outcome: "collision-created"; otherIngredientNames: string[] };
+
 /**
- * Insert an alias of {@link ingredientId} with the given display name, but
- * only when no existing canonical or alias row already covers it (case-
- * insensitive, Unicode-aware). Used by the force-match flow on recipe save
- * — the user explicitly opted in by checking "Als Alias hinzufügen" in the
- * picker, so they accept a small catalog change.
+ * Insert an alias of {@link ingredientId} with the given display name
+ * (case-insensitive, Unicode-aware lookups). Used by the force-match flow on
+ * recipe save — the user explicitly opted in by checking "Als Alias
+ * hinzufügen" in the picker, so they accept a small catalog change. Never
+ * silent: every non-trivial outcome is reported via the result.
  */
 function addIngredientAlias(
   tx: Tx,
   ingredientId: number,
   aliasName: string,
-): void {
+): AddIngredientAliasResult {
   const cleaned = norm(aliasName);
-  if (cleaned.length === 0) return;
+  if (cleaned.length === 0) return { outcome: "covered" };
   const lowered = cleaned.toLowerCase();
   const canonical = tx
-    .select({ id: ingredientTable.id })
+    .select({ id: ingredientTable.id, name: ingredientTable.name })
     .from(ingredientTable)
     .where(sql`lower_u(${ingredientTable.name}) = ${lowered}`)
     .get();
-  if (canonical) return;
-  const existingAlias = tx
-    .select({ id: ingredientAliasTable.ingredientId })
+  if (canonical) {
+    return canonical.id === ingredientId
+      ? { outcome: "covered" }
+      : { outcome: "canonical-conflict", otherIngredientName: canonical.name };
+  }
+  const owners = tx
+    .select({
+      ingredientId: ingredientAliasTable.ingredientId,
+      ownerName: ingredientTable.name,
+    })
     .from(ingredientAliasTable)
+    .innerJoin(
+      ingredientTable,
+      eq(ingredientTable.id, ingredientAliasTable.ingredientId),
+    )
     .where(sql`lower_u(${ingredientAliasTable.name}) = ${lowered}`)
-    .get();
-  if (existingAlias) return;
+    .all();
+  if (owners.some((o) => o.ingredientId === ingredientId)) {
+    return { outcome: "covered" };
+  }
   tx.insert(ingredientAliasTable)
     .values({ ingredientId, name: cleaned })
     .run();
+  return owners.length > 0
+    ? {
+        outcome: "collision-created",
+        otherIngredientNames: [...new Set(owners.map((o) => o.ownerName))],
+      }
+    : { outcome: "created" };
 }
 
 function resolveDisplayUnit(
@@ -190,10 +221,11 @@ function writeSections(
   recipeId: number,
   sections: RecipeInput["sections"],
   newIngredientDefaults?: RecipeInput["newIngredientDefaults"],
-) {
+): AliasWarning[] {
   const defaultsByLowerName = buildNewIngredientDefaultsMap(
     newIngredientDefaults,
   );
+  const aliasWarnings: AliasWarning[] = [];
   sections.forEach((section, sIdx) => {
     const sectionRow = tx
       .insert(recipeSection)
@@ -232,8 +264,24 @@ function writeSections(
       // Force-match alias add: when the user pinned the row to a specific
       // ingredient and asked to remember the spelling, insert it as an
       // alias too (idempotent — duplicates are guarded by the lookup).
+      // Conflicting outcomes are collected, never silently dropped.
       if (!ing.unassigned && ing.ingredientId != null && ing.addAsAlias) {
-        addIngredientAlias(tx, ing.ingredientId, trimmedName);
+        const result = addIngredientAlias(tx, ing.ingredientId, trimmedName);
+        if (result.outcome === "canonical-conflict") {
+          aliasWarnings.push({
+            aliasName: trimmedName,
+            kind: "canonical",
+            otherIngredientNames: [result.otherIngredientName],
+            created: false,
+          });
+        } else if (result.outcome === "collision-created") {
+          aliasWarnings.push({
+            aliasName: trimmedName,
+            kind: "collision",
+            otherIngredientNames: result.otherIngredientNames,
+            created: true,
+          });
+        }
       }
       // Resolve the alternative linkage. Orphan alternatives (no preceding
       // primary) silently become primaries — easier than rejecting the
@@ -273,6 +321,7 @@ function writeSections(
       }
     });
   });
+  return aliasWarnings;
 }
 
 function writeTags(tx: Tx, recipeId: number, tagNames: string[]) {
@@ -304,32 +353,50 @@ export function createRecipe(input: RecipeInput): number {
   });
 }
 
+/**
+ * Transaction-scoped body of {@link updateRecipe}. Exported so callers that
+ * update several recipes atomically (bulk re-parse apply) can run them inside
+ * ONE outer `db.transaction` — nesting `db.transaction` would BEGIN twice on
+ * the same connection. Returns the alias warnings collected while writing.
+ */
+export function updateRecipeTx(
+  tx: Tx,
+  id: number,
+  input: RecipeInput,
+): { aliasWarnings: AliasWarning[] } {
+  const updated = tx
+    .update(recipe)
+    .set({
+      title: input.title.trim(),
+      description: input.description?.trim() || null,
+      sourceUrl: input.sourceUrl?.trim() || null,
+      photoPath: input.photoPath?.trim() || null,
+      servings: input.servings,
+      prepTimeMin: input.prepTimeMin,
+      cookTimeMin: input.cookTimeMin,
+      updatedAt: nowSec(),
+    })
+    .where(eq(recipe.id, id))
+    .returning({ id: recipe.id })
+    .all();
+  if (updated.length === 0) throw new Error(`recipe ${id} not found`);
+
+  // Replace sections + ingredients (cascade handles ingredients) and tag links.
+  tx.delete(recipeSection).where(eq(recipeSection.recipeId, id)).run();
+  tx.delete(recipeTag).where(eq(recipeTag.recipeId, id)).run();
+
+  const aliasWarnings = writeSections(
+    tx,
+    id,
+    input.sections,
+    input.newIngredientDefaults,
+  );
+  writeTags(tx, id, input.tags);
+  return { aliasWarnings };
+}
+
 export function updateRecipe(id: number, input: RecipeInput): void {
-  db.transaction((tx) => {
-    const updated = tx
-      .update(recipe)
-      .set({
-        title: input.title.trim(),
-        description: input.description?.trim() || null,
-        sourceUrl: input.sourceUrl?.trim() || null,
-        photoPath: input.photoPath?.trim() || null,
-        servings: input.servings,
-        prepTimeMin: input.prepTimeMin,
-        cookTimeMin: input.cookTimeMin,
-        updatedAt: nowSec(),
-      })
-      .where(eq(recipe.id, id))
-      .returning({ id: recipe.id })
-      .all();
-    if (updated.length === 0) throw new Error(`recipe ${id} not found`);
-
-    // Replace sections + ingredients (cascade handles ingredients) and tag links.
-    tx.delete(recipeSection).where(eq(recipeSection.recipeId, id)).run();
-    tx.delete(recipeTag).where(eq(recipeTag.recipeId, id)).run();
-
-    writeSections(tx, id, input.sections, input.newIngredientDefaults);
-    writeTags(tx, id, input.tags);
-  });
+  db.transaction((tx) => updateRecipeTx(tx, id, input));
 }
 
 export function deleteRecipe(id: number): boolean {

@@ -63,6 +63,22 @@ export type NewIngredientDefaults = {
   isEquipment: boolean;
 };
 
+/**
+ * Non-fatal outcome of an explicit "add as alias" request during a recipe
+ * save. `canonical`: the spelling is another ingredient's canonical name —
+ * the alias was NOT created (canonical lookup would always shadow it).
+ * `collision`: the spelling is already an alias of other ingredient(s) — the
+ * alias WAS created anyway (cross-ingredient collisions are a legal, curated
+ * state; see the ingredient_alias schema notes) and is reported so the user
+ * can curate it.
+ */
+export type AliasWarning = {
+  aliasName: string;
+  kind: "canonical" | "collision";
+  otherIngredientNames: string[];
+  created: boolean;
+};
+
 export type RecipeInput = {
   title: string;
   description: string | null;
