@@ -281,7 +281,7 @@ describe("parseIngredientString — extended cases", () => {
     const r = parse("12-count package pull-apart dinner rolls");
     expect(r.quantity).toBe(1);
     expect(r.unitName?.toLowerCase()).toBe("package");
-    expect(r.notes).toMatch(/12 count/i);
+    expect(r.notes).toMatch(/12-count/i);
     expect(r.name).toMatch(/pull-apart/i);
   });
   it("4-inch stems: compound becomes amount+unit when next word is not a container", () => {

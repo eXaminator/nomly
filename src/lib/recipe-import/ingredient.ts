@@ -754,22 +754,33 @@ function preprocess(raw: string): {
     text = `${amountPart} ${namePart}`;
   }
 
-  // Compound size-unit dash like "12-count", "14-ounce", "1-inch", "4-inch":
+  // Compound size-unit dash like "12-count", "14-ounce", "1-inch", "4-inch"
+  // — anchored to the line FRONT (only digits / whitespace / "x" may precede
+  // it): a mid-line compound ("sliced into 1-inch pieces") is part of an
+  // annotation and stays verbatim for the notes.
   //   - If the next token is a container word (package, can, tin, Dose, …),
-  //     the compound describes the container's size — demote to a note and
-  //     let the container word become the unit.
-  //         "14-ounce can of black beans" → unit "can", note "14 ounce"
+  //     the compound describes the container's size — demote to a note
+  //     (kept verbatim, dash included) and let the container word become
+  //     the unit: "14-ounce can of black beans" → unit "can", note "14-ounce"
   //   - Otherwise the compound IS the quantity + unit — strip just the dash
   //     so the regular parser sees "4 inch stems …" → unit "inch", qty 4.
   const CONTAINER_RE = /(?:package|packages|packet|packets|can|cans|tin|tins|jar|jars|bottle|bottles|tube|tubes|box|boxes|dose|dosen|packung|päckchen|pck|pkg|carton|cartons)/i;
   text = text.replace(
-    /(\d+)[-–](count|ounce|ounces|oz|inch|inches|cm|gram|grams|g|kg|ml|l|lb|pound|pounds)\b(\s*)(\S*)/gi,
-    (match, num: string, sizeUnit: string, ws: string, next: string) => {
+    /^((?:[\d().,x]+\s+)*)(\d+)([-–])(count|ounce|ounces|oz|inch|inches|cm|gram|grams|g|kg|ml|l|lb|pound|pounds)\b(\s*)(\S*)/i,
+    (
+      match,
+      lead: string,
+      num: string,
+      dash: string,
+      sizeUnit: string,
+      ws: string,
+      next: string,
+    ) => {
       if (next && CONTAINER_RE.test(next)) {
-        frontCaptures.push(`${num} ${sizeUnit}`);
-        return `${ws}${next}`;
+        frontCaptures.push(`${num}${dash}${sizeUnit}`);
+        return `${lead}${ws}${next}`;
       }
-      return `${num} ${sizeUnit}${ws}${next}`;
+      return `${lead}${num} ${sizeUnit}${ws}${next}`;
     },
   );
 
@@ -1208,9 +1219,12 @@ export function parseIngredientString(
         knownUnitTokens.has(lower) ||
         knownUnitTokens.has(stripped) ||
         knownUnitTokens.has(`${stripped}.`);
+      // Any digit anywhere in the head (incl. compounds like "1-inch")
+      // signals a measurement annotation — the trailing "unit" then belongs
+      // to that annotation, not to the row.
       const hasInteriorNumeric = tokens
         .slice(0, headEnd - 1)
-        .some((t) => NUMERIC_TOKEN_RE.test(t));
+        .some((t) => /\d/.test(t));
       if (isUnit && !hasInteriorNumeric) {
         unitName = lastTok.replace(/\.$/, "");
         tokens.splice(headEnd - 1, 1);

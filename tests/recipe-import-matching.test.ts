@@ -1610,7 +1610,7 @@ describe("raw-remainder notes — matched lines keep the source verbatim", () =>
     // No unit stolen from "pieces" (interior numeric guard).
     expect(out[0].unit).toBeNull();
     expect(out[0].notes).toBe(
-      "small head, sliced into 1 inch pieces, or small florets",
+      "small head, sliced into 1-inch pieces, or small florets",
     );
   });
 
@@ -1732,7 +1732,8 @@ describe("preprocess size captures lead the notes", () => {
     );
     expect(out[0].ingredientId).toBe(1);
     expect(out[0].unit?.name.toLowerCase()).toBe("package");
-    expect(out[0].notes).toMatch(/^12 count/);
+    expect(out[0].notes).toMatch(/^12-count/);
+    expect(out[0].notes).toContain("whole-wheat");
     expect(out[0].notes).toContain("preferably whole");
   });
 });

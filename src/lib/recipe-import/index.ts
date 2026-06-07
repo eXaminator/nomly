@@ -576,9 +576,14 @@ function computeNameAndNotes(
     if (lo > hi) return "";
     let out = candidate[lo].raw;
     for (let k = lo + 1; k <= hi; k++) {
-      out +=
-        (commas && candidate[k].precededByComma ? ", " : " ") +
-        candidate[k].raw;
+      const tok = candidate[k];
+      const sep =
+        commas && tok.precededByComma
+          ? ", "
+          : tok.joinedByDash !== undefined
+            ? tok.joinedByDash
+            : " ";
+      out += sep + tok.raw;
     }
     return out.replace(/\s+/g, " ").trim();
   };

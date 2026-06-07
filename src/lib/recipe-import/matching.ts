@@ -134,6 +134,11 @@ export type CandidateToken = {
    *  mapping from the generic), but the raw tokens stay available for the
    *  verbatim notes reconstruction. */
   inParens: boolean;
+  /** Set when this token was split off the PREVIOUS one at an intra-word
+   *  dash ("whole-wheat" → "whole" + "wheat") — holds the dash character so
+   *  the verbatim notes reconstruction can re-join the compound exactly as
+   *  written. Undefined for ordinary whitespace-separated tokens. */
+  joinedByDash?: string;
 };
 
 /**
@@ -156,25 +161,43 @@ export function tokenizeCandidate(text: string): CandidateToken[] {
     }
     // Keep fraction slashes ("1/2") as one token — notes are reconstructed
     // from raw tokens and must not degrade to "1 2". Letter slashes
-    // ("und/oder") still split.
-    for (const raw of segment
+    // ("und/oder") still split. Intra-word dashes split for MATCHING (so
+    // "Cherry-Tomate" aligns against a 2-token entry) but remember the dash
+    // via `joinedByDash` so notes reconstruction restores "whole-wheat".
+    for (const piece of segment
       .replace(/(?<!\d)\/|\/(?!\d)/g, " ")
-      .split(/[\s;\-–—]+/u)) {
-      if (raw.length === 0) continue;
-      const opens = (raw.match(/\(/g) ?? []).length;
-      const closes = (raw.match(/\)/g) ?? []).length;
-      const inParens = parenDepth > 0 || opens > 0;
-      parenDepth = Math.max(0, parenDepth + opens - closes);
-      const normalized = canonicalizeMatchToken(normalizeForMatch(raw));
-      if (normalized.length === 0) continue;
-      out.push({
-        raw,
-        normalized,
-        postComma,
-        precededByComma: pendingComma,
-        inParens,
-      });
-      pendingComma = false;
+      .split(/[\s;]+/u)) {
+      if (piece.length === 0) continue;
+      const subs = piece.split(/([-–—])/);
+      let pendingDash: string | undefined;
+      let emittedInPiece = false;
+      for (const sub of subs) {
+        if (/^[-–—]$/.test(sub)) {
+          if (emittedInPiece) pendingDash = sub;
+          continue;
+        }
+        if (sub.length === 0) continue;
+        const raw = sub;
+        const opens = (raw.match(/\(/g) ?? []).length;
+        const closes = (raw.match(/\)/g) ?? []).length;
+        const inParens = parenDepth > 0 || opens > 0;
+        parenDepth = Math.max(0, parenDepth + opens - closes);
+        const normalized = canonicalizeMatchToken(normalizeForMatch(raw));
+        if (normalized.length === 0) continue;
+        out.push({
+          raw,
+          normalized,
+          postComma,
+          precededByComma: pendingComma,
+          inParens,
+          ...(pendingDash !== undefined && !pendingComma
+            ? { joinedByDash: pendingDash }
+            : {}),
+        });
+        pendingComma = false;
+        pendingDash = undefined;
+        emittedInPiece = true;
+      }
     }
   }
   return out;
