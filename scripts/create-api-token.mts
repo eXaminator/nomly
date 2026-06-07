@@ -15,8 +15,8 @@ Required:
   --name <label>   Human label stored with the token (e.g. "import-cli")
 
 Optional:
-  --scope <scope>  "full" (default, whole API) or "embed" (read-only, only the
-                   Home Assistant recipe-iframe allow-list)
+  --scope <scope>  "full" (default, whole API) or "embed" (only the Home
+                   Assistant recipe-iframe allow-list)
   --help           Print this help`;
 
 async function main() {

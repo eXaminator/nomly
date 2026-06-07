@@ -8,8 +8,10 @@ export const dynamic = "force-dynamic";
 
 /**
  * Chrome-less recipe view for the Home Assistant iframe. No app nav, no edit
- * button. Auth is the `__nomly_embed` cookie minted by proxy.ts from the `?k=`
- * token; this page never sees the token itself.
+ * button — but the "Update vormerken" wrench toggle works (the embed
+ * allow-list permits that single write). Auth is the `__nomly_embed` cookie
+ * minted by proxy.ts from the `?k=` token; this page never sees the token
+ * itself.
  *
  * Query params:
  *   meal=<mealPlanId>  enables the per-ingredient "upcoming uses" affordance

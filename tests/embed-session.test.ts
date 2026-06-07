@@ -67,6 +67,24 @@ describe("embed allow-list", () => {
     expect(isEmbedAllowedPath("/api/v1/meal-plans", "GET")).toBe(false);
   });
 
+  it("permits PATCH on a recipe's needs-update flag (the embed wrench button)", () => {
+    expect(isEmbedAllowedPath("/api/v1/recipes/12/needs-update", "PATCH")).toBe(
+      true,
+    );
+    // only PATCH — the route has no other methods anyway
+    expect(isEmbedAllowedPath("/api/v1/recipes/12/needs-update", "GET")).toBe(
+      false,
+    );
+    expect(isEmbedAllowedPath("/api/v1/recipes/12/needs-update", "POST")).toBe(
+      false,
+    );
+    // and only that one flag endpoint — not the full recipe PATCH
+    expect(isEmbedAllowedPath("/api/v1/recipes/12", "PATCH")).toBe(false);
+    expect(
+      isEmbedAllowedPath("/api/v1/recipes/12/needs-update/extra", "PATCH"),
+    ).toBe(false);
+  });
+
   it("denies everything else", () => {
     expect(isEmbedAllowedPath("/api/v1/recipes", "GET")).toBe(false);
     expect(isEmbedAllowedPath("/rezepte/12", "GET")).toBe(false);

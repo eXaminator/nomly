@@ -99,14 +99,24 @@ const EMBED_API_GET = [
 ];
 
 /**
+ * PATCH endpoints the embed recipe view calls from the client. The single
+ * entry is the "Update vormerken" wrench button — a one-field reminder flag,
+ * deliberately the only write an embed principal can perform.
+ */
+const EMBED_API_PATCH = [/^\/api\/v1\/recipes\/\d+\/needs-update$/];
+
+/**
  * What an "embed"-scoped principal may reach. Deliberately tiny: the embed
- * recipe pages, and a short GET-only allow-list of read endpoints the page
- * fetches. Everything else is denied — the embed token is read-only by
- * construction.
+ * recipe pages, a short GET-only allow-list of read endpoints the page
+ * fetches, and the needs-update flag toggle (the embed view's only write).
+ * Everything else is denied.
  */
 export function isEmbedAllowedPath(pathname: string, method: string): boolean {
   if (pathname === "/embed" || pathname.startsWith("/embed/")) return true;
   if (method === "GET" && EMBED_API_GET.some((re) => re.test(pathname))) {
+    return true;
+  }
+  if (method === "PATCH" && EMBED_API_PATCH.some((re) => re.test(pathname))) {
     return true;
   }
   return false;

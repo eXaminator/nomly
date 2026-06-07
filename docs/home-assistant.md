@@ -20,8 +20,8 @@ docker compose exec nomly \
   node --experimental-transform-types --disable-warning=ExperimentalWarning \
   scripts/create-api-token.mts --name home-assistant
 
-# Embed token — read-only, only the recipe-iframe allow-list. Goes in the
-# dashboard iframe URL.
+# Embed token — only the recipe-iframe allow-list (reads + the "Update
+# vormerken" toggle). Goes in the dashboard iframe URL.
 docker compose exec nomly \
   node --experimental-transform-types --disable-warning=ExperimentalWarning \
   scripts/create-api-token.mts --name home-assistant-embed --scope embed
@@ -38,8 +38,9 @@ nomly_bearer: "Bearer <full token>"
 
 The **embed** token is used in a Lovelace dashboard card (the iframe URL).
 Lovelace can't read `secrets.yaml`, so paste the embed token directly into the
-card config wherever you see `?k=<embed token>` below. It's a read-only token by
-construction, so that's fine.
+card config wherever you see `?k=<embed token>` below. The token is confined to
+the embed allow-list — recipe reads plus the harmless "Update vormerken" flag
+toggle — so that's fine.
 
 ### Allow framing
 
@@ -76,7 +77,8 @@ rest:
 
 The sensor's **state** is the meal count; the `mealPlans` **attribute** is the
 full array. Each meal exposes `recipe.id`, `recipe.title`, `recipe.photoPath`,
-`date`, `servings`, and `isLeftover`. Photo URL:
+`date`, `servings`, `note` (the free-text note on the planned meal, `null` when
+unset), and `isLeftover`. Photo URL:
 `https://nomly.weingaertner.pro/api/v1/<photoPath>`.
 
 `isLeftover` is `true` for a leftover day ("we're eating this again"). These
@@ -210,7 +212,13 @@ card:
 
 The tiles mirror the look of your existing `custom:button-card` (full-bleed
 photo, bold meal name bottom-left, empty-plate fallback). The placeholder's
-`tap_action: { action: 'none' }` makes it inert.
+`tap_action: { action: 'none' }` makes it inert. Each meal also carries
+`m.note` (the planner's free-text note, `null` when unset) — e.g. to surface it
+on the tile:
+
+```js
+state_display: (m.isLeftover ? '♻︎ Reste · ' : '') + m.recipe.title + (m.note ? ' — ' + m.note : ''),
+```
 
 > **Tile height:** `grid_options: { rows: 2 }` only sizes a card when it sits
 > directly in a Sections-view grid — inside this `vertical-stack` it's ignored.
@@ -487,11 +495,12 @@ automation:
 
 | Method | Path | Purpose |
 | ------ | ---- | ------- |
-| GET | `/api/v1/meal-plans?from=&to=` | Meals in a date range. Each carries `isLeftover`. |
+| GET | `/api/v1/meal-plans?from=&to=` | Meals in a date range. Each carries `note` and `isLeftover`. |
 | POST | `/api/v1/shopping/items` `{byName}` | Add an item (existing). |
 | GET | `/api/v1/ingredients/usage?name=` | Where an ingredient is used + on-list. |
 | GET | `/api/v1/shopping/store-availability` | Per-store still-needed count. |
 | GET | `/api/v1/shopping/today-meal-status` | Today's meals still needing shopping + per-shop coverage. |
-| GET | `/embed/rezepte/<id>?k=<embed token>` | Chrome-less recipe view for the iframe. |
+| GET | `/embed/rezepte/<id>?k=<embed token>` | Chrome-less recipe view for the iframe. Includes the "Update vormerken" toggle. |
+| PATCH | `/api/v1/recipes/<id>/needs-update` | Toggle the "Update vormerken" flag — the embed scope's only write. |
 | GET | `/einkauf?supermarket=<id>` | Shopping list with a store preselected (persists as the default). |
 | GET | `/einkauf?supermarket=all` | Shopping list with the store filter reset to "Alle Supermärkte" (clears the stored default). |

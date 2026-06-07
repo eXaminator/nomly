@@ -120,20 +120,23 @@ export function RecipeDetail({
               </div>
             ) : null}
           </div>
-          {showEdit ? (
-            <div className="flex shrink-0 flex-wrap gap-2">
-              <NeedsUpdateToggle
-                recipeId={recipe.id}
-                initial={recipe.needsUpdate}
-              />
+          {/* The needs-update toggle renders everywhere — including the
+              embed/iframe view, whose allow-list permits exactly this one
+              write. Only the edit link is gated by `showEdit`. */}
+          <div className="flex shrink-0 flex-wrap gap-2">
+            <NeedsUpdateToggle
+              recipeId={recipe.id}
+              initial={recipe.needsUpdate}
+            />
+            {showEdit ? (
               <Button asChild variant="outline">
                 <Link href={`/rezepte/${recipe.id}/bearbeiten`}>
                   <Pencil className="size-4" />
                   Bearbeiten
                 </Link>
               </Button>
-            </div>
-          ) : null}
+            ) : null}
+          </div>
         </div>
 
         {recipe.photoPath ? (

@@ -24,8 +24,8 @@ export type MintedToken = {
 /**
  * Create a new machine API token. Returns the raw token to hand to the
  * caller (e.g. the import CLI); the DB only ever stores its sha256 hash.
- * `scope` defaults to "full"; pass "embed" for the read-only Home Assistant
- * recipe-iframe token.
+ * `scope` defaults to "full"; pass "embed" for the Home Assistant
+ * recipe-iframe token (confined to the embed allow-list).
  */
 export function createApiToken(
   name: string,

@@ -31,7 +31,7 @@ type MintedToken = { id: number; name: string; scope: TokenScope; token: string 
 
 const SCOPE_LABEL: Record<TokenScope, string> = {
   full: "Voll",
-  embed: "Embed · nur Lesen",
+  embed: "Embed · Rezept-Ansicht",
 };
 
 type Props = { initial: TokenSummary[] };
@@ -258,13 +258,14 @@ function CreateTokenDialog({
             className="h-9 rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-bg)] px-2 text-sm text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
           >
             <option value="full">Voll — gesamte API (Lesen + Schreiben)</option>
-            <option value="embed">Embed — nur Lesen (Rezept-iframe)</option>
+            <option value="embed">Embed — Rezept-Ansicht (iframe)</option>
           </select>
           <p className="text-xs text-[var(--color-muted-fg)]">
             {scope === "embed" ? (
               <>
-                Nur-Lesen, beschränkt auf die Rezept-Ansicht
-                (<code className="rounded bg-[var(--color-muted)] px-1 py-0.5">/embed/…</code>).
+                Beschränkt auf die Rezept-Ansicht
+                (<code className="rounded bg-[var(--color-muted)] px-1 py-0.5">/embed/…</code>)
+                — Lesen plus die Update-Vormerkung, sonst nichts.
                 Wird als <code className="rounded bg-[var(--color-muted)] px-1 py-0.5">?k=&lt;token&gt;</code>{" "}
                 in der iframe-URL übergeben — gedacht fürs Home-Assistant-Dashboard.
               </>
