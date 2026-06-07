@@ -427,6 +427,12 @@ describe("parseIngredientString — extended cases", () => {
       expect(tidyRemainderFragment("of")).toBeNull();
       expect(tidyRemainderFragment("()")).toBeNull();
     });
+    it("leaves decimal commas untouched", () => {
+      // German decimals inside range captures ("1-1,5") must not become
+      // "1-1, 5" — only separator commas get normalised.
+      expect(tidyRemainderFragment("1-1,5")).toBe("1-1,5");
+      expect(tidyRemainderFragment("0,5-1 (gehäuft)")).toBe("0,5-1, gehäuft");
+    });
   });
 
   describe("stripVocabTail — no-match-only vocabulary cleanup", () => {

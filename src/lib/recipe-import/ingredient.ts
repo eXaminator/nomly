@@ -881,8 +881,11 @@ const REMAINDER_EDGE_FILLER = new Set(["of", "von", "vom"]);
  */
 export function tidyRemainderFragment(s: string): string | null {
   let text = s.trim().replace(/\s*[()]\s*/g, ", ");
-  // Normalise the comma runs the paren replacement may have produced.
-  text = text.replace(/\s*,[\s,]*/g, ", ");
+  // Normalise the comma runs the paren replacement may have produced —
+  // but ONLY separator commas. A comma directly between two digits is a
+  // German decimal ("1-1,5") and must stay glued (same discrimination the
+  // tokenizer's comma padding uses).
+  text = text.replace(/\s*(?:(?<!\d),|,(?!\d))[\s,]*/g, ", ");
   let prev: string | null = null;
   while (prev !== text) {
     prev = text;
