@@ -597,18 +597,22 @@ function computeNameAndNotes(
   for (let k = lo + 1; k < hi; k++) {
     if (!covered.has(k)) interior.push(candidate[k].raw);
   }
-  const before = tidyRemainderFragment(spanText(0, lo - 1, true));
+  // Front captures (range expression, prep noun, vague amount) and the
+  // before-remainder are one contiguous source prefix — "5-6 große Äpfel"
+  // must yield the note "5-6 große", not "5-6, große". Join them with
+  // spaces into a single fragment before tidying.
+  const frontAndBefore = tidyRemainderFragment(
+    [...parsed.frontCaptures, spanText(0, lo - 1, true)]
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0)
+      .join(" "),
+  );
   const afterRaw = [interior.join(" "), spanText(hi + 1, candidate.length - 1, true)]
     .filter((s) => s.length > 0)
     .join(" ");
   const after = tidyRemainderFragment(afterRaw);
   const notes =
-    [
-      ...parsed.frontCaptures,
-      before ?? "",
-      after ?? "",
-      ...parsed.trailingCaptures,
-    ]
+    [frontAndBefore ?? "", after ?? "", ...parsed.trailingCaptures]
       .map((s) => s.trim())
       .filter((s) => s.length > 0)
       .join(", ") || null;

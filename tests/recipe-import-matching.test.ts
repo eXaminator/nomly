@@ -1693,3 +1693,22 @@ describe("paren content is matcher-invisible but stays verbatim in notes", () =>
     expect(out[0].notes).toBe("z. B. braune Champignons");
   });
 });
+
+describe("front captures stay glued to the before-remainder", () => {
+  // "5-6 große Äpfel": the range expression (consumed into the quantity) and
+  // the size word are contiguous in the source — the note must read
+  // "5-6 große", not "5-6, große".
+  const catalog: IngredientCatalog = [
+    { ingredientId: 1, canonicalName: "Apfel", aliasName: "Äpfel", tokens: ["apfel"] },
+  ];
+
+  it("'5-6 große Äpfel (am liebsten säuerlich)' keeps '5-6 große' intact", () => {
+    const out = parseIngredientLines(
+      ["5-6 große Äpfel (am liebsten säuerlich)"],
+      makeLookups(catalog),
+    );
+    expect(out[0].ingredientId).toBe(1);
+    expect(out[0].quantity).toBe(6); // range resolves to the high bound
+    expect(out[0].notes).toBe("5-6 große, am liebsten säuerlich");
+  });
+});
