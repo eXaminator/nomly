@@ -1712,3 +1712,27 @@ describe("front captures stay glued to the before-remainder", () => {
     expect(out[0].notes).toBe("5-6 große, am liebsten säuerlich");
   });
 });
+
+describe("preprocess size captures lead the notes", () => {
+  // "12-count" / "(28 oz.)" are consumed alongside the amount at the line
+  // FRONT — they must open the notes, not trail them.
+  const catalog: IngredientCatalog = [
+    {
+      ingredientId: 1,
+      canonicalName: "dinner roll",
+      aliasName: "dinner rolls",
+      tokens: ["dinner", "rolls"],
+    },
+  ];
+
+  it("'1 12-count package … rolls, preferably whole-wheat' keeps 12-count first", () => {
+    const out = parseIngredientLines(
+      ["1 12-count package pull-apart dinner rolls, preferably whole-wheat"],
+      makeLookups(catalog, ["package"]),
+    );
+    expect(out[0].ingredientId).toBe(1);
+    expect(out[0].unit?.name.toLowerCase()).toBe("package");
+    expect(out[0].notes).toMatch(/^12 count/);
+    expect(out[0].notes).toContain("preferably whole");
+  });
+});

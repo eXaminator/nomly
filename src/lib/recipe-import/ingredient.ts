@@ -624,6 +624,10 @@ export function aliasDedupKey(name: string): string {
 function preprocess(raw: string): {
   text: string;
   capturedNotes: string[];
+  /** Amount-derived captures that sit at the line FRONT alongside the
+   *  quantity ("12-count" container sizes, "(28 oz.)" paren sizes) — the
+   *  raw-remainder notes builder leads with these instead of trailing. */
+  frontCaptures: string[];
   isOptional: boolean;
 } {
   // Strip invisible / formatting chars up front: SOFT HYPHEN, ZWSP/ZWNJ/ZWJ,
@@ -641,6 +645,7 @@ function preprocess(raw: string): {
       "",
     );
   const capturedNotes: string[] = [];
+  const frontCaptures: string[] = [];
   let isOptional = false;
 
   // "(...optional...)" — the paren contains the marker. Strip the parens
@@ -761,7 +766,7 @@ function preprocess(raw: string): {
     /(\d+)[-–](count|ounce|ounces|oz|inch|inches|cm|gram|grams|g|kg|ml|l|lb|pound|pounds)\b(\s*)(\S*)/gi,
     (match, num: string, sizeUnit: string, ws: string, next: string) => {
       if (next && CONTAINER_RE.test(next)) {
-        capturedNotes.push(`${num} ${sizeUnit}`);
+        frontCaptures.push(`${num} ${sizeUnit}`);
         return `${ws}${next}`;
       }
       return `${num} ${sizeUnit}${ws}${next}`;
@@ -772,14 +777,14 @@ function preprocess(raw: string): {
   // amount/unit/name unaffected.
   text = text.replace(/\(\s*([\d\s./,\-–½¼¾⅓⅔⅛⅜⅝⅞]+\s+\p{L}{1,30}\.?)\s*\)/gu,
     (_match, inner: string) => {
-      capturedNotes.push(inner.trim());
+      frontCaptures.push(inner.trim());
       return " ";
     },
   );
 
   // Collapse whitespace.
   text = text.replace(/\s+/g, " ").trim();
-  return { text, capturedNotes, isOptional };
+  return { text, capturedNotes, frontCaptures, isOptional };
 }
 
 function escapeRegExp(s: string): string {
@@ -1004,16 +1009,22 @@ export function parseIngredientString(
   raw: string,
   knownUnitTokens: ReadonlySet<string>,
 ): ParsedIngredient {
-  const { text: preprocessed, capturedNotes, isOptional } = preprocess(raw);
-  // Preprocess-hoisted captures (brackets, "(28 oz.)" sizes) — snapshot
-  // before the front-consumption pushes below so the two stay separable for
-  // the raw-remainder notes builder.
+  const {
+    text: preprocessed,
+    capturedNotes,
+    frontCaptures: preprocessFront,
+    isOptional,
+  } = preprocess(raw);
+  // Trailing captures (brackets, optional-paren leftovers) vs FRONT captures
+  // ("12-count" / "(28 oz.)" sizes from preprocess, plus the range / prep
+  // noun / vague amount consumed below) — the raw-remainder notes builder
+  // leads with the front group and trails with the rest.
   const trailingCaptures = [...capturedNotes];
-  const frontCaptures: string[] = [];
+  const frontCaptures: string[] = [...preprocessFront];
   const cleaned = normalize(preprocessed);
   if (cleaned.length === 0) {
-    const notes =
-      capturedNotes.length > 0 ? capturedNotes.join(", ") : null;
+    const allCaptures = [...preprocessFront, ...capturedNotes];
+    const notes = allCaptures.length > 0 ? allCaptures.join(", ") : null;
     return {
       quantity: null,
       unitName: null,
@@ -1425,7 +1436,12 @@ export function parseIngredientString(
   // here we join them in occurrence order for the new-ingredient / fallback
   // case. e.g. "1/2 pound (225g) large shrimp, peeled and deveined" →
   // "large, 225 g, peeled and deveined".
-  const leadingNotes = [sizeNote, ...rangeNotes, ...secondaryAmounts]
+  const leadingNotes = [
+    sizeNote,
+    ...rangeNotes,
+    ...preprocessFront,
+    ...secondaryAmounts,
+  ]
     .map((p) => p.trim())
     .filter((p) => p.length > 0);
   const trailingNotes = capturedNotes
@@ -1481,6 +1497,7 @@ export function parseIngredientString(
       [
         sizeNote,
         ...rangeNotes,
+        ...preprocessFront,
         ...secondaryAmounts,
         ...nameAreaNotes.map((n) => n.text),
         stripNote,
