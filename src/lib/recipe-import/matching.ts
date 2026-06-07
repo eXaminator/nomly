@@ -382,9 +382,11 @@ function bestMatchForEntry(
   const E = entry.tokens;
   if (E.length === 0 || candidate.length === 0) return null;
   const maxWin = Math.min(E.length, candidate.length);
-  // The "canonical row" (aliasName === canonicalName) gets a tiny +1 boost so
-  // it slightly outranks otherwise-equal alias hits. +1 is below every other
-  // increment so it can't shift a match across the auto-merge gate on its own.
+  // The "canonical row" (aliasName === canonicalName) is preferred over
+  // otherwise-equal alias hits — but only as a SORT tiebreak, never as a
+  // score increment. Folding it into the score let a canonical's non-exact
+  // alignment outscore another ingredient's verbatim EXACT alias by 1
+  // ("Erdnussöl" prefix beat the curated alias "Erdnuss" on Erdnüsse).
   const isCanonical =
     entry.aliasName.toLowerCase() === entry.canonicalName.toLowerCase();
   let best: IngredientCandidateMatch | null = null;
@@ -397,9 +399,7 @@ function bestMatchForEntry(
         (a, i) => i === 0 || a.entryIndex > aligned[i - 1].entryIndex,
       );
       const unmatchedEntryCount = E.length - aligned.length;
-      const score =
-        scoreMatch(aligned, window, inOrder, unmatchedEntryCount) +
-        (isCanonical ? 1 : 0);
+      const score = scoreMatch(aligned, window, inOrder, unmatchedEntryCount);
       if (best && score <= best.score) continue;
       best = {
         ingredientId: entry.ingredientId,
@@ -600,8 +600,8 @@ function surfaceMatchRank(m: IngredientCandidateMatch): number {
 }
 
 /**
- * Pick the better of two matches for the SAME ingredient. Compares on the
- * score WITHOUT the canonical +1 boost so that boost can't let the canonical
+ * Pick the better of two matches for the SAME ingredient. Scores carry no
+ * canonical boost (it lives in the sort tiebreaks), so the canonical can't
  * shadow an equally-strong (or stronger) alias the user typed verbatim; the
  * surface-form rank decides those, with the canonical winning only true ties.
  */
@@ -609,9 +609,7 @@ function isBetterWithinIngredient(
   m: IngredientCandidateMatch,
   existing: IngredientCandidateMatch,
 ): boolean {
-  const mBase = m.score - (m.isCanonical ? 1 : 0);
-  const eBase = existing.score - (existing.isCanonical ? 1 : 0);
-  if (mBase !== eBase) return mBase > eBase;
+  if (m.score !== existing.score) return m.score > existing.score;
   const mRank = surfaceMatchRank(m);
   const eRank = surfaceMatchRank(existing);
   if (mRank !== eRank) return mRank > eRank;
@@ -693,14 +691,28 @@ export function findIngredientCandidates(
     lineUnitId != null && m.unitId === lineUnitId && m.score >= gate
       ? m.score * 2
       : m.score;
+  // Cross-ingredient exactness: the worst alignment kind across the match's
+  // tokens (exact < prefix < suffix < fuzzy). At equal score, a verbatim
+  // exact hit must outrank one that needed a looser alignment — "Erdnuss"
+  // exactly hitting the Erdnüsse alias beats "Erdnussöl", whose 2-char
+  // compound head slips through the close-inflection bonus as a prefix.
+  const KIND_RANK: Record<MatchKind, number> = {
+    exact: 0,
+    prefix: 1,
+    suffix: 2,
+    fuzzy: 3,
+  };
+  const worstKind = (m: IngredientCandidateMatch): number =>
+    m.perTokenKinds.reduce((w, k) => Math.max(w, KIND_RANK[k]), 0);
   const sorted = Array.from(bestById.values()).sort((a, b) => {
     const aw = rankWeight(a.match);
     const bw = rankWeight(b.match);
     if (aw !== bw) return bw - aw;
-    // Cross-ingredient tiebreak: prefer the candidate whose winning row is
-    // the canonical (a redundant guard since canonicals already get a +1
-    // score boost in bestMatchForEntry, but explicit here so the sort
-    // stays robust if the boost is ever tuned).
+    const ak = worstKind(a.match);
+    const bk = worstKind(b.match);
+    if (ak !== bk) return ak - bk;
+    // Equally-exact: prefer the candidate whose winning row is the canonical.
+    // This is THE canonical preference now — scores carry no canonical boost.
     if (a.match.isCanonical !== b.match.isCanonical) {
       return a.match.isCanonical ? -1 : 1;
     }

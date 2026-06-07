@@ -473,7 +473,7 @@ describe("structural matcher scoring", () => {
       entry(1, "Salt"),
     ]);
     expect(matches[0].ingredientId).toBe(1);
-    expect(matches[0].score).toBe(131); // 100 + 20 + 10 + 1 canonical
+    expect(matches[0].score).toBe(130); // 100 + 20 + 10 (no canonical score boost)
     expect(matches[0].coveredCandidateTokens).toEqual([0]);
   });
 
@@ -482,9 +482,9 @@ describe("structural matcher scoring", () => {
       entry(1, "olive oil"),
       entry(2, "oil divided"), // simulates a polluted catalog row
     ]);
-    expect(matches[0].ingredientId).toBe(1); // 251 beats 211
-    expect(matches[0].score).toBe(251);
-    expect(matches.find((m) => m.ingredientId === 2)?.score).toBe(211);
+    expect(matches[0].ingredientId).toBe(1); // 250 beats 210
+    expect(matches[0].score).toBe(250);
+    expect(matches.find((m) => m.ingredientId === 2)?.score).toBe(210);
   });
 
   it("full multi-token contiguous match scores 100/token + bonuses", () => {
@@ -493,7 +493,7 @@ describe("structural matcher scoring", () => {
       [entry(1, "chick peas")],
     );
     expect(matches[0].ingredientId).toBe(1);
-    expect(matches[0].score).toBe(251); // 100 + 100 + 20 + 20 + 10 + 1 canonical
+    expect(matches[0].score).toBe(250); // 100 + 100 + 20 + 20 + 10
     expect(matches[0].coveredCandidateTokens).toEqual([1, 2]);
   });
 
@@ -501,10 +501,10 @@ describe("structural matcher scoring", () => {
     const cat = [entry(1, "Tomate"), entry(2, "Cherry Tomate")];
     const { matches } = findIngredientCandidates("Tomaten", cat);
     expect(matches[0].ingredientId).toBe(1);
-    expect(matches[0].score).toBe(131);
+    expect(matches[0].score).toBe(130);
     // "Cherry Tomate" covers only "Tomate" (1 of 2 tokens); the uncovered
-    // "Cherry" costs −120: 100 + 20 + 10 + 1 canonical − 120 = 11.
-    expect(matches.find((m) => m.ingredientId === 2)?.score).toBe(11);
+    // "Cherry" costs −120: 100 + 20 + 10 − 120 = 10.
+    expect(matches.find((m) => m.ingredientId === 2)?.score).toBe(10);
   });
 
   it("a fully-covered entry beats a partial one even when the partial matched MORE input tokens", () => {
@@ -534,7 +534,7 @@ describe("structural matcher scoring", () => {
     const cat = [entry(1, "Tomate"), entry(2, "Cherry Tomate")];
     const { matches } = findIngredientCandidates("Cherry Tomaten", cat);
     expect(matches[0].ingredientId).toBe(2);
-    expect(matches[0].score).toBe(251);
+    expect(matches[0].score).toBe(250);
   });
 
   it("prefix fragments stay below the gate", () => {
@@ -807,5 +807,65 @@ describe("block index equivalence", () => {
         full.matches.map((m) => [m.ingredientId, m.aliasName, m.score]),
       );
     }
+  });
+});
+
+describe("exact alias vs close-compound canonical (Erdnuss regression)", () => {
+  // Prod case: "4 EL Erdnuss". "Erdnussöl" aligns as a prefix and the 2-char
+  // compound head "-öl" slips through the close-inflection bonus window
+  // (Δ2, ratio 7/9 ≥ 0.75), tying the genuine plural "Erdnüsse". The curated
+  // alias "Erdnuss" must settle this: a verbatim EXACT match may never lose
+  // to a non-exact alignment of another ingredient — neither the canonical
+  // score boost nor the name-length tiebreak may override alignment
+  // exactness.
+  const cat: IngredientCatalog = [
+    {
+      ingredientId: 404,
+      canonicalName: "Erdnussöl",
+      aliasName: "Erdnussöl",
+      tokens: ["erdnussol"],
+    },
+    {
+      ingredientId: 491,
+      canonicalName: "Erdnüsse",
+      aliasName: "Erdnüsse",
+      tokens: ["erdnusse"],
+    },
+    {
+      ingredientId: 491,
+      canonicalName: "Erdnüsse",
+      aliasName: "Erdnuss",
+      tokens: ["erdnuss"],
+    },
+  ];
+
+  it("ranks the exact alias above the close-compound canonical and auto-picks it", () => {
+    const { matches } = findIngredientCandidates("Erdnuss", cat);
+    expect(matches[0].ingredientId).toBe(491);
+    expect(matches[0].aliasName).toBe("Erdnuss");
+    expect(matches[0].score).toBeGreaterThanOrEqual(MIN_AUTO_MATCH_SCORE);
+    expect(matches[1].ingredientId).toBe(404);
+  });
+
+  it("keeps the canonical preferred over an equally-exact alias of another ingredient", () => {
+    // Counter-guard: exactness decides only when it differs. Two all-exact
+    // hits on different ingredients still prefer the canonical row.
+    const tie: IngredientCatalog = [
+      {
+        ingredientId: 1,
+        canonicalName: "Erdnuss",
+        aliasName: "Erdnuss",
+        tokens: ["erdnuss"],
+      },
+      {
+        ingredientId: 2,
+        canonicalName: "Erdnüsse",
+        aliasName: "Erdnuss",
+        tokens: ["erdnuss"],
+      },
+    ];
+    const { matches } = findIngredientCandidates("Erdnuss", tie);
+    expect(matches[0].ingredientId).toBe(1);
+    expect(matches[0].isCanonical).toBe(true);
   });
 });
