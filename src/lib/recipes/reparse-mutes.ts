@@ -64,6 +64,11 @@ export function removeReparseMute(id: number): void {
   db.delete(reparseMute).where(eq(reparseMute.id, id)).run();
 }
 
+/** Remove every mute (unmute all). */
+export function removeAllReparseMutes(): void {
+  db.delete(reparseMute).run();
+}
+
 /** The mute set the scan consults: recipe ids muted wholesale, and per-line
  *  keys `${recipeId} ${trimmedRawLine}`. */
 export function loadMuteSet(): { recipes: Set<number>; lines: Set<string> } {

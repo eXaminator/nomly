@@ -274,6 +274,18 @@ export function BulkReparseDialog({
     }
   }
 
+  async function unmuteAll() {
+    const r = await fetch("/api/v1/recipes/reparse-mutes", {
+      method: "DELETE",
+    }).catch(() => null);
+    // Only mirror the clear locally if the server actually cleared — otherwise
+    // we'd hide mutes that are still persisted (same caution as single unmute).
+    if (!r || !r.ok) return;
+    setMutedList([]);
+    setMutedRecipes(new Set());
+    setMutedLines(new Set());
+  }
+
   const runScan = React.useCallback(async () => {
     // Cancel any in-flight scan before starting a new one. Aborting the fetch
     // also disconnects the request, which the server honors to stop scanning.
@@ -623,26 +635,38 @@ export function BulkReparseDialog({
                   Nichts stummgeschaltet.
                 </p>
               ) : (
-                <ul className="flex flex-col divide-y divide-[var(--color-border)] overflow-hidden rounded-[var(--radius)] border border-[var(--color-border)]">
-                  {mutedList.map((m) => (
-                    <li key={m.id} className="flex items-center gap-2 px-3 py-2">
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-medium">{m.recipeTitle}</p>
-                        <p className="truncate text-xs text-[var(--color-muted-fg)]">
-                          {m.rawLine == null ? "Ganzes Rezept" : `„${m.rawLine}“`}
-                        </p>
-                      </div>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => void unmute(m)}
-                      >
-                        <Volume2 className="size-4" /> Aufheben
-                      </Button>
-                    </li>
-                  ))}
-                </ul>
+                <div className="flex flex-col gap-2">
+                  <div className="flex justify-end">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => void unmuteAll()}
+                    >
+                      <Volume2 className="size-4" /> Alle aufheben
+                    </Button>
+                  </div>
+                  <ul className="flex flex-col divide-y divide-[var(--color-border)] overflow-hidden rounded-[var(--radius)] border border-[var(--color-border)]">
+                    {mutedList.map((m) => (
+                      <li key={m.id} className="flex items-center gap-2 px-3 py-2">
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-medium">{m.recipeTitle}</p>
+                          <p className="truncate text-xs text-[var(--color-muted-fg)]">
+                            {m.rawLine == null ? "Ganzes Rezept" : `„${m.rawLine}“`}
+                          </p>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => void unmute(m)}
+                        >
+                          <Volume2 className="size-4" /> Aufheben
+                        </Button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
               )
             ) : loading ? (
               <div className="flex items-center gap-2 py-8 text-[var(--color-muted-fg)]">

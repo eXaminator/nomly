@@ -60,6 +60,16 @@ describe("reparse mutes", () => {
     expect(mutes.listReparseMutes().some((m) => m.id === a.id)).toBe(false);
   });
 
+  it("removeAll clears every mute", () => {
+    mutes.addReparseMute(recipeId, "200 g Mehl");
+    mutes.addReparseMute(recipeId, "3 Eier");
+    mutes.addReparseMute(recipeId, null);
+    expect(mutes.listReparseMutes().length).toBeGreaterThan(0);
+
+    mutes.removeAllReparseMutes();
+    expect(mutes.listReparseMutes()).toHaveLength(0);
+  });
+
   it("scan excludes a line-muted group, and a recipe-muted recipe entirely", async () => {
     resetCache();
     const baseline = await scan();

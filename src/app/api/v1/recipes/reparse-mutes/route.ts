@@ -1,11 +1,21 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { addReparseMute, listReparseMutes } from "@/lib/recipes/reparse-mutes";
+import {
+  addReparseMute,
+  listReparseMutes,
+  removeAllReparseMutes,
+} from "@/lib/recipes/reparse-mutes";
 
 /** GET — all bulk-reparse mutes (for the "Muted" tab). */
 export function GET() {
   return NextResponse.json({ mutes: listReparseMutes() });
+}
+
+/** DELETE — unmute all (clear every mute at once). */
+export function DELETE() {
+  removeAllReparseMutes();
+  return NextResponse.json({ ok: true });
 }
 
 const muteSchema = z.object({
