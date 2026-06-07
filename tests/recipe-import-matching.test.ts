@@ -1850,3 +1850,40 @@ describe("front-capture gluing follows source contiguity", () => {
     expect(out[0].notes).toBe("5-6 große");
   });
 });
+
+describe("paren sizes are front captures only at the line front", () => {
+  const catalog: IngredientCatalog = [
+    {
+      ingredientId: 1,
+      canonicalName: "Schalotte",
+      aliasName: "shallots",
+      tokens: ["shallots"],
+    },
+    {
+      ingredientId: 2,
+      canonicalName: "crushed tomatoes",
+      aliasName: "crushed tomatoes",
+      tokens: ["crushed", "tomatoes"],
+    },
+  ];
+
+  it("'2 shallots (chopped (⅔ cup))' keeps source order in the notes", () => {
+    const out = parseIngredientLines(
+      ["2 shallots (chopped (⅔ cup))"],
+      makeLookups(catalog, ["cup"]),
+    );
+    expect(out[0].ingredientId).toBe(1);
+    expect(out[0].quantity).toBe(2);
+    expect(out[0].notes).toBe("chopped, ⅔ cup");
+  });
+
+  it("'1 (28 oz.) can crushed tomatoes' still leads with the size", () => {
+    const out = parseIngredientLines(
+      ["1 (28 oz.) can crushed tomatoes"],
+      makeLookups(catalog, ["can"]),
+    );
+    expect(out[0].ingredientId).toBe(2);
+    expect(out[0].unit?.name.toLowerCase()).toBe("can");
+    expect(out[0].notes).toBe("28 oz.");
+  });
+});

@@ -788,12 +788,16 @@ function preprocess(raw: string): {
     },
   );
 
-  // Parenthesized size like "(28 oz.) can" → drop into notes, keep the main
-  // amount/unit/name unaffected.
-  text = text.replace(/\(\s*([\d\s./,\-–½¼¾⅓⅔⅛⅜⅝⅞]+\s+\p{L}{1,30}\.?)\s*\)/gu,
-    (_match, inner: string) => {
+  // Parenthesized size like "(28 oz.) can" → drop into a FRONT note, keep
+  // the main amount/unit/name unaffected. Anchored to the line front (only
+  // non-letter chars may precede it): a size paren further into the line
+  // ("2 shallots (chopped (⅔ cup))") is part of an annotation and stays in
+  // place so the notes keep the source order ("chopped, ⅔ cup").
+  text = text.replace(
+    /^([^\p{L}]*)\(\s*([\d\s./,\-–½¼¾⅓⅔⅛⅜⅝⅞]+\s+\p{L}{1,30}\.?)\s*\)/u,
+    (_match, lead: string, inner: string) => {
       frontCaptures.push(inner.trim());
-      return " ";
+      return `${lead} `;
     },
   );
 
