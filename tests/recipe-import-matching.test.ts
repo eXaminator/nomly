@@ -1737,3 +1737,93 @@ describe("preprocess size captures lead the notes", () => {
     expect(out[0].notes).toContain("preferably whole");
   });
 });
+
+describe("sub / substitute / ersatzweise mark alternatives", () => {
+  // "(sub X)", "(or sub X)", "(substitute with X)", "(ersatzweise X)" are
+  // alternative markers like "(Alternativ: X)"; "or sub X" in a chain strips
+  // the marker from the alternative's text. Same line-structure vocabulary
+  // category as alternativ:/oder — never ingredient identity.
+  const catalog: IngredientCatalog = [
+    { ingredientId: 1, canonicalName: "honey", aliasName: "honey", tokens: ["honey"] },
+    {
+      ingredientId: 2,
+      canonicalName: "maple syrup",
+      aliasName: "maple syrup",
+      tokens: ["maple", "syrup"],
+    },
+    {
+      ingredientId: 3,
+      canonicalName: "Schalotte",
+      aliasName: "shallot",
+      tokens: ["shallot"],
+    },
+    {
+      ingredientId: 4,
+      canonicalName: "rote Zwiebel",
+      aliasName: "red onion",
+      tokens: ["red", "onion"],
+    },
+    { ingredientId: 5, canonicalName: "Honig", aliasName: "Honig", tokens: ["honig"] },
+    { ingredientId: 6, canonicalName: "Zucker", aliasName: "Zucker", tokens: ["zucker"] },
+    {
+      ingredientId: 7,
+      canonicalName: "Joghurt",
+      aliasName: "yogurt",
+      tokens: ["yogurt"],
+    },
+    {
+      ingredientId: 8,
+      canonicalName: "Saure Sahne",
+      aliasName: "sour cream",
+      tokens: ["sour", "cream"],
+    },
+  ];
+
+  it("'(sub maple syrup to make vegan)' adds an optional alternative with the tail as its note", () => {
+    const out = parseIngredientLines(
+      ["1/4 cup honey (sub maple syrup to make vegan)"],
+      makeLookups(catalog, ["cup"]),
+    );
+    expect(out).toHaveLength(2);
+    expect(out[0].name).toBe("honey");
+    expect(out[0].isAlternative).toBe(false);
+    expect(out[1].name).toBe("maple syrup");
+    expect(out[1].isAlternative).toBe(true);
+    expect(out[1].isOptional).toBe(true);
+    expect(out[1].notes).toContain("to make vegan");
+  });
+
+  it("'(or sub 1/2 a red onion)' after a dash-annotated primary works too", () => {
+    const out = parseIngredientLines(
+      ["1 extra-large shallot - chopped (or sub 1/2 a red onion)"],
+      makeLookups(catalog),
+    );
+    expect(out).toHaveLength(2);
+    expect(out[0].ingredientId).toBe(3);
+    expect(out[1].ingredientId).toBe(4);
+    expect(out[1].isAlternative).toBe(true);
+    expect(out[1].quantity).toBe(0.5);
+  });
+
+  it("'(ersatzweise Zucker)' is recognized as the German marker", () => {
+    const out = parseIngredientLines(
+      ["2 g Honig (ersatzweise Zucker)"],
+      makeLookups(catalog),
+    );
+    expect(out).toHaveLength(2);
+    expect(out[1].name).toBe("Zucker");
+    expect(out[1].isAlternative).toBe(true);
+  });
+
+  it("chain form: 'or sub sour cream' strips the marker from the alternative", () => {
+    const out = parseIngredientLines(
+      ["1 cup yogurt or sub sour cream"],
+      makeLookups(catalog, ["cup"]),
+    );
+    expect(out).toHaveLength(2);
+    expect(out[0].ingredientId).toBe(7);
+    expect(out[1].ingredientId).toBe(8);
+    expect(out[1].name).toBe("sour cream");
+    expect(out[1].isAlternative).toBe(true);
+  });
+});

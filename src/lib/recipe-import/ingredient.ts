@@ -2047,7 +2047,14 @@ const OPTIONAL_PREFIX_RE =
 const ALTERNATIV_SEP_RE =
   /\s+(?:alternativ|alternative|alternatively|alternativly)\s*:?\s+/i;
 const PARENS_ALTERNATIV_RE =
-  /\s*\((alternativ|alternative|alternatively|alternativly)(?:\s*:\s*|\s+)([^)]+)\)\s*$/i;
+  /\s*\(\s*(?:(?:or|oder)\s+)?(alternativ|alternative|alternatively|alternativly|substituted?(?:\s+with)?|sub\.?|ersatzweise|notfalls)(?:\s*:\s*|\s+)([^)]+)\)\s*$/i;
+/**
+ * Leading substitute marker on an alternative SEGMENT ("or sub sour cream"
+ * → strip "sub" so the alternative's name stays clean). Same line-structure
+ * vocabulary category as "alternativ:" — it marks the alternative role,
+ * never ingredient identity.
+ */
+const SUB_MARKER_RE = /^(?:substituted?(?:\s+with)?|sub\.?|ersatzweise|notfalls)\s+/i;
 const EACH_DIST_RE = /^(\S[^:]*?)\s+each\s*:\s*(.+)$/i;
 
 /**
@@ -2366,7 +2373,9 @@ export function expandIngredientLine(rawLine: string): ExpandedIngredientRow[] {
     ) {
       return segments.map((seg, idx) => ({
         kind: "ingredient" as const,
-        text: seg.text,
+        // Alternatives may carry a leading substitute marker ("or sub sour
+        // cream") — strip it so the alternative's text is just the product.
+        text: idx > 0 ? seg.text.replace(SUB_MARKER_RE, "") : seg.text,
         rawText: original,
         forceOptional: idx === 0 ? baseOptional : true,
         isAlternative: idx > 0,
