@@ -2101,6 +2101,12 @@ export type ExpandedIngredientRow =
        *  the piece back into the primary's notes verbatim when the
        *  alternative doesn't match a catalog article. Null for primary rows. */
       alternativeConnector: string | null;
+      /** True when this alternative's note belongs to IT ALONE and must not
+       *  propagate to siblings — e.g. a note inside a parenthetical
+       *  alternative ("Salz (oder Pfeffer, frisch gemahlen)" → "frisch
+       *  gemahlen" is Pfeffer's, not Salz's). A line-trailing note in a bare
+       *  "A or B, diced" chain stays shareable, so it's left false there. */
+      localNote?: boolean;
     };
 
 const OPTIONAL_PREFIX_RE =
@@ -2182,6 +2188,40 @@ function splitColonListItems(text: string): string[] {
 }
 
 /**
+ * Split a parenthetical alternative's content into one option per top-level
+ * "oder"/"or" ONLY — commas stay glued, because inside an alternative a comma
+ * separates the ingredient from its own note ("1 kl. Glas Spargelköpfe,
+ * Abtropfgew. 115 g" is ONE alternative with a drained-weight note), not two
+ * alternatives. Separators inside parens/brackets are skipped.
+ */
+function splitOrOptions(text: string): string[] {
+  const trimmed = text.trim();
+  if (trimmed.length === 0) return [];
+  const out: string[] = [];
+  let depth = 0;
+  let current = "";
+  let i = 0;
+  while (i < trimmed.length) {
+    const ch = trimmed[i];
+    if (ch === "(" || ch === "[") depth += 1;
+    else if (ch === ")" || ch === "]") depth = Math.max(0, depth - 1);
+    if (depth === 0 && /\s/.test(ch)) {
+      const m = /^\s+(?:or|oder)\s+/i.exec(trimmed.slice(i));
+      if (m) {
+        out.push(current.trim());
+        current = "";
+        i += m[0].length;
+        continue;
+      }
+    }
+    current += ch;
+    i += 1;
+  }
+  if (current.trim().length > 0) out.push(current.trim());
+  return out.filter((s) => s.length > 0);
+}
+
+/**
  * Detect a trailing alternative parenthetical — "(Alternativ: X)",
  * "(alternativ X)", or a bare "(oder X)" / "(or X)" — and split it from the
  * primary. The closing paren is matched to its opener by a balanced backward
@@ -2214,8 +2254,18 @@ function extractTrailingParenAlternative(
     }
   }
   if (open < 0) return null; // unbalanced — leave it to the note path
-  const inner = trimmed.slice(open + 1, trimmed.length - 1).trim();
-  const primary = trimmed.slice(0, open).trim();
+  let inner = trimmed.slice(open + 1, trimmed.length - 1).trim();
+  let primary = trimmed.slice(0, open).trim();
+  // A leading parenthetical inside the alt-paren that precedes the leader
+  // ("((10 g) oder Ahornsirup)") is a note on the PRIMARY, not part of the
+  // alternative — hoist it onto the primary so "oder Ahornsirup" can match.
+  const leadParen = /^(\([^()]*\))\s*(?=(?:or|oder|alternativ|alternative|ersatzweise|notfalls|sub)\b)/i.exec(
+    inner,
+  );
+  if (leadParen) {
+    primary = `${primary} ${leadParen[1]}`.trim();
+    inner = inner.slice(leadParen[0].length).trim();
+  }
   const altMatch = ALT_PAREN_LEADER_RE.exec(inner);
   if (altMatch) {
     return { primary, content: altMatch[2].trim(), connector: `${altMatch[1]}:` };
@@ -2365,25 +2415,33 @@ export function expandIngredientLine(rawLine: string): ExpandedIngredientRow[] {
   //    (abgetropft))").
   const parensAlt = extractTrailingParenAlternative(body);
   if (parensAlt) {
-    const primary = parensAlt.primary;
     const altLeader = parensAlt.connector;
-    const altItems = splitColonListItems(parensAlt.content);
+    // Each option is separated by "oder"/"or" only — a comma inside an option
+    // is its own note ("1 kl. Glas Spargelköpfe, Abtropfgew. 115 g").
+    const altItems = splitOrOptions(parensAlt.content);
     const rows: ExpandedIngredientRow[] = [];
-    if (primary.length > 0) {
-      rows.push({
-        kind: "ingredient",
-        text: primary,
-        rawText: original,
-        forceOptional: baseOptional,
-        isAlternative: false,
-        alternativeConnector: null,
+    // Re-expand the primary so its OWN "oder"/"alternativ" chain splits too
+    // ("Weizenmehl oder Dinkelmehl (oder glutenfrei)" → 3 rows). The first
+    // emitted row is the real primary; the rest are its alternatives.
+    if (parensAlt.primary.length > 0) {
+      expandIngredientLine(parensAlt.primary).forEach((r, idx) => {
+        if (r.kind !== "ingredient") {
+          rows.push({ ...r, rawText: original });
+          return;
+        }
+        rows.push({
+          ...r,
+          rawText: original,
+          forceOptional: idx === 0 ? baseOptional || r.forceOptional : r.forceOptional,
+        });
       });
     }
+    const hasPrimary = rows.some((r) => r.kind === "ingredient" && !r.isAlternative);
     altItems.forEach((item, idx) => {
       // With a primary, every parenthetical item is an alternative to it.
       // Without one, a bare "(Alternativ: X)" emits its first item as a
       // standalone optional row and any further items as alternatives to it.
-      const isAlt = primary.length > 0 || idx > 0;
+      const isAlt = hasPrimary || idx > 0;
       rows.push({
         kind: "ingredient",
         text: item,
@@ -2395,9 +2453,13 @@ export function expandIngredientLine(rawLine: string): ExpandedIngredientRow[] {
         // with "oder".
         alternativeConnector: !isAlt
           ? null
-          : idx === 0 && primary.length > 0
+          : idx === 0 && hasPrimary
             ? altLeader
             : "oder",
+        // A note inside this parenthetical alternative is the alternative's
+        // own ("(oder Pfeffer, frisch gemahlen)") — don't share it with the
+        // primary or other siblings.
+        localNote: true,
       });
     });
     return rows;

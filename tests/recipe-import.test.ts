@@ -1107,6 +1107,40 @@ describe("expandIngredientLine — parenthetical alternatives", () => {
     expect(alt?.alternativeConnector).toBe("oder");
   });
 
+  it("re-expands an 'oder' chain in the primary alongside a paren alternative", () => {
+    // "Weizenmehl oder Dinkelmehl (oder glutenfreies Mehl)" → 3 ingredients.
+    const rows = ingredients("80 g Weizenmehl oder Dinkelmehl (oder glutenfreies Mehl)");
+    expect(rows).toHaveLength(3);
+    expect(rows[0]).toMatchObject({ text: "80 g Weizenmehl", isAlternative: false });
+    expect(rows[1]).toMatchObject({ text: "Dinkelmehl", isAlternative: true });
+    expect(rows[2]).toMatchObject({ text: "glutenfreies Mehl", isAlternative: true });
+  });
+
+  it("splits a primary 'oder' chain even when a paren note-alt follows", () => {
+    const rows = ingredients("2 EL Zitronensaft oder Limettensaft (oder nach Geschmack)");
+    // Zitronensaft (primary) + Limettensaft (alt) + nach Geschmack (alt note)
+    expect(rows.length).toBeGreaterThanOrEqual(2);
+    expect(rows[0]).toMatchObject({ text: "2 EL Zitronensaft", isAlternative: false });
+    expect(rows[1]).toMatchObject({ text: "Limettensaft", isAlternative: true });
+  });
+
+  it("keeps an ingredient,note comma inside a paren alternative as ONE alternative", () => {
+    // "Abtropfgew. 115 g" is a note on the alternative, not a second one — so
+    // there must be exactly one extra alternative (one 'oder', not two).
+    const rows = ingredients(
+      "200 g Spargelspitzen (oder 1 kl. Glas Spargelköpfe, Abtropfgew. 115 g)",
+    );
+    expect(rows).toHaveLength(2);
+    expect(rows[1].text).toBe("1 kl. Glas Spargelköpfe, Abtropfgew. 115 g");
+  });
+
+  it("hoists a leading paren note out of a '((10 g) oder X)' alternative", () => {
+    const rows = ingredients("1/2 EL Melasse ((10 g) oder Ahornsirup)");
+    expect(rows).toHaveLength(2);
+    expect(rows[0].text).toBe("1/2 EL Melasse (10 g)");
+    expect(rows[1]).toMatchObject({ text: "Ahornsirup", isAlternative: true });
+  });
+
   it("does not split a decimal comma inside a parenthetical alternative", () => {
     // "1,5 TL Apfelessig" must stay ONE alternative — the comma is a decimal
     // point, not a list separator.

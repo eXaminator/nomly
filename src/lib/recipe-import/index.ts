@@ -89,6 +89,10 @@ export type ImportedIngredient = {
    *  `recipe_ingredient.alternative_for_id` linking back to the most
    *  recent primary in the same section. */
   isAlternative: boolean;
+  /** Transient hint (consumed by {@link applyAlternativeInheritance}): this
+   *  alternative's note is its own and must not propagate to siblings — set
+   *  for notes inside a parenthetical alternative. Not persisted. */
+  localNote?: boolean;
   /** Auto-set when the parser found no quantity — these lines describe an
    *  ingredient whose amount is portion-independent ("Salz nach Geschmack",
    *  "etwas Öl"). The recipe view can still override via the per-row toggle. */
@@ -717,7 +721,19 @@ function resolveIngredientForRow(
         // alias text — the unit (e.g. the alias's default "Zehe") is rendered
         // separately, so the line reads "3 Zehen Knoblauch". Notes from the
         // uncovered tokens are kept. NULL display name → alias verbatim.
-        const displayName = top.displayName?.trim() || name;
+        //
+        // But the rename only makes sense alongside the default unit it pairs
+        // with: that unit carries the meaning the rename strips off the name
+        // ("Knoblauchzehe" → "Knoblauch" + "Zehe"). When the default unit is
+        // dropped because the line has no amount (see pickFinalUnit), renaming
+        // would silently lose that meaning — so keep the source alias name.
+        const defaultUnitDropped =
+          top.defaultUnit != null &&
+          !(parsed.quantity !== null && parsed.quantity > 0);
+        const displayName =
+          !defaultUnitDropped && top.displayName?.trim()
+            ? top.displayName.trim()
+            : name;
         const canonical =
           displayName.toLowerCase() === top.canonicalName.toLowerCase()
             ? null
@@ -1087,6 +1103,7 @@ export function parseIngredientLines(
           // Optional:/alternativ: wrappers from the expansion pass.
           isOptional: parsed.isOptional || resolved.isEquipment || row.forceOptional,
           isAlternative: row.isAlternative,
+          localNote: row.localNote,
           // No parsed quantity → treat the amount as constant. Catches
           // "Salz nach Geschmack" / "etwas Olivenöl" so changing the meal's
           // portion size doesn't multiply a non-existent number.
@@ -1154,6 +1171,13 @@ function inheritWithinGroup(
   hi: number,
 ): void {
   const primary = rows[lo];
+  // The range expression the primary recorded in notes ("2-3", "0,5-1") when
+  // it resolved a range to its high bound. An alt that inherits the amount
+  // took the same high bound, so it inherits the range note too.
+  const primaryRange = (primary.notes ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .find((s) => /^[\d.,/]+\s*[-–]\s*[\d.,/]+$/.test(s));
   for (let k = lo + 1; k <= hi; k++) {
     const alt = rows[k];
     const hasOwnAmount = alt.quantity !== null;
@@ -1164,9 +1188,16 @@ function inheritWithinGroup(
     alt.unit = primary.unit;
     alt.unitMatch = primary.unitMatch;
     alt.rawUnit = primary.rawUnit;
+    if (primaryRange) {
+      const cur = alt.notes?.trim();
+      alt.notes = cur && cur.length > 0 ? `${primaryRange}, ${cur}` : primaryRange;
+    }
   }
   // Trailing note of the last member → siblings that have none of their own.
-  const sharedNote = rows[hi].notes?.trim();
+  // Only a genuinely shared (line-trailing) note propagates: a note that
+  // belongs to a single parenthetical alternative ("Salz (oder Pfeffer,
+  // frisch gemahlen)") is flagged `localNote` and stays put.
+  const sharedNote = rows[hi].localNote ? undefined : rows[hi].notes?.trim();
   if (sharedNote && sharedNote.length > 0) {
     for (let k = lo; k < hi; k++) {
       const cur = rows[k].notes?.trim();
@@ -1358,6 +1389,7 @@ function parseGroupedIngredientLines(
             // wrappers from the expansion pass.
             isOptional: parsed.isOptional || resolved.isEquipment || row.forceOptional,
             isAlternative: row.isAlternative,
+            localNote: row.localNote,
             fixedAmount: parsed.quantity === null,
             // Expanded rows surface the user's ORIGINAL full line so the
             // import-review UI can show where each row came from.

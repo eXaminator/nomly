@@ -1300,6 +1300,29 @@ describe("alternative amount/unit/notes inheritance", () => {
     expect(out.find((r) => r.isAlternative)!.notes).toMatch(/diced/);
   });
 
+  it("a note inside a paren alternative stays local (not shared with the primary)", () => {
+    const out = rows("Salz (oder Pfeffer, frisch gemahlen)", [
+      { ingredientId: 1, canonicalName: "Salz", aliasName: "Salz", tokens: ["salz"] },
+      { ingredientId: 2, canonicalName: "Pfeffer", aliasName: "Pfeffer", tokens: ["pfeffer"] },
+    ]);
+    const salz = out[0];
+    const pfeffer = out.find((r) => r.isAlternative)!;
+    expect(pfeffer.notes).toMatch(/frisch gemahlen/);
+    expect(salz.notes ?? "").not.toMatch(/frisch gemahlen/);
+  });
+
+  it("an alt that inherits the amount also inherits the range note", () => {
+    const out = rows("2-3 EL Honig oder Ahornsirup", [
+      { ingredientId: 1, canonicalName: "Honig", aliasName: "Honig", tokens: ["honig"] },
+      { ingredientId: 2, canonicalName: "Ahornsirup", aliasName: "Ahornsirup", tokens: ["ahornsirup"] },
+    ], ["el"]);
+    const primary = out[0];
+    const alt = out.find((r) => r.isAlternative)!;
+    expect(primary.notes).toMatch(/2-3/);
+    expect(alt.quantity).toBe(3);
+    expect(alt.notes).toMatch(/2-3/);
+  });
+
   it("mirrors the inherited shared note onto the primary's candidate matches", () => {
     // Picking a candidate from the pill UI replaces the row's notes with the
     // candidate's own `notes`. The shared prep ("diced") must therefore be
@@ -1386,6 +1409,30 @@ describe("note fragments keep source order, comma-separated", () => {
     expect(out[0].ingredientMatch).toBe("new");
     expect(out[0].name).toBe("shrimp");
     expect(out[0].notes).toBe("225 g, large, peeled and deveined");
+  });
+
+  it("skips the per-alias rename when the default unit is skipped (no amount)", () => {
+    const catalog: IngredientCatalog = [
+      {
+        ingredientId: 5,
+        canonicalName: "Knoblauch",
+        aliasName: "Knoblauchzehe",
+        tokens: ["knoblauchzehe"],
+        defaultUnit: { id: 99, name: "Zehe" },
+        displayName: "Knoblauch",
+      },
+    ];
+    // With an amount: default unit + rename both apply ("3 Zehe Knoblauch").
+    const withQty = parseIngredientLines(["3 Knoblauchzehe"], makeLookups(catalog));
+    expect(withQty[0].unit?.id).toBe(99);
+    expect(withQty[0].name).toBe("Knoblauch");
+
+    // No amount: the default unit "Zehe" is dropped, so renaming to "Knoblauch"
+    // would silently lose the "Zehe" meaning — keep the source name instead.
+    const noQty = parseIngredientLines(["Knoblauchzehe"], makeLookups(catalog));
+    expect(noQty[0].ingredientId).toBe(5);
+    expect(noQty[0].unit).toBeNull();
+    expect(noQty[0].name).toBe("Knoblauchzehe");
   });
 
   it("per-alias displayName renames a matched alias: '3 Knoblauchzehen' → 3 Zehe Knoblauch", () => {
