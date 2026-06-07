@@ -408,6 +408,15 @@ describe("parseIngredientString — extended cases", () => {
       expect(tidyRemainderFragment("cooked)")).toBe("cooked");
       expect(tidyRemainderFragment("honey (sub")).toBe("honey sub");
     });
+    it("collapses doubled paren pairs anywhere in the fragment", () => {
+      // Whole-fragment doubles unwrap all the way…
+      expect(tidyRemainderFragment("((fein gerieben))")).toBe("fein gerieben");
+      // …and mid-fragment doubles collapse to a single pair.
+      expect(tidyRemainderFragment("((fein gerieben)) frisch")).toBe(
+        "(fein gerieben) frisch",
+      );
+      expect(tidyRemainderFragment("5-6 ((sehr reif))")).toBe("5-6 (sehr reif)");
+    });
     it("unwraps a fragment entirely bound by parens", () => {
       expect(tidyRemainderFragment("(natural, no sugar added)")).toBe(
         "natural, no sugar added",

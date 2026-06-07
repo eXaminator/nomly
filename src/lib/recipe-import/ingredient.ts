@@ -912,6 +912,10 @@ export function tidyRemainderFragment(s: string): string | null {
   while (prev !== text) {
     prev = text;
     text = unwrap(text);
+    // Collapse doubled pairs anywhere — "((fein gerieben)) frisch" →
+    // "(fein gerieben) frisch". The loop re-applies until stable, so any
+    // nesting depth flattens to a single pair.
+    text = text.replace(/\((\([^()]*\))\)/g, "$1");
     text = dropUnbalancedParens(text);
     text = text.replace(/^[\s,;:–—-]+|[\s,;:–—-]+$/g, "");
     const toks = text.split(/\s+/).filter((t) => t.length > 0);
