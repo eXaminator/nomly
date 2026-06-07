@@ -907,3 +907,37 @@ describe("position tiebreak — earlier match wins ties", () => {
     expect(matches[0].ingredientId).toBe(3); // 3-token full coverage beats 1-token
   });
 });
+
+describe("suffix alignments earn no close-inflection bonus", () => {
+  // German inflection changes a word's END — two tokens sharing only a
+  // SUFFIX ("ohne"/"Bohne", "Reis"/"Preis") differ at the START and are
+  // different stems. The close-inflection bonus must not lift such a match
+  // over the auto-pick gate (prod case: "… (ca. 500 g ohne Schale)"
+  // auto-matched Bohne via the stopword "ohne").
+  it("'ohne' must not auto-match 'Bohne'", () => {
+    const cat: IngredientCatalog = [
+      {
+        ingredientId: 1,
+        canonicalName: "Bohne",
+        aliasName: "Bohne",
+        tokens: ["bohne"],
+      },
+    ];
+    const { matches } = findIngredientCandidates("Brot ohne Kruste", cat);
+    const bohne = matches.find((m) => m.ingredientId === 1);
+    expect(bohne === undefined || bohne.score < MIN_AUTO_MATCH_SCORE).toBe(true);
+  });
+
+  it("genuine plural prefix-inflection keeps the bonus", () => {
+    const cat: IngredientCatalog = [
+      {
+        ingredientId: 1,
+        canonicalName: "Tomate",
+        aliasName: "Tomate",
+        tokens: ["tomate"],
+      },
+    ];
+    const { matches } = findIngredientCandidates("Tomaten", cat);
+    expect(matches[0].score).toBeGreaterThanOrEqual(MIN_AUTO_MATCH_SCORE);
+  });
+});

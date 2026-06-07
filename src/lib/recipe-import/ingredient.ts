@@ -56,29 +56,45 @@ export type ParsedIngredient = {
    */
   altWithPrepStripped: { name: string; notes: string | null } | null;
   /**
-   * Note fragments split out so the matched path can reassemble notes in the
-   * SOURCE order of the original line:
+   * Categorised note fragments — these feed the legacy `notes` assembly and
+   * the NO-MATCH path only (the matched path derives notes from
+   * {@link matchText}'s raw remainder instead):
    *   - `leadingNotes`: range / size / secondary-amount notes that sit with
    *     the quantity at the front ("2-3", "groß").
    *   - `nameAreaNotes`: parenthetical notes that appeared INSIDE the name
    *     area, each tagged with `afterText` = the name-area prefix that
-   *     preceded it ("…peanut butter-no sugar added (crunchy…)" →
-   *     { afterText: "…peanut butter-no sugar added", text: "crunchy…" }).
-   *     Stored as text (not a token index) so the matched path can re-tokenise
-   *     it the SAME way as the match candidate — the parser and the matcher
-   *     split dashes differently, so a raw index would drift.
+   *     preceded it.
    *   - `postCommaNotes`: notes after the first top-level comma (the
-   *     comma-tail + any parens/usage after it), already in source order.
+   *     comma-tail + any parens after it), already in source order.
    *   - `trailingNotes`: notes hoisted out of position by preprocess
-   *     (brackets, "to taste", optional-parens) — appended last.
-   *   - `nameTokenCount`: number of tokens in the final name area, so the
-   *     matcher's covered indices can be mapped back to name positions.
+   *     (brackets, optional-parens) — appended last.
+   *   - `nameTokenCount`: number of tokens in the final name area.
    */
   leadingNotes: string[];
   nameAreaNotes: { afterText: string; text: string }[];
   postCommaNotes: string;
   trailingNotes: string[];
   nameTokenCount: number;
+  /**
+   * Flavor-1 matcher input: the verbatim reconstruction of everything left
+   * in the line after ONLY amount / unit / flag consumption — size
+   * modifiers, secondary measurements, parens, commas, usage words all stay,
+   * in source order. The matched path runs the catalog matcher over this
+   * and derives notes as the raw remainder around the covered span; all the
+   * categorised fields above serve the NO-MATCH path only.
+   */
+  matchText: string;
+  /** Notes consumed from the line FRONT alongside the amount (range
+   *  expressions, prep-leading noun "Saft", vague amount "etwas") — the
+   *  raw-remainder notes builder prepends these in source order.
+   *  `gluedToNext` is true when NOTHING was consumed between this capture
+   *  and the next note piece ("5-6 große" reads as one phrase, space-
+   *  joined); false when tokens were stripped in between ("Juice of 1
+   *  small" → "Juice, small"). */
+  frontCaptures: { text: string; gluedToNext: boolean }[];
+  /** Preprocess-hoisted captures (brackets, parenthesized sizes) — appended
+   *  after the remainder fragments, mirroring today's trailing placement. */
+  trailingCaptures: string[];
 };
 
 /**
@@ -612,6 +628,10 @@ export function aliasDedupKey(name: string): string {
 function preprocess(raw: string): {
   text: string;
   capturedNotes: string[];
+  /** Amount-derived captures that sit at the line FRONT alongside the
+   *  quantity ("12-count" container sizes, "(28 oz.)" paren sizes) — the
+   *  raw-remainder notes builder leads with these instead of trailing. */
+  frontCaptures: string[];
   isOptional: boolean;
 } {
   // Strip invisible / formatting chars up front: SOFT HYPHEN, ZWSP/ZWNJ/ZWJ,
@@ -629,6 +649,7 @@ function preprocess(raw: string): {
       "",
     );
   const capturedNotes: string[] = [];
+  const frontCaptures: string[] = [];
   let isOptional = false;
 
   // "(...optional...)" — the paren contains the marker. Strip the parens
@@ -641,8 +662,12 @@ function preprocess(raw: string): {
       isOptional = true;
       const cleaned = inner
         .replace(/\b(?:optional|optionally|opt\.)\b/gi, "")
-        .replace(/^[\s,;]+|[\s,;]+$/g, "")
-        .replace(/[\s,;]+/g, " ")
+        // Keep commas that separated content around the removed marker
+        // ("gehackt, optional je nach …" → "gehackt, je nach …") —
+        // collapse separator runs to ", ", sparing decimal commas.
+        .replace(/\s*(?:(?<!\d)[,;]|[,;](?!\d))[\s,;]*/g, ", ")
+        .replace(/\s+/g, " ")
+        .replace(/^[\s,]+|[\s,]+$/g, "")
         .trim();
       if (cleaned.length > 0) capturedNotes.push(cleaned);
       return " ";
@@ -651,10 +676,16 @@ function preprocess(raw: string): {
 
   // "optional" / "optionally" / "opt." appearing ANYWHERE flags the row
   // and is stripped from the text. The user's rule: never let those words
-  // bleed into the name or notes.
+  // bleed into the name or notes. The match swallows surrounding
+  // separators — when a COMMA was among them ("gehackt, optional je nach
+  // …"), keep one so the pieces around the removed marker stay separated
+  // ("gehackt, je nach …").
   if (OPTIONAL_ANYWHERE_RE.test(text)) {
     isOptional = true;
-    text = text.replace(OPTIONAL_ANYWHERE_RE, " ");
+    OPTIONAL_ANYWHERE_RE.lastIndex = 0;
+    text = text.replace(OPTIONAL_ANYWHERE_RE, (m) =>
+      m.includes(",") ? ", " : " ",
+    );
     OPTIONAL_ANYWHERE_RE.lastIndex = 0;
   }
   // Other markers (n. B., evtl., nach Belieben, …) — same strip but they
@@ -737,37 +768,52 @@ function preprocess(raw: string): {
     text = `${amountPart} ${namePart}`;
   }
 
-  // Compound size-unit dash like "12-count", "14-ounce", "1-inch", "4-inch":
+  // Compound size-unit dash like "12-count", "14-ounce", "1-inch", "4-inch"
+  // — anchored to the line FRONT (only digits / whitespace / "x" may precede
+  // it): a mid-line compound ("sliced into 1-inch pieces") is part of an
+  // annotation and stays verbatim for the notes.
   //   - If the next token is a container word (package, can, tin, Dose, …),
-  //     the compound describes the container's size — demote to a note and
-  //     let the container word become the unit.
-  //         "14-ounce can of black beans" → unit "can", note "14 ounce"
+  //     the compound describes the container's size — demote to a note
+  //     (kept verbatim, dash included) and let the container word become
+  //     the unit: "14-ounce can of black beans" → unit "can", note "14-ounce"
   //   - Otherwise the compound IS the quantity + unit — strip just the dash
   //     so the regular parser sees "4 inch stems …" → unit "inch", qty 4.
   const CONTAINER_RE = /(?:package|packages|packet|packets|can|cans|tin|tins|jar|jars|bottle|bottles|tube|tubes|box|boxes|dose|dosen|packung|päckchen|pck|pkg|carton|cartons)/i;
   text = text.replace(
-    /(\d+)[-–](count|ounce|ounces|oz|inch|inches|cm|gram|grams|g|kg|ml|l|lb|pound|pounds)\b(\s*)(\S*)/gi,
-    (match, num: string, sizeUnit: string, ws: string, next: string) => {
+    /^((?:[\d().,x]+\s+)*)(\d+)([-–])(count|ounce|ounces|oz|inch|inches|cm|gram|grams|g|kg|ml|l|lb|pound|pounds)\b(\s*)(\S*)/i,
+    (
+      match,
+      lead: string,
+      num: string,
+      dash: string,
+      sizeUnit: string,
+      ws: string,
+      next: string,
+    ) => {
       if (next && CONTAINER_RE.test(next)) {
-        capturedNotes.push(`${num} ${sizeUnit}`);
-        return `${ws}${next}`;
+        frontCaptures.push(`${num}${dash}${sizeUnit}`);
+        return `${lead}${ws}${next}`;
       }
-      return `${num} ${sizeUnit}${ws}${next}`;
+      return `${lead}${num} ${sizeUnit}${ws}${next}`;
     },
   );
 
-  // Parenthesized size like "(28 oz.) can" → drop into notes, keep the main
-  // amount/unit/name unaffected.
-  text = text.replace(/\(\s*([\d\s./,\-–½¼¾⅓⅔⅛⅜⅝⅞]+\s+\p{L}{1,30}\.?)\s*\)/gu,
-    (_match, inner: string) => {
-      capturedNotes.push(inner.trim());
-      return " ";
+  // Parenthesized size like "(28 oz.) can" → drop into a FRONT note, keep
+  // the main amount/unit/name unaffected. Anchored to the line front (only
+  // non-letter chars may precede it): a size paren further into the line
+  // ("2 shallots (chopped (⅔ cup))") is part of an annotation and stays in
+  // place so the notes keep the source order ("chopped, ⅔ cup").
+  text = text.replace(
+    /^([^\p{L}]*)\(\s*([\d\s./,\-–½¼¾⅓⅔⅛⅜⅝⅞]+\s+\p{L}{1,30}\.?)\s*\)/u,
+    (_match, lead: string, inner: string) => {
+      frontCaptures.push(inner.trim());
+      return `${lead} `;
     },
   );
 
   // Collapse whitespace.
   text = text.replace(/\s+/g, " ").trim();
-  return { text, capturedNotes, isOptional };
+  return { text, capturedNotes, frontCaptures, isOptional };
 }
 
 function escapeRegExp(s: string): string {
@@ -829,6 +875,47 @@ export function stripVocabTail(name: string): { name: string; notes: string[] } 
     text = tokens.join(" ");
   }
   return { name: text, notes };
+}
+
+/**
+ * Genitive linkers that are noise at a notes-fragment EDGE ("strip of",
+ * "Saft von") but nothing more — deliberately tiny. Words like "to",
+ * "plus", "und" carry meaning in notes ("to taste", "plus more for
+ * serving", "und/oder …") and stay verbatim per the raw-remainder rule.
+ */
+const REMAINDER_EDGE_FILLER = new Set(["of", "von", "vom"]);
+
+/**
+ * Presentation cleanup for a raw-remainder notes fragment (the verbatim
+ * source text around a matched span):
+ *   - parentheses become COMMA separators ("(natural) smooth" →
+ *     "natural, smooth") — one rule that also covers whole-fragment wraps
+ *     ("(crunchy)" → "crunchy"), orphan halves left by a match span cutting
+ *     through a parenthetical, and doubled pairs ("((x))" → "x");
+ *   - comma/whitespace runs are normalised;
+ *   - edge separators and edge-adjacent genitive linkers (see
+ *     {@link REMAINDER_EDGE_FILLER}) are trimmed iteratively.
+ * Returns null when nothing meaningful is left.
+ */
+export function tidyRemainderFragment(s: string): string | null {
+  let text = s.trim().replace(/\s*[()]\s*/g, ", ");
+  // Normalise the comma runs the paren replacement may have produced —
+  // but ONLY separator commas. A comma directly between two digits is a
+  // German decimal ("1-1,5") and must stay glued (same discrimination the
+  // tokenizer's comma padding uses).
+  text = text.replace(/\s*(?:(?<!\d),|,(?!\d))[\s,]*/g, ", ");
+  let prev: string | null = null;
+  while (prev !== text) {
+    prev = text;
+    text = text.replace(/^[\s,;:–—-]+|[\s,;:–—-]+$/g, "");
+    const toks = text.split(/\s+/).filter((t) => t.length > 0);
+    const isFiller = (t: string) =>
+      REMAINDER_EDGE_FILLER.has(t.toLowerCase().replace(/[.,;]$/, ""));
+    while (toks.length > 0 && isFiller(toks[0])) toks.shift();
+    while (toks.length > 0 && isFiller(toks[toks.length - 1])) toks.pop();
+    text = toks.join(" ");
+  }
+  return text.length > 0 ? text : null;
 }
 
 function normalize(s: string): string {
@@ -912,26 +999,50 @@ function tokenize(input: string): string[] {
  * Drop leading filler tokens that snuck through the preprocess regex (they
  * may appear after a quantity-or-unit prefix has been consumed too).
  */
-function dropLeadingFiller(tokens: string[]): void {
+function dropLeadingFiller(tokens: string[]): boolean {
+  let dropped = false;
   while (tokens.length > 0) {
     const lower = tokens[0].toLowerCase().replace(/[.,;]$/, "");
     if (NAME_FILLER_TOKENS.has(lower)) {
       tokens.shift();
+      dropped = true;
     } else {
       break;
     }
   }
+  return dropped;
 }
 
 export function parseIngredientString(
   raw: string,
   knownUnitTokens: ReadonlySet<string>,
 ): ParsedIngredient {
-  const { text: preprocessed, capturedNotes, isOptional } = preprocess(raw);
+  const {
+    text: preprocessed,
+    capturedNotes,
+    frontCaptures: preprocessFront,
+    isOptional,
+  } = preprocess(raw);
+  // Trailing captures (brackets, optional-paren leftovers) vs FRONT captures
+  // ("12-count" / "(28 oz.)" sizes from preprocess, plus the range / prep
+  // noun / vague amount consumed below) — the raw-remainder notes builder
+  // leads with the front group and trails with the rest.
+  const trailingCaptures = [...capturedNotes];
+  // Preprocess size captures always have consumed text after them
+  // (the container word becomes the unit) → never glued.
+  const frontCaptures: { text: string; gluedToNext: boolean }[] =
+    preprocessFront.map((text) => ({ text, gluedToNext: false }));
+  /** Mark that tokens were CONSUMED after the latest front capture — the
+   *  capture and whatever note piece follows are no longer contiguous in
+   *  the source, so the notes builder separates them with a comma. */
+  const markFrontBoundary = () => {
+    const last = frontCaptures[frontCaptures.length - 1];
+    if (last) last.gluedToNext = false;
+  };
   const cleaned = normalize(preprocessed);
   if (cleaned.length === 0) {
-    const notes =
-      capturedNotes.length > 0 ? capturedNotes.join(", ") : null;
+    const allCaptures = [...preprocessFront, ...capturedNotes];
+    const notes = allCaptures.length > 0 ? allCaptures.join(", ") : null;
     return {
       quantity: null,
       unitName: null,
@@ -945,11 +1056,14 @@ export function parseIngredientString(
       postCommaNotes: "",
       trailingNotes: [...capturedNotes],
       nameTokenCount: 0,
+      matchText: "",
+      frontCaptures,
+      trailingCaptures,
     };
   }
   const tokens = tokenize(cleaned);
 
-  dropLeadingFiller(tokens);
+  if (dropLeadingFiller(tokens)) markFrontBoundary();
 
   // Leading preparation nouns — "Saft einer halben Zitrone", "Abrieb einer
   // Bio-Orange", "juice of half a lemon". We only treat the noun as
@@ -960,10 +1074,12 @@ export function parseIngredientString(
     PREP_LEADING_NOUNS.has(tokens[0].toLowerCase()) &&
     PREP_FOLLOWUP_TOKENS.has(tokens[1].toLowerCase().replace(/[.,;]$/, ""))
   ) {
-    capturedNotes.push(tokens.shift()!);
+    const noun = tokens.shift()!;
+    capturedNotes.push(noun);
+    frontCaptures.push({ text: noun, gluedToNext: true });
     // Re-strip filler so the next stage sees the actual quantity / unit
     // token, not "von" / "einer".
-    dropLeadingFiller(tokens);
+    if (dropLeadingFiller(tokens)) markFrontBoundary();
   }
 
   // Pre-quantity size modifiers — "Heaping 1 teaspoon", "Scant ½ cup",
@@ -999,9 +1115,11 @@ export function parseIngredientString(
     const firstLower = tokens[0].toLowerCase();
     if (TEXT_AMOUNT_VAGUE.has(firstLower)) {
       capturedNotes.push(tokens[0]);
+      frontCaptures.push({ text: tokens[0], gluedToNext: true });
       tokens.shift();
       quantity = null;
     } else if (TEXT_AMOUNT_ONE.has(firstLower)) {
+      markFrontBoundary();
       tokens.shift();
       quantity = 1;
       // "ein halber TL", "eine halbe Tasse", "ein viertel TL" — indefinite
@@ -1019,6 +1137,7 @@ export function parseIngredientString(
         }
       }
     } else if (TEXT_AMOUNT_HALF.has(firstLower)) {
+      markFrontBoundary();
       tokens.shift();
       quantity = 0.5;
       // "half a teaspoon" — drop the trailing article so the unit detector
@@ -1027,6 +1146,7 @@ export function parseIngredientString(
         tokens.shift();
       }
     } else if (TEXT_AMOUNT_QUARTER.has(firstLower)) {
+      markFrontBoundary();
       tokens.shift();
       quantity = 0.25;
       if (tokens.length > 0 && TEXT_AMOUNT_ONE.has(tokens[0].toLowerCase())) {
@@ -1035,8 +1155,16 @@ export function parseIngredientString(
     } else {
       const range = consumeQuantity(tokens);
       if (range) {
+        // Quantity tokens were consumed — earlier captures (e.g. a prep
+        // noun) are no longer contiguous with what follows.
+        markFrontBoundary();
         quantity = range.quantity;
-        if (range.rangeExpression) rangeNotes.push(range.rangeExpression);
+        if (range.rangeExpression) {
+          rangeNotes.push(range.rangeExpression);
+          // The range itself sits exactly where the quantity was — it IS
+          // the consumed text, so it stays glued to the next word.
+          frontCaptures.push({ text: range.rangeExpression, gluedToNext: true });
+        }
       }
     }
   }
@@ -1075,13 +1203,63 @@ export function parseIngredientString(
     ) {
       unitName = candidate.replace(/\.$/, "");
       tokens.shift();
+      markFrontBoundary();
       // Fallback: unit present but no amount → default to 1.
       if (quantity === null) quantity = 1;
     }
   }
 
   // Drop a leading filler word between unit and name ("of", "von", "and").
-  dropLeadingFiller(tokens);
+  if (dropLeadingFiller(tokens)) markFrontBoundary();
+
+  // Trailing-unit fallback: when we didn't catch a unit after the quantity
+  // ("1 garlic clove") but the LAST token of the line's head (up to the
+  // first comma / semicolon / paren) IS a known unit, peel it off. Runs
+  // BEFORE the matchText snapshot — unit consumption is the one thing
+  // Flavor 1 allows pre-match. Guard: skip when the head contains an
+  // interior numeric token — then the "unit" is part of an annotation like
+  // "sliced into 1-inch pieces" and must NOT be stolen as the row's unit.
+  if (unitName === null && quantity !== null) {
+    let headEnd = 0;
+    while (
+      headEnd < tokens.length &&
+      ![",", ";", "("].includes(tokens[headEnd])
+    ) {
+      headEnd += 1;
+    }
+    if (headEnd >= 2) {
+      const lastTok = tokens[headEnd - 1];
+      const lower = lastTok.toLowerCase();
+      const stripped = lower.replace(/\.$/, "");
+      const isUnit =
+        knownUnitTokens.has(lower) ||
+        knownUnitTokens.has(stripped) ||
+        knownUnitTokens.has(`${stripped}.`);
+      // Any digit anywhere in the head (incl. compounds like "1-inch")
+      // signals a measurement annotation — the trailing "unit" then belongs
+      // to that annotation, not to the row.
+      const hasInteriorNumeric = tokens
+        .slice(0, headEnd - 1)
+        .some((t) => /\d/.test(t));
+      if (isUnit && !hasInteriorNumeric) {
+        unitName = lastTok.replace(/\.$/, "");
+        tokens.splice(headEnd - 1, 1);
+      }
+    }
+  }
+
+  // Flavor-1 snapshot: the matcher's input is everything still in the
+  // stream — size modifiers re-inserted at the front (their source position:
+  // they always precede the unit), parens / commas / secondary measurements
+  // untouched. The legacy extraction below keeps running on the stream to
+  // produce the categorised fields, which now serve the NO-MATCH path only.
+  const matchText = [...sizeModifiers, ...tokens]
+    .join(" ")
+    .replace(/\s+([,;])/g, "$1")
+    .replace(/\(\s+/g, "(")
+    .replace(/\s+\)/g, ")")
+    .replace(/\s+/g, " ")
+    .trim();
 
   // Detect a leading "usage" phrase ("zum Bestreuen", "for drizzling") that
   // shouldn't be part of the name.
@@ -1201,27 +1379,9 @@ export function parseIngredientString(
     nameTokens.pop();
   }
 
-  // Trailing-unit fallback: when we didn't catch a unit after the quantity
-  // ("1 garlic clove") but the last name token IS a known unit, peel it
-  // off. This handles English-style "qty NAME UNIT" alongside the more
-  // common "qty UNIT NAME" the main loop already covers.
-  if (
-    unitName === null &&
-    nameTokens.length >= 2 &&
-    quantity !== null
-  ) {
-    const lastToken = nameTokens[nameTokens.length - 1];
-    const lower = lastToken.toLowerCase();
-    const stripped = lower.replace(/\.$/, "");
-    if (
-      knownUnitTokens.has(lower) ||
-      knownUnitTokens.has(stripped) ||
-      knownUnitTokens.has(`${stripped}.`)
-    ) {
-      unitName = lastToken.replace(/\.$/, "");
-      nameTokens.pop();
-    }
-  }
+  // (The trailing-unit fallback used to live here; it moved BEFORE the
+  // matchText snapshot — see above — so a consumed unit token leaves the
+  // matcher's remainder too, and gained the interior-numeric guard.)
 
   // Secondary "N UNIT" runs inside the name area — these come from
   // parallel measurement writeups like "½ cup 1 stick unsalted butter"
@@ -1306,7 +1466,12 @@ export function parseIngredientString(
   // here we join them in occurrence order for the new-ingredient / fallback
   // case. e.g. "1/2 pound (225g) large shrimp, peeled and deveined" →
   // "large, 225 g, peeled and deveined".
-  const leadingNotes = [sizeNote, ...rangeNotes, ...secondaryAmounts]
+  const leadingNotes = [
+    sizeNote,
+    ...rangeNotes,
+    ...preprocessFront,
+    ...secondaryAmounts,
+  ]
     .map((p) => p.trim())
     .filter((p) => p.length > 0);
   const trailingNotes = capturedNotes
@@ -1362,6 +1527,7 @@ export function parseIngredientString(
       [
         sizeNote,
         ...rangeNotes,
+        ...preprocessFront,
         ...secondaryAmounts,
         ...nameAreaNotes.map((n) => n.text),
         stripNote,
@@ -1387,6 +1553,9 @@ export function parseIngredientString(
     postCommaNotes: noteBody,
     trailingNotes,
     nameTokenCount: nameTokens.length,
+    matchText,
+    frontCaptures,
+    trailingCaptures,
   };
 }
 
@@ -1890,7 +2059,14 @@ const OPTIONAL_PREFIX_RE =
 const ALTERNATIV_SEP_RE =
   /\s+(?:alternativ|alternative|alternatively|alternativly)\s*:?\s+/i;
 const PARENS_ALTERNATIV_RE =
-  /\s*\((alternativ|alternative|alternatively|alternativly)(?:\s*:\s*|\s+)([^)]+)\)\s*$/i;
+  /\s*\(\s*(?:(?:or|oder)\s+)?(alternativ|alternative|alternatively|alternativly|substituted?(?:\s+with)?|sub\.?|ersatzweise|notfalls)(?:\s*:\s*|\s+)([^)]+)\)\s*$/i;
+/**
+ * Leading substitute marker on an alternative SEGMENT ("or sub sour cream"
+ * → strip "sub" so the alternative's name stays clean). Same line-structure
+ * vocabulary category as "alternativ:" — it marks the alternative role,
+ * never ingredient identity.
+ */
+const SUB_MARKER_RE = /^(?:substituted?(?:\s+with)?|sub\.?|ersatzweise|notfalls)\s+/i;
 const EACH_DIST_RE = /^(\S[^:]*?)\s+each\s*:\s*(.+)$/i;
 
 /**
@@ -2209,7 +2385,9 @@ export function expandIngredientLine(rawLine: string): ExpandedIngredientRow[] {
     ) {
       return segments.map((seg, idx) => ({
         kind: "ingredient" as const,
-        text: seg.text,
+        // Alternatives may carry a leading substitute marker ("or sub sour
+        // cream") — strip it so the alternative's text is just the product.
+        text: idx > 0 ? seg.text.replace(SUB_MARKER_RE, "") : seg.text,
         rawText: original,
         forceOptional: idx === 0 ? baseOptional : true,
         isAlternative: idx > 0,

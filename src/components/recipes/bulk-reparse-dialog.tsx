@@ -32,6 +32,7 @@ import {
   RecipeIngredientReadLine,
   type LineHighlight,
 } from "./ingredient-read-line";
+import { diffNotes, type NotesDiff } from "./notes-diff";
 import type { AliasWarning, NewIngredientDefaults } from "@/lib/recipes/types";
 
 /** One-line German rendering of a non-fatal alias outcome. */
@@ -87,20 +88,30 @@ function computeHighlights(
   current: ScanRowSummary[],
   draft: DraftIngredient[],
   inflect: UnitInflector,
-): { current: LineHighlight[]; proposed: LineHighlight[] } {
+): {
+  current: LineHighlight[];
+  proposed: LineHighlight[];
+  /** Word-level notes diff per row pair (undefined when the notes are equal
+   *  or the row exists on one side only) — lets the read lines tint only
+   *  the changed words instead of the whole notes string. */
+  notesDiffs: (NotesDiff | undefined)[];
+} {
   const n = Math.max(current.length, draft.length);
   const cur: LineHighlight[] = [];
   const prop: LineHighlight[] = [];
+  const notesDiffs: (NotesDiff | undefined)[] = [];
   const ALL: LineHighlight = { amount: true, name: true, notes: true, mapping: true };
   for (let k = 0; k < n; k++) {
     const c = current[k];
     const d = draft[k];
     if (!c) {
       prop.push(ALL); // added row
+      notesDiffs.push(undefined);
       continue;
     }
     if (!d) {
       cur.push(ALL); // removed row
+      notesDiffs.push(undefined);
       continue;
     }
     const flags: LineHighlight = {
@@ -125,8 +136,11 @@ function computeHighlights(
     };
     cur.push(flags);
     prop.push(flags);
+    notesDiffs.push(
+      flags.notes ? diffNotes(c.notes, d.notes.trim() || null) : undefined,
+    );
   }
-  return { current: cur, proposed: prop };
+  return { current: cur, proposed: prop, notesDiffs };
 }
 
 type ScanRowSummary = {
@@ -772,6 +786,7 @@ export function BulkReparseDialog({
                                               mappingLabel={currentMappingLabel(c)}
                                               highlight={hi.current[k]}
                                               tone="removed"
+                                              notesDiff={hi.notesDiffs[k]?.current}
                                             />
                                           ))}
                                         </div>
@@ -833,6 +848,7 @@ export function BulkReparseDialog({
                                                   highlight={hi.proposed[k]}
                                                   tone="added"
                                                   mappingLabel={draftMappingLabel(d)}
+                                                  notesDiff={hi.notesDiffs[k]?.proposed}
                                                 />
                                                 {showAlias ? (
                                                   <button

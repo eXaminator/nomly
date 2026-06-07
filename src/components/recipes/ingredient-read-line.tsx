@@ -1,8 +1,9 @@
-import type { ReactNode } from "react";
+import { Fragment, type ReactNode } from "react";
 import { CornerDownRight, Lock } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { IngredientLine } from "@/components/recipes/ingredient-line";
 import { toFractionDisplay } from "@/lib/units/fraction";
+import type { NotesDiffSegment } from "@/components/recipes/notes-diff";
 
 /**
  * Display formatting for an ingredient quantity (de-DE, ≤2 decimals). When
@@ -55,6 +56,10 @@ export type ReadLineProps = {
    *  (new/proposed side, green). */
   highlight?: LineHighlight;
   tone?: "removed" | "added";
+  /** Word-level diff segments for THIS side's notes (see diffNotes). When
+   *  provided (and the notes are flagged changed), only the changed words
+   *  are tinted instead of the whole notes string. */
+  notesDiff?: NotesDiffSegment[];
 };
 
 /**
@@ -78,6 +83,7 @@ export function RecipeIngredientReadLine({
   mappingLabel,
   highlight,
   tone,
+  notesDiff,
 }: ReadLineProps) {
   // Subtle tint: green for the new/proposed side, red for the old/current side.
   const hlClass =
@@ -116,12 +122,30 @@ export function RecipeIngredientReadLine({
           highlight?.name,
           <IngredientLine displayName={name} canonicalName={canonicalName} />,
         )}
-        {notes
-          ? mark(
+        {notes ? (
+          highlight?.notes && tone && notesDiff && notesDiff.length > 0 ? (
+            // Granular notes diff: tint only the changed words.
+            <span className="text-[var(--color-muted-fg)]">
+              {" "}
+              –{" "}
+              {notesDiff.map((seg, k) => (
+                <Fragment key={k}>
+                  {k > 0 ? " " : null}
+                  {seg.changed ? (
+                    <span className={hlClass}>{seg.text}</span>
+                  ) : (
+                    seg.text
+                  )}
+                </Fragment>
+              ))}
+            </span>
+          ) : (
+            mark(
               highlight?.notes,
               <span className="text-[var(--color-muted-fg)]"> – {notes}</span>,
             )
-          : null}
+          )
+        ) : null}
         {!isAlternative && isOptional ? (
           <span className="ml-1 text-xs text-[var(--color-muted-fg)]">
             (optional)

@@ -6,6 +6,7 @@ import {
   parseIngredientString,
   splitConjunctions,
   stripVocabTail,
+  tidyRemainderFragment,
 } from "@/lib/recipe-import/ingredient";
 import {
   asImageUrl,
@@ -280,7 +281,7 @@ describe("parseIngredientString — extended cases", () => {
     const r = parse("12-count package pull-apart dinner rolls");
     expect(r.quantity).toBe(1);
     expect(r.unitName?.toLowerCase()).toBe("package");
-    expect(r.notes).toMatch(/12 count/i);
+    expect(r.notes).toMatch(/12-count/i);
     expect(r.name).toMatch(/pull-apart/i);
   });
   it("4-inch stems: compound becomes amount+unit when next word is not a container", () => {
@@ -381,6 +382,57 @@ describe("parseIngredientString — extended cases", () => {
   it("'Salz - nach Geschmack' collapses the dash, keeps the phrase", () => {
     const r = parse("Salz - nach Geschmack");
     expect(r.name).toBe("Salz nach Geschmack");
+  });
+
+  describe("tidyRemainderFragment — raw-remainder edge cleanup", () => {
+    it("trims separators and whitespace at the edges", () => {
+      expect(tidyRemainderFragment("- sliced into pieces,")).toBe(
+        "sliced into pieces",
+      );
+      expect(tidyRemainderFragment(" , – ")).toBeNull();
+    });
+    it("drops edge-adjacent genitive linkers only — meaning-bearing words stay", () => {
+      expect(tidyRemainderFragment("of small head")).toBe("small head");
+      // interior filler stays — it's part of the phrase
+      expect(tidyRemainderFragment("sliced into strips of gold")).toBe(
+        "sliced into strips of gold",
+      );
+      // "to" / "plus" carry meaning in notes ("to taste", "plus more") and
+      // are NOT trimmed, per the verbatim rule.
+      expect(tidyRemainderFragment("to taste")).toBe("to taste");
+      expect(tidyRemainderFragment("plus more for serving")).toBe(
+        "plus more for serving",
+      );
+    });
+    it("replaces parens with comma separators", () => {
+      expect(tidyRemainderFragment("(natural, no sugar added)")).toBe(
+        "natural, no sugar added",
+      );
+      expect(tidyRemainderFragment("(natural) smooth")).toBe("natural, smooth");
+      expect(tidyRemainderFragment("cut into half-moons (or quarters)")).toBe(
+        "cut into half-moons, or quarters",
+      );
+    });
+    it("handles orphan and doubled parens via the same comma rule", () => {
+      expect(tidyRemainderFragment("cooked)")).toBe("cooked");
+      expect(tidyRemainderFragment("honey (sub")).toBe("honey, sub");
+      expect(tidyRemainderFragment("((fein gerieben))")).toBe("fein gerieben");
+      expect(tidyRemainderFragment("((fein gerieben)) frisch")).toBe(
+        "fein gerieben, frisch",
+      );
+      expect(tidyRemainderFragment("5-6 ((sehr reif))")).toBe("5-6, sehr reif");
+    });
+    it("never returns an empty string", () => {
+      expect(tidyRemainderFragment("")).toBeNull();
+      expect(tidyRemainderFragment("of")).toBeNull();
+      expect(tidyRemainderFragment("()")).toBeNull();
+    });
+    it("leaves decimal commas untouched", () => {
+      // German decimals inside range captures ("1-1,5") must not become
+      // "1-1, 5" — only separator commas get normalised.
+      expect(tidyRemainderFragment("1-1,5")).toBe("1-1,5");
+      expect(tidyRemainderFragment("0,5-1 (gehäuft)")).toBe("0,5-1, gehäuft");
+    });
   });
 
   describe("stripVocabTail — no-match-only vocabulary cleanup", () => {

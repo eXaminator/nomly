@@ -128,6 +128,17 @@ export type CandidateToken = {
    *  the parser re-insert internal commas in a name when the matched alias
    *  itself contains one. */
   precededByComma: boolean;
+  /** True for tokens inside a parenthetical. Parens are a structural
+   *  annotation marker: their content is NEVER part of a match window (the
+   *  example in "Pilze (z. B. braune Champignons)" must not steal the
+   *  mapping from the generic), but the raw tokens stay available for the
+   *  verbatim notes reconstruction. */
+  inParens: boolean;
+  /** Set when this token was split off the PREVIOUS one at an intra-word
+   *  dash ("whole-wheat" → "whole" + "wheat") — holds the dash character so
+   *  the verbatim notes reconstruction can re-join the compound exactly as
+   *  written. Undefined for ordinary whitespace-separated tokens. */
+  joinedByDash?: string;
 };
 
 /**
@@ -140,6 +151,7 @@ export function tokenizeCandidate(text: string): CandidateToken[] {
   const out: CandidateToken[] = [];
   let postComma = false;
   let pendingComma = false;
+  let parenDepth = 0;
   // Keep commas as their own pieces so we can flip the flags as we cross them.
   for (const segment of text.split(/(,)/u)) {
     if (segment === ",") {
@@ -147,12 +159,45 @@ export function tokenizeCandidate(text: string): CandidateToken[] {
       pendingComma = true;
       continue;
     }
-    for (const raw of segment.split(/[\s;/\-–—]+/u)) {
-      if (raw.length === 0) continue;
-      const normalized = canonicalizeMatchToken(normalizeForMatch(raw));
-      if (normalized.length === 0) continue;
-      out.push({ raw, normalized, postComma, precededByComma: pendingComma });
-      pendingComma = false;
+    // Keep fraction slashes ("1/2") as one token — notes are reconstructed
+    // from raw tokens and must not degrade to "1 2". Letter slashes
+    // ("und/oder") still split. Intra-word dashes split for MATCHING (so
+    // "Cherry-Tomate" aligns against a 2-token entry) but remember the dash
+    // via `joinedByDash` so notes reconstruction restores "whole-wheat".
+    for (const piece of segment
+      .replace(/(?<!\d)\/|\/(?!\d)/g, " ")
+      .split(/[\s;]+/u)) {
+      if (piece.length === 0) continue;
+      const subs = piece.split(/([-–—])/);
+      let pendingDash: string | undefined;
+      let emittedInPiece = false;
+      for (const sub of subs) {
+        if (/^[-–—]$/.test(sub)) {
+          if (emittedInPiece) pendingDash = sub;
+          continue;
+        }
+        if (sub.length === 0) continue;
+        const raw = sub;
+        const opens = (raw.match(/\(/g) ?? []).length;
+        const closes = (raw.match(/\)/g) ?? []).length;
+        const inParens = parenDepth > 0 || opens > 0;
+        parenDepth = Math.max(0, parenDepth + opens - closes);
+        const normalized = canonicalizeMatchToken(normalizeForMatch(raw));
+        if (normalized.length === 0) continue;
+        out.push({
+          raw,
+          normalized,
+          postComma,
+          precededByComma: pendingComma,
+          inParens,
+          ...(pendingDash !== undefined && !pendingComma
+            ? { joinedByDash: pendingDash }
+            : {}),
+        });
+        pendingComma = false;
+        pendingDash = undefined;
+        emittedInPiece = true;
+      }
     }
   }
   return out;
@@ -175,6 +220,7 @@ export function tokenizeCandidateJoinDashes(text: string): CandidateToken[] {
   const out: CandidateToken[] = [];
   let postComma = false;
   let pendingComma = false;
+  let parenDepth = 0;
   for (const segment of text.split(/(,)/u)) {
     if (segment === ",") {
       postComma = true;
@@ -184,13 +230,25 @@ export function tokenizeCandidateJoinDashes(text: string): CandidateToken[] {
     // Split on whitespace / semicolon / slash, but not on dashes between
     // letters. Standalone / padded dashes still separate (handled by the
     // surrounding whitespace).
-    for (const raw of segment.split(/[\s;/]+/u)) {
+    for (const raw of segment
+      .replace(/(?<!\d)\/|\/(?!\d)/g, " ")
+      .split(/[\s;]+/u)) {
       if (raw.length === 0) continue;
+      const opens = (raw.match(/\(/g) ?? []).length;
+      const closes = (raw.match(/\)/g) ?? []).length;
+      const inParens = parenDepth > 0 || opens > 0;
+      parenDepth = Math.max(0, parenDepth + opens - closes);
       const normalized = canonicalizeMatchToken(
         normalizeForMatch(raw.replace(/(\p{L})[-–—](\p{L})/gu, "$1$2")),
       );
       if (normalized.length === 0) continue;
-      out.push({ raw, normalized, postComma, precededByComma: pendingComma });
+      out.push({
+        raw,
+        normalized,
+        postComma,
+        precededByComma: pendingComma,
+        inParens,
+      });
       pendingComma = false;
     }
   }
@@ -321,7 +379,16 @@ function scoreMatch(
     // otherwise be handed the +20 "close inflection" bonus (an equal-length
     // typo like "kale"/"kase" has ratio 1.0), pushing a lone fuzzy token to
     // the auto-pick gate. Zero bonus keeps lone fuzzy matches below it.
-    const bonus = a.kind === "fuzzy" ? 0 : perTokenBonus(a.entryToken, a.windowToken);
+    // SUFFIX alignments are excluded for the same reason: German inflection
+    // changes a word's END, so genuine inflection pairs share a PREFIX. Two
+    // tokens sharing only a suffix ("ohne"/"Bohne", "Reis"/"Preis") differ
+    // at the START — different stems — and must not be lifted over the gate
+    // by the closeness bonus (prod case: "(ca. 500 g ohne Schale)"
+    // auto-matched Bohne via the stopword "ohne").
+    const bonus =
+      a.kind === "fuzzy" || a.kind === "suffix"
+        ? 0
+        : perTokenBonus(a.entryToken, a.windowToken);
     s += base + bonus;
   }
   if (inOrder) s += 10;
@@ -391,7 +458,11 @@ function bestMatchForEntry(
     entry.aliasName.toLowerCase() === entry.canonicalName.toLowerCase();
   let best: IngredientCandidateMatch | null = null;
   for (let start = 0; start < candidate.length; start++) {
+    // Paren content is matcher-invisible: a window may not contain a token
+    // inside a parenthetical (see {@link CandidateToken.inParens}).
+    if (candidate[start].inParens) continue;
     for (let len = 1; start + len <= candidate.length && len <= maxWin; len++) {
+      if (candidate[start + len - 1].inParens) break;
       const window = candidate.slice(start, start + len);
       const aligned = alignWindowToEntry(window, E);
       if (!aligned) continue;

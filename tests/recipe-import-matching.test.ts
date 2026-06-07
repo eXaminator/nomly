@@ -1560,3 +1560,351 @@ describe("vocab rules apply only on the no-match path", () => {
     expect(out[0].notes).toContain("zum Bestreuen");
   });
 });
+
+describe("raw-remainder notes — matched lines keep the source verbatim", () => {
+  // Flavor 1: only amount/unit/flags are consumed before matching; after a
+  // match the notes are the verbatim source remainder before+after the
+  // covered span (edges trimmed, whole-paren fragments unwrapped). No
+  // category buckets, no mid-line peeling.
+  const catalog: IngredientCatalog = [
+    {
+      ingredientId: 1,
+      canonicalName: "cauliflower",
+      aliasName: "cauliflower",
+      tokens: ["cauliflower"],
+    },
+    {
+      ingredientId: 2,
+      canonicalName: "peanut butter",
+      aliasName: "peanut butter",
+      tokens: ["peanut", "butter"],
+    },
+    {
+      ingredientId: 3,
+      canonicalName: "unsalted butter",
+      aliasName: "unsalted butter",
+      tokens: ["unsalted", "butter"],
+    },
+    {
+      ingredientId: 4,
+      canonicalName: "Bohnen",
+      aliasName: "Bohnen",
+      tokens: ["bohnen"],
+    },
+    {
+      ingredientId: 5,
+      canonicalName: "Knoblauch",
+      aliasName: "garlic",
+      tokens: ["garlic"],
+    },
+  ];
+
+  it("cauliflower: prep phrase survives intact, in source order", () => {
+    const out = parseIngredientLines(
+      ["1 small head cauliflower - sliced into 1-inch pieces, or small florets"],
+      makeLookups(catalog),
+    );
+    expect(out[0].ingredientId).toBe(1);
+    expect(out[0].name).toBe("cauliflower");
+    expect(out[0].quantity).toBe(1);
+    // No unit stolen from "pieces" (interior numeric guard).
+    expect(out[0].unit).toBeNull();
+    expect(out[0].notes).toBe(
+      "small head, sliced into 1-inch pieces, or small florets",
+    );
+  });
+
+  it("a fragment ENTIRELY bound by parens is unwrapped", () => {
+    const out = parseIngredientLines(
+      ["500 g peanut butter (natural, no sugar added)"],
+      makeLookups(catalog),
+    );
+    expect(out[0].ingredientId).toBe(2);
+    expect(out[0].name).toBe("peanut butter");
+    expect(out[0].notes).toBe("natural, no sugar added");
+  });
+
+  it("parens inside a larger fragment become comma separators", () => {
+    const out = parseIngredientLines(
+      ["500 g peanut butter (natural, no sugar added) smooth"],
+      makeLookups(catalog),
+    );
+    expect(out[0].ingredientId).toBe(2);
+    expect(out[0].notes).toBe("natural, no sugar added, smooth");
+  });
+
+  it("secondary measurement stays verbatim in the notes (no peel-gutting)", () => {
+    const out = parseIngredientLines(
+      ["1/2 cup 1 stick unsalted butter, room temperature"],
+      makeLookups(catalog, ["cup", "stick"]),
+    );
+    expect(out[0].ingredientId).toBe(3);
+    expect(out[0].quantity).toBe(0.5);
+    expect(out[0].unit?.name.toLowerCase()).toBe("cup");
+    expect(out[0].notes).toBe("1 stick, room temperature");
+  });
+
+  it("size modifier is skipped (not consumed) so the unit is still found", () => {
+    const out = parseIngredientLines(
+      ["1 kl. Dose Bohnen"],
+      makeLookups(catalog, ["Dose"]),
+    );
+    expect(out[0].ingredientId).toBe(4);
+    expect(out[0].quantity).toBe(1);
+    expect(out[0].unit?.name).toBe("Dose");
+    expect(out[0].notes).toBe("kl.");
+  });
+
+  it("trailing-unit fallback still fires for '1 garlic clove' and leaves the remainder", () => {
+    const out = parseIngredientLines(
+      ["1 garlic clove"],
+      makeLookups(catalog, ["clove"]),
+    );
+    expect(out[0].ingredientId).toBe(5);
+    expect(out[0].quantity).toBe(1);
+    expect(out[0].unit?.name).toBe("clove");
+    expect(out[0].notes).toBeNull();
+  });
+});
+
+describe("paren content is matcher-invisible but stays verbatim in notes", () => {
+  // Parens are a structural annotation marker (stronger than a comma). The
+  // example product inside them must not steal the mapping from the generic
+  // outside — "150 g Pilze (z. B. braune Champignons)" stays Pilze — but the
+  // paren text remains in the notes verbatim (unwrapped when it is the whole
+  // fragment).
+  const catalog: IngredientCatalog = [
+    { ingredientId: 1, canonicalName: "Pilze", aliasName: "Pilze", tokens: ["pilze"] },
+    {
+      ingredientId: 2,
+      canonicalName: "brauner Champignon",
+      aliasName: "braune Champignons",
+      tokens: ["braune", "champignons"],
+    },
+  ];
+
+  it("maps to the generic outside the parens", () => {
+    const out = parseIngredientLines(
+      ["150 g Pilze (z. B. braune Champignons)"],
+      makeLookups(catalog),
+    );
+    expect(out[0].ingredientId).toBe(1);
+    expect(out[0].name).toBe("Pilze");
+    expect(out[0].notes).toBe("z. B. braune Champignons");
+  });
+});
+
+describe("front captures stay glued to the before-remainder", () => {
+  // "5-6 große Äpfel": the range expression (consumed into the quantity) and
+  // the size word are contiguous in the source — the note must read
+  // "5-6 große", not "5-6, große".
+  const catalog: IngredientCatalog = [
+    { ingredientId: 1, canonicalName: "Apfel", aliasName: "Äpfel", tokens: ["apfel"] },
+  ];
+
+  it("'5-6 große Äpfel (am liebsten säuerlich)' keeps '5-6 große' intact", () => {
+    const out = parseIngredientLines(
+      ["5-6 große Äpfel (am liebsten säuerlich)"],
+      makeLookups(catalog),
+    );
+    expect(out[0].ingredientId).toBe(1);
+    expect(out[0].quantity).toBe(6); // range resolves to the high bound
+    expect(out[0].notes).toBe("5-6 große, am liebsten säuerlich");
+  });
+});
+
+describe("preprocess size captures lead the notes", () => {
+  // "12-count" / "(28 oz.)" are consumed alongside the amount at the line
+  // FRONT — they must open the notes, not trail them.
+  const catalog: IngredientCatalog = [
+    {
+      ingredientId: 1,
+      canonicalName: "dinner roll",
+      aliasName: "dinner rolls",
+      tokens: ["dinner", "rolls"],
+    },
+  ];
+
+  it("'1 12-count package … rolls, preferably whole-wheat' keeps 12-count first", () => {
+    const out = parseIngredientLines(
+      ["1 12-count package pull-apart dinner rolls, preferably whole-wheat"],
+      makeLookups(catalog, ["package"]),
+    );
+    expect(out[0].ingredientId).toBe(1);
+    expect(out[0].unit?.name.toLowerCase()).toBe("package");
+    expect(out[0].notes).toMatch(/^12-count/);
+    expect(out[0].notes).toContain("whole-wheat");
+    expect(out[0].notes).toContain("preferably whole");
+  });
+});
+
+describe("sub / substitute / ersatzweise mark alternatives", () => {
+  // "(sub X)", "(or sub X)", "(substitute with X)", "(ersatzweise X)" are
+  // alternative markers like "(Alternativ: X)"; "or sub X" in a chain strips
+  // the marker from the alternative's text. Same line-structure vocabulary
+  // category as alternativ:/oder — never ingredient identity.
+  const catalog: IngredientCatalog = [
+    { ingredientId: 1, canonicalName: "honey", aliasName: "honey", tokens: ["honey"] },
+    {
+      ingredientId: 2,
+      canonicalName: "maple syrup",
+      aliasName: "maple syrup",
+      tokens: ["maple", "syrup"],
+    },
+    {
+      ingredientId: 3,
+      canonicalName: "Schalotte",
+      aliasName: "shallot",
+      tokens: ["shallot"],
+    },
+    {
+      ingredientId: 4,
+      canonicalName: "rote Zwiebel",
+      aliasName: "red onion",
+      tokens: ["red", "onion"],
+    },
+    { ingredientId: 5, canonicalName: "Honig", aliasName: "Honig", tokens: ["honig"] },
+    { ingredientId: 6, canonicalName: "Zucker", aliasName: "Zucker", tokens: ["zucker"] },
+    {
+      ingredientId: 7,
+      canonicalName: "Joghurt",
+      aliasName: "yogurt",
+      tokens: ["yogurt"],
+    },
+    {
+      ingredientId: 8,
+      canonicalName: "Saure Sahne",
+      aliasName: "sour cream",
+      tokens: ["sour", "cream"],
+    },
+  ];
+
+  it("'(sub maple syrup to make vegan)' adds an optional alternative with the tail as its note", () => {
+    const out = parseIngredientLines(
+      ["1/4 cup honey (sub maple syrup to make vegan)"],
+      makeLookups(catalog, ["cup"]),
+    );
+    expect(out).toHaveLength(2);
+    expect(out[0].name).toBe("honey");
+    expect(out[0].isAlternative).toBe(false);
+    expect(out[1].name).toBe("maple syrup");
+    expect(out[1].isAlternative).toBe(true);
+    expect(out[1].isOptional).toBe(true);
+    expect(out[1].notes).toContain("to make vegan");
+  });
+
+  it("'(or sub 1/2 a red onion)' after a dash-annotated primary works too", () => {
+    const out = parseIngredientLines(
+      ["1 extra-large shallot - chopped (or sub 1/2 a red onion)"],
+      makeLookups(catalog),
+    );
+    expect(out).toHaveLength(2);
+    expect(out[0].ingredientId).toBe(3);
+    expect(out[1].ingredientId).toBe(4);
+    expect(out[1].isAlternative).toBe(true);
+    expect(out[1].quantity).toBe(0.5);
+  });
+
+  it("'(ersatzweise Zucker)' is recognized as the German marker", () => {
+    const out = parseIngredientLines(
+      ["2 g Honig (ersatzweise Zucker)"],
+      makeLookups(catalog),
+    );
+    expect(out).toHaveLength(2);
+    expect(out[1].name).toBe("Zucker");
+    expect(out[1].isAlternative).toBe(true);
+  });
+
+  it("chain form: 'or sub sour cream' strips the marker from the alternative", () => {
+    const out = parseIngredientLines(
+      ["1 cup yogurt or sub sour cream"],
+      makeLookups(catalog, ["cup"]),
+    );
+    expect(out).toHaveLength(2);
+    expect(out[0].ingredientId).toBe(7);
+    expect(out[1].ingredientId).toBe(8);
+    expect(out[1].name).toBe("sour cream");
+    expect(out[1].isAlternative).toBe(true);
+  });
+});
+
+describe("front-capture gluing follows source contiguity", () => {
+  const catalog: IngredientCatalog = [
+    { ingredientId: 1, canonicalName: "Zitrone", aliasName: "lemon", tokens: ["lemon"] },
+    { ingredientId: 2, canonicalName: "Apfel", aliasName: "Äpfel", tokens: ["apfel"] },
+  ];
+
+  it("'Juice of 1 small lemon' → stripped words between pieces become a comma", () => {
+    const out = parseIngredientLines(
+      ["Juice of 1 small lemon"],
+      makeLookups(catalog),
+    );
+    expect(out[0].ingredientId).toBe(1);
+    expect(out[0].quantity).toBe(1);
+    expect(out[0].notes).toBe("Juice, small");
+  });
+
+  it("'5-6 große Äpfel' stays glued — nothing was stripped between range and word", () => {
+    const out = parseIngredientLines(["5-6 große Äpfel"], makeLookups(catalog));
+    expect(out[0].ingredientId).toBe(2);
+    expect(out[0].notes).toBe("5-6 große");
+  });
+});
+
+describe("paren sizes are front captures only at the line front", () => {
+  const catalog: IngredientCatalog = [
+    {
+      ingredientId: 1,
+      canonicalName: "Schalotte",
+      aliasName: "shallots",
+      tokens: ["shallots"],
+    },
+    {
+      ingredientId: 2,
+      canonicalName: "crushed tomatoes",
+      aliasName: "crushed tomatoes",
+      tokens: ["crushed", "tomatoes"],
+    },
+  ];
+
+  it("'2 shallots (chopped (⅔ cup))' keeps source order in the notes", () => {
+    const out = parseIngredientLines(
+      ["2 shallots (chopped (⅔ cup))"],
+      makeLookups(catalog, ["cup"]),
+    );
+    expect(out[0].ingredientId).toBe(1);
+    expect(out[0].quantity).toBe(2);
+    expect(out[0].notes).toBe("chopped, ⅔ cup");
+  });
+
+  it("'1 (28 oz.) can crushed tomatoes' still leads with the size", () => {
+    const out = parseIngredientLines(
+      ["1 (28 oz.) can crushed tomatoes"],
+      makeLookups(catalog, ["can"]),
+    );
+    expect(out[0].ingredientId).toBe(2);
+    expect(out[0].unit?.name.toLowerCase()).toBe("can");
+    expect(out[0].notes).toBe("28 oz.");
+  });
+});
+
+describe("optional marker strip preserves the surrounding comma", () => {
+  const catalog: IngredientCatalog = [
+    {
+      ingredientId: 1,
+      canonicalName: "Chilischote",
+      aliasName: "Chilischote",
+      tokens: ["chilischote"],
+    },
+  ];
+
+  it("'(gehackt, optional je nach Schärfe …)' keeps the comma where 'optional' was removed", () => {
+    const out = parseIngredientLines(
+      ["1 kleine Chilischote (gehackt, optional je nach Schärfe der Currypaste)"],
+      makeLookups(catalog),
+    );
+    expect(out[0].ingredientId).toBe(1);
+    expect(out[0].isOptional).toBe(true);
+    expect(out[0].notes).toBe("kleine, gehackt, je nach Schärfe der Currypaste");
+  });
+});
