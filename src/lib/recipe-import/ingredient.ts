@@ -869,54 +869,23 @@ const REMAINDER_EDGE_FILLER = new Set(["of", "von", "vom"]);
 
 /**
  * Presentation cleanup for a raw-remainder notes fragment (the verbatim
- * source text around a matched span): iteratively trims edge separators and
- * whitespace, drops edge-adjacent genitive linkers (see
- * {@link REMAINDER_EDGE_FILLER}), removes paren characters whose partner
- * fell on the other side of the matched span (unbalanced within the
- * fragment), and unwraps a fragment that is ENTIRELY enclosed by one
- * balanced paren pair ("(crunchy)" → "crunchy"; "(natural) smooth" stays).
+ * source text around a matched span):
+ *   - parentheses become COMMA separators ("(natural) smooth" →
+ *     "natural, smooth") — one rule that also covers whole-fragment wraps
+ *     ("(crunchy)" → "crunchy"), orphan halves left by a match span cutting
+ *     through a parenthetical, and doubled pairs ("((x))" → "x");
+ *   - comma/whitespace runs are normalised;
+ *   - edge separators and edge-adjacent genitive linkers (see
+ *     {@link REMAINDER_EDGE_FILLER}) are trimmed iteratively.
  * Returns null when nothing meaningful is left.
  */
 export function tidyRemainderFragment(s: string): string | null {
-  const unwrap = (t: string): string => {
-    if (!t.startsWith("(") || !t.endsWith(")")) return t;
-    let depth = 0;
-    const inner = t.slice(1, -1);
-    for (const ch of inner) {
-      if (ch === "(") depth += 1;
-      else if (ch === ")") {
-        depth -= 1;
-        if (depth < 0) return t; // the outer pair isn't one balanced wrap
-      }
-    }
-    return depth === 0 ? inner.trim() : t;
-  };
-  // Strip paren characters that have no partner inside the fragment — the
-  // matched span cut through a parenthetical, leaving an orphan "(" or ")".
-  const dropUnbalancedParens = (t: string): string => {
-    const chars = [...t];
-    const keep = new Array<boolean>(chars.length).fill(true);
-    const stack: number[] = [];
-    chars.forEach((ch, i) => {
-      if (ch === "(") stack.push(i);
-      else if (ch === ")") {
-        if (stack.length > 0) stack.pop();
-        else keep[i] = false;
-      }
-    });
-    for (const i of stack) keep[i] = false;
-    return chars.filter((_, i) => keep[i]).join("");
-  };
-  let text = s.trim();
+  let text = s.trim().replace(/\s*[()]\s*/g, ", ");
+  // Normalise the comma runs the paren replacement may have produced.
+  text = text.replace(/\s*,[\s,]*/g, ", ");
   let prev: string | null = null;
   while (prev !== text) {
     prev = text;
-    text = unwrap(text);
-    // Collapse doubled pairs anywhere — "((fein gerieben)) frisch" →
-    // "(fein gerieben) frisch". The loop re-applies until stable, so any
-    // nesting depth flattens to a single pair.
-    text = text.replace(/\((\([^()]*\))\)/g, "$1");
-    text = dropUnbalancedParens(text);
     text = text.replace(/^[\s,;:–—-]+|[\s,;:–—-]+$/g, "");
     const toks = text.split(/\s+/).filter((t) => t.length > 0);
     const isFiller = (t: string) =>

@@ -1624,13 +1624,13 @@ describe("raw-remainder notes — matched lines keep the source verbatim", () =>
     expect(out[0].notes).toBe("natural, no sugar added");
   });
 
-  it("parens NOT bounding the whole fragment stay verbatim", () => {
+  it("parens inside a larger fragment become comma separators", () => {
     const out = parseIngredientLines(
       ["500 g peanut butter (natural, no sugar added) smooth"],
       makeLookups(catalog),
     );
     expect(out[0].ingredientId).toBe(2);
-    expect(out[0].notes).toBe("(natural, no sugar added) smooth");
+    expect(out[0].notes).toBe("natural, no sugar added, smooth");
   });
 
   it("secondary measurement stays verbatim in the notes (no peel-gutting)", () => {

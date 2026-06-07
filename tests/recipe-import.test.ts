@@ -404,25 +404,23 @@ describe("parseIngredientString — extended cases", () => {
         "plus more for serving",
       );
     });
-    it("drops paren chars whose partner fell outside the fragment", () => {
-      expect(tidyRemainderFragment("cooked)")).toBe("cooked");
-      expect(tidyRemainderFragment("honey (sub")).toBe("honey sub");
-    });
-    it("collapses doubled paren pairs anywhere in the fragment", () => {
-      // Whole-fragment doubles unwrap all the way…
-      expect(tidyRemainderFragment("((fein gerieben))")).toBe("fein gerieben");
-      // …and mid-fragment doubles collapse to a single pair.
-      expect(tidyRemainderFragment("((fein gerieben)) frisch")).toBe(
-        "(fein gerieben) frisch",
-      );
-      expect(tidyRemainderFragment("5-6 ((sehr reif))")).toBe("5-6 (sehr reif)");
-    });
-    it("unwraps a fragment entirely bound by parens", () => {
+    it("replaces parens with comma separators", () => {
       expect(tidyRemainderFragment("(natural, no sugar added)")).toBe(
         "natural, no sugar added",
       );
-      // partial parens stay verbatim
-      expect(tidyRemainderFragment("(natural) smooth")).toBe("(natural) smooth");
+      expect(tidyRemainderFragment("(natural) smooth")).toBe("natural, smooth");
+      expect(tidyRemainderFragment("cut into half-moons (or quarters)")).toBe(
+        "cut into half-moons, or quarters",
+      );
+    });
+    it("handles orphan and doubled parens via the same comma rule", () => {
+      expect(tidyRemainderFragment("cooked)")).toBe("cooked");
+      expect(tidyRemainderFragment("honey (sub")).toBe("honey, sub");
+      expect(tidyRemainderFragment("((fein gerieben))")).toBe("fein gerieben");
+      expect(tidyRemainderFragment("((fein gerieben)) frisch")).toBe(
+        "fein gerieben, frisch",
+      );
+      expect(tidyRemainderFragment("5-6 ((sehr reif))")).toBe("5-6, sehr reif");
     });
     it("never returns an empty string", () => {
       expect(tidyRemainderFragment("")).toBeNull();
