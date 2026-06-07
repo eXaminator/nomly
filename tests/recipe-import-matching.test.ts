@@ -1666,3 +1666,30 @@ describe("raw-remainder notes — matched lines keep the source verbatim", () =>
     expect(out[0].notes).toBeNull();
   });
 });
+
+describe("paren content is matcher-invisible but stays verbatim in notes", () => {
+  // Parens are a structural annotation marker (stronger than a comma). The
+  // example product inside them must not steal the mapping from the generic
+  // outside — "150 g Pilze (z. B. braune Champignons)" stays Pilze — but the
+  // paren text remains in the notes verbatim (unwrapped when it is the whole
+  // fragment).
+  const catalog: IngredientCatalog = [
+    { ingredientId: 1, canonicalName: "Pilze", aliasName: "Pilze", tokens: ["pilze"] },
+    {
+      ingredientId: 2,
+      canonicalName: "brauner Champignon",
+      aliasName: "braune Champignons",
+      tokens: ["braune", "champignons"],
+    },
+  ];
+
+  it("maps to the generic outside the parens", () => {
+    const out = parseIngredientLines(
+      ["150 g Pilze (z. B. braune Champignons)"],
+      makeLookups(catalog),
+    );
+    expect(out[0].ingredientId).toBe(1);
+    expect(out[0].name).toBe("Pilze");
+    expect(out[0].notes).toBe("z. B. braune Champignons");
+  });
+});

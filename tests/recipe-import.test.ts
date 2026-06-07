@@ -391,12 +391,22 @@ describe("parseIngredientString — extended cases", () => {
       );
       expect(tidyRemainderFragment(" , – ")).toBeNull();
     });
-    it("drops edge-adjacent filler words only", () => {
-      expect(tidyRemainderFragment("of the small head")).toBe("small head");
+    it("drops edge-adjacent genitive linkers only — meaning-bearing words stay", () => {
+      expect(tidyRemainderFragment("of small head")).toBe("small head");
       // interior filler stays — it's part of the phrase
       expect(tidyRemainderFragment("sliced into strips of gold")).toBe(
         "sliced into strips of gold",
       );
+      // "to" / "plus" carry meaning in notes ("to taste", "plus more") and
+      // are NOT trimmed, per the verbatim rule.
+      expect(tidyRemainderFragment("to taste")).toBe("to taste");
+      expect(tidyRemainderFragment("plus more for serving")).toBe(
+        "plus more for serving",
+      );
+    });
+    it("drops paren chars whose partner fell outside the fragment", () => {
+      expect(tidyRemainderFragment("cooked)")).toBe("cooked");
+      expect(tidyRemainderFragment("honey (sub")).toBe("honey sub");
     });
     it("unwraps a fragment entirely bound by parens", () => {
       expect(tidyRemainderFragment("(natural, no sugar added)")).toBe(

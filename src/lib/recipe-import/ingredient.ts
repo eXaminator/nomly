@@ -844,13 +844,22 @@ export function stripVocabTail(name: string): { name: string; notes: string[] } 
 }
 
 /**
+ * Genitive linkers that are noise at a notes-fragment EDGE ("strip of",
+ * "Saft von") but nothing more — deliberately tiny. Words like "to",
+ * "plus", "und" carry meaning in notes ("to taste", "plus more for
+ * serving", "und/oder …") and stay verbatim per the raw-remainder rule.
+ */
+const REMAINDER_EDGE_FILLER = new Set(["of", "von", "vom"]);
+
+/**
  * Presentation cleanup for a raw-remainder notes fragment (the verbatim
  * source text around a matched span): iteratively trims edge separators and
- * whitespace, drops edge-adjacent filler words ("of", "von", "the", … — the
- * NAME_FILLER set reused for presentation only, never for matching), and
- * unwraps a fragment that is ENTIRELY enclosed by one balanced paren pair
- * ("(crunchy)" → "crunchy"; "(natural) smooth" stays). Returns null when
- * nothing meaningful is left.
+ * whitespace, drops edge-adjacent genitive linkers (see
+ * {@link REMAINDER_EDGE_FILLER}), removes paren characters whose partner
+ * fell on the other side of the matched span (unbalanced within the
+ * fragment), and unwraps a fragment that is ENTIRELY enclosed by one
+ * balanced paren pair ("(crunchy)" → "crunchy"; "(natural) smooth" stays).
+ * Returns null when nothing meaningful is left.
  */
 export function tidyRemainderFragment(s: string): string | null {
   const unwrap = (t: string): string => {
@@ -866,15 +875,32 @@ export function tidyRemainderFragment(s: string): string | null {
     }
     return depth === 0 ? inner.trim() : t;
   };
+  // Strip paren characters that have no partner inside the fragment — the
+  // matched span cut through a parenthetical, leaving an orphan "(" or ")".
+  const dropUnbalancedParens = (t: string): string => {
+    const chars = [...t];
+    const keep = new Array<boolean>(chars.length).fill(true);
+    const stack: number[] = [];
+    chars.forEach((ch, i) => {
+      if (ch === "(") stack.push(i);
+      else if (ch === ")") {
+        if (stack.length > 0) stack.pop();
+        else keep[i] = false;
+      }
+    });
+    for (const i of stack) keep[i] = false;
+    return chars.filter((_, i) => keep[i]).join("");
+  };
   let text = s.trim();
   let prev: string | null = null;
   while (prev !== text) {
     prev = text;
     text = unwrap(text);
+    text = dropUnbalancedParens(text);
     text = text.replace(/^[\s,;:–—-]+|[\s,;:–—-]+$/g, "");
     const toks = text.split(/\s+/).filter((t) => t.length > 0);
     const isFiller = (t: string) =>
-      NAME_FILLER_TOKENS.has(t.toLowerCase().replace(/[.,;]$/, ""));
+      REMAINDER_EDGE_FILLER.has(t.toLowerCase().replace(/[.,;]$/, ""));
     while (toks.length > 0 && isFiller(toks[0])) toks.shift();
     while (toks.length > 0 && isFiller(toks[toks.length - 1])) toks.pop();
     text = toks.join(" ");
