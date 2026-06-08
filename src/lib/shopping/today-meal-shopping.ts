@@ -73,23 +73,30 @@ export function getTodayMealShoppingStatus(): TodayMealShoppingStatus {
 
   for (const item of listShoppingItems()) {
     if (item.checked) continue;
-    const todaysSources = item.sources.filter((s) => s.mealDate === date);
+    // Only contributions still tied to a planned meal count here — a detached
+    // (meal deleted) contribution keeps its snapshot date but is no longer a
+    // meal the morning reminder should report.
+    const todaysSources = item.sources.filter(
+      (s) => s.mealDate === date && s.mealPlanId != null && s.recipeId != null,
+    );
     if (todaysSources.length === 0) continue;
 
     distinctItemIds.add(item.id);
     // Dedupe per meal so an item contributing twice to one meal counts once.
     const seenMeals = new Set<number>();
     for (const src of todaysSources) {
-      if (seenMeals.has(src.mealPlanId)) continue;
-      seenMeals.add(src.mealPlanId);
+      const mealPlanId = src.mealPlanId as number;
+      const recipeId = src.recipeId as number;
+      if (seenMeals.has(mealPlanId)) continue;
+      seenMeals.add(mealPlanId);
 
-      const meal = byMeal.get(src.mealPlanId);
+      const meal = byMeal.get(mealPlanId);
       if (meal) {
         meal.items.push(item);
       } else {
-        byMeal.set(src.mealPlanId, {
-          recipeId: src.recipeId,
-          recipeTitle: src.recipeTitle,
+        byMeal.set(mealPlanId, {
+          recipeId,
+          recipeTitle: src.recipeTitle ?? "",
           items: [item],
         });
       }

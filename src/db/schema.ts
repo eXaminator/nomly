@@ -482,6 +482,14 @@ export const shoppingItemStock = sqliteTable(
   (t) => [uniqueIndex("shopping_item_stock_item_unique").on(t.itemId)],
 );
 
+/**
+ * One recipe-meal contribution to a shopping item. Self-sufficient: once
+ * added, it carries snapshots of everything the list needs to render, so
+ * editing/deleting the originating recipe or meal never mutates the list.
+ * The links to meal_plan / recipe / recipe_ingredient are SOFT (nullable,
+ * ON DELETE SET NULL) — kept only for grouping + provenance while those rows
+ * exist, and detached (not destroyed) when they go away.
+ */
 export const shoppingItemSource = sqliteTable(
   "shopping_item_source",
   {
@@ -489,12 +497,43 @@ export const shoppingItemSource = sqliteTable(
     itemId: integer("item_id")
       .notNull()
       .references(() => shoppingItem.id, { onDelete: "cascade" }),
-    mealPlanId: integer("meal_plan_id")
+    /**
+     * Soft link to the originating planned meal. Set while the meal is
+     * planned (so grouping and the "already on the list" check work);
+     * SET NULL when the meal is deleted — the contribution survives.
+     */
+    mealPlanId: integer("meal_plan_id").references(() => mealPlan.id, {
+      onDelete: "set null",
+    }),
+    /**
+     * Soft provenance link to the exact recipe line. SET NULL on recipe edit
+     * (which recreates recipe_ingredient rows). Nothing reads this
+     * functionally — all needed values are snapshotted below.
+     */
+    recipeIngredientId: integer("recipe_ingredient_id").references(
+      () => recipeIngredient.id,
+      { onDelete: "set null" },
+    ),
+    /** Soft link to the recipe, for the "open recipe" action + grouping. */
+    recipeId: integer("recipe_id").references(() => recipe.id, {
+      onDelete: "set null",
+    }),
+    /** Snapshot of the recipe title at add time (display + grouping). */
+    recipeTitle: text("recipe_title"),
+    /** Snapshot of the meal's date (ISO YYYY-MM-DD) at add time. */
+    mealDate: text("meal_date"),
+    /** Snapshot of the meal's note at add time. */
+    mealNote: text("meal_note"),
+    /** Snapshot of the recipe line's note at add time. */
+    recipeNotes: text("recipe_notes"),
+    /**
+     * Snapshot of the line's fixed-amount flag. Drives the servings re-scale
+     * (fixed rows don't scale) without reading the — possibly changed —
+     * recipe.
+     */
+    fixedAmount: integer("fixed_amount", { mode: "boolean" })
       .notNull()
-      .references(() => mealPlan.id, { onDelete: "cascade" }),
-    recipeIngredientId: integer("recipe_ingredient_id")
-      .notNull()
-      .references(() => recipeIngredient.id, { onDelete: "cascade" }),
+      .default(false),
     contributedQuantity: real("contributed_quantity"),
     contributedUnitId: integer("contributed_unit_id").references(() => unit.id, {
       onDelete: "set null",
@@ -558,9 +597,14 @@ export const shoppingItemStapleSource = sqliteTable(
     itemId: integer("item_id")
       .notNull()
       .references(() => shoppingItem.id, { onDelete: "cascade" }),
-    stapleGroupId: integer("staple_group_id")
-      .notNull()
-      .references(() => stapleGroup.id, { onDelete: "cascade" }),
+    /**
+     * Soft link to the originating staple group. Set while the group exists
+     * (for grouping + the clear dialog); SET NULL when the group is deleted —
+     * the contribution survives (its display name is snapshotted below).
+     */
+    stapleGroupId: integer("staple_group_id").references(() => stapleGroup.id, {
+      onDelete: "set null",
+    }),
     /**
      * Nullable so removing a single staple-group entry doesn't retroactively
      * strip past contributions from the running list. The clear dialog
@@ -570,6 +614,8 @@ export const shoppingItemStapleSource = sqliteTable(
       () => stapleGroupItem.id,
       { onDelete: "set null" },
     ),
+    /** Snapshot of the staple group's name at add time (display). */
+    stapleGroupName: text("staple_group_name"),
     contributedQuantity: real("contributed_quantity"),
     contributedUnitId: integer("contributed_unit_id").references(() => unit.id, {
       onDelete: "set null",

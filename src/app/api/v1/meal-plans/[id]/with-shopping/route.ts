@@ -15,11 +15,12 @@ function parseId(raw: string): number | null {
 /**
  * Shopping-aware meal-removal endpoint. The plain
  * `DELETE /api/v1/meal-plans/[id]` is still wired for the no-shopping case;
- * this endpoint handles the §4.3.3 confirm choices:
- *   - `mode=keep`     → just deletes the meal; cascade trims source rows.
- *                       Existing shopping items keep their quantities.
- *   - `mode=subtract` → recomputes affected item quantities from remaining
- *                       sources; drops items with no surviving sources.
+ * this endpoint handles the delete-time confirm choices:
+ *   - `mode=keep`     → deletes the meal but leaves its contributions on the
+ *                       list (they detach via SET NULL, keeping their
+ *                       snapshotted amounts and recipe/date labels).
+ *   - `mode=subtract` → strips this meal's contributions from the list, then
+ *                       deletes the meal; drops items left with nothing.
  */
 export async function POST(
   request: Request,

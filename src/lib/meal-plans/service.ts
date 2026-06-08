@@ -129,13 +129,11 @@ export function updateMeal(id: number, patch: MealPlanUpdateInput): void {
   if (Object.keys(patchData).length === 0) return;
 
   db.transaction((tx) => {
-    // When the effective servings change, recompute each source's
-    // contributed quantity from the recipe's original `recipe_ingredient`
-    // value × new_scale. This intentionally discards any prior manual
-    // edit on the source — the planner is the source of truth for what a
-    // meal contributes; if the user edited the amount in the shopping
-    // list, the planner's portion change is treated as a reset back to
-    // the recipe-derived value.
+    // When the effective servings change, scale each contribution this meal
+    // makes to the shopping list *proportionally* off its own stored amount —
+    // independent of the recipe (which may have changed since the item was
+    // added). Doubling the portions doubles what's on the list; any manual
+    // edit the user made to the amount is preserved and scaled with it.
     if (Object.prototype.hasOwnProperty.call(patch, "servingsOverride")) {
       const current = tx
         .select({
@@ -146,6 +144,9 @@ export function updateMeal(id: number, patch: MealPlanUpdateInput): void {
         .where(eq(mealPlan.id, id))
         .get();
       if (current) {
+        // The recipe's own serving count is only needed to turn a NULL
+        // override into an effective portion count — this is the meal's live
+        // recipe relationship, not the (decoupled) shopping-source link.
         const recipeRow = tx
           .select({ servings: recipe.servings })
           .from(recipe)
@@ -154,36 +155,24 @@ export function updateMeal(id: number, patch: MealPlanUpdateInput): void {
         const recipeServings = recipeRow?.servings ?? 1;
         const oldEffective = current.oldOverride ?? recipeServings;
         const newEffective = patch.servingsOverride ?? recipeServings;
-        if (recipeServings > 0 && newEffective !== oldEffective) {
-          const newScale = newEffective / recipeServings;
-          // Recompute every source row from the recipe ingredient. Source
-          // rows whose recipe_ingredient.quantity is null stay null
-          // (open-ended).
+        if (oldEffective > 0 && newEffective !== oldEffective) {
+          const ratio = newEffective / oldEffective;
           const sources = tx
             .select({
               id: shoppingItemSource.id,
               itemId: shoppingItemSource.itemId,
-              recipeQty: recipeIngredient.quantity,
-              fixedAmount: recipeIngredient.fixedAmount,
+              qty: shoppingItemSource.contributedQuantity,
+              fixedAmount: shoppingItemSource.fixedAmount,
             })
             .from(shoppingItemSource)
-            .innerJoin(
-              recipeIngredient,
-              eq(recipeIngredient.id, shoppingItemSource.recipeIngredientId),
-            )
             .where(eq(shoppingItemSource.mealPlanId, id))
             .all();
           for (const s of sources) {
-            // Fixed-amount lines (no portion scaling) keep the recipe's value
-            // verbatim — a "1 Prise Salz" contribution doesn't double when
-            // the meal grows from 2 to 4 portions.
-            const effectiveScale = s.fixedAmount ? 1 : newScale;
-            const nextQty =
-              s.recipeQty == null
-                ? null
-                : Math.round(s.recipeQty * effectiveScale * 1000) / 1000;
+            // Fixed-amount lines ("1 Prise Salz") and open-ended ones (no
+            // quantity) don't scale with portions.
+            if (s.fixedAmount || s.qty == null) continue;
             tx.update(shoppingItemSource)
-              .set({ contributedQuantity: nextQty })
+              .set({ contributedQuantity: Math.round(s.qty * ratio * 1000) / 1000 })
               .where(eq(shoppingItemSource.id, s.id))
               .run();
           }

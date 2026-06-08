@@ -32,7 +32,7 @@ export type AddStapleGroupResult = {
 export function addStapleGroupToList(groupId: number): AddStapleGroupResult {
   return db.transaction((tx) => {
     const head = tx
-      .select({ id: stapleGroup.id })
+      .select({ id: stapleGroup.id, name: stapleGroup.name })
       .from(stapleGroup)
       .where(eq(stapleGroup.id, groupId))
       .get();
@@ -65,6 +65,7 @@ export function addStapleGroupToList(groupId: number): AddStapleGroupResult {
           itemId: upsert.itemId,
           stapleGroupId: groupId,
           stapleGroupItemId: entry.id,
+          stapleGroupName: head.name,
           contributedQuantity: entry.quantity,
           contributedUnitId: entry.unitId,
         })

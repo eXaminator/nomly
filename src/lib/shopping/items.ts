@@ -6,15 +6,11 @@ import {
   ingredient,
   ingredientAlias,
   ingredientSupermarketUnavailable,
-  mealPlan,
-  recipe,
-  recipeIngredient,
   shoppingItem,
   shoppingItemAmount,
   shoppingItemSource,
   shoppingItemStapleSource,
   shoppingItemStock,
-  stapleGroup,
   unit,
 } from "../../db/schema.ts";
 import {
@@ -37,24 +33,28 @@ import {
 
 export type ShoppingItemSourceView = {
   sourceId: number;
-  mealPlanId: number;
-  mealDate: string;
-  recipeId: number;
-  recipeTitle: string;
-  recipeIngredientId: number;
+  /** Soft link — null once the originating meal has been deleted. */
+  mealPlanId: number | null;
+  mealDate: string | null;
+  /** Soft link — null once the originating recipe has been deleted. */
+  recipeId: number | null;
+  recipeTitle: string | null;
+  /** Soft provenance link — null once the recipe was edited/reparsed. */
+  recipeIngredientId: number | null;
   contributedQuantity: number | null;
   contributedUnitId: number | null;
   contributedUnit: string | null;
   recipeNotes: string | null;
-  /** The planned meal's own note (`meal_plan.note`), shared by every ingredient
-   *  that came from this meal. Null when the meal carries no note. */
+  /** The planned meal's own note, snapshotted at add time. Null when the meal
+   *  carried no note. */
   mealNote: string | null;
 };
 
 export type ShoppingItemStapleSourceView = {
   sourceId: number;
-  stapleGroupId: number;
-  stapleGroupName: string;
+  /** Soft link — null once the originating staple group has been deleted. */
+  stapleGroupId: number | null;
+  stapleGroupName: string | null;
   contributedQuantity: number | null;
   contributedUnitId: number | null;
   contributedUnit: string | null;
@@ -192,32 +192,30 @@ export function listShoppingItems(
   type RawSource = ShoppingItemSourceView;
   const sourcesByItem = new Map<number, RawSource[]>();
   if (itemIds.length > 0) {
+    // Read entirely from the source row's own snapshot columns — never join
+    // meal_plan / recipe / recipe_ingredient. Those links are soft (nullable)
+    // and an inner join would silently drop a contribution whose meal or
+    // recipe has since been deleted/edited.
     const sources = db
       .select({
         sourceId: shoppingItemSource.id,
         itemId: shoppingItemSource.itemId,
-        mealPlanId: mealPlan.id,
-        mealDate: mealPlan.date,
-        recipeId: recipe.id,
-        recipeTitle: recipe.title,
+        mealPlanId: shoppingItemSource.mealPlanId,
+        mealDate: shoppingItemSource.mealDate,
+        recipeId: shoppingItemSource.recipeId,
+        recipeTitle: shoppingItemSource.recipeTitle,
         recipeIngredientId: shoppingItemSource.recipeIngredientId,
         contributedQuantity: shoppingItemSource.contributedQuantity,
         contributedUnit: unit.name,
         contributedUnitPlural: unit.plural,
         contributedUnitId: shoppingItemSource.contributedUnitId,
-        recipeNotes: recipeIngredient.notes,
-        mealNote: mealPlan.note,
+        recipeNotes: shoppingItemSource.recipeNotes,
+        mealNote: shoppingItemSource.mealNote,
       })
       .from(shoppingItemSource)
-      .innerJoin(mealPlan, eq(mealPlan.id, shoppingItemSource.mealPlanId))
-      .innerJoin(recipe, eq(recipe.id, mealPlan.recipeId))
-      .innerJoin(
-        recipeIngredient,
-        eq(recipeIngredient.id, shoppingItemSource.recipeIngredientId),
-      )
       .leftJoin(unit, eq(unit.id, shoppingItemSource.contributedUnitId))
       .where(inArray(shoppingItemSource.itemId, itemIds))
-      .orderBy(asc(mealPlan.date), asc(recipe.title))
+      .orderBy(asc(shoppingItemSource.mealDate), asc(shoppingItemSource.recipeTitle))
       .all();
     for (const s of sources) {
       const arr = sourcesByItem.get(s.itemId) ?? [];
@@ -250,20 +248,16 @@ export function listShoppingItems(
         sourceId: shoppingItemStapleSource.id,
         itemId: shoppingItemStapleSource.itemId,
         stapleGroupId: shoppingItemStapleSource.stapleGroupId,
-        stapleGroupName: stapleGroup.name,
+        stapleGroupName: shoppingItemStapleSource.stapleGroupName,
         contributedQuantity: shoppingItemStapleSource.contributedQuantity,
         contributedUnitId: shoppingItemStapleSource.contributedUnitId,
         contributedUnit: unit.name,
         contributedUnitPlural: unit.plural,
       })
       .from(shoppingItemStapleSource)
-      .innerJoin(
-        stapleGroup,
-        eq(stapleGroup.id, shoppingItemStapleSource.stapleGroupId),
-      )
       .leftJoin(unit, eq(unit.id, shoppingItemStapleSource.contributedUnitId))
       .where(inArray(shoppingItemStapleSource.itemId, itemIds))
-      .orderBy(asc(stapleGroup.sortOrder), asc(stapleGroup.name))
+      .orderBy(asc(shoppingItemStapleSource.stapleGroupName))
       .all();
     for (const r of rows) {
       const arr = stapleSourcesByItem.get(r.itemId) ?? [];

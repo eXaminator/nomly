@@ -283,13 +283,13 @@ describe("staples groups — items CRUD", () => {
   });
 });
 
-describe("staples groups — delete cascade with live contributions", () => {
+describe("staples groups — delete keeps live contributions", () => {
   let ctx: Ctx;
   beforeEach(async () => {
     ctx = await seed();
   });
 
-  it("strips contributions and cleans up orphan shopping items", async () => {
+  it("keeps shopping items and detaches their staple sources on group delete", async () => {
     const { db } = await import("@/db");
     const { createGroup, addGroupItem, deleteGroup } = await import(
       "@/lib/staples/groups"
@@ -313,10 +313,13 @@ describe("staples groups — delete cascade with live contributions", () => {
       .values({ itemId, stapleGroupId: g.id })
       .run();
 
+    // The list is decoupled: deleting the group must not destroy list data.
     const result = deleteGroup(g.id);
-    expect(result.shoppingItemsRemoved).toBe(1);
-    expect(db.select().from(shoppingItem).all()).toHaveLength(0);
-    expect(db.select().from(shoppingItemStapleSource).all()).toHaveLength(0);
+    expect(result.shoppingItemsRemoved).toBe(0);
+    expect(db.select().from(shoppingItem).all()).toHaveLength(1);
+    const sources = db.select().from(shoppingItemStapleSource).all();
+    expect(sources).toHaveLength(1);
+    expect(sources[0].stapleGroupId).toBeNull(); // detached, not deleted
   });
 
   it("preserves shopping items with other contributions", async () => {

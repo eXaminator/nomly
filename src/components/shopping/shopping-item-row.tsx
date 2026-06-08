@@ -201,7 +201,7 @@ function SourceLine({ source }: { source: ShoppingItemSourceView }) {
   return (
     <li className="inline-flex flex-wrap items-baseline gap-x-1.5 px-1">
       <span className="font-medium text-[var(--color-fg)]/80">{source.recipeTitle}</span>
-      <span>({formatDate(source.mealDate)})</span>
+      {source.mealDate ? <span>({formatDate(source.mealDate)})</span> : null}
       {(() => {
         const unitLabel = source.contributedUnit;
         if (source.contributedQuantity == null && !unitLabel) return null;
@@ -260,15 +260,20 @@ function RecipeMenuEntry({
   onPreview: (recipeId: number) => void;
 }) {
   if (sources.length === 0) return null;
+  // Skip sources whose recipe has been deleted (recipeId nulled) — there's
+  // nothing to open for those.
   const uniqueByRecipe = new Map<number, ShoppingItemSourceView>();
   for (const s of sources) {
-    if (!uniqueByRecipe.has(s.recipeId)) uniqueByRecipe.set(s.recipeId, s);
+    if (s.recipeId != null && !uniqueByRecipe.has(s.recipeId)) {
+      uniqueByRecipe.set(s.recipeId, s);
+    }
   }
-  const unique = Array.from(uniqueByRecipe.values());
+  const unique = Array.from(uniqueByRecipe.entries());
+  if (unique.length === 0) return null;
   if (unique.length === 1) {
-    const only = unique[0];
+    const [recipeId] = unique[0];
     return (
-      <DropdownMenuItem onClick={() => onPreview(only.recipeId)}>
+      <DropdownMenuItem onClick={() => onPreview(recipeId)}>
         <BookOpen className="mr-2 size-4" />
         Rezept öffnen
       </DropdownMenuItem>
@@ -281,8 +286,8 @@ function RecipeMenuEntry({
         Rezept öffnen
       </DropdownMenuSubTrigger>
       <DropdownMenuSubContent>
-        {unique.map((s) => (
-          <DropdownMenuItem key={s.recipeId} onClick={() => onPreview(s.recipeId)}>
+        {unique.map(([recipeId, s]) => (
+          <DropdownMenuItem key={recipeId} onClick={() => onPreview(recipeId)}>
             {s.recipeTitle}
           </DropdownMenuItem>
         ))}

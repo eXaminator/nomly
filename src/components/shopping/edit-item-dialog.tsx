@@ -315,9 +315,11 @@ function EditItemDialogBody({
                     }`}
                   >
                     <span className="font-medium">{s.recipeTitle}</span>
-                    <span className="ml-1 text-xs text-[var(--color-muted-fg)]">
-                      ({formatDate(s.mealDate)})
-                    </span>
+                    {s.mealDate ? (
+                      <span className="ml-1 text-xs text-[var(--color-muted-fg)]">
+                        ({formatDate(s.mealDate)})
+                      </span>
+                    ) : null}
                     {s.mealNote ? (
                       <span className="ml-1 text-xs italic text-[var(--color-muted-fg)]">
                         · {s.mealNote}

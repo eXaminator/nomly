@@ -27,7 +27,12 @@ export function shoppingImpactForMeal(mealPlanId: number): {
   return { itemCount: items.size };
 }
 
-/** "Nur Mahlzeit löschen". Cascade removes `shopping_item_source` rows. */
+/**
+ * "Nur Mahlzeit löschen" — delete the meal but keep its contributions on the
+ * shopping list. `shopping_item_source.meal_plan_id` is `ON DELETE SET NULL`,
+ * so the rows detach from the (now-gone) meal but survive with their
+ * snapshotted recipe/date/amount intact.
+ */
 export function deleteMealOnly(mealPlanId: number): void {
   db.delete(mealPlan).where(eq(mealPlan.id, mealPlanId)).run();
 }

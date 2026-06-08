@@ -36,6 +36,10 @@ type RecipeIngredientRow = {
 type MealMeta = {
   servings: number;
   recipeServings: number;
+  recipeId: number;
+  recipeTitle: string;
+  mealDate: string;
+  mealNote: string | null;
 };
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -46,6 +50,13 @@ type ContributionLine = {
   ingredientId: number;
   unitId: number | null;
   contributedQuantity: number | null;
+  // Snapshots captured at add time so the contribution is self-sufficient.
+  recipeId: number;
+  recipeTitle: string;
+  mealDate: string;
+  mealNote: string | null;
+  recipeNotes: string | null;
+  fixedAmount: boolean;
 };
 
 /**
@@ -111,6 +122,12 @@ function applyAdd(tx: Tx, selection: AddMealsSelection[]): AddMealsResult {
         ingredientId: r.ingredientId,
         unitId: r.unitId,
         contributedQuantity: qty,
+        recipeId: meta.recipeId,
+        recipeTitle: meta.recipeTitle,
+        mealDate: meta.mealDate,
+        mealNote: meta.mealNote,
+        recipeNotes: r.notes,
+        fixedAmount: r.fixedAmount,
       });
     }
   }
@@ -143,6 +160,12 @@ function applyAdd(tx: Tx, selection: AddMealsSelection[]): AddMealsResult {
           itemId: upsert.itemId,
           mealPlanId: c.mealPlanId,
           recipeIngredientId: c.recipeIngredientId,
+          recipeId: c.recipeId,
+          recipeTitle: c.recipeTitle,
+          mealDate: c.mealDate,
+          mealNote: c.mealNote,
+          recipeNotes: c.recipeNotes,
+          fixedAmount: c.fixedAmount,
           contributedQuantity: c.contributedQuantity,
           contributedUnitId: c.unitId,
         })
@@ -160,6 +183,10 @@ function loadMealMeta(tx: Tx, mealPlanIds: number[]): Map<number, MealMeta> {
       id: sql<number>`meal_plan.id`,
       servingsOverride: sql<number | null>`meal_plan.servings_override`,
       recipeServings: sql<number>`recipe.servings`,
+      recipeId: sql<number>`recipe.id`,
+      recipeTitle: sql<string>`recipe.title`,
+      mealDate: sql<string>`meal_plan.date`,
+      mealNote: sql<string | null>`meal_plan.note`,
     })
     .from(sql`meal_plan`)
     .innerJoin(sql`recipe`, sql`recipe.id = meal_plan.recipe_id`)
@@ -171,6 +198,10 @@ function loadMealMeta(tx: Tx, mealPlanIds: number[]): Map<number, MealMeta> {
       {
         servings: r.servingsOverride ?? r.recipeServings,
         recipeServings: r.recipeServings,
+        recipeId: r.recipeId,
+        recipeTitle: r.recipeTitle,
+        mealDate: r.mealDate,
+        mealNote: r.mealNote,
       },
     ]),
   );

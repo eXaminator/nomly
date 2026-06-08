@@ -811,7 +811,7 @@ describe("portion changes re-scale source contributions", () => {
     ctx = await seed();
   });
 
-  it("portion change discards a manual edit and recomputes from the recipe", async () => {
+  it("portion change scales the current contribution, preserving a manual edit", async () => {
     const { previewMeals } = await import("@/lib/shopping/preview");
     const { addMealsToList } = await import("@/lib/shopping/merge");
     const {
@@ -839,12 +839,12 @@ describe("portion changes re-scale source contributions", () => {
     const edited = listShoppingItems().find((i) => i.name === "Tomate")!;
     expect(edited.sources[0].contributedQuantity).toBe(300);
 
-    // Planner change to 6 portions → new scale 3 → recipe.qty × 3 = 1500 g.
-    // The manual edit (300 g) is intentionally discarded; the planner is
-    // the source of truth for what a meal contributes.
+    // Planner change 4 → 6 portions → ratio 1.5. The list is decoupled from
+    // the recipe, so the *current* contribution (the 300 g edit) scales:
+    // 300 × 1.5 = 450 g. The edit is preserved, not reset to the recipe value.
     updateMeal(ctx.mealPlanId, { servingsOverride: 6 });
     const after = listShoppingItems().find((i) => i.name === "Tomate")!;
-    expect(after.sources[0].contributedQuantity).toBe(1500);
+    expect(after.sources[0].contributedQuantity).toBe(450);
   });
 
   it("doubling the planned servings doubles each contributed quantity", async () => {
@@ -1097,7 +1097,7 @@ describe("meal-removal subtraction", () => {
     expect(listShoppingItems().length).toBe(0);
   });
 
-  it("deleteMealOnly leaves shopping items intact", async () => {
+  it("deleteMealOnly keeps shopping items AND their contributions, detached", async () => {
     const { previewMeals } = await import("@/lib/shopping/preview");
     const { addMealsToList } = await import("@/lib/shopping/merge");
     const { deleteMealOnly } = await import("@/lib/shopping/meals");
@@ -1114,9 +1114,15 @@ describe("meal-removal subtraction", () => {
     deleteMealOnly(ctx.mealPlanId);
     const after = listShoppingItems();
     expect(after.length).toBe(before);
-    // Sources are gone (cascade), so the items now look manually added.
+    // The list is independent of the plan: contributions survive (with their
+    // snapshotted amount + recipe label) but detach from the deleted meal.
+    const withSources = after.filter((i) => i.sources.length > 0);
+    expect(withSources.length).toBeGreaterThan(0);
     for (const item of after) {
-      expect(item.sources).toEqual([]);
+      for (const src of item.sources) {
+        expect(src.mealPlanId).toBeNull();
+        expect(src.recipeTitle).toBe("Spaghetti");
+      }
     }
   });
 });

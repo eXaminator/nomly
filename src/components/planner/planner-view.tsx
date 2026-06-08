@@ -25,6 +25,14 @@ import {
   ChevronUp,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { addDays, alignToStartWeekday } from "@/lib/meal-plans/dates";
 import {
   defaultMealPortions,
@@ -93,6 +101,12 @@ export function PlannerView({
   React.useEffect(() => setMealPlans(initialMealPlans), [initialMealPlans]);
   const [editing, setEditing] = React.useState<MealPlanView | null>(null);
   const [addingForDate, setAddingForDate] = React.useState<string | null>(null);
+  // A meal pending deletion that still contributes to the shopping list — the
+  // user must first choose whether to keep or remove those list entries.
+  const [deleteChoice, setDeleteChoice] = React.useState<{
+    id: number;
+    title: string;
+  } | null>(null);
   // Owned at PlannerView level so both calendar meal cards and the recipe
   // panel rows can open the same dialog.
   const [previewRecipeId, setPreviewRecipeId] = React.useState<number | null>(null);
@@ -310,13 +324,23 @@ export function PlannerView({
 
   async function handleDelete(id: number) {
     const meal = mealPlans.find((m) => m.id === id);
+    // If the meal still feeds the shopping list, ask whether to keep or remove
+    // those entries before deleting. The list is independent of the plan, so
+    // we never silently mutate it.
+    if (meal?.hasShoppingImpact) {
+      setDeleteChoice({ id, title: meal.recipe.title });
+      return;
+    }
+    await performDelete(id, null);
+  }
+
+  // mode `null` → plain delete (no shopping impact); "keep" leaves the meal's
+  // contributions on the list; "subtract" removes them.
+  async function performDelete(id: number, mode: "keep" | "subtract" | null) {
     setMealPlans((prev) => prev.filter((m) => m.id !== id));
     await withBusy(async () => {
-      // Always subtract the meal's shopping-list contributions so the list
-      // and the plan stay in sync. For meals with no shopping impact this
-      // is identical to a plain delete (no sources → nothing to subtract).
-      if (meal?.hasShoppingImpact) {
-        await apiDeleteMealWithShopping(id, "subtract");
+      if (mode) {
+        await apiDeleteMealWithShopping(id, mode);
       } else {
         await apiDeleteMeal(id);
       }
@@ -812,6 +836,46 @@ export function PlannerView({
           setPreviewMealPlanId(null);
         }}
       />
+      <Dialog
+        open={deleteChoice != null}
+        onOpenChange={(v) => (!v ? setDeleteChoice(null) : undefined)}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Mahlzeit löschen</DialogTitle>
+            <DialogDescription>
+              {deleteChoice?.title
+                ? `„${deleteChoice.title}" steht auf der Einkaufsliste. Sollen die Einträge dort bleiben oder entfernt werden?`
+                : "Diese Mahlzeit steht auf der Einkaufsliste. Sollen die Einträge dort bleiben oder entfernt werden?"}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="flex-col gap-2 sm:flex-row sm:justify-end">
+            <Button variant="ghost" onClick={() => setDeleteChoice(null)}>
+              Abbrechen
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                const id = deleteChoice?.id;
+                setDeleteChoice(null);
+                if (id != null) void performDelete(id, "keep");
+              }}
+            >
+              Auf der Liste behalten
+            </Button>
+            <Button
+              variant="danger"
+              onClick={() => {
+                const id = deleteChoice?.id;
+                setDeleteChoice(null);
+                if (id != null) void performDelete(id, "subtract");
+              }}
+            >
+              Von der Liste entfernen
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </DndContext>
   );
 }
