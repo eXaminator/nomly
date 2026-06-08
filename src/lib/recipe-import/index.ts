@@ -1120,7 +1120,7 @@ export function parseIngredientLines(
           unitMatch: final.match,
           rawUnit: final.rawUnit,
           sourceRange: sourceRange ?? undefined,
-          highlightParts: ownHighlightParts(originalTrimmed, sourceRange, parsed, resolved),
+          highlightParts: ownHighlightParts(originalTrimmed, sourceRange, piece, parsed, resolved),
           name: resolved.name,
           ingredientId: resolved.ingredientId,
           ingredientMatch: resolved.match,
@@ -1200,17 +1200,25 @@ function applyAlternativeInheritance(rows: ImportedIngredient[]): void {
 function ownHighlightParts(
   line: string,
   sourceRange: SourceRange | null,
+  piece: string,
   parsed: { quantity: number | null; unitName: string | null },
   resolved: { name: string; sourceName: string | null; notes: string | null },
 ): HighlightPart[] | undefined {
   if (!sourceRange) return undefined;
   const seg = line.slice(sourceRange[0], sourceRange[1]);
+  // For an alternative the segment leads with the connector ("oder 1 TL …");
+  // the parsed `piece` is the connector-free content, so its offset in the
+  // segment tells the decomposer where the amount really begins.
+  const pieceTrimmed = piece.trim();
+  const ci = seg.lastIndexOf(pieceTrimmed);
+  const contentStart = ci > 0 ? ci : 0;
   return decomposeSegment(
     seg,
     parsed.quantity !== null,
     parsed.unitName,
     resolved.sourceName ?? resolved.name,
     resolved.notes,
+    contentStart,
   ).map((p) => ({
     range: [sourceRange[0] + p.range[0], sourceRange[0] + p.range[1]] as SourceRange,
     kind: p.kind,
@@ -1473,7 +1481,7 @@ function parseGroupedIngredientLines(
             quantity: parsed.quantity,
             unit: final.resolved,
             sourceRange: sourceRange ?? undefined,
-            highlightParts: ownHighlightParts(originalTrimmed, sourceRange, parsed, resolved),
+            highlightParts: ownHighlightParts(originalTrimmed, sourceRange, piece, parsed, resolved),
             unitMatch: final.match,
             rawUnit: final.rawUnit,
             name: resolved.name,

@@ -94,21 +94,32 @@ export function decomposeSegment(
   unitName: string | null,
   name: string | null,
   notes: string | null,
+  /** Offset where the real content starts — i.e. after a leading connector
+   *  ("oder 1 TL Backpulver"). The amount is detected from here so the alt's
+   *  own "1 TL" is recognised; the connector prefix is classified as a gap. */
+  contentStart = 0,
 ): HighlightPart[] {
   const marks: HighlightPart[] = [];
-  const amount = amountPrefixRange(segment, hasAmount, unitName);
+  const amountLocal = amountPrefixRange(
+    segment.slice(contentStart),
+    hasAmount,
+    unitName,
+  );
+  const amount: SourceRange | null = amountLocal
+    ? [contentStart + amountLocal[0], contentStart + amountLocal[1]]
+    : null;
   if (amount) marks.push({ range: amount, kind: "amount" });
   const needle = name?.trim().toLowerCase() ?? "";
   if (needle.length > 0) {
-    const from = amount ? amount[1] : 0;
+    const from = amount ? amount[1] : contentStart;
     const idx = segment.toLowerCase().indexOf(needle, from);
     if (idx >= 0) marks.push({ range: [idx, idx + needle.length], kind: "name" });
   }
   marks.sort((a, b) => a.range[0] - b.range[0]);
   // Deterministic drop test: a word in the leftover gaps that appears in the
-  // row's output (name + notes) is a real note; one that appears nowhere was
+  // row's output (name + notes + unit) is kept; one that appears nowhere was
   // discarded (a connector like "oder", a stripped marker) → struck through.
-  const outputText = `${name ?? ""} ${notes ?? ""}`.toLowerCase();
+  const outputText = `${name ?? ""} ${notes ?? ""} ${unitName ?? ""}`.toLowerCase();
   const parts: HighlightPart[] = [];
   let cursor = 0;
   const fillGap = (start: number, end: number) => {

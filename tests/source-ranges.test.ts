@@ -60,8 +60,9 @@ describe("decomposeSegment", () => {
     unit: string | null,
     name: string | null,
     notes: string | null,
+    contentStart = 0,
   ) =>
-    decomposeSegment(seg, hasAmount, unit, name, notes).map((p) => ({
+    decomposeSegment(seg, hasAmount, unit, name, notes, contentStart).map((p) => ({
       text: seg.slice(p.range[0], p.range[1]),
       kind: p.kind,
     }));
@@ -91,6 +92,18 @@ describe("decomposeSegment", () => {
       { text: "oder", kind: "dropped" },
       { text: " ", kind: "note" },
       { text: "Ahornsirup", kind: "name" },
+    ]);
+  });
+
+  it("recognises the alt's own amount after a leading connector (not struck)", () => {
+    // "oder 1 TL Backpulver": connector struck, but "1 TL" is the amount and
+    // must NOT be struck even though "TL" isn't in the name.
+    expect(render("oder 1 TL Backpulver", true, "TL", "Backpulver", null, 5)).toEqual([
+      { text: "oder", kind: "dropped" },
+      { text: " ", kind: "note" },
+      { text: "1 TL", kind: "amount" },
+      { text: " ", kind: "note" },
+      { text: "Backpulver", kind: "name" },
     ]);
   });
 

@@ -1321,6 +1321,23 @@ describe("alternative amount/unit/notes inheritance", () => {
     expect(altAmount.map((p) => slice(alt, p.range))).toContain("2-3 EL");
   });
 
+  it("does not strike the alternative's own unit (½ TL Natron (oder 1 TL Backpulver))", () => {
+    const out = rows("½ TL Natron (oder 1 TL Backpulver)", [
+      { ingredientId: 1, canonicalName: "Natron", aliasName: "Natron", tokens: ["natron"] },
+      { ingredientId: 2, canonicalName: "Backpulver", aliasName: "Backpulver", tokens: ["backpulver"] },
+    ], ["tl"]);
+    const alt = out.find((r) => r.isAlternative)!;
+    const slice = (rg: [number, number]) => alt.rawText!.slice(rg[0], rg[1]);
+    // "1 TL" is the alt's amount → coloured amount, never dropped.
+    const amountParts = alt.highlightParts!.filter((p) => p.kind === "amount");
+    expect(amountParts.map((p) => slice(p.range))).toContain("1 TL");
+    // No "TL" is struck through.
+    const dropped = alt.highlightParts!.filter((p) => p.kind === "dropped");
+    expect(dropped.some((p) => /TL/.test(slice(p.range)))).toBe(false);
+    // The connector "oder" IS struck.
+    expect(dropped.some((p) => slice(p.range).toLowerCase() === "oder")).toBe(true);
+  });
+
   it("captures the shared note as a note part on a sibling that inherits it", () => {
     const out = rows("2 g bacon or pancetta, diced", [
       { ingredientId: 5, canonicalName: "bacon", aliasName: "bacon", tokens: ["bacon"] },
