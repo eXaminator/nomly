@@ -580,6 +580,14 @@ function IngredientCheckbox({
           isOptionalIngredient(ing) ? "text-[var(--color-muted-fg)] italic" : ""
         }`}
       >
+        {/* Alternative marker leads the row — in front of the checkbox — so
+            an alternative reads as indented under its primary. */}
+        {ing.alternativeForId != null ? (
+          <CornerDownRight
+            className="mt-1 size-4 shrink-0 text-[var(--color-muted-fg)]"
+            aria-hidden="true"
+          />
+        ) : null}
         {/* mt-1 keeps the checkbox visually centered on the FIRST text line
             (rather than centered on the wrapped multi-line block) when the
             notes are long enough to break onto their own line. */}
@@ -589,12 +597,6 @@ function IngredientCheckbox({
           onChange={onToggle}
           className="mt-1 size-3.5"
         />
-        {ing.alternativeForId != null ? (
-          <CornerDownRight
-            className="mt-0.5 size-4 shrink-0 text-[var(--color-muted-fg)]"
-            aria-hidden="true"
-          />
-        ) : null}
         <span className="flex flex-1 flex-wrap items-center gap-2">
           <span>{ing.ingredientName}</span>
           {ing.notes ? (
