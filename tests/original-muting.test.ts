@@ -11,13 +11,15 @@ function pieces(node: ReactNode): { text: string; tone: string }[] {
   return arr.map((n) => {
     if (isValidElement(n)) {
       const props = n.props as { className: string; children: string };
-      const tone = props.className.includes("color-accent")
-        ? "amount"
-        : props.className.includes("color-success")
-          ? "name"
-          : props.className.includes("opacity-50")
-            ? "muted"
-            : "note";
+      const tone = props.className.includes("line-through")
+        ? "dropped"
+        : props.className.includes("color-accent")
+          ? "amount"
+          : props.className.includes("color-success")
+            ? "name"
+            : props.className.includes("opacity-50")
+              ? "muted"
+              : "note";
       return { text: props.children, tone };
     }
     return { text: String(n), tone: "plain" };
@@ -49,6 +51,18 @@ describe("renderOriginalWithMuting", () => {
       { text: " ", tone: "note" },
       { text: "Mehl", tone: "name" },
       { text: ", gesiebt", tone: "note" },
+    ]);
+  });
+
+  it("strikes through a dropped part", () => {
+    const text = "oder Ahornsirup";
+    const p = pieces(
+      renderOriginalWithMuting(text, [part([0, 4], "dropped"), part([5, 15], "name")]),
+    );
+    expect(p).toEqual([
+      { text: "oder", tone: "dropped" },
+      { text: " ", tone: "muted" },
+      { text: "Ahornsirup", tone: "name" },
     ]);
   });
 

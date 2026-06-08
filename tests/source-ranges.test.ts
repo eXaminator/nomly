@@ -54,43 +54,51 @@ describe("amountPrefixRange", () => {
 });
 
 describe("decomposeSegment", () => {
-  const render = (seg: string, hasAmount: boolean, unit: string | null, name: string | null) =>
-    decomposeSegment(seg, hasAmount, unit, name).map((p) => ({
+  const render = (
+    seg: string,
+    hasAmount: boolean,
+    unit: string | null,
+    name: string | null,
+    notes: string | null,
+  ) =>
+    decomposeSegment(seg, hasAmount, unit, name, notes).map((p) => ({
       text: seg.slice(p.range[0], p.range[1]),
       kind: p.kind,
     }));
 
-  it("splits amount, name and a trailing note", () => {
-    expect(render("200 g Mehl, gesiebt", true, "g", "Mehl")).toEqual([
+  it("splits amount, name and a note that appears in the output", () => {
+    expect(render("200 g Mehl, gesiebt", true, "g", "Mehl", "gesiebt")).toEqual([
       { text: "200 g", kind: "amount" },
       { text: " ", kind: "note" },
       { text: "Mehl", kind: "name" },
-      { text: ", gesiebt", kind: "note" },
+      { text: ", ", kind: "note" },
+      { text: "gesiebt", kind: "note" },
     ]);
   });
 
   it("covers the whole segment with no gaps", () => {
     const seg = "2-3 EL Honig";
-    const parts = decomposeSegment(seg, true, "EL", "Honig");
+    const parts = decomposeSegment(seg, true, "EL", "Honig", null);
     expect(parts[0]).toEqual({ range: [0, 6], kind: "amount" });
     expect(parts.at(-1)).toEqual({ range: [7, 12], kind: "name" });
-    // contiguous, full coverage
     expect(parts[0].range[0]).toBe(0);
     expect(parts.at(-1)!.range[1]).toBe(seg.length);
   });
 
-  it("treats a connector + name (no amount) as note + name", () => {
-    expect(render("oder Ahornsirup", false, null, "Ahornsirup")).toEqual([
-      { text: "oder ", kind: "note" },
+  it("strikes a connector that appears in no output field", () => {
+    // "oder" is in neither name nor notes → dropped (struck); the name is green.
+    expect(render("oder Ahornsirup", false, null, "Ahornsirup", null)).toEqual([
+      { text: "oder", kind: "dropped" },
+      { text: " ", kind: "note" },
       { text: "Ahornsirup", kind: "name" },
     ]);
   });
 
-  it("falls back to all-note when the name isn't found", () => {
-    expect(render("100 g Zeug", true, "g", "Etwas anderes")).toEqual([
-      { text: "100 g", kind: "amount" },
-      { text: " Zeug", kind: "note" },
-    ]);
+  it("keeps a connector that DID make it into the notes", () => {
+    // A previously-folded alternative lives in notes as "oder Ahornsirup" — so
+    // here "oder" is part of the output and must NOT be struck.
+    const parts = render("X oder Ahornsirup", false, null, "X", "oder Ahornsirup");
+    expect(parts.find((p) => p.text === "oder")?.kind).toBe("note");
   });
 });
 

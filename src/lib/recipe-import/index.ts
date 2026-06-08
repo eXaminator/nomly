@@ -1201,7 +1201,7 @@ function ownHighlightParts(
   line: string,
   sourceRange: SourceRange | null,
   parsed: { quantity: number | null; unitName: string | null },
-  resolved: { name: string; sourceName: string | null },
+  resolved: { name: string; sourceName: string | null; notes: string | null },
 ): HighlightPart[] | undefined {
   if (!sourceRange) return undefined;
   const seg = line.slice(sourceRange[0], sourceRange[1]);
@@ -1210,6 +1210,7 @@ function ownHighlightParts(
     parsed.quantity !== null,
     parsed.unitName,
     resolved.sourceName ?? resolved.name,
+    resolved.notes,
   ).map((p) => ({
     range: [sourceRange[0] + p.range[0], sourceRange[0] + p.range[1]] as SourceRange,
     kind: p.kind,

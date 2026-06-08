@@ -1,14 +1,16 @@
 import * as React from "react";
 
-export type HighlightKind = "amount" | "name" | "note";
+export type HighlightKind = "amount" | "name" | "note" | "dropped";
 export type HighlightPart = { range: [number, number]; kind: HighlightKind };
 
 /** Colour per category — amount/unit and name in distinct hues so the parse
- *  decisions read at a glance; notes stay neutral-but-legible. */
+ *  decisions read at a glance; notes stay neutral-but-legible; words the parser
+ *  dropped (connectors, stripped markers) are struck through. */
 const KIND_CLASS: Record<HighlightKind, string> = {
   amount: "font-medium text-[var(--color-accent)]",
   name: "font-medium text-[var(--color-success)]",
   note: "text-[var(--color-fg)]",
+  dropped: "line-through opacity-60",
 };
 
 /**

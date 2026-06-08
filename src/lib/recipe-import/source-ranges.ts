@@ -13,8 +13,10 @@
 
 export type SourceRange = [number, number];
 
-/** What a highlighted span of the original line maps to. */
-export type HighlightKind = "amount" | "name" | "note";
+/** What a highlighted span of the original line maps to. "dropped" = a word
+ *  the parser discarded (it appears in NO output field — connectors like
+ *  "oder", stripped markers), shown struck through. */
+export type HighlightKind = "amount" | "name" | "note" | "dropped";
 export type HighlightPart = { range: SourceRange; kind: HighlightKind };
 
 const CONNECTOR_TAIL_RE =
@@ -91,6 +93,7 @@ export function decomposeSegment(
   hasAmount: boolean,
   unitName: string | null,
   name: string | null,
+  notes: string | null,
 ): HighlightPart[] {
   const marks: HighlightPart[] = [];
   const amount = amountPrefixRange(segment, hasAmount, unitName);
@@ -102,15 +105,49 @@ export function decomposeSegment(
     if (idx >= 0) marks.push({ range: [idx, idx + needle.length], kind: "name" });
   }
   marks.sort((a, b) => a.range[0] - b.range[0]);
+  // Deterministic drop test: a word in the leftover gaps that appears in the
+  // row's output (name + notes) is a real note; one that appears nowhere was
+  // discarded (a connector like "oder", a stripped marker) → struck through.
+  const outputText = `${name ?? ""} ${notes ?? ""}`.toLowerCase();
   const parts: HighlightPart[] = [];
   let cursor = 0;
+  const fillGap = (start: number, end: number) => {
+    if (end <= start) return;
+    classifyGap(segment, start, end, outputText, parts);
+  };
   for (const m of marks) {
-    if (m.range[0] > cursor) parts.push({ range: [cursor, m.range[0]], kind: "note" });
+    fillGap(cursor, m.range[0]);
     parts.push(m);
     cursor = m.range[1];
   }
-  if (cursor < segment.length) parts.push({ range: [cursor, segment.length], kind: "note" });
+  fillGap(cursor, segment.length);
   return parts;
+}
+
+/** Word-aware classification of a leftover gap: word runs absent from the
+ *  output are "dropped", everything else (notes words + punctuation/glue) is
+ *  "note". Offsets are relative to the whole segment. */
+function classifyGap(
+  segment: string,
+  start: number,
+  end: number,
+  outputText: string,
+  parts: HighlightPart[],
+): void {
+  const text = segment.slice(start, end);
+  const wordRe = /\p{L}[\p{L}\p{N}.\-/']*/gu;
+  let last = 0;
+  let m: RegExpExecArray | null;
+  const push = (s: number, e: number, kind: HighlightKind) => {
+    if (e > s) parts.push({ range: [start + s, start + e], kind });
+  };
+  while ((m = wordRe.exec(text)) !== null) {
+    push(last, m.index, "note"); // punctuation / whitespace glue
+    const dropped = !outputText.includes(m[0].toLowerCase());
+    push(m.index, m.index + m[0].length, dropped ? "dropped" : "note");
+    last = m.index + m[0].length;
+  }
+  push(last, text.length, "note");
 }
 
 /**

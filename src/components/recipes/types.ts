@@ -100,7 +100,7 @@ export type DraftIngredient = {
   /** Categorised highlight spans into `rawText` (own amount/name/note +
    *  inherited amount/note) — coloured by kind in the "Original:" line so the
    *  parse decisions are legible. Parse-session only. */
-  highlightParts?: { range: [number, number]; kind: "amount" | "name" | "note" }[];
+  highlightParts?: { range: [number, number]; kind: "amount" | "name" | "note" | "dropped" }[];
   importAnnotation?: ImportAnnotation;
   /** When true, this row is an alternative for the most recent
    *  non-alternative row above it in the same section. Rendered indented
@@ -216,7 +216,7 @@ export type ParsedIngredientResponse = {
   sourceRange?: [number, number];
   /** Categorised highlight spans into `rawText` (own amount/name/note +
    *  inherited amount/note) — coloured by kind in the source-line view. */
-  highlightParts?: { range: [number, number]; kind: "amount" | "name" | "note" }[];
+  highlightParts?: { range: [number, number]; kind: "amount" | "name" | "note" | "dropped" }[];
 };
 
 export function parsedIngredientToDraft(
