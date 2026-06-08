@@ -1321,15 +1321,37 @@ describe("alternative amount/unit/notes inheritance", () => {
     expect(altAmount.map((p) => slice(alt, p.range))).toContain("2-3 EL");
   });
 
-  it("keeps an optional marker on a matched alternative (nach Belieben)", () => {
+  it("'nach Belieben' survives as a to-taste note on a matched alternative", () => {
     const out = rows("100 g Rohrohrzucker (oder anderer Zucker nach Belieben)", [
       { ingredientId: 1, canonicalName: "Rohrohrzucker", aliasName: "Rohrohrzucker", tokens: ["rohrohrzucker"] },
       { ingredientId: 2, canonicalName: "Zucker", aliasName: "Zucker", tokens: ["zucker"] },
     ]);
     const alt = out.find((r) => r.isAlternative)!;
     expect(alt.ingredientId).toBe(2);
-    // "nach Belieben" is kept on the (optional-by-definition) alternative.
     expect(alt.notes).toMatch(/nach Belieben/i);
+  });
+
+  it("'nach Belieben' on a primary routes to notes (not optional)", () => {
+    const out = rows("Salz nach Belieben", [
+      { ingredientId: 1, canonicalName: "Salz", aliasName: "Salz", tokens: ["salz"] },
+    ]);
+    expect(out[0].name).toBe("Salz");
+    expect(out[0].isOptional).toBe(false);
+    expect(out[0].notes).toMatch(/nach Belieben/i);
+  });
+
+  it("an optional marker on an alternative makes the whole block optional", () => {
+    const out = rows("2 EL Hefeflocken (oder Veganer Parmesan, optional)", [
+      { ingredientId: 1, canonicalName: "Hefeflocken", aliasName: "Hefeflocken", tokens: ["hefeflocken"] },
+      { ingredientId: 2, canonicalName: "Veganer Parmesan", aliasName: "Veganer Parmesan", tokens: ["veganer", "parmesan"] },
+    ], ["el"]);
+    const primary = out[0];
+    const alt = out.find((r) => r.isAlternative)!;
+    expect(primary.isOptional).toBe(true); // whole block optional
+    expect(alt.isOptional).toBe(true);
+    // "optional" is a flag, not note text.
+    expect(primary.notes ?? "").not.toMatch(/optional/i);
+    expect(alt.notes ?? "").not.toMatch(/optional/i);
   });
 
   it("folds an unmatched alt without a trailing comma and highlights it as a note", () => {

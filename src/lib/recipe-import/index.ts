@@ -1052,9 +1052,12 @@ export function parseIngredientLines(
         ? preprocessAlternatives(row.text, knownIngredientKeys)
         : row.text;
       for (const piece of splitConjunctions(raw, splitOpts)) {
-        const parsed = parseIngredientString(piece, knownUnitTokens, {
-          keepOptionalMarkers: row.isAlternative,
-        });
+        const parsed = parseIngredientString(piece, knownUnitTokens);
+        // An optional marker makes the WHOLE block optional: when it sits on an
+        // alternative ("… (oder X, optional)"), flag the primary too.
+        if (parsed.isOptional && row.isAlternative && lastPrimaryIndex !== null) {
+          out[lastPrimaryIndex].isOptional = true;
+        }
         // Skip the row when the parser couldn't pull a real ingredient name
         // out of the line. Familywall data legitimately has entries like
         // "2 Prise" / "200 g" / "5-7 EL" with no ingredient — there's nothing
@@ -1438,9 +1441,7 @@ function parseGroupedIngredientLines(
           ? preprocessAlternatives(row.text, knownIngredientKeys)
           : row.text;
         for (const piece of splitConjunctions(raw, splitOpts)) {
-          const parsed = parseIngredientString(piece, knownUnitTokens, {
-          keepOptionalMarkers: row.isAlternative,
-        });
+          const parsed = parseIngredientString(piece, knownUnitTokens);
           if (parsed.name.trim().length === 0) continue;
           // Defensive fallback: a colon still in the parsed name means none
           // of the expansion rules above caught this line. Use the WHOLE
@@ -1454,6 +1455,10 @@ function parseGroupedIngredientLines(
           // {@link parseIngredientLines} for the cascade this prevents.
           if (useFirstWins && isStandaloneDescriptor(parsed.name)) continue;
           const currentGroup = groups[groups.length - 1];
+          // An optional marker on an alternative flags the whole block optional.
+          if (parsed.isOptional && row.isAlternative && lastPrimaryIndex !== null) {
+            currentGroup.ingredients[lastPrimaryIndex].isOptional = true;
+          }
           const leadingOr = /^(?:or|oder)\s+(.+)/i.exec(parsed.name.trim());
           if (leadingOr && currentGroup.ingredients.length > 0) {
             const alt = leadingOr[1];

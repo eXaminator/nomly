@@ -264,18 +264,11 @@ describe("parseIngredientString — extended cases", () => {
     const r = parse("1 EL Zucker o. Honig");
     expect(r.name).toBe("Zucker or Honig");
   });
-  it("keeps an optional marker as a note when keepOptionalMarkers (alternatives)", () => {
-    const r = parseIngredientString("anderer Zucker nach Belieben", TEST_UNITS, {
-      keepOptionalMarkers: true,
-    });
-    expect(r.name).toBe("anderer Zucker");
+  it("'nach Belieben' is captured as a note, never an optional flag", () => {
+    const r = parse("Salz nach Belieben");
+    expect(r.isOptional).toBe(false);
+    expect(r.name).toBe("Salz");
     expect(r.notes).toMatch(/nach Belieben/i);
-  });
-  it("strips the optional marker for a primary (default)", () => {
-    const r = parse("anderer Zucker nach Belieben");
-    expect(r.isOptional).toBe(true);
-    expect(r.notes ?? "").not.toMatch(/nach Belieben/i);
-    expect(r.name).toBe("anderer Zucker");
   });
   it("preserves an unspaced slash inside a parenthetical note", () => {
     // "height/bundle" is not a pluralization shorthand and not a separator —
@@ -613,11 +606,14 @@ describe("parseIngredientString — extended cases", () => {
     expect(r.name).toBe("Sesamsaat");
     expect(r.isOptional).toBe(true);
   });
-  it("'Nach Belieben 1 Eigelb' → marked optional, name parsed", () => {
+  it("'Nach Belieben 1 Eigelb' → note 'nach Belieben', NOT optional, name parsed", () => {
+    // "nach Belieben" is descriptive ("as desired"), not an optionality flag:
+    // captured as a note, and a leading occurrence still lets the amount parse.
     const r = parse("Nach Belieben 1 Eigelb");
     expect(r.quantity).toBe(1);
     expect(r.name).toBe("Eigelb");
-    expect(r.isOptional).toBe(true);
+    expect(r.isOptional).toBe(false);
+    expect(r.notes).toMatch(/nach Belieben/i);
   });
   it("inline '(optional)' marker → optional flag set", () => {
     const r = parse("1 EL Honig (optional)");

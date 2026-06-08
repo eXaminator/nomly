@@ -397,7 +397,6 @@ const OPTIONAL_MARKER_WORDS = [
   "eventuell",
   "wenn vorhanden",
   "bei bedarf",
-  "nach belieben",
   "ggf\\.?",
   "if available",
   "if needed",
@@ -666,13 +665,7 @@ export function aliasDedupKey(name: string): string {
  *
  * Returns the cleaned text plus any notes captured from the pre-processing.
  */
-function preprocess(
-  raw: string,
-  /** When true (alternatives — optional by definition), optional markers like
-   *  "nach Belieben" are KEPT as notes instead of stripped, since they carry
-   *  meaning rather than just flagging the whole ingredient optional. */
-  keepOptionalMarkers: boolean,
-): {
+function preprocess(raw: string): {
   text: string;
   capturedNotes: string[];
   /** Amount-derived captures that sit at the line FRONT alongside the
@@ -727,54 +720,43 @@ function preprocess(
   // separators — when a COMMA was among them ("gehackt, optional je nach
   // …"), keep one so the pieces around the removed marker stay separated
   // ("gehackt, je nach …").
-  // Clean a matched marker down to its words and keep it as a note (only for
-  // alternatives — see {@link keepOptionalMarkers}).
-  const keepMarker = (m: string) => {
-    if (!keepOptionalMarkers) return;
-    const cleaned = m
-      .replace(/[()]/g, " ")
-      .replace(/^[\s,;:–-]+|[\s,;:–-]+$/g, "")
-      .replace(/\s+/g, " ")
-      .trim();
-    if (cleaned.length > 0) capturedNotes.push(cleaned);
-  };
   if (OPTIONAL_ANYWHERE_RE.test(text)) {
     isOptional = true;
     OPTIONAL_ANYWHERE_RE.lastIndex = 0;
-    text = text.replace(OPTIONAL_ANYWHERE_RE, (m) => {
-      keepMarker(m);
-      return m.includes(",") ? ", " : " ";
-    });
+    text = text.replace(OPTIONAL_ANYWHERE_RE, (m) =>
+      m.includes(",") ? ", " : " ",
+    );
     OPTIONAL_ANYWHERE_RE.lastIndex = 0;
   }
-  // Other markers (n. B., evtl., nach Belieben, …) — stripped on a primary,
-  // but kept as a note on an alternative (it's optional by definition).
+  // Other markers (evtl., wenn vorhanden, …) — stripped; the isOptional flag
+  // carries the meaning. (Descriptive "nach Belieben" is NOT here — it's a
+  // to-taste note, see TO_TASTE_PHRASES.)
   if (OPTIONAL_LEADING_RE.test(text)) {
     isOptional = true;
-    text = text.replace(OPTIONAL_LEADING_RE, (m) => {
-      keepMarker(m);
-      return "";
-    });
+    text = text.replace(OPTIONAL_LEADING_RE, "");
   }
   if (OPTIONAL_INLINE_PAREN_RE.test(text)) {
     isOptional = true;
-    text = text.replace(OPTIONAL_INLINE_PAREN_RE, (m) => {
-      keepMarker(m);
-      return " ";
-    });
+    text = text.replace(OPTIONAL_INLINE_PAREN_RE, " ");
   }
   if (OPTIONAL_INLINE_TRAIL_RE.test(text)) {
     isOptional = true;
-    text = text.replace(OPTIONAL_INLINE_TRAIL_RE, (m) => {
-      keepMarker(m);
-      return "";
-    });
+    text = text.replace(OPTIONAL_INLINE_TRAIL_RE, "");
   }
 
   // Capture and strip [bracketed text] → notes.
   text = text.replace(/\[([^\]]+)\]/g, (_, inner: string) => {
     const trimmed = inner.trim();
     if (trimmed.length > 0) capturedNotes.push(trimmed);
+    return " ";
+  });
+
+  // "nach Belieben" = "as desired" — a descriptive note, NOT an optionality
+  // flag. Capture + remove it (any position) so it's preserved in the notes
+  // and a LEADING occurrence ("Nach Belieben 1 Eigelb") doesn't block the
+  // quantity/name parse. Never sets isOptional.
+  text = text.replace(/\bnach\s+belieben\b/gi, () => {
+    capturedNotes.push("nach Belieben");
     return " ";
   });
 
@@ -1087,14 +1069,13 @@ function dropLeadingFiller(tokens: string[]): boolean {
 export function parseIngredientString(
   raw: string,
   knownUnitTokens: ReadonlySet<string>,
-  options: { keepOptionalMarkers?: boolean } = {},
 ): ParsedIngredient {
   const {
     text: preprocessed,
     capturedNotes,
     frontCaptures: preprocessFront,
     isOptional,
-  } = preprocess(raw, options.keepOptionalMarkers ?? false);
+  } = preprocess(raw);
   // Trailing captures (brackets, optional-paren leftovers) vs FRONT captures
   // ("12-count" / "(28 oz.)" sizes from preprocess, plus the range / prep
   // noun / vague amount consumed below) — the raw-remainder notes builder
