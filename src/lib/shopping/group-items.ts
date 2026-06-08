@@ -25,6 +25,14 @@ export type GroupedShoppingItems = {
   hiddenOpen: number;
   /** Checked items hidden by the active store filter (0 when no store selected). */
   hiddenChecked: number;
+  /**
+   * Articles the user explicitly marked "not available here" at the active
+   * store (open or checked). Subset of the hidden items — excludes the ones
+   * merely hidden because the store doesn't carry their category. Drives the
+   * "Nicht verfügbar" tab, whose reverse button clears the marker. Empty when
+   * no store is selected.
+   */
+  unavailableHere: ShoppingItemView[];
 };
 
 /**
@@ -67,10 +75,17 @@ export function groupShoppingItems(
 
   const open: ShoppingItemView[] = [];
   const checked: ShoppingItemView[] = [];
+  const unavailableHere: ShoppingItemView[] = [];
   let hiddenOpen = 0;
   let hiddenChecked = 0;
   for (const item of items) {
     const hidden = hiddenAtStore(item, supermarketId, allowedCategoryIds);
+    if (
+      supermarketId != null &&
+      item.unavailableSupermarketIds.includes(supermarketId)
+    ) {
+      unavailableHere.push(item);
+    }
     if (item.checked) {
       if (hidden) hiddenChecked += 1;
       else checked.push(item);
@@ -142,5 +157,8 @@ export function groupShoppingItems(
     visibleChecked: checked.length,
     hiddenOpen,
     hiddenChecked,
+    unavailableHere: unavailableHere.sort((a, b) =>
+      a.name.localeCompare(b.name, "de", { sensitivity: "base" }),
+    ),
   };
 }

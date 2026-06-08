@@ -22,6 +22,7 @@ import {
 import { countNeededItemsPerSupermarket } from "@/lib/shopping/supermarket-availability";
 import { resolveSupermarketDeepLink } from "@/lib/shopping/supermarket-deep-link";
 import { ShoppingItemRow } from "./shopping-item-row";
+import { AmountList } from "./amount-list";
 import { MarkRecipeUpdateDialog } from "./mark-recipe-update-dialog";
 import { ShoppingDoneState } from "./shopping-done";
 import { AddItemDialog } from "./add-item-dialog";
@@ -117,7 +118,9 @@ export function ShoppingListView({
   // Which list the user is looking at: still-to-buy ("open") or already
   // checked off ("checked"). Checking the last item leaves them on "open" so
   // they land on the celebratory done screen rather than an empty list.
-  const [activeTab, setActiveTab] = React.useState<"open" | "checked">("open");
+  const [activeTab, setActiveTab] = React.useState<
+    "open" | "checked" | "unavailable"
+  >("open");
 
   const [connectivity, setConnectivityState] = React.useState(getConnectivity());
 
@@ -204,6 +207,9 @@ export function ShoppingListView({
 
   function persistSupermarket(id: number | null) {
     setSupermarketId(id);
+    // The "Nicht verfügbar" tab only exists while a store is selected; fall
+    // back to "Offen" when the store is cleared from under it.
+    if (id == null) setActiveTab((t) => (t === "unavailable" ? "open" : t));
     if (id == null) {
       window.localStorage.removeItem(STORAGE_KEY);
     } else {
@@ -419,6 +425,15 @@ export function ShoppingListView({
     [items, supermarketId, supermarkets],
   );
 
+  // Leaving the "Nicht verfügbar" tab once its last article has been made
+  // available again (the tab trigger is gone, so its content would orphan).
+  React.useEffect(() => {
+    if (activeTab === "unavailable" && grouped.unavailableHere.length === 0) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setActiveTab("open");
+    }
+  }, [activeTab, grouped.unavailableHere.length]);
+
   // How many still-needed items each supermarket carries — drives the count
   // shown next to each store in the filter so it's easy to see which stores
   // still have something to buy.
@@ -540,7 +555,9 @@ export function ShoppingListView({
       ) : (
         <Tabs
           value={activeTab}
-          onValueChange={(v) => setActiveTab(v as "open" | "checked")}
+          onValueChange={(v) =>
+            setActiveTab(v as "open" | "checked" | "unavailable")
+          }
         >
           {/* Sticky shelf: tabs pinned left, supermarket select pinned right.
               Sits below the AppShell topbar (h-16) at z-20 so it doesn't
@@ -555,6 +572,12 @@ export function ShoppingListView({
                 Erledigt
                 <TabCount count={grouped.visibleChecked} />
               </TabsTrigger>
+              {supermarketId != null && grouped.unavailableHere.length > 0 ? (
+                <TabsTrigger value="unavailable">
+                  Nicht verfügbar
+                  <TabCount count={grouped.unavailableHere.length} />
+                </TabsTrigger>
+              ) : null}
             </TabsList>
             <div className="shrink-0">
               <SupermarketFilter
@@ -612,6 +635,42 @@ export function ShoppingListView({
                 {grouped.checkedItems.map(renderRow)}
               </ul>
             )}
+          </TabsContent>
+
+          <TabsContent value="unavailable" className="mt-4 flex flex-col gap-3">
+            <p className="text-sm text-[var(--color-muted-fg)]">
+              Diese Artikel hast du hier als nicht verfügbar markiert – kauf sie
+              woanders. Hebe die Markierung auf, um sie wieder einzublenden.
+            </p>
+            <ul className="flex flex-col divide-y divide-[var(--color-border)] rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-card)]">
+              {grouped.unavailableHere.map((item) => (
+                <li
+                  key={item.id}
+                  className="flex items-center gap-2 px-2 py-2 sm:px-3"
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                      <span className="font-medium">{item.name}</span>
+                      <AmountList amounts={item.amounts} />
+                    </div>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="shrink-0"
+                    disabled={disabledOffline || supermarketId == null}
+                    onClick={() =>
+                      supermarketId != null
+                        ? void onToggleUnavailable(item, supermarketId)
+                        : undefined
+                    }
+                  >
+                    <RotateCcw className="mr-2 size-4" />
+                    Hier verfügbar machen
+                  </Button>
+                </li>
+              ))}
+            </ul>
           </TabsContent>
         </Tabs>
       )}

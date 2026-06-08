@@ -134,5 +134,33 @@ describe("groupShoppingItems", () => {
     expect(result.hiddenChecked).toBe(0);
     expect(result.visibleOpen).toBe(1);
     expect(result.visibleChecked).toBe(1);
+    expect(result.unavailableHere).toEqual([]);
+  });
+
+  it("collects only explicitly-excluded articles into unavailableHere (open + checked)", () => {
+    const items = [
+      item({ id: 1, name: "Apfel", categoryId: 1, unavailableSupermarketIds: [store.id] }),
+      item({
+        id: 2,
+        name: "Brot",
+        categoryId: 2,
+        checked: true,
+        checkedAt: 100,
+        unavailableSupermarketIds: [store.id],
+      }),
+      // Hidden because the store lacks this category — NOT an explicit
+      // exclusion, so it must not appear in unavailableHere.
+      item({ id: 3, name: "Schraube", categoryId: 99 }),
+      item({ id: 4, name: "Birne", categoryId: 1 }),
+    ];
+    const result = groupShoppingItems(items, store.id, [store]);
+    expect(result.unavailableHere.map((i) => i.id)).toEqual([1, 2]);
+  });
+
+  it("leaves unavailableHere empty when no store is selected", () => {
+    const items = [
+      item({ id: 1, unavailableSupermarketIds: [store.id] }),
+    ];
+    expect(groupShoppingItems(items, null, [store]).unavailableHere).toEqual([]);
   });
 });
