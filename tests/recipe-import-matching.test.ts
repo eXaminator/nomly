@@ -1321,6 +1321,22 @@ describe("alternative amount/unit/notes inheritance", () => {
     expect(altAmount.map((p) => slice(alt, p.range))).toContain("2-3 EL");
   });
 
+  it("folds an unmatched alt without a trailing comma and highlights it as a note", () => {
+    const out = rows("50 g gesalzene Erdnüsse (oder ungesalzen, oder andere Nüsse)", [
+      { ingredientId: 1, canonicalName: "Erdnüsse", aliasName: "Erdnüsse", tokens: ["erdnüsse"] },
+      { ingredientId: 2, canonicalName: "Nüsse", aliasName: "Nüsse", tokens: ["nüsse"] },
+    ]);
+    const primary = out[0];
+    // "ungesalzen" doesn't match → folds into notes, with NO trailing comma.
+    expect(primary.notes).toMatch(/oder ungesalzen/);
+    expect(primary.notes).not.toMatch(/ungesalzen,\s*$/);
+    // The folded text shows as a note on the primary's source line (not muted).
+    const noteSlices = (primary.highlightParts ?? [])
+      .filter((p) => p.kind === "note")
+      .map((p) => primary.rawText!.slice(p.range[0], p.range[1]));
+    expect(noteSlices).toContain("oder ungesalzen");
+  });
+
   it("does not strike the alternative's own unit (½ TL Natron (oder 1 TL Backpulver))", () => {
     const out = rows("½ TL Natron (oder 1 TL Backpulver)", [
       { ingredientId: 1, canonicalName: "Natron", aliasName: "Natron", tokens: ["natron"] },

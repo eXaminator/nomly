@@ -1089,6 +1089,13 @@ export function parseIngredientLines(
           parsed.quantity,
         );
         const resolved = resolveIngredientForRow(parsed, piece, lookups, threshold);
+        const sourceRange = findSegmentRange(
+          originalTrimmed,
+          piece,
+          sourceCursor,
+          row.isAlternative,
+        );
+        if (sourceRange) sourceCursor = sourceRange[1];
         // Fold an unmatched alternative back into its primary's notes instead
         // of creating an "orphan new-ingredient" row. Most recipe "or"s mean
         // "or you could use this instead" rather than a parallel shopping
@@ -1104,16 +1111,18 @@ export function parseIngredientLines(
             row.alternativeConnector,
             piece.trim(),
           );
+          // The folded text is now part of the primary's NOTES output, so show
+          // its source span (incl. connector) as a note on the primary's line
+          // rather than muting it.
+          if (sourceRange) {
+            (out[lastPrimaryIndex].highlightParts ??= []).push({
+              range: sourceRange,
+              kind: "note",
+            });
+          }
           continue;
         }
         const final = pickFinalUnit(initialUnit, resolved.defaultUnit, parsed.quantity);
-        const sourceRange = findSegmentRange(
-          originalTrimmed,
-          piece,
-          sourceCursor,
-          row.isAlternative,
-        );
-        if (sourceRange) sourceCursor = sourceRange[1];
         out.push({
           quantity: parsed.quantity,
           unit: final.resolved,
@@ -1455,6 +1464,13 @@ function parseGroupedIngredientLines(
             parsed.quantity,
           );
           const resolved = resolveIngredientForRow(parsed, piece, lookups, threshold);
+          const sourceRange = findSegmentRange(
+            originalTrimmed,
+            piece,
+            sourceCursor,
+            row.isAlternative,
+          );
+          if (sourceRange) sourceCursor = sourceRange[1];
           // See parseIngredientLines: unmatched alternatives fold back into
           // the primary's notes instead of becoming orphan new-ingredient rows.
           if (
@@ -1467,16 +1483,15 @@ function parseGroupedIngredientLines(
               row.alternativeConnector,
               piece.trim(),
             );
+            if (sourceRange) {
+              (currentGroup.ingredients[lastPrimaryIndex].highlightParts ??= []).push({
+                range: sourceRange,
+                kind: "note",
+              });
+            }
             continue;
           }
           const final = pickFinalUnit(initialUnit, resolved.defaultUnit, parsed.quantity);
-          const sourceRange = findSegmentRange(
-            originalTrimmed,
-            piece,
-            sourceCursor,
-            row.isAlternative,
-          );
-          if (sourceRange) sourceCursor = sourceRange[1];
           currentGroup.ingredients.push({
             quantity: parsed.quantity,
             unit: final.resolved,

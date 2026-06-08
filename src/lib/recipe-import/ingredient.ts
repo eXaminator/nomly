@@ -2201,6 +2201,9 @@ function splitOrOptions(text: string): string[] {
   let depth = 0;
   let current = "";
   let i = 0;
+  // Trailing separator left when a "X, oder Y" comma sits before the "oder"
+  // we split on ("ungesalzen," → "ungesalzen"). Internal commas survive.
+  const clean = (s: string) => s.trim().replace(/[,;]+$/, "").trim();
   while (i < trimmed.length) {
     const ch = trimmed[i];
     if (ch === "(" || ch === "[") depth += 1;
@@ -2208,7 +2211,7 @@ function splitOrOptions(text: string): string[] {
     if (depth === 0 && /\s/.test(ch)) {
       const m = /^\s+(?:or|oder)\s+/i.exec(trimmed.slice(i));
       if (m) {
-        out.push(current.trim());
+        out.push(clean(current));
         current = "";
         i += m[0].length;
         continue;
@@ -2217,7 +2220,7 @@ function splitOrOptions(text: string): string[] {
     current += ch;
     i += 1;
   }
-  if (current.trim().length > 0) out.push(current.trim());
+  if (clean(current).length > 0) out.push(clean(current));
   return out.filter((s) => s.length > 0);
 }
 
