@@ -37,61 +37,9 @@ import {
   resolveUnitPick,
 } from "@/components/units/unit-picker";
 import { IngredientNameInput } from "./ingredient-name-input";
+import { renderOriginalWithMuting } from "./original-muting";
 import { liveMatchQuery, type DraftIngredient, type ImportAnnotation } from "./types";
 import { ForceMatchPopover } from "./force-match-popover";
-
-/**
- * Render an "Original:" source line with the parts that did NOT contribute to
- * this row muted, leaving the row's own + inherited spans at full emphasis.
- * `ranges` are `[start, end)` offsets into `text`. Returns the plain string
- * when there's nothing distinguishable to mute (no ranges, or they cover the
- * whole line) so lone ingredients keep their usual muted look.
- */
-function renderOriginalWithMuting(
-  text: string,
-  ranges: [number, number][],
-): React.ReactNode {
-  if (ranges.length === 0) return text;
-  const clamped = ranges
-    .map(([s, e]) => [Math.max(0, s), Math.min(text.length, e)] as [number, number])
-    .filter(([s, e]) => e > s)
-    .sort((a, b) => a[0] - b[0]);
-  const merged: [number, number][] = [];
-  for (const [s, e] of clamped) {
-    const last = merged[merged.length - 1];
-    if (last && s <= last[1]) last[1] = Math.max(last[1], e);
-    else merged.push([s, e]);
-  }
-  // Nothing muted (the kept spans cover the whole line) → plain string.
-  if (merged.length === 1 && merged[0][0] === 0 && merged[0][1] === text.length) {
-    return text;
-  }
-  const out: React.ReactNode[] = [];
-  let cursor = 0;
-  merged.forEach(([s, e], i) => {
-    if (s > cursor) {
-      out.push(
-        <span key={`mute-${i}`} className="opacity-50">
-          {text.slice(cursor, s)}
-        </span>,
-      );
-    }
-    out.push(
-      <span key={`keep-${i}`} className="text-[var(--color-fg)]">
-        {text.slice(s, e)}
-      </span>,
-    );
-    cursor = e;
-  });
-  if (cursor < text.length) {
-    out.push(
-      <span key="mute-end" className="opacity-50">
-        {text.slice(cursor)}
-      </span>,
-    );
-  }
-  return out;
-}
 
 /**
  * Mirror of the server-side {@link MIN_AUTO_MATCH_SCORE} (see
