@@ -5,6 +5,7 @@ import type {
   ShoppingItemView,
 } from "@/lib/shopping/items";
 import type { PreviewMeal } from "@/lib/shopping/preview";
+import type { StaplePreviewGroup } from "@/lib/staples/preview";
 
 async function jsonOrThrow(res: Response): Promise<unknown> {
   if (!res.ok) {
@@ -56,16 +57,27 @@ export async function clearListSelective(input: {
   };
 }
 
-export async function addStapleGroupToList(groupId: number): Promise<{
+export async function previewStaples(): Promise<StaplePreviewGroup[]> {
+  const res = await fetch("/api/v1/shopping/preview-staples", { cache: "no-store" });
+  const data = (await jsonOrThrow(res)) as { groups: StaplePreviewGroup[] };
+  return data.groups;
+}
+
+export async function addStaplesToList(
+  selection: Array<{
+    stapleGroupId: number;
+    items: Array<{ stapleGroupItemId: number; quantity?: number | null }>;
+  }>,
+): Promise<{
   itemsCreated: number;
   itemsIncremented: number;
   itemsReactivated: number;
   affectedItemIds: number[];
 }> {
-  const res = await fetch("/api/v1/shopping/add-staple-group", {
+  const res = await fetch("/api/v1/shopping/add-staples", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ groupId }),
+    body: JSON.stringify({ selection }),
   });
   return (await jsonOrThrow(res)) as {
     itemsCreated: number;
@@ -322,6 +334,24 @@ export async function addMealsToList(
     itemsReactivated: number;
     affectedItemIds: number[];
   };
+}
+
+/**
+ * Flag one or more recipes as "needs update" (one-way). Used from the
+ * shopping-list item menu when the user notices a recipe needs a fix while
+ * shopping. Issues one PATCH per recipe against the existing endpoint.
+ */
+export async function markRecipesNeedUpdate(recipeIds: number[]): Promise<void> {
+  await Promise.all(
+    recipeIds.map(async (id) => {
+      const res = await fetch(`/api/v1/recipes/${id}/needs-update`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ needsUpdate: true }),
+      });
+      await jsonOrThrow(res);
+    }),
+  );
 }
 
 export async function setUnavailable(

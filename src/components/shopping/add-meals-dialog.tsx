@@ -574,7 +574,7 @@ function IngredientCheckbox({
   onChangeQuantity: (value: string) => void;
 }) {
   return (
-    <li>
+    <li className={ing.alternativeForId != null ? "pl-5" : undefined}>
       <label
         className={`flex cursor-pointer items-start gap-2 text-sm ${
           isOptionalIngredient(ing) ? "text-[var(--color-muted-fg)] italic" : ""

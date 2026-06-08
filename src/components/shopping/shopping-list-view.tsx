@@ -22,10 +22,11 @@ import {
 import { countNeededItemsPerSupermarket } from "@/lib/shopping/supermarket-availability";
 import { resolveSupermarketDeepLink } from "@/lib/shopping/supermarket-deep-link";
 import { ShoppingItemRow } from "./shopping-item-row";
+import { MarkRecipeUpdateDialog } from "./mark-recipe-update-dialog";
 import { ShoppingDoneState } from "./shopping-done";
 import { AddItemDialog } from "./add-item-dialog";
 import { AddMealsDialog } from "./add-meals-dialog";
-import { AddStapleGroupDialog } from "./add-staple-group-dialog";
+import { AddStaplesDialog } from "./add-staples-dialog";
 import { SupermarketFilter } from "./supermarket-filter";
 import { ClearListDialog } from "./clear-list-dialog";
 import { EditItemDialog } from "./edit-item-dialog";
@@ -39,6 +40,7 @@ import {
   deleteSource as apiDeleteSource,
   deleteStapleSource as apiDeleteStapleSource,
   fetchItems,
+  markRecipesNeedUpdate as apiMarkRecipesNeedUpdate,
   patchItem as apiPatch,
   setItemStock as apiSetStock,
   setManualAmountQuantity as apiSetManualQty,
@@ -89,6 +91,11 @@ export function ShoppingListView({
   const [addMealsOpen, setAddMealsOpen] = React.useState(false);
   const [addStaplesOpen, setAddStaplesOpen] = React.useState(false);
   const [previewRecipeId, setPreviewRecipeId] = React.useState<number | null>(null);
+  // The item whose recipes are being picked for "needs update" (multi-recipe
+  // items only; single-recipe items mark directly).
+  const [markUpdateItem, setMarkUpdateItem] = React.useState<ShoppingItemView | null>(
+    null,
+  );
   const [clearOpen, setClearOpen] = React.useState(false);
   const [stockCheckOpen, setStockCheckOpen] = React.useState(false);
   // Identify by id so the dialog body re-keys to fresh state when a
@@ -446,6 +453,8 @@ export function ShoppingListView({
         onEditArticle={setEditingArticleId}
         onDelete={onDelete}
         onToggleUnavailable={onToggleUnavailable}
+        onMarkRecipesNeedUpdate={(ids) => void apiMarkRecipesNeedUpdate(ids)}
+        onRequestMarkRecipeUpdate={setMarkUpdateItem}
         disabledOffline={disabledOffline}
       />
     </li>
@@ -625,7 +634,7 @@ export function ShoppingListView({
           router.refresh();
         }}
       />
-      <AddStapleGroupDialog
+      <AddStaplesDialog
         open={addStaplesOpen}
         onClose={() => setAddStaplesOpen(false)}
         onAdded={() => {
@@ -636,6 +645,11 @@ export function ShoppingListView({
       <RecipePreviewDialog
         recipeId={previewRecipeId}
         onClose={() => setPreviewRecipeId(null)}
+      />
+      <MarkRecipeUpdateDialog
+        item={markUpdateItem}
+        onClose={() => setMarkUpdateItem(null)}
+        onConfirm={(ids) => void apiMarkRecipesNeedUpdate(ids)}
       />
       <ClearListDialog
         open={clearOpen}

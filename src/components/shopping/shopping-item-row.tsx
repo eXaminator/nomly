@@ -1,6 +1,6 @@
 "use client";
 
-import { Ban, BookOpen, Check, MoreVertical, Pencil, Tags, Trash2 } from "lucide-react";
+import { Ban, BookOpen, Check, MoreVertical, Pencil, Tags, Trash2, Wrench } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -36,6 +36,12 @@ type Props = {
   onEditArticle: (ingredientId: number) => void;
   onDelete: (id: number) => Promise<void>;
   onToggleUnavailable: (item: ShoppingItemView, supermarketId: number) => Promise<void>;
+  /** Marks the given recipes as "needs update" (one-way). Used directly when
+   *  the item has exactly one associated recipe. */
+  onMarkRecipesNeedUpdate: (recipeIds: number[]) => void;
+  /** Opens the recipe-picker dialog to mark a subset — used when the item has
+   *  more than one associated recipe. */
+  onRequestMarkRecipeUpdate: (item: ShoppingItemView) => void;
   /** When true, all non-toggle actions (edit, delete, unavailable) are disabled. */
   disabledOffline?: boolean;
 };
@@ -49,6 +55,8 @@ export function ShoppingItemRow({
   onEditArticle,
   onDelete,
   onToggleUnavailable,
+  onMarkRecipesNeedUpdate,
+  onRequestMarkRecipeUpdate,
   disabledOffline = false,
 }: Props) {
   const isUnavailableHere =
@@ -155,6 +163,12 @@ export function ShoppingItemRow({
               Artikel bearbeiten
             </DropdownMenuItem>
             <RecipeMenuEntry sources={item.sources} onPreview={onPreviewRecipe} />
+            <MarkUpdateMenuEntry
+              sources={item.sources}
+              disabled={disabledOffline}
+              onMarkOne={(recipeId) => onMarkRecipesNeedUpdate([recipeId])}
+              onRequestPick={() => onRequestMarkRecipeUpdate(item)}
+            />
             <DropdownMenuItem
               onClick={() =>
                 activeSupermarketId != null
@@ -259,19 +273,10 @@ function RecipeMenuEntry({
   sources: ShoppingItemSourceView[];
   onPreview: (recipeId: number) => void;
 }) {
-  if (sources.length === 0) return null;
-  // Skip sources whose recipe has been deleted (recipeId nulled) — there's
-  // nothing to open for those.
-  const uniqueByRecipe = new Map<number, ShoppingItemSourceView>();
-  for (const s of sources) {
-    if (s.recipeId != null && !uniqueByRecipe.has(s.recipeId)) {
-      uniqueByRecipe.set(s.recipeId, s);
-    }
-  }
-  const unique = Array.from(uniqueByRecipe.entries());
+  const unique = uniqueRecipes(sources);
   if (unique.length === 0) return null;
   if (unique.length === 1) {
-    const [recipeId] = unique[0];
+    const { recipeId } = unique[0];
     return (
       <DropdownMenuItem onClick={() => onPreview(recipeId)}>
         <BookOpen className="mr-2 size-4" />
@@ -286,13 +291,61 @@ function RecipeMenuEntry({
         Rezept öffnen
       </DropdownMenuSubTrigger>
       <DropdownMenuSubContent>
-        {unique.map(([recipeId, s]) => (
+        {unique.map(({ recipeId, recipeTitle }) => (
           <DropdownMenuItem key={recipeId} onClick={() => onPreview(recipeId)}>
-            {s.recipeTitle}
+            {recipeTitle}
           </DropdownMenuItem>
         ))}
       </DropdownMenuSubContent>
     </DropdownMenuSub>
+  );
+}
+
+export type ItemRecipe = { recipeId: number; recipeTitle: string | null };
+
+/**
+ * The distinct recipes a shopping item is associated with, derived from its
+ * meal sources. Dedupes by `recipeId` and skips sources whose recipe has been
+ * deleted (recipeId nulled by the decoupling SET NULL).
+ */
+export function uniqueRecipes(sources: ShoppingItemSourceView[]): ItemRecipe[] {
+  const byRecipe = new Map<number, ItemRecipe>();
+  for (const s of sources) {
+    if (s.recipeId != null && !byRecipe.has(s.recipeId)) {
+      byRecipe.set(s.recipeId, { recipeId: s.recipeId, recipeTitle: s.recipeTitle });
+    }
+  }
+  return Array.from(byRecipe.values());
+}
+
+/**
+ * "Update vormerken" menu entry. Hidden when the item has no live recipe.
+ * One recipe → marks it directly; several → defers to the picker dialog so
+ * the user chooses which to flag.
+ */
+function MarkUpdateMenuEntry({
+  sources,
+  disabled,
+  onMarkOne,
+  onRequestPick,
+}: {
+  sources: ShoppingItemSourceView[];
+  disabled: boolean;
+  onMarkOne: (recipeId: number) => void;
+  onRequestPick: () => void;
+}) {
+  const unique = uniqueRecipes(sources);
+  if (unique.length === 0) return null;
+  return (
+    <DropdownMenuItem
+      disabled={disabled}
+      onClick={() =>
+        unique.length === 1 ? onMarkOne(unique[0].recipeId) : onRequestPick()
+      }
+    >
+      <Wrench className="mr-2 size-4" />
+      Update vormerken
+    </DropdownMenuItem>
   );
 }
 
