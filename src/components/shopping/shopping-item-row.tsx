@@ -221,7 +221,15 @@ function SourceLine({ source }: { source: ShoppingItemSourceView }) {
         />
       ) : null}
       <span className="font-medium text-[var(--color-fg)]/80">{source.recipeTitle}</span>
-      {source.mealDate ? <span>({formatDate(source.mealDate)})</span> : null}
+      {(() => {
+        const parts = [
+          source.mealDate ? formatDate(source.mealDate) : null,
+          source.mealServings != null
+            ? `${source.mealServings} ${source.mealServings === 1 ? "Portion" : "Portionen"}`
+            : null,
+        ].filter(Boolean);
+        return parts.length > 0 ? <span>({parts.join(" · ")})</span> : null;
+      })()}
       {(() => {
         const unitLabel = source.contributedUnit;
         if (source.contributedQuantity == null && !unitLabel) return null;

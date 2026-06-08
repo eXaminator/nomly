@@ -203,6 +203,19 @@ describe("shopping-list decoupling", () => {
     expect(tomate().recipeNeedsUpdate).toBe(true); // live flag, reflected at once
   });
 
+  it("exposes the meal's live effective portions on each source", async () => {
+    await addWholeMeal(ctx);
+    const { listShoppingItems } = await import("@/lib/shopping/items");
+    const { updateMeal } = await import("@/lib/meal-plans/service");
+    const tomate = () =>
+      listShoppingItems().find((i) => i.name === "Tomate")!.sources[0];
+
+    expect(tomate().mealServings).toBe(4); // servingsOverride 4 (recipe is 2)
+
+    updateMeal(ctx.mealPlanId, { servingsOverride: 6 });
+    expect(tomate().mealServings).toBe(6); // reflects the current plan
+  });
+
   it("meal delete (keep) leaves contributions on the list, detached", async () => {
     await addWholeMeal(ctx);
     const { deleteMealOnly } = await import("@/lib/shopping/meals");
