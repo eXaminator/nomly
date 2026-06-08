@@ -40,6 +40,7 @@ import {
   detachAlternative,
   moveAlternativeWithinGroup,
   promoteAlternative,
+  removeAlternativeFoldingNote,
 } from "./alternatives";
 import { ingredientToPayload, toNumberOrNull } from "./payload";
 import { buildUnitInflector, type UnitInflector } from "./unit-inflect";
@@ -140,7 +141,9 @@ function DraftEditList({
                 key={rows[k].uid}
                 alt={rows[k]}
                 onChange={(next) => onChangeRow(k, next)}
-                onRemove={() => onRemoveRow(k)}
+                // Removing an alternative folds it back into the primary's
+                // notes (as if it had never been split out).
+                onRemove={() => onMutate((rs) => removeAlternativeFoldingNote(rs, k))}
                 onPromote={() => onMutate((rs) => promoteAlternative(rs, k))}
                 onDetach={() => onMutate((rs) => detachAlternative(rs, k))}
               />

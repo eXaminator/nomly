@@ -8,6 +8,7 @@ import {
   lastInGroup,
   moveAlternativeWithinGroup,
   promoteAlternative,
+  removeAlternativeFoldingNote,
 } from "@/components/recipes/alternatives";
 import type { DraftIngredient } from "@/components/recipes/types";
 
@@ -136,6 +137,57 @@ describe("alternative grouping helpers", () => {
     const rows = [row("A"), row("a1", true), row("B")];
     expect(shape(moveAlternativeWithinGroup(rows, 0, 1))).toEqual(shape(rows));
     expect(shape(moveAlternativeWithinGroup(rows, 2, 0))).toEqual(shape(rows));
+  });
+
+  describe("removeAlternativeFoldingNote", () => {
+    it("folds the verbatim source span back into the primary's notes", () => {
+      const a = row("Honig");
+      a.rawText = "2-3 EL Honig oder Ahornsirup";
+      const b = row("Ahornsirup", true, true);
+      b.rawText = "2-3 EL Honig oder Ahornsirup";
+      b.sourceRange = [13, 28]; // "oder Ahornsirup"
+      const out = removeAlternativeFoldingNote([a, b], 1);
+      expect(out).toHaveLength(1);
+      expect(out[0].name).toBe("Honig");
+      expect(out[0].notes).toBe("oder Ahornsirup");
+    });
+
+    it("appends after existing notes with a comma", () => {
+      const a = row("Honig");
+      a.notes = "warm";
+      a.rawText = "2-3 EL Honig oder Ahornsirup";
+      const b = row("Ahornsirup", true, true);
+      b.rawText = "2-3 EL Honig oder Ahornsirup";
+      b.sourceRange = [13, 28];
+      const out = removeAlternativeFoldingNote([a, b], 1);
+      expect(out[0].notes).toBe("warm, oder Ahornsirup");
+    });
+
+    it("reconstructs a fold when no sourceRange (DB-loaded / edited)", () => {
+      const a = row("Honig");
+      const b = row("Ahornsirup", true, true);
+      b.quantity = "50";
+      b.unit = { id: 1, name: "g" };
+      b.notes = "warm";
+      const out = removeAlternativeFoldingNote([a, b], 1);
+      expect(out[0].notes).toBe("oder 50 g Ahornsirup, warm");
+    });
+
+    it("a blank alternative is just removed, no note added", () => {
+      const a = row("Honig");
+      a.notes = "warm";
+      const b = row("", true, true); // empty freshly-added alternative
+      const out = removeAlternativeFoldingNote([a, b], 1);
+      expect(out).toHaveLength(1);
+      expect(out[0].notes).toBe("warm");
+    });
+
+    it("a non-alternative row is removed without folding", () => {
+      const a = row("Honig");
+      const b = row("Butter");
+      const out = removeAlternativeFoldingNote([a, b], 1);
+      expect(out.map((r) => r.name)).toEqual(["Honig"]);
+    });
   });
 
   it("promote/detach are no-ops on a primary index", () => {

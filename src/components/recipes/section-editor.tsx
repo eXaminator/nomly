@@ -47,6 +47,7 @@ import {
   promoteAlternative as applyPromoteAlternative,
   detachAlternative as applyDetachAlternative,
   demoteToAlternative as applyDemoteToAlternative,
+  removeAlternativeFoldingNote,
 } from "./alternatives";
 
 /**
@@ -255,10 +256,12 @@ export function SectionEditor({
   function requestRemove(i: number) {
     const row = section.ingredients[i];
     if (row.isAlternative) {
-      // Alternative: drop just this row.
-      const ings = section.ingredients.slice();
-      ings.splice(i, 1);
-      onChange({ ...section, ingredients: ings });
+      // Alternative: fold it back into its primary's notes (as if it had never
+      // been split out) rather than discarding it.
+      onChange({
+        ...section,
+        ingredients: removeAlternativeFoldingNote(section.ingredients, i),
+      });
       return;
     }
     // Primary: cascade-aware.
