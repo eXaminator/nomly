@@ -2,6 +2,7 @@ import { Fragment } from "react";
 import Link from "next/link";
 import {
   Clock,
+  Copy,
   CornerDownRight,
   ExternalLink,
   Lock,
@@ -129,12 +130,20 @@ export function RecipeDetail({
               initial={recipe.needsUpdate}
             />
             {showEdit ? (
-              <Button asChild variant="outline">
-                <Link href={`/rezepte/${recipe.id}/bearbeiten`}>
-                  <Pencil className="size-4" />
-                  Bearbeiten
-                </Link>
-              </Button>
+              <>
+                <Button asChild variant="outline">
+                  <Link href={`/rezepte/${recipe.id}/kopieren`}>
+                    <Copy className="size-4" />
+                    Kopieren
+                  </Link>
+                </Button>
+                <Button asChild variant="outline">
+                  <Link href={`/rezepte/${recipe.id}/bearbeiten`}>
+                    <Pencil className="size-4" />
+                    Bearbeiten
+                  </Link>
+                </Button>
+              </>
             ) : null}
           </div>
         </div>

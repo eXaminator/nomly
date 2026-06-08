@@ -5,7 +5,7 @@ import { notFound } from "next/navigation";
 import { asc } from "drizzle-orm";
 import { RecipeForm } from "@/components/recipes/recipe-form";
 import { getRecipe } from "@/lib/recipes/service";
-import { quantityToInputString, type DraftRecipe } from "@/components/recipes/types";
+import { recipeToDraft } from "@/components/recipes/types";
 import { db } from "@/db";
 import { tag } from "@/db/schema";
 
@@ -40,59 +40,7 @@ export default async function EditRecipePage({
     .all()
     .map((t) => t.name);
 
-  const draft: DraftRecipe = {
-    title: recipe.title,
-    description: recipe.description ?? "",
-    servings: String(recipe.servings),
-    prepTimeMin: recipe.prepTimeMin === null ? "" : String(recipe.prepTimeMin),
-    cookTimeMin: recipe.cookTimeMin === null ? "" : String(recipe.cookTimeMin),
-    sourceUrl: recipe.sourceUrl ?? "",
-    photoPath: recipe.photoPath,
-    photoUrl: "",
-    tags: recipe.tags,
-    sections: recipe.sections.map((s) => ({
-      uid: crypto.randomUUID(),
-      title: s.title ?? "",
-      instructions: s.instructions,
-      ingredients: s.ingredients.map((i) => ({
-        uid: crypto.randomUUID(),
-        name: i.ingredientName,
-        // "Nicht zugeordnet" line (no article): start with the unassigned
-        // pill selected and no canonical/ingredient link.
-        canonicalName:
-          i.canonicalIngredientName == null ||
-          i.canonicalIngredientName.toLowerCase() ===
-            i.ingredientName.toLowerCase()
-            ? null
-            : i.canonicalIngredientName,
-        // The row already links to an ingredient (or is unassigned); the pill
-        // UI starts with that pill selected. Candidates are populated lazily
-        // when the user edits the name (the matcher endpoint runs then).
-        selectedIngredientId: i.ingredientId,
-        candidates: [],
-        addAsAlias: false,
-        unassigned: i.ingredientId == null,
-        quantity: quantityToInputString(i.quantity),
-        // The displayed unit name comes from the server's `unitName` coalesce
-        // (display_unit override → canonical), so we don't look it up twice.
-        unit:
-          i.unitId !== null && i.unitName
-            ? { id: i.unitId, name: i.unitName }
-            : null,
-        notes: i.notes ?? "",
-        isOptional: i.isOptional,
-        fixedAmount: i.fixedAmount,
-        // The server returns the primary's row id when this row is an
-        // alternative. The form only needs the boolean — alternatives sit
-        // immediately after their primary in the sorted ingredient array,
-        // so the structural relationship is reconstructible client-side.
-        isAlternative: i.alternativeForId != null,
-        // Reuse the import-flow `rawText` slot — the existing
-        // IngredientRow already surfaces it as the "Original" hint.
-        rawText: i.rawLine ?? undefined,
-      })),
-    })),
-  };
+  const draft = recipeToDraft(recipe);
 
   return (
     <>

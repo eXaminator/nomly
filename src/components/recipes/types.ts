@@ -1,4 +1,5 @@
 import type { ComboboxItem } from "@/components/ui/combobox";
+import type { RecipeView } from "@/lib/recipes/types";
 
 /**
  * Per-row state surfaced after a URL import: what matched, what didn't,
@@ -350,6 +351,58 @@ export function emptySection(): DraftSection {
  * adds at runtime stay on `crypto.randomUUID()` because those callsites only
  * fire client-side.
  */
+/**
+ * Maps a persisted recipe (server view) into the editable draft consumed by
+ * RecipeForm. Shared by the edit page and the copy page — the copy page omits
+ * `recipeId` on the form so saving creates a new recipe instead of updating.
+ */
+export function recipeToDraft(recipe: RecipeView): DraftRecipe {
+  return {
+    title: recipe.title,
+    description: recipe.description ?? "",
+    servings: String(recipe.servings),
+    prepTimeMin: recipe.prepTimeMin === null ? "" : String(recipe.prepTimeMin),
+    cookTimeMin: recipe.cookTimeMin === null ? "" : String(recipe.cookTimeMin),
+    sourceUrl: recipe.sourceUrl ?? "",
+    photoPath: recipe.photoPath,
+    photoUrl: "",
+    tags: recipe.tags,
+    sections: recipe.sections.map((s) => ({
+      uid: crypto.randomUUID(),
+      title: s.title ?? "",
+      instructions: s.instructions,
+      ingredients: s.ingredients.map((i) => ({
+        uid: crypto.randomUUID(),
+        name: i.ingredientName,
+        // "Nicht zugeordnet" line (no article): start with the unassigned
+        // pill selected and no canonical/ingredient link.
+        canonicalName:
+          i.canonicalIngredientName == null ||
+          i.canonicalIngredientName.toLowerCase() ===
+            i.ingredientName.toLowerCase()
+            ? null
+            : i.canonicalIngredientName,
+        selectedIngredientId: i.ingredientId,
+        candidates: [],
+        addAsAlias: false,
+        unassigned: i.ingredientId == null,
+        quantity: quantityToInputString(i.quantity),
+        unit:
+          i.unitId !== null && i.unitName
+            ? { id: i.unitId, name: i.unitName }
+            : null,
+        notes: i.notes ?? "",
+        isOptional: i.isOptional,
+        fixedAmount: i.fixedAmount,
+        // Alternatives sit immediately after their primary in the sorted
+        // array, so the boolean is enough to reconstruct the grouping.
+        isAlternative: i.alternativeForId != null,
+        rawText: i.rawLine ?? undefined,
+      })),
+    })),
+  };
+}
+
 export function emptyRecipe(): DraftRecipe {
   return {
     title: "",
