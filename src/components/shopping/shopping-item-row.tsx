@@ -214,6 +214,12 @@ function ManualLine({ manual }: { manual: ShoppingItemManualAmount }) {
 function SourceLine({ source }: { source: ShoppingItemSourceView }) {
   return (
     <li className="inline-flex flex-wrap items-baseline gap-x-1.5 px-1">
+      {source.recipeNeedsUpdate ? (
+        <Wrench
+          className="size-3 self-center text-[var(--color-warning)]"
+          aria-label="Rezept muss aktualisiert werden"
+        />
+      ) : null}
       <span className="font-medium text-[var(--color-fg)]/80">{source.recipeTitle}</span>
       {source.mealDate ? <span>({formatDate(source.mealDate)})</span> : null}
       {(() => {

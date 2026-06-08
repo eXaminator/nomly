@@ -190,6 +190,19 @@ describe("shopping-list decoupling", () => {
     expect(src.recipeIngredientId).toBeNull(); // link detached, not destroyed
   });
 
+  it("exposes the recipe's live needsUpdate flag on each source", async () => {
+    await addWholeMeal(ctx);
+    const { listShoppingItems } = await import("@/lib/shopping/items");
+    const { setRecipeNeedsUpdate } = await import("@/lib/recipes/service");
+    const tomate = () =>
+      listShoppingItems().find((i) => i.name === "Tomate")!.sources[0];
+
+    expect(tomate().recipeNeedsUpdate).toBe(false); // not flagged by default
+
+    setRecipeNeedsUpdate(ctx.recipeId, true);
+    expect(tomate().recipeNeedsUpdate).toBe(true); // live flag, reflected at once
+  });
+
   it("meal delete (keep) leaves contributions on the list, detached", async () => {
     await addWholeMeal(ctx);
     const { deleteMealOnly } = await import("@/lib/shopping/meals");

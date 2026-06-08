@@ -6,6 +6,7 @@ import {
   ingredient,
   ingredientAlias,
   ingredientSupermarketUnavailable,
+  recipe,
   shoppingItem,
   shoppingItemAmount,
   shoppingItemSource,
@@ -48,6 +49,9 @@ export type ShoppingItemSourceView = {
   /** The planned meal's own note, snapshotted at add time. Null when the meal
    *  carried no note. */
   mealNote: string | null;
+  /** LIVE flag (not a snapshot): the linked recipe is currently marked
+   *  "needs update". False when the recipe link is null (deleted). */
+  recipeNeedsUpdate: boolean;
 };
 
 export type ShoppingItemStapleSourceView = {
@@ -192,10 +196,12 @@ export function listShoppingItems(
   type RawSource = ShoppingItemSourceView;
   const sourcesByItem = new Map<number, RawSource[]>();
   if (itemIds.length > 0) {
-    // Read entirely from the source row's own snapshot columns — never join
-    // meal_plan / recipe / recipe_ingredient. Those links are soft (nullable)
-    // and an inner join would silently drop a contribution whose meal or
-    // recipe has since been deleted/edited.
+    // Display data comes from the source row's own snapshot columns — we never
+    // INNER JOIN meal_plan / recipe / recipe_ingredient (the links are soft, and
+    // an inner join would drop a contribution whose meal/recipe was deleted).
+    // The lone LEFT JOIN to `recipe` reads only the LIVE `needs_update` flag (so
+    // a freshly-marked recipe shows the wrench at once); being a LEFT JOIN it
+    // never drops rows and is null for detached/deleted recipes.
     const sources = db
       .select({
         sourceId: shoppingItemSource.id,
@@ -211,9 +217,11 @@ export function listShoppingItems(
         contributedUnitId: shoppingItemSource.contributedUnitId,
         recipeNotes: shoppingItemSource.recipeNotes,
         mealNote: shoppingItemSource.mealNote,
+        recipeNeedsUpdate: recipe.needsUpdate,
       })
       .from(shoppingItemSource)
       .leftJoin(unit, eq(unit.id, shoppingItemSource.contributedUnitId))
+      .leftJoin(recipe, eq(recipe.id, shoppingItemSource.recipeId))
       .where(inArray(shoppingItemSource.itemId, itemIds))
       .orderBy(asc(shoppingItemSource.mealDate), asc(shoppingItemSource.recipeTitle))
       .all();
@@ -236,6 +244,7 @@ export function listShoppingItems(
         contributedUnitId: s.contributedUnitId,
         recipeNotes: s.recipeNotes,
         mealNote: s.mealNote,
+        recipeNeedsUpdate: !!s.recipeNeedsUpdate,
       });
       sourcesByItem.set(s.itemId, arr);
     }
@@ -447,6 +456,7 @@ export function listShoppingItems(
         contributedUnit: s.contributedUnit,
         recipeNotes: s.recipeNotes,
         mealNote: s.mealNote,
+        recipeNeedsUpdate: s.recipeNeedsUpdate,
       })),
       stapleSources,
       manualAmounts: manuals.map((m) => ({
