@@ -1321,6 +1321,17 @@ describe("alternative amount/unit/notes inheritance", () => {
     expect(altAmount.map((p) => slice(alt, p.range))).toContain("2-3 EL");
   });
 
+  it("keeps an optional marker on a matched alternative (nach Belieben)", () => {
+    const out = rows("100 g Rohrohrzucker (oder anderer Zucker nach Belieben)", [
+      { ingredientId: 1, canonicalName: "Rohrohrzucker", aliasName: "Rohrohrzucker", tokens: ["rohrohrzucker"] },
+      { ingredientId: 2, canonicalName: "Zucker", aliasName: "Zucker", tokens: ["zucker"] },
+    ]);
+    const alt = out.find((r) => r.isAlternative)!;
+    expect(alt.ingredientId).toBe(2);
+    // "nach Belieben" is kept on the (optional-by-definition) alternative.
+    expect(alt.notes).toMatch(/nach Belieben/i);
+  });
+
   it("folds an unmatched alt without a trailing comma and highlights it as a note", () => {
     const out = rows("50 g gesalzene Erdnüsse (oder ungesalzen, oder andere Nüsse)", [
       { ingredientId: 1, canonicalName: "Erdnüsse", aliasName: "Erdnüsse", tokens: ["erdnüsse"] },

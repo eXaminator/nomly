@@ -666,7 +666,13 @@ export function aliasDedupKey(name: string): string {
  *
  * Returns the cleaned text plus any notes captured from the pre-processing.
  */
-function preprocess(raw: string): {
+function preprocess(
+  raw: string,
+  /** When true (alternatives — optional by definition), optional markers like
+   *  "nach Belieben" are KEPT as notes instead of stripped, since they carry
+   *  meaning rather than just flagging the whole ingredient optional. */
+  keepOptionalMarkers: boolean,
+): {
   text: string;
   capturedNotes: string[];
   /** Amount-derived captures that sit at the line FRONT alongside the
@@ -721,27 +727,48 @@ function preprocess(raw: string): {
   // separators — when a COMMA was among them ("gehackt, optional je nach
   // …"), keep one so the pieces around the removed marker stay separated
   // ("gehackt, je nach …").
+  // Clean a matched marker down to its words and keep it as a note (only for
+  // alternatives — see {@link keepOptionalMarkers}).
+  const keepMarker = (m: string) => {
+    if (!keepOptionalMarkers) return;
+    const cleaned = m
+      .replace(/[()]/g, " ")
+      .replace(/^[\s,;:–-]+|[\s,;:–-]+$/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (cleaned.length > 0) capturedNotes.push(cleaned);
+  };
   if (OPTIONAL_ANYWHERE_RE.test(text)) {
     isOptional = true;
     OPTIONAL_ANYWHERE_RE.lastIndex = 0;
-    text = text.replace(OPTIONAL_ANYWHERE_RE, (m) =>
-      m.includes(",") ? ", " : " ",
-    );
+    text = text.replace(OPTIONAL_ANYWHERE_RE, (m) => {
+      keepMarker(m);
+      return m.includes(",") ? ", " : " ";
+    });
     OPTIONAL_ANYWHERE_RE.lastIndex = 0;
   }
-  // Other markers (n. B., evtl., nach Belieben, …) — same strip but they
-  // never appear standalone so we still scan all three positions.
+  // Other markers (n. B., evtl., nach Belieben, …) — stripped on a primary,
+  // but kept as a note on an alternative (it's optional by definition).
   if (OPTIONAL_LEADING_RE.test(text)) {
     isOptional = true;
-    text = text.replace(OPTIONAL_LEADING_RE, "");
+    text = text.replace(OPTIONAL_LEADING_RE, (m) => {
+      keepMarker(m);
+      return "";
+    });
   }
   if (OPTIONAL_INLINE_PAREN_RE.test(text)) {
     isOptional = true;
-    text = text.replace(OPTIONAL_INLINE_PAREN_RE, " ");
+    text = text.replace(OPTIONAL_INLINE_PAREN_RE, (m) => {
+      keepMarker(m);
+      return " ";
+    });
   }
   if (OPTIONAL_INLINE_TRAIL_RE.test(text)) {
     isOptional = true;
-    text = text.replace(OPTIONAL_INLINE_TRAIL_RE, "");
+    text = text.replace(OPTIONAL_INLINE_TRAIL_RE, (m) => {
+      keepMarker(m);
+      return "";
+    });
   }
 
   // Capture and strip [bracketed text] → notes.
@@ -1060,13 +1087,14 @@ function dropLeadingFiller(tokens: string[]): boolean {
 export function parseIngredientString(
   raw: string,
   knownUnitTokens: ReadonlySet<string>,
+  options: { keepOptionalMarkers?: boolean } = {},
 ): ParsedIngredient {
   const {
     text: preprocessed,
     capturedNotes,
     frontCaptures: preprocessFront,
     isOptional,
-  } = preprocess(raw);
+  } = preprocess(raw, options.keepOptionalMarkers ?? false);
   // Trailing captures (brackets, optional-paren leftovers) vs FRONT captures
   // ("12-count" / "(28 oz.)" sizes from preprocess, plus the range / prep
   // noun / vague amount consumed below) — the raw-remainder notes builder

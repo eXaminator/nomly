@@ -264,6 +264,19 @@ describe("parseIngredientString — extended cases", () => {
     const r = parse("1 EL Zucker o. Honig");
     expect(r.name).toBe("Zucker or Honig");
   });
+  it("keeps an optional marker as a note when keepOptionalMarkers (alternatives)", () => {
+    const r = parseIngredientString("anderer Zucker nach Belieben", TEST_UNITS, {
+      keepOptionalMarkers: true,
+    });
+    expect(r.name).toBe("anderer Zucker");
+    expect(r.notes).toMatch(/nach Belieben/i);
+  });
+  it("strips the optional marker for a primary (default)", () => {
+    const r = parse("anderer Zucker nach Belieben");
+    expect(r.isOptional).toBe(true);
+    expect(r.notes ?? "").not.toMatch(/nach Belieben/i);
+    expect(r.name).toBe("anderer Zucker");
+  });
   it("preserves an unspaced slash inside a parenthetical note", () => {
     // "height/bundle" is not a pluralization shorthand and not a separator —
     // the slash must survive verbatim into notes, like every other special char.

@@ -1052,7 +1052,9 @@ export function parseIngredientLines(
         ? preprocessAlternatives(row.text, knownIngredientKeys)
         : row.text;
       for (const piece of splitConjunctions(raw, splitOpts)) {
-        const parsed = parseIngredientString(piece, knownUnitTokens);
+        const parsed = parseIngredientString(piece, knownUnitTokens, {
+          keepOptionalMarkers: row.isAlternative,
+        });
         // Skip the row when the parser couldn't pull a real ingredient name
         // out of the line. Familywall data legitimately has entries like
         // "2 Prise" / "200 g" / "5-7 EL" with no ingredient — there's nothing
@@ -1436,7 +1438,9 @@ function parseGroupedIngredientLines(
           ? preprocessAlternatives(row.text, knownIngredientKeys)
           : row.text;
         for (const piece of splitConjunctions(raw, splitOpts)) {
-          const parsed = parseIngredientString(piece, knownUnitTokens);
+          const parsed = parseIngredientString(piece, knownUnitTokens, {
+          keepOptionalMarkers: row.isAlternative,
+        });
           if (parsed.name.trim().length === 0) continue;
           // Defensive fallback: a colon still in the parsed name means none
           // of the expansion rules above caught this line. Use the WHOLE
