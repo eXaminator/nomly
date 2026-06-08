@@ -92,6 +92,15 @@ export type DraftIngredient = {
    *  the parser was working from. Undefined for manually-added rows and for
    *  rows loaded from an existing recipe. */
   rawText?: string;
+  /** Char range `[start, end)` of this row's own segment within `rawText`.
+   *  For an alternative it includes the connector ("oder Ahornsirup"). Used to
+   *  fold the alternative back into the primary's notes on removal and to mute
+   *  the rest of the "Original:" line. Parse-session only — absent for rows
+   *  loaded from a saved recipe. */
+  sourceRange?: [number, number];
+  /** Extra char ranges this row inherits from its group (the primary's
+   *  amount/unit; a shared note) — kept un-muted in the source highlight. */
+  inheritedRanges?: [number, number][];
   importAnnotation?: ImportAnnotation;
   /** When true, this row is an alternative for the most recent
    *  non-alternative row above it in the same section. Rendered indented
@@ -201,6 +210,13 @@ export type ParsedIngredientResponse = {
    *  (parsed from `alternativ:` / `(Alternativ: X)`). Pairs with
    *  `isOptional: true`. */
   isAlternative?: boolean;
+  /** Char range `[start, end)` of this row's own segment within `rawText`
+   *  (the original line). For an alternative it includes the connector.
+   *  Drives fold-back-on-removal and the source highlight. */
+  sourceRange?: [number, number];
+  /** Extra char ranges this row inherits from its group (the primary's
+   *  amount/unit; a shared note) — kept un-muted in the source highlight. */
+  inheritedRanges?: [number, number][];
 };
 
 export function parsedIngredientToDraft(
@@ -262,6 +278,8 @@ export function parsedIngredientToDraft(
     fixedAmount: i.fixedAmount ?? false,
     isAlternative: i.isAlternative ?? false,
     rawText: i.rawText,
+    sourceRange: i.sourceRange,
+    inheritedRanges: i.inheritedRanges,
     importAnnotation: annotation,
   };
 }

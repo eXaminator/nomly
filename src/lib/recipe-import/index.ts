@@ -22,6 +22,12 @@ import {
 } from "./html-groups.ts";
 import { parseIsoDurationToMinutes } from "./duration.ts";
 import {
+  amountPrefixRange,
+  findSegmentRange,
+  trailingNoteRange,
+  type SourceRange,
+} from "./source-ranges.ts";
+import {
   detectSectionHeader,
   expandIngredientLine,
   isPrepLeadingToken,
@@ -93,6 +99,14 @@ export type ImportedIngredient = {
    *  alternative's note is its own and must not propagate to siblings — set
    *  for notes inside a parenthetical alternative. Not persisted. */
   localNote?: boolean;
+  /** Char range `[start, end)` of this row's OWN segment in its original line
+   *  (`rawText`). For an alternative it includes the connector. Drives
+   *  fold-back-on-removal and the source highlight. Transient. */
+  sourceRange?: SourceRange;
+  /** Extra char ranges this row INHERITS from its group (the primary's
+   *  amount/unit span; a shared note's span) — kept un-muted in the highlight
+   *  alongside {@link sourceRange}. Transient. */
+  inheritedRanges?: SourceRange[];
   /** Auto-set when the parser found no quantity — these lines describe an
    *  ingredient whose amount is portion-independent ("Salz nach Geschmack",
    *  "etwas Öl"). The recipe view can still override via the per-row toggle. */
@@ -1022,6 +1036,10 @@ export function parseIngredientLines(
     // the alternative doesn't match a catalog article. Scoped per rawLine so
     // an alt from this line never folds into a primary from a previous line.
     let lastPrimaryIndex: number | null = null;
+    // Cursor for mapping each emitted piece back to a char range in the
+    // (trimmed) source line. `rawText` on emitted rows equals this string.
+    const originalTrimmed = rawLine.trim();
+    let sourceCursor = 0;
 
     for (const row of expandIngredientLine(rawLine)) {
       if (row.kind === "header") continue;
@@ -1086,11 +1104,19 @@ export function parseIngredientLines(
           continue;
         }
         const final = pickFinalUnit(initialUnit, resolved.defaultUnit, parsed.quantity);
+        const sourceRange = findSegmentRange(
+          originalTrimmed,
+          piece,
+          sourceCursor,
+          row.isAlternative,
+        );
+        if (sourceRange) sourceCursor = sourceRange[1];
         out.push({
           quantity: parsed.quantity,
           unit: final.resolved,
           unitMatch: final.match,
           rawUnit: final.rawUnit,
+          sourceRange: sourceRange ?? undefined,
           name: resolved.name,
           ingredientId: resolved.ingredientId,
           ingredientMatch: resolved.match,
@@ -1165,6 +1191,17 @@ function applyAlternativeInheritance(rows: ImportedIngredient[]): void {
   }
 }
 
+/** Re-base a within-segment range onto the full line and stash it on a row's
+ *  inherited (kept-un-muted) ranges. No-op when the local range is null. */
+function addInheritedRange(
+  row: ImportedIngredient,
+  base: SourceRange | undefined,
+  local: SourceRange | null,
+): void {
+  if (!base || !local) return;
+  (row.inheritedRanges ??= []).push([base[0] + local[0], base[0] + local[1]]);
+}
+
 function inheritWithinGroup(
   rows: ImportedIngredient[],
   lo: number,
@@ -1178,6 +1215,15 @@ function inheritWithinGroup(
     .split(",")
     .map((s) => s.trim())
     .find((s) => /^[\d.,/]+\s*[-–]\s*[\d.,/]+$/.test(s));
+  // Source range of the primary's amount/unit, so an alt that inherits the
+  // amount keeps it un-muted on its own line.
+  const primaryAmountLocal = primary.sourceRange
+    ? amountPrefixRange(
+        primary.rawText.slice(primary.sourceRange[0], primary.sourceRange[1]),
+        primary.quantity !== null,
+        primary.rawUnit ?? primary.unit?.name ?? null,
+      )
+    : null;
   for (let k = lo + 1; k <= hi; k++) {
     const alt = rows[k];
     const hasOwnAmount = alt.quantity !== null;
@@ -1188,6 +1234,7 @@ function inheritWithinGroup(
     alt.unit = primary.unit;
     alt.unitMatch = primary.unitMatch;
     alt.rawUnit = primary.rawUnit;
+    addInheritedRange(alt, primary.sourceRange, primaryAmountLocal);
     if (primaryRange) {
       const cur = alt.notes?.trim();
       alt.notes = cur && cur.length > 0 ? `${primaryRange}, ${cur}` : primaryRange;
@@ -1198,6 +1245,15 @@ function inheritWithinGroup(
   // belongs to a single parenthetical alternative ("Salz (oder Pfeffer,
   // frisch gemahlen)") is flagged `localNote` and stays put.
   const sharedNote = rows[hi].localNote ? undefined : rows[hi].notes?.trim();
+  // Source range of that shared note within the last member's segment, so each
+  // inheriting sibling can keep it un-muted on its own line.
+  const sharedNoteLocal =
+    sharedNote && rows[hi].sourceRange
+      ? trailingNoteRange(
+          rows[hi].rawText.slice(rows[hi].sourceRange![0], rows[hi].sourceRange![1]),
+          sharedNote,
+        )
+      : null;
   if (sharedNote && sharedNote.length > 0) {
     for (let k = lo; k < hi; k++) {
       const cur = rows[k].notes?.trim();
@@ -1206,6 +1262,7 @@ function inheritWithinGroup(
       // diced") keeps it on both the row and its candidates.
       if (cur && cur.length > 0) continue;
       rows[k].notes = sharedNote;
+      addInheritedRange(rows[k], rows[hi].sourceRange, sharedNoteLocal);
       // The shared prep also belongs on each sibling's candidate matches: a
       // candidate's `notes` is "what this row's notes become if you pick it",
       // and picking it from the pill UI replaces the row's notes wholesale.
@@ -1318,6 +1375,8 @@ function parseGroupedIngredientLines(
       // FROM THIS INPUT LINE so unmatched alternatives fold back into it
       // rather than into a primary from a previous line. Cleared each new line.
       let lastPrimaryIndex: number | null = null;
+      const originalTrimmed = rawLine.trim();
+      let sourceCursor = 0;
 
       for (const row of expandIngredientLine(rawLine)) {
         if (row.kind === "header") {
@@ -1372,9 +1431,17 @@ function parseGroupedIngredientLines(
             continue;
           }
           const final = pickFinalUnit(initialUnit, resolved.defaultUnit, parsed.quantity);
+          const sourceRange = findSegmentRange(
+            originalTrimmed,
+            piece,
+            sourceCursor,
+            row.isAlternative,
+          );
+          if (sourceRange) sourceCursor = sourceRange[1];
           currentGroup.ingredients.push({
             quantity: parsed.quantity,
             unit: final.resolved,
+            sourceRange: sourceRange ?? undefined,
             unitMatch: final.match,
             rawUnit: final.rawUnit,
             name: resolved.name,
