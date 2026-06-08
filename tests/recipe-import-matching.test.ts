@@ -1354,6 +1354,21 @@ describe("alternative amount/unit/notes inheritance", () => {
     expect(alt.notes ?? "").not.toMatch(/optional/i);
   });
 
+  it("folds a nameless alternative (amount-only, e.g. '1/2 large head') into notes", () => {
+    const out = rows("1 small head cabbage (or 1/2 large head, shredded)", [
+      { ingredientId: 1, canonicalName: "cabbage", aliasName: "cabbage", tokens: ["cabbage"] },
+    ], ["head"]);
+    expect(out).toHaveLength(1); // no orphan row for the nameless alt
+    expect(out[0].name).toBe("cabbage");
+    // The whole parenthetical is preserved in the notes, not dropped.
+    expect(out[0].notes).toMatch(/or 1\/2 large head, shredded/i);
+    // …and shown as a note span on the source line.
+    const noteSlices = (out[0].highlightParts ?? [])
+      .filter((p) => p.kind === "note")
+      .map((p) => out[0].rawText!.slice(p.range[0], p.range[1]));
+    expect(noteSlices.some((s) => /1\/2 large head, shredded/i.test(s))).toBe(true);
+  });
+
   it("folds an unmatched alt without a trailing comma and highlights it as a note", () => {
     const out = rows("50 g gesalzene Erdnüsse (oder ungesalzen, oder andere Nüsse)", [
       { ingredientId: 1, canonicalName: "Erdnüsse", aliasName: "Erdnüsse", tokens: ["erdnüsse"] },

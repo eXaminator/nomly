@@ -1053,6 +1053,13 @@ export function parseIngredientLines(
         : row.text;
       for (const piece of splitConjunctions(raw, splitOpts)) {
         const parsed = parseIngredientString(piece, knownUnitTokens);
+        const sourceRange = findSegmentRange(
+          originalTrimmed,
+          piece,
+          sourceCursor,
+          row.isAlternative,
+        );
+        if (sourceRange) sourceCursor = sourceRange[1];
         // An optional marker makes the WHOLE block optional: when it sits on an
         // alternative ("… (oder X, optional)"), flag the primary too.
         if (parsed.isOptional && row.isAlternative && lastPrimaryIndex !== null) {
@@ -1065,7 +1072,25 @@ export function parseIngredientLines(
         // a garbage row in the global ingredient catalog ("2 Prise" as an
         // ingredient). Same for fragments produced by conjunction splitting
         // that turn out to be empty.
-        if (parsed.name.trim().length === 0) continue;
+        if (parsed.name.trim().length === 0) {
+          // A nameless ALTERNATIVE ("1/2 large head" — the same ingredient in
+          // a different amount, no article of its own) can't become a row;
+          // fold it into the primary's notes instead of dropping it.
+          if (row.isAlternative && lastPrimaryIndex !== null) {
+            appendAlternativeToNotes(
+              out[lastPrimaryIndex],
+              row.alternativeConnector,
+              piece.trim(),
+            );
+            if (sourceRange) {
+              (out[lastPrimaryIndex].highlightParts ??= []).push({
+                range: sourceRange,
+                kind: "note",
+              });
+            }
+          }
+          continue;
+        }
         // Defensive: a colon still in the parsed name means none of the
         // expansion rules caught the line. Drop rather than pollute the
         // catalog with a colon-bearing ingredient name.
@@ -1094,13 +1119,6 @@ export function parseIngredientLines(
           parsed.quantity,
         );
         const resolved = resolveIngredientForRow(parsed, piece, lookups, threshold);
-        const sourceRange = findSegmentRange(
-          originalTrimmed,
-          piece,
-          sourceCursor,
-          row.isAlternative,
-        );
-        if (sourceRange) sourceCursor = sourceRange[1];
         // Fold an unmatched alternative back into its primary's notes instead
         // of creating an "orphan new-ingredient" row. Most recipe "or"s mean
         // "or you could use this instead" rather than a parallel shopping
@@ -1442,7 +1460,25 @@ function parseGroupedIngredientLines(
           : row.text;
         for (const piece of splitConjunctions(raw, splitOpts)) {
           const parsed = parseIngredientString(piece, knownUnitTokens);
-          if (parsed.name.trim().length === 0) continue;
+          const sourceRange = findSegmentRange(
+            originalTrimmed,
+            piece,
+            sourceCursor,
+            row.isAlternative,
+          );
+          if (sourceRange) sourceCursor = sourceRange[1];
+          if (parsed.name.trim().length === 0) {
+            // A nameless ALTERNATIVE ("1/2 large head") folds into the primary's
+            // notes rather than being dropped.
+            if (row.isAlternative && lastPrimaryIndex !== null) {
+              const primary = groups[groups.length - 1].ingredients[lastPrimaryIndex];
+              appendAlternativeToNotes(primary, row.alternativeConnector, piece.trim());
+              if (sourceRange) {
+                (primary.highlightParts ??= []).push({ range: sourceRange, kind: "note" });
+              }
+            }
+            continue;
+          }
           // Defensive fallback: a colon still in the parsed name means none
           // of the expansion rules above caught this line. Use the WHOLE
           // original input as the new section title so no information is
@@ -1473,13 +1509,6 @@ function parseGroupedIngredientLines(
             parsed.quantity,
           );
           const resolved = resolveIngredientForRow(parsed, piece, lookups, threshold);
-          const sourceRange = findSegmentRange(
-            originalTrimmed,
-            piece,
-            sourceCursor,
-            row.isAlternative,
-          );
-          if (sourceRange) sourceCursor = sourceRange[1];
           // See parseIngredientLines: unmatched alternatives fold back into
           // the primary's notes instead of becoming orphan new-ingredient rows.
           if (
