@@ -23,8 +23,10 @@ import {
 import { parseIsoDurationToMinutes } from "./duration.ts";
 import {
   amountPrefixRange,
+  decomposeSegment,
   findSegmentRange,
   trailingNoteRange,
+  type HighlightPart,
   type SourceRange,
 } from "./source-ranges.ts";
 import {
@@ -101,12 +103,13 @@ export type ImportedIngredient = {
   localNote?: boolean;
   /** Char range `[start, end)` of this row's OWN segment in its original line
    *  (`rawText`). For an alternative it includes the connector. Drives
-   *  fold-back-on-removal and the source highlight. Transient. */
+   *  fold-back-on-removal. Transient. */
   sourceRange?: SourceRange;
-  /** Extra char ranges this row INHERITS from its group (the primary's
-   *  amount/unit span; a shared note's span) — kept un-muted in the highlight
-   *  alongside {@link sourceRange}. Transient. */
-  inheritedRanges?: SourceRange[];
+  /** Categorised highlight spans into `rawText` — the row's own segment split
+   *  into amount/name/note parts, plus any inherited amount/note spans. The
+   *  source-line view colours these (amount vs name vs note) and mutes the
+   *  rest. Transient. */
+  highlightParts?: HighlightPart[];
   /** Auto-set when the parser found no quantity — these lines describe an
    *  ingredient whose amount is portion-independent ("Salz nach Geschmack",
    *  "etwas Öl"). The recipe view can still override via the per-row toggle. */
@@ -1117,6 +1120,7 @@ export function parseIngredientLines(
           unitMatch: final.match,
           rawUnit: final.rawUnit,
           sourceRange: sourceRange ?? undefined,
+          highlightParts: ownHighlightParts(originalTrimmed, sourceRange, parsed, resolved),
           name: resolved.name,
           ingredientId: resolved.ingredientId,
           ingredientMatch: resolved.match,
@@ -1191,15 +1195,41 @@ function applyAlternativeInheritance(rows: ImportedIngredient[]): void {
   }
 }
 
-/** Re-base a within-segment range onto the full line and stash it on a row's
- *  inherited (kept-un-muted) ranges. No-op when the local range is null. */
-function addInheritedRange(
+/** Categorised highlight parts for a row's OWN segment — amount/name/note,
+ *  re-based onto the full line. Undefined when the segment isn't located. */
+function ownHighlightParts(
+  line: string,
+  sourceRange: SourceRange | null,
+  parsed: { quantity: number | null; unitName: string | null },
+  resolved: { name: string; sourceName: string | null },
+): HighlightPart[] | undefined {
+  if (!sourceRange) return undefined;
+  const seg = line.slice(sourceRange[0], sourceRange[1]);
+  return decomposeSegment(
+    seg,
+    parsed.quantity !== null,
+    parsed.unitName,
+    resolved.sourceName ?? resolved.name,
+  ).map((p) => ({
+    range: [sourceRange[0] + p.range[0], sourceRange[0] + p.range[1]] as SourceRange,
+    kind: p.kind,
+  }));
+}
+
+/** Re-base a within-segment range onto the full line and stash it as an
+ *  inherited highlight part of the given kind. No-op when the local range is
+ *  null (segment not located / nothing to inherit). */
+function addInheritedPart(
   row: ImportedIngredient,
   base: SourceRange | undefined,
   local: SourceRange | null,
+  kind: HighlightPart["kind"],
 ): void {
   if (!base || !local) return;
-  (row.inheritedRanges ??= []).push([base[0] + local[0], base[0] + local[1]]);
+  (row.highlightParts ??= []).push({
+    range: [base[0] + local[0], base[0] + local[1]],
+    kind,
+  });
 }
 
 function inheritWithinGroup(
@@ -1234,7 +1264,7 @@ function inheritWithinGroup(
     alt.unit = primary.unit;
     alt.unitMatch = primary.unitMatch;
     alt.rawUnit = primary.rawUnit;
-    addInheritedRange(alt, primary.sourceRange, primaryAmountLocal);
+    addInheritedPart(alt, primary.sourceRange, primaryAmountLocal, "amount");
     if (primaryRange) {
       const cur = alt.notes?.trim();
       alt.notes = cur && cur.length > 0 ? `${primaryRange}, ${cur}` : primaryRange;
@@ -1262,7 +1292,7 @@ function inheritWithinGroup(
       // diced") keeps it on both the row and its candidates.
       if (cur && cur.length > 0) continue;
       rows[k].notes = sharedNote;
-      addInheritedRange(rows[k], rows[hi].sourceRange, sharedNoteLocal);
+      addInheritedPart(rows[k], rows[hi].sourceRange, sharedNoteLocal, "note");
       // The shared prep also belongs on each sibling's candidate matches: a
       // candidate's `notes` is "what this row's notes become if you pick it",
       // and picking it from the pill UI replaces the row's notes wholesale.
@@ -1442,6 +1472,7 @@ function parseGroupedIngredientLines(
             quantity: parsed.quantity,
             unit: final.resolved,
             sourceRange: sourceRange ?? undefined,
+            highlightParts: ownHighlightParts(originalTrimmed, sourceRange, parsed, resolved),
             unitMatch: final.match,
             rawUnit: final.rawUnit,
             name: resolved.name,

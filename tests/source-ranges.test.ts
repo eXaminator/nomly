@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   amountPrefixRange,
+  decomposeSegment,
   findSegmentRange,
   trailingNoteRange,
 } from "@/lib/recipe-import/source-ranges";
@@ -49,6 +50,47 @@ describe("amountPrefixRange", () => {
 
   it("returns null with no amount", () => {
     expect(amountPrefixRange("Honig", false, null)).toBeNull();
+  });
+});
+
+describe("decomposeSegment", () => {
+  const render = (seg: string, hasAmount: boolean, unit: string | null, name: string | null) =>
+    decomposeSegment(seg, hasAmount, unit, name).map((p) => ({
+      text: seg.slice(p.range[0], p.range[1]),
+      kind: p.kind,
+    }));
+
+  it("splits amount, name and a trailing note", () => {
+    expect(render("200 g Mehl, gesiebt", true, "g", "Mehl")).toEqual([
+      { text: "200 g", kind: "amount" },
+      { text: " ", kind: "note" },
+      { text: "Mehl", kind: "name" },
+      { text: ", gesiebt", kind: "note" },
+    ]);
+  });
+
+  it("covers the whole segment with no gaps", () => {
+    const seg = "2-3 EL Honig";
+    const parts = decomposeSegment(seg, true, "EL", "Honig");
+    expect(parts[0]).toEqual({ range: [0, 6], kind: "amount" });
+    expect(parts.at(-1)).toEqual({ range: [7, 12], kind: "name" });
+    // contiguous, full coverage
+    expect(parts[0].range[0]).toBe(0);
+    expect(parts.at(-1)!.range[1]).toBe(seg.length);
+  });
+
+  it("treats a connector + name (no amount) as note + name", () => {
+    expect(render("oder Ahornsirup", false, null, "Ahornsirup")).toEqual([
+      { text: "oder ", kind: "note" },
+      { text: "Ahornsirup", kind: "name" },
+    ]);
+  });
+
+  it("falls back to all-note when the name isn't found", () => {
+    expect(render("100 g Zeug", true, "g", "Etwas anderes")).toEqual([
+      { text: "100 g", kind: "amount" },
+      { text: " Zeug", kind: "note" },
+    ]);
   });
 });
 

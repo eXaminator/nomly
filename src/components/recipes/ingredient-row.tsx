@@ -627,10 +627,7 @@ export function IngredientRow({
               title={value.rawText}
             >
               <span className="opacity-70">Original:</span>{" "}
-              {renderOriginalWithMuting(value.rawText, [
-                ...(value.sourceRange ? [value.sourceRange] : []),
-                ...(value.inheritedRanges ?? []),
-              ])}
+              {renderOriginalWithMuting(value.rawText, value.highlightParts ?? [])}
             </p>
             {onReparse ? (
               <button

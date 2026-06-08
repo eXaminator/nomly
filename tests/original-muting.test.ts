@@ -1,47 +1,69 @@
 import { describe, it, expect } from "vitest";
 import { isValidElement, type ReactNode } from "react";
-import { renderOriginalWithMuting } from "@/components/recipes/original-muting";
+import {
+  renderOriginalWithMuting,
+  type HighlightPart,
+} from "@/components/recipes/original-muting";
 
-/** Flatten the rendered nodes into {text, kept} pieces for assertions. */
-function pieces(node: ReactNode): { text: string; kept: boolean }[] {
+/** Flatten the rendered nodes into {text, tone} pieces for assertions. */
+function pieces(node: ReactNode): { text: string; tone: string }[] {
   const arr = Array.isArray(node) ? node : [node];
   return arr.map((n) => {
     if (isValidElement(n)) {
       const props = n.props as { className: string; children: string };
-      return { text: props.children, kept: props.className.includes("color-fg") };
+      const tone = props.className.includes("color-accent")
+        ? "amount"
+        : props.className.includes("color-success")
+          ? "name"
+          : props.className.includes("opacity-50")
+            ? "muted"
+            : "note";
+      return { text: props.children, tone };
     }
-    return { text: String(n), kept: false };
+    return { text: String(n), tone: "plain" };
   });
 }
 
+const part = (range: [number, number], kind: HighlightPart["kind"]): HighlightPart => ({
+  range,
+  kind,
+});
+
 describe("renderOriginalWithMuting", () => {
-  it("returns the plain string when no ranges are known", () => {
+  it("returns the plain string when no parts are known", () => {
     expect(renderOriginalWithMuting("200 g Mehl", [])).toBe("200 g Mehl");
   });
 
-  it("highlights the WHOLE line (incl. notes) when ranges cover it — lone row", () => {
+  it("colours amount, name and note distinctly (lone row, nothing muted)", () => {
     const text = "200 g Mehl, gesiebt";
-    const p = pieces(renderOriginalWithMuting(text, [[0, text.length]]));
-    expect(p).toHaveLength(1);
-    expect(p[0]).toEqual({ text, kept: true });
+    const p = pieces(
+      renderOriginalWithMuting(text, [
+        part([0, 5], "amount"),
+        part([5, 6], "note"),
+        part([6, 10], "name"),
+        part([10, 19], "note"),
+      ]),
+    );
+    expect(p).toEqual([
+      { text: "200 g", tone: "amount" },
+      { text: " ", tone: "note" },
+      { text: "Mehl", tone: "name" },
+      { text: ", gesiebt", tone: "note" },
+    ]);
   });
 
-  it("mutes the gap between kept spans", () => {
-    // "2-3 EL Honig oder Ahornsirup": keep "2-3 EL" + "oder Ahornsirup",
-    // mute "Honig" in between.
+  it("mutes text that belongs to other rows", () => {
+    // Primary "Honig" line: keep "2-3 EL" (amount) + "Honig" (name), mute the
+    // alternative tail "oder Ahornsirup".
     const text = "2-3 EL Honig oder Ahornsirup";
-    const p = pieces(renderOriginalWithMuting(text, [
-      [0, 6],
-      [13, 28],
-    ]));
-    expect(p.map((x) => x.text)).toEqual(["2-3 EL", " Honig ", "oder Ahornsirup"]);
-    expect(p.map((x) => x.kept)).toEqual([true, false, true]);
-  });
-
-  it("mutes a leading part before the first kept span", () => {
-    const text = "2-3 EL Honig";
-    const p = pieces(renderOriginalWithMuting(text, [[7, 12]]));
-    expect(p.map((x) => x.text)).toEqual(["2-3 EL ", "Honig"]);
-    expect(p.map((x) => x.kept)).toEqual([false, true]);
+    const p = pieces(
+      renderOriginalWithMuting(text, [part([0, 6], "amount"), part([7, 12], "name")]),
+    );
+    expect(p).toEqual([
+      { text: "2-3 EL", tone: "amount" },
+      { text: " ", tone: "muted" },
+      { text: "Honig", tone: "name" },
+      { text: " oder Ahornsirup", tone: "muted" },
+    ]);
   });
 });

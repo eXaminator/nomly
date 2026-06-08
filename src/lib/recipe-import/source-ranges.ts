@@ -13,6 +13,10 @@
 
 export type SourceRange = [number, number];
 
+/** What a highlighted span of the original line maps to. */
+export type HighlightKind = "amount" | "name" | "note";
+export type HighlightPart = { range: SourceRange; kind: HighlightKind };
+
 const CONNECTOR_TAIL_RE =
   /(?:^|[\s(,;–-])((?:oder|or|bzw|alternativ\w*|ersatzweise|notfalls|substituted?(?:\s+with)?|sub)\.?\s*:?\s*)$/i;
 
@@ -71,6 +75,42 @@ export function amountPrefixRange(
     if (um) end += um[0].length;
   }
   return [0, end];
+}
+
+/**
+ * Decompose a segment into categorised, gap-filled parts covering all of it:
+ * the leading amount/unit → "amount", the located ingredient name → "name",
+ * and everything else (separators, prep, parenthetical notes) → "note". Used to
+ * colour the source highlight so the amount/unit and the name read in distinct
+ * colours. `name` should be the SOURCE name (the span the alias replaced, when
+ * matched) so it's found in the raw segment; when it isn't found, that text
+ * just stays "note".
+ */
+export function decomposeSegment(
+  segment: string,
+  hasAmount: boolean,
+  unitName: string | null,
+  name: string | null,
+): HighlightPart[] {
+  const marks: HighlightPart[] = [];
+  const amount = amountPrefixRange(segment, hasAmount, unitName);
+  if (amount) marks.push({ range: amount, kind: "amount" });
+  const needle = name?.trim().toLowerCase() ?? "";
+  if (needle.length > 0) {
+    const from = amount ? amount[1] : 0;
+    const idx = segment.toLowerCase().indexOf(needle, from);
+    if (idx >= 0) marks.push({ range: [idx, idx + needle.length], kind: "name" });
+  }
+  marks.sort((a, b) => a.range[0] - b.range[0]);
+  const parts: HighlightPart[] = [];
+  let cursor = 0;
+  for (const m of marks) {
+    if (m.range[0] > cursor) parts.push({ range: [cursor, m.range[0]], kind: "note" });
+    parts.push(m);
+    cursor = m.range[1];
+  }
+  if (cursor < segment.length) parts.push({ range: [cursor, segment.length], kind: "note" });
+  return parts;
 }
 
 /**

@@ -94,13 +94,13 @@ export type DraftIngredient = {
   rawText?: string;
   /** Char range `[start, end)` of this row's own segment within `rawText`.
    *  For an alternative it includes the connector ("oder Ahornsirup"). Used to
-   *  fold the alternative back into the primary's notes on removal and to mute
-   *  the rest of the "Original:" line. Parse-session only — absent for rows
-   *  loaded from a saved recipe. */
+   *  fold the alternative back into the primary's notes on removal. Parse-
+   *  session only — absent for rows loaded from a saved recipe. */
   sourceRange?: [number, number];
-  /** Extra char ranges this row inherits from its group (the primary's
-   *  amount/unit; a shared note) — kept un-muted in the source highlight. */
-  inheritedRanges?: [number, number][];
+  /** Categorised highlight spans into `rawText` (own amount/name/note +
+   *  inherited amount/note) — coloured by kind in the "Original:" line so the
+   *  parse decisions are legible. Parse-session only. */
+  highlightParts?: { range: [number, number]; kind: "amount" | "name" | "note" }[];
   importAnnotation?: ImportAnnotation;
   /** When true, this row is an alternative for the most recent
    *  non-alternative row above it in the same section. Rendered indented
@@ -212,11 +212,11 @@ export type ParsedIngredientResponse = {
   isAlternative?: boolean;
   /** Char range `[start, end)` of this row's own segment within `rawText`
    *  (the original line). For an alternative it includes the connector.
-   *  Drives fold-back-on-removal and the source highlight. */
+   *  Drives fold-back-on-removal. */
   sourceRange?: [number, number];
-  /** Extra char ranges this row inherits from its group (the primary's
-   *  amount/unit; a shared note) — kept un-muted in the source highlight. */
-  inheritedRanges?: [number, number][];
+  /** Categorised highlight spans into `rawText` (own amount/name/note +
+   *  inherited amount/note) — coloured by kind in the source-line view. */
+  highlightParts?: { range: [number, number]; kind: "amount" | "name" | "note" }[];
 };
 
 export function parsedIngredientToDraft(
@@ -279,7 +279,7 @@ export function parsedIngredientToDraft(
     isAlternative: i.isAlternative ?? false,
     rawText: i.rawText,
     sourceRange: i.sourceRange,
-    inheritedRanges: i.inheritedRanges,
+    highlightParts: i.highlightParts,
     importAnnotation: annotation,
   };
 }

@@ -1300,7 +1300,7 @@ describe("alternative amount/unit/notes inheritance", () => {
     expect(out.find((r) => r.isAlternative)!.notes).toMatch(/diced/);
   });
 
-  it("captures source ranges: own segment + inherited amount/note", () => {
+  it("captures categorised highlight parts: own segment + inherited amount", () => {
     const out = rows("2-3 EL Honig oder Ahornsirup", [
       { ingredientId: 1, canonicalName: "Honig", aliasName: "Honig", tokens: ["honig"] },
       { ingredientId: 2, canonicalName: "Ahornsirup", aliasName: "Ahornsirup", tokens: ["ahornsirup"] },
@@ -1311,19 +1311,26 @@ describe("alternative amount/unit/notes inheritance", () => {
       r.rawText!.slice(range[0], range[1]);
     expect(slice(primary, primary.sourceRange!)).toBe("2-3 EL Honig");
     expect(slice(alt, alt.sourceRange!)).toBe("oder Ahornsirup");
-    // The alt inherited "2-3 EL" → that amount span is kept un-muted on its line.
-    expect(alt.inheritedRanges?.map((rg) => slice(alt, rg))).toContain("2-3 EL");
+    // Primary parts: "2-3 EL" → amount, "Honig" → name.
+    const pAmount = primary.highlightParts!.find((p) => p.kind === "amount")!;
+    const pName = primary.highlightParts!.find((p) => p.kind === "name")!;
+    expect(slice(primary, pAmount.range)).toBe("2-3 EL");
+    expect(slice(primary, pName.range)).toBe("Honig");
+    // The alt inherited "2-3 EL" → carried as an amount part on its own line.
+    const altAmount = alt.highlightParts!.filter((p) => p.kind === "amount");
+    expect(altAmount.map((p) => slice(alt, p.range))).toContain("2-3 EL");
   });
 
-  it("captures the shared-note range on a sibling that inherits it", () => {
+  it("captures the shared note as a note part on a sibling that inherits it", () => {
     const out = rows("2 g bacon or pancetta, diced", [
       { ingredientId: 5, canonicalName: "bacon", aliasName: "bacon", tokens: ["bacon"] },
       { ingredientId: 6, canonicalName: "pancetta", aliasName: "pancetta", tokens: ["pancetta"] },
     ]);
     const bacon = out[0];
-    // bacon inherits the trailing shared note "diced" → its span is kept.
-    const slices = bacon.inheritedRanges?.map((rg) => bacon.rawText!.slice(rg[0], rg[1])) ?? [];
-    expect(slices.some((s) => /diced/.test(s))).toBe(true);
+    const noteSlices = (bacon.highlightParts ?? [])
+      .filter((p) => p.kind === "note")
+      .map((p) => bacon.rawText!.slice(p.range[0], p.range[1]));
+    expect(noteSlices.some((s) => /diced/.test(s))).toBe(true);
   });
 
   it("a note inside a paren alternative stays local (not shared with the primary)", () => {
