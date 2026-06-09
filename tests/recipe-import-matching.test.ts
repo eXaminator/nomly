@@ -1420,6 +1420,20 @@ describe("alternative amount/unit/notes inheritance", () => {
     );
   });
 
+  it("commas off a leading descriptor from a folded alt when the matched name was between them", () => {
+    // "red" precedes the matched "chili powder", which is stripped, then the
+    // "(or to taste)" note follows — so the note must read "red, or to taste":
+    // the comma stands in for the removed "chili powder".
+    const out = rows(
+      "1/4 teaspoon red chili powder (or to taste)",
+      [{ ingredientId: 1, canonicalName: "chili powder", aliasName: "chili powder", tokens: ["chili", "powder"] }],
+      ["teaspoon"],
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0].name).toBe("chili powder");
+    expect(out[0].notes).toBe("red, or to taste");
+  });
+
   it("does not strike the alternative's own unit (½ TL Natron (oder 1 TL Backpulver))", () => {
     const out = rows("½ TL Natron (oder 1 TL Backpulver)", [
       { ingredientId: 1, canonicalName: "Natron", aliasName: "Natron", tokens: ["natron"] },

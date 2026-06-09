@@ -1214,12 +1214,49 @@ function appendAlternativeToNotes(
     target.notes = fragment;
     return;
   }
-  // Re-join with the SAME separator the source used: "pieces, or small
-  // florets" keeps its comma, while "Reis oder Rübensirup" (split on "oder"
-  // and re-joined) must NOT gain one. Splitting then re-joining loses the
-  // original separator, so recover it from the source line.
-  const sep = sourceCommaBeforeAlt(source, connector, altText) ? ", " : " ";
+  const sep = alternativeNoteSeparator(target, source, connector, altText);
   target.notes = `${target.notes}${sep}${fragment}`;
+}
+
+/**
+ * Separator to place before a folded alternative in the notes. The rule:
+ * keep the source text between the previous note and this alternative AS IS,
+ * unless something was stripped there (the matched name, a consumed unit) —
+ * then a comma stands in for the removed words.
+ *
+ *   "red chili powder (or to taste)" → "red, or to taste"  (name removed)
+ *   "…Zucker, Reis oder Rübensirup"  → "…Reis oder Rübensirup" (nothing removed)
+ *   "…pieces, or small florets"      → "…pieces, or small florets" (source comma)
+ *
+ * Falls back to the local "comma right before the connector?" check when the
+ * source span of the previous note can't be located.
+ */
+function alternativeNoteSeparator(
+  target: ImportedIngredient,
+  source: string,
+  connector: string | null,
+  altText: string,
+): string {
+  const lc = source.toLowerCase();
+  const connectorStart = connector
+    ? lc.indexOf(`${connector} ${altText}`.toLowerCase())
+    : -1;
+  // When the matched ingredient name sits between an earlier note and this
+  // alternative ("red [chili powder] (or to taste)"), it was stripped — a comma
+  // stands in for the removed name. The name's own highlight is "name"-kind, so
+  // a "note" highlight that STARTS before it is a genuine pre-name descriptor.
+  if (connectorStart >= 0 && target.sourceName) {
+    const nameStart = lc.indexOf(target.sourceName.toLowerCase());
+    const nameEnd = nameStart >= 0 ? nameStart + target.sourceName.length : -1;
+    const hasPreNameNote = (target.highlightParts ?? []).some(
+      (p) =>
+        p.kind === "note" &&
+        p.range[0] < nameStart &&
+        /[\p{L}\p{N}]/u.test(source.slice(p.range[0], p.range[1])),
+    );
+    if (nameStart >= 0 && nameEnd <= connectorStart && hasPreNameNote) return ", ";
+  }
+  return sourceCommaBeforeAlt(source, connector, altText) ? ", " : " ";
 }
 
 /**
