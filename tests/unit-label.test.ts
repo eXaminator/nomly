@@ -25,10 +25,15 @@ describe("pluralizeLabel", () => {
     expect(pluralizeLabel({ name: "Dose", plural: "Dosen" }, 1)).toBe("Dose");
   });
 
-  it("uses the plural for any amount other than 1", () => {
+  it("uses the plural for amounts greater than 1", () => {
     expect(pluralizeLabel({ name: "Dose", plural: "Dosen" }, 2)).toBe("Dosen");
-    expect(pluralizeLabel({ name: "Dose", plural: "Dosen" }, 0.5)).toBe("Dosen");
-    expect(pluralizeLabel({ name: "Dose", plural: "Dosen" }, 0)).toBe("Dosen");
+    expect(pluralizeLabel({ name: "Dose", plural: "Dosen" }, 1.5)).toBe("Dosen");
+  });
+
+  it("uses the singular for fractional amounts below 1", () => {
+    // "0,5 Dose" / "eine halbe Dose" — a partial amount takes the singular.
+    expect(pluralizeLabel({ name: "Dose", plural: "Dosen" }, 0.5)).toBe("Dose");
+    expect(pluralizeLabel({ name: "Dose", plural: "Dosen" }, 0.25)).toBe("Dose");
   });
 
   it("falls back to the singular when no plural is configured", () => {

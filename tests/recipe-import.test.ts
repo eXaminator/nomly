@@ -135,30 +135,39 @@ describe("parseIngredientString", () => {
       altWithPrepStripped: null,
     });
   });
-  it("uses the max of a range and records the range in notes", () => {
+  it("uses the max of a range and records the range — with its unit — in notes", () => {
     expect(parse("100-200 g Käse")).toMatchObject({
       quantity: 200,
       unitName: "g",
       name: "Käse",
       commaTailText: "",
-      notes: "100-200",
+      // The range note carries the unit it ranges over, like the amount does.
+      notes: "100-200 g",
       isOptional: false,
       altWithPrepStripped: null,
     });
   });
-  it("range with fractions: max + note", () => {
+  it("range with fractions: max + note with unit", () => {
     const r = parse("1/2-1 cup peanut butter");
     expect(r.quantity).toBe(1);
     expect(r.unitName).toBe("cup");
     expect(r.name).toBe("peanut butter");
-    expect(r.notes).toMatch(/0,5-1/);
+    expect(r.notes).toBe("0,5-1 cup");
   });
-  it("range across token boundaries: max + note", () => {
+  it("range across token boundaries: max + note with unit", () => {
     const r = parse("1- 1 1/2 teaspoons sea salt");
     expect(r.quantity).toBe(1.5);
     expect(r.unitName).toBe("teaspoons");
     expect(r.name).toBe("sea salt");
-    expect(r.notes).toMatch(/1-1,5/);
+    expect(r.notes).toBe("1-1,5 teaspoons");
+  });
+  it("a unitless range keeps the bare range note", () => {
+    // No unit to append — "2-3 Eier" → note stays "2-3".
+    const r = parse("2-3 Eier");
+    expect(r.quantity).toBe(3);
+    expect(r.unitName).toBeNull();
+    expect(r.name).toBe("Eier");
+    expect(r.notes).toBe("2-3");
   });
   it("leaves unitless ingredients alone", () => {
     expect(parse("3 Eier")).toMatchObject({
@@ -270,6 +279,16 @@ describe("parseIngredientString — extended cases", () => {
     expect(r.name).toBe("Salz");
     expect(r.notes).toMatch(/nach Belieben/i);
   });
+  it("keeps note fragments in source order when 'nach Belieben' sits inside a paren", () => {
+    // "(nach Belieben zum Garnieren)" — both note phrases must stay in the
+    // order written; "nach Belieben" must not jump to the end.
+    const r = parse("Walnüsse, gehackt (nach Belieben zum Garnieren)");
+    expect(r.name).toBe("Walnüsse");
+    const n = r.notes ?? "";
+    expect(n.indexOf("gehackt")).toBeGreaterThanOrEqual(0);
+    expect(n.indexOf("gehackt")).toBeLessThan(n.indexOf("nach Belieben"));
+    expect(n.indexOf("nach Belieben")).toBeLessThan(n.indexOf("Garnieren"));
+  });
   it("preserves an unspaced slash inside a parenthetical note", () => {
     // "height/bundle" is not a pluralization shorthand and not a separator —
     // the slash must survive verbatim into notes, like every other special char.
@@ -331,6 +350,16 @@ describe("parseIngredientString — extended cases", () => {
     expect(r.unitName?.toLowerCase()).toBe("can");
     expect(r.notes).toMatch(/28-ounce/i);
     expect(r.name).toMatch(/whole peeled tomatoes/i);
+  });
+  it("size compound with a space after the dash: '1 15- ounce can tomato sauce'", () => {
+    // "15- ounce" (dash then space) is a common spelling of "15-ounce" — it
+    // must still demote to a size note so the container "can" is the unit and
+    // the quantity stays 1 (not "1 15" mis-read as a mixed number → 16).
+    const r = parse("1 15- ounce can tomato sauce");
+    expect(r.quantity).toBe(1);
+    expect(r.unitName?.toLowerCase()).toBe("can");
+    expect(r.notes).toMatch(/15.?ounce/i);
+    expect(r.name).toMatch(/tomato sauce/i);
   });
   it("'to taste' stays in the name at string level", () => {
     const r = parse("Black pepper to taste");
@@ -438,6 +467,14 @@ describe("parseIngredientString — extended cases", () => {
       expect(tidyRemainderFragment("plus more for serving")).toBe(
         "plus more for serving",
       );
+    });
+    it("keeps a leading linker that introduces a quantified source", () => {
+      // "von ca. 300 g rohem Hokkaido-Kürbis" — the "von" says where the
+      // amount comes from; dropping it loses the meaning.
+      expect(tidyRemainderFragment("von ca. 300 g rohem Hokkaido-Kürbis")).toBe(
+        "von ca. 300 g rohem Hokkaido-Kürbis",
+      );
+      expect(tidyRemainderFragment("of 2 lemons")).toBe("of 2 lemons");
     });
     it("replaces parens with comma separators", () => {
       expect(tidyRemainderFragment("(natural, no sugar added)")).toBe(

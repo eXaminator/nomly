@@ -1081,6 +1081,7 @@ export function parseIngredientLines(
               out[lastPrimaryIndex],
               row.alternativeConnector,
               piece.trim(),
+              originalTrimmed,
             );
             if (sourceRange) {
               (out[lastPrimaryIndex].highlightParts ??= []).push({
@@ -1144,6 +1145,7 @@ export function parseIngredientLines(
               out[ti],
               row.alternativeConnector,
               piece.trim(),
+              originalTrimmed,
             );
             // The folded text is now part of this row's NOTES output, so show
             // its source span (incl. connector) as a note on the row's line
@@ -1202,12 +1204,42 @@ function appendAlternativeToNotes(
   target: ImportedIngredient,
   connector: string | null,
   altText: string,
+  source: string,
 ): void {
   const fragment = connector
     ? `${connector} ${altText}`.trim()
     : altText.trim();
   if (fragment.length === 0) return;
-  target.notes = target.notes ? `${target.notes}, ${fragment}` : fragment;
+  if (!target.notes) {
+    target.notes = fragment;
+    return;
+  }
+  // Re-join with the SAME separator the source used: "pieces, or small
+  // florets" keeps its comma, while "Reis oder Rübensirup" (split on "oder"
+  // and re-joined) must NOT gain one. Splitting then re-joining loses the
+  // original separator, so recover it from the source line.
+  const sep = sourceCommaBeforeAlt(source, connector, altText) ? ", " : " ";
+  target.notes = `${target.notes}${sep}${fragment}`;
+}
+
+/**
+ * Did the source put a comma right before this alternative's connector
+ * (",  or X" vs " or X")? Anchors on "<connector> <altText>" and inspects the
+ * preceding non-space char. Defaults to true (keep the comma) when the span
+ * can't be located or there's no connector — a distinct note reads with one.
+ */
+function sourceCommaBeforeAlt(
+  source: string,
+  connector: string | null,
+  altText: string,
+): boolean {
+  if (!connector) return true;
+  const needle = `${connector} ${altText}`.toLowerCase();
+  const idx = source.toLowerCase().indexOf(needle);
+  if (idx < 0) return true;
+  let i = idx - 1;
+  while (i >= 0 && /\s/.test(source[i])) i -= 1;
+  return source[i] === ",";
 }
 
 /**
@@ -1294,10 +1326,13 @@ function inheritWithinGroup(
   // The range expression the primary recorded in notes ("2-3", "0,5-1") when
   // it resolved a range to its high bound. An alt that inherits the amount
   // took the same high bound, so it inherits the range note too.
-  const primaryRange = (primary.notes ?? "")
-    .split(",")
-    .map((s) => s.trim())
-    .find((s) => /^[\d.,/]+\s*[-–]\s*[\d.,/]+$/.test(s));
+  // Pull the range expression straight out of the notes — don't split on
+  // commas first, since a German decimal range ("0,25-0,75 teaspoon") contains
+  // commas that the split would shred into "25-0". The optional trailing word
+  // captures the unit the range note now carries.
+  const primaryRange = (primary.notes ?? "").match(
+    /\d[\d.,/]*\s*[-–]\s*\d[\d.,/]*(?:\s+\p{L}+)?/u,
+  )?.[0];
   // Source range of the primary's amount/unit, so an alt that inherits the
   // amount keeps it un-muted on its own line.
   const primaryAmountLocal = primary.sourceRange
@@ -1484,7 +1519,7 @@ function parseGroupedIngredientLines(
             // notes rather than being dropped.
             if (row.isAlternative && lastPrimaryIndex !== null) {
               const primary = groups[groups.length - 1].ingredients[lastPrimaryIndex];
-              appendAlternativeToNotes(primary, row.alternativeConnector, piece.trim());
+              appendAlternativeToNotes(primary, row.alternativeConnector, piece.trim(), originalTrimmed);
               if (sourceRange) {
                 (primary.highlightParts ??= []).push({ range: sourceRange, kind: "note" });
               }
@@ -1532,6 +1567,7 @@ function parseGroupedIngredientLines(
               currentGroup.ingredients[lastPrimaryIndex],
               row.alternativeConnector,
               piece.trim(),
+              originalTrimmed,
             );
             if (sourceRange) {
               (currentGroup.ingredients[lastPrimaryIndex].highlightParts ??= []).push({

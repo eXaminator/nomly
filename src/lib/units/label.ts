@@ -23,10 +23,12 @@ export type UnitLabelInfo = LabelForm & {
 
 /**
  * Pick the singular or plural form of a label for a given amount. Plural wins
- * only when one is configured AND the quantity is neither 1 nor null.
+ * only when one is configured AND the quantity is greater than 1 — a partial
+ * amount below 1 ("0,5 Dose", "eine halbe Dose") and exactly 1 both take the
+ * singular, as does a missing amount.
  */
 export function pluralizeLabel(form: LabelForm, quantity: number | null): string {
-  if (form.plural && quantity !== null && quantity !== 1) return form.plural;
+  if (form.plural && quantity !== null && quantity > 1) return form.plural;
   return form.name;
 }
 

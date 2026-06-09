@@ -752,10 +752,13 @@ function preprocess(raw: string): {
   });
 
   // "nach Belieben" = "as desired" — a descriptive note, NOT an optionality
-  // flag. Capture + remove it (any position) so it's preserved in the notes
-  // and a LEADING occurrence ("Nach Belieben 1 Eigelb") doesn't block the
-  // quantity/name parse. Never sets isOptional.
-  text = text.replace(/\bnach\s+belieben\b/gi, () => {
+  // flag. Capture + remove it so it's preserved in the notes and a LEADING
+  // occurrence ("Nach Belieben 1 Eigelb") doesn't block the quantity/name
+  // parse. Never sets isOptional. Skip occurrences INSIDE parens, though: a
+  // parenthetical ("(nach Belieben zum Garnieren)") is captured as one note
+  // later, and pulling "nach Belieben" out here would reorder its fragments.
+  text = text.replace(/\([^()]*\)|\bnach\s+belieben\b/gi, (m) => {
+    if (m.startsWith("(")) return m;
     capturedNotes.push("nach Belieben");
     return " ";
   });
@@ -830,7 +833,7 @@ function preprocess(raw: string): {
   //     so the regular parser sees "4 inch stems …" → unit "inch", qty 4.
   const CONTAINER_RE = /(?:package|packages|packet|packets|can|cans|tin|tins|jar|jars|bottle|bottles|tube|tubes|box|boxes|dose|dosen|packung|päckchen|pck|pkg|carton|cartons)/i;
   text = text.replace(
-    /^((?:[\d().,x]+\s+)*)(\d+)([-–])(count|ounce|ounces|oz|inch|inches|cm|gram|grams|g|kg|ml|l|lb|pound|pounds)\b(\s*)(\S*)/i,
+    /^((?:[\d().,x]+\s+)*)(\d+)\s*([-–])\s*(count|ounce|ounces|oz|inch|inches|cm|gram|grams|g|kg|ml|l|lb|pound|pounds)\b(\s*)(\S*)/i,
     (
       match,
       lead: string,
@@ -965,7 +968,17 @@ export function tidyRemainderFragment(s: string): string | null {
     const toks = text.split(/\s+/).filter((t) => t.length > 0);
     const isFiller = (t: string) =>
       REMAINDER_EDGE_FILLER.has(t.toLowerCase().replace(/[.,;]$/, ""));
-    while (toks.length > 0 && isFiller(toks[0])) toks.shift();
+    // A leading linker that introduces a quantified source stays ("von ca.
+    // 300 g rohem Kürbis", "of 2 lemons") — only a bare-descriptor linker
+    // ("of small head") is noise. A trailing linker ("Schale von") is always
+    // noise.
+    while (
+      toks.length > 0 &&
+      isFiller(toks[0]) &&
+      !toks.slice(1).some((t) => /\d/.test(t))
+    ) {
+      toks.shift();
+    }
     while (toks.length > 0 && isFiller(toks[toks.length - 1])) toks.pop();
     text = toks.join(" ");
   }
@@ -1167,6 +1180,9 @@ export function parseIngredientString(
   // ("Etwas Salz"), a numeric range, or a single number.
   let quantity: number | null = null;
   const rangeNotes: string[] = [];
+  // The frontCaptures entry for the range, kept so the unit can be appended to
+  // it (the matched-path note is built from frontCaptures, not rangeNotes).
+  let rangeFrontCapture: { text: string; gluedToNext: boolean } | null = null;
 
   if (tokens.length > 0) {
     const firstLower = tokens[0].toLowerCase();
@@ -1220,7 +1236,8 @@ export function parseIngredientString(
           rangeNotes.push(range.rangeExpression);
           // The range itself sits exactly where the quantity was — it IS
           // the consumed text, so it stays glued to the next word.
-          frontCaptures.push({ text: range.rangeExpression, gluedToNext: true });
+          rangeFrontCapture = { text: range.rangeExpression, gluedToNext: true };
+          frontCaptures.push(rangeFrontCapture);
         }
       }
     }
@@ -1309,6 +1326,18 @@ export function parseIngredientString(
         unitName = lastTok.replace(/\.$/, "");
         tokens.splice(headEnd - 1, 1);
       }
+    }
+  }
+
+  // A range note ("2-3") reads as an amount, so give it the unit the amount
+  // uses ("2-3 EL"). The unit is known only now (after detection above); a
+  // unitless range keeps the bare expression.
+  if (unitName) {
+    for (let i = 0; i < rangeNotes.length; i++) {
+      rangeNotes[i] = `${rangeNotes[i]} ${unitName}`;
+    }
+    if (rangeFrontCapture) {
+      rangeFrontCapture.text = `${rangeFrontCapture.text} ${unitName}`;
     }
   }
 
@@ -2249,12 +2278,20 @@ function splitOrOptions(text: string): string[] {
  */
 function extractTrailingParenAlternative(
   body: string,
-): { primary: string; content: string; connector: string } | null {
+): { primary: string; content: string; connector: string; tail: string } | null {
   const trimmed = body.trimEnd();
-  if (!trimmed.endsWith(")")) return null;
+  // The alternative paren is usually line-final, but a short note can trail it
+  // ("(or chili flakes) more to taste"). Locate the last ")" and treat any
+  // text after it as a tail — UNLESS that tail carries a list separator
+  // (und/and/oder/or/sowie), which signals more ingredients rather than a note
+  // and is left to the conjunction splitter.
+  const close = trimmed.lastIndexOf(")");
+  if (close < 0) return null;
+  const tail = trimmed.slice(close + 1).trim();
+  if (tail.length > 0 && /\b(?:und|and|oder|or|sowie)\b/i.test(tail)) return null;
   let depth = 0;
   let open = -1;
-  for (let i = trimmed.length - 1; i >= 0; i--) {
+  for (let i = close; i >= 0; i--) {
     const ch = trimmed[i];
     if (ch === ")") depth += 1;
     else if (ch === "(") {
@@ -2266,7 +2303,7 @@ function extractTrailingParenAlternative(
     }
   }
   if (open < 0) return null; // unbalanced — leave it to the note path
-  let inner = trimmed.slice(open + 1, trimmed.length - 1).trim();
+  let inner = trimmed.slice(open + 1, close).trim();
   let primary = trimmed.slice(0, open).trim();
   // A leading parenthetical inside the alt-paren that precedes the leader
   // ("((10 g) oder Ahornsirup)") is a note on the PRIMARY, not part of the
@@ -2280,7 +2317,7 @@ function extractTrailingParenAlternative(
   }
   const altMatch = ALT_PAREN_LEADER_RE.exec(inner);
   if (altMatch) {
-    return { primary, content: altMatch[2].trim(), connector: `${altMatch[1]}:` };
+    return { primary, content: altMatch[2].trim(), connector: `${altMatch[1]}:`, tail };
   }
   const orMatch = BARE_OR_PAREN_LEADER_RE.exec(inner);
   if (orMatch) {
@@ -2288,6 +2325,7 @@ function extractTrailingParenAlternative(
       primary,
       content: orMatch[2].trim(),
       connector: orMatch[1].toLowerCase(),
+      tail,
     };
   }
   return null;
@@ -2432,11 +2470,16 @@ export function expandIngredientLine(rawLine: string): ExpandedIngredientRow[] {
     // is its own note ("1 kl. Glas Spargelköpfe, Abtropfgew. 115 g").
     const altItems = splitOrOptions(parensAlt.content);
     const rows: ExpandedIngredientRow[] = [];
+    // A note tail after the paren ("(or chili flakes) more to taste") rides
+    // along with the primary so it lands in the primary's notes.
+    const primaryText = parensAlt.tail
+      ? `${parensAlt.primary} ${parensAlt.tail}`.trim()
+      : parensAlt.primary;
     // Re-expand the primary so its OWN "oder"/"alternativ" chain splits too
     // ("Weizenmehl oder Dinkelmehl (oder glutenfrei)" → 3 rows). The first
     // emitted row is the real primary; the rest are its alternatives.
-    if (parensAlt.primary.length > 0) {
-      expandIngredientLine(parensAlt.primary).forEach((r, idx) => {
+    if (primaryText.length > 0) {
+      expandIngredientLine(primaryText).forEach((r, idx) => {
         if (r.kind !== "ingredient") {
           rows.push({ ...r, rawText: original });
           return;

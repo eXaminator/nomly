@@ -711,6 +711,26 @@ describe("colon-in-name treated as section + listed items", () => {
     expect(out[2].isAlternative).toBe(true);
   });
 
+  it("matches a parenthetical alternative even when a note tail follows it", () => {
+    // "(or chili flakes) more to taste" — the alternative isn't line-final,
+    // but it must still split out and match; the tail becomes a note.
+    const catalog: IngredientCatalog = [
+      { ingredientId: 1, canonicalName: "Cayennepfeffer", aliasName: "cayenne", tokens: ["cayenne"] },
+      { ingredientId: 2, canonicalName: "Chiliflocken", aliasName: "chili flakes", tokens: ["chili", "flakes"] },
+    ];
+    const out = parseIngredientLines(
+      ["1/4-3/4 teaspoon cayenne (or chili flakes) more to taste"],
+      makeLookups(catalog, ["teaspoon"]),
+    );
+    expect(out).toHaveLength(2);
+    expect(out[0].ingredientId).toBe(1);
+    expect(out[0].isAlternative).toBe(false);
+    expect(out[1].ingredientId).toBe(2);
+    expect(out[1].isAlternative).toBe(true);
+    // The trailing "more to taste" isn't lost.
+    expect(out[0].notes).toMatch(/more to taste/i);
+  });
+
   it("comma-separates a leading size modifier from a post-unit descriptor in notes", () => {
     // "1 small bunch fresh parsley": "small" describes the bunch (pre-unit
     // size note), "fresh" describes the parsley (post-unit). The unit between
@@ -1385,6 +1405,21 @@ describe("alternative amount/unit/notes inheritance", () => {
     expect(noteSlices).toContain("oder ungesalzen");
   });
 
+  it("folds a multi-option 'oder' note without inventing a comma before 'oder'", () => {
+    const out = rows(
+      "2 EL Honig (oder anderes Süßungsmittel, etwa Zucker, Reis oder Rübensirup)",
+      [{ ingredientId: 1, canonicalName: "Honig", aliasName: "Honig", tokens: ["honig"] }],
+      ["el"],
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0].name).toBe("Honig");
+    // The source had no comma before "oder Rübensirup"; splitting the options
+    // and re-joining them must not insert one.
+    expect(out[0].notes).toBe(
+      "oder anderes Süßungsmittel, etwa Zucker, Reis oder Rübensirup",
+    );
+  });
+
   it("does not strike the alternative's own unit (½ TL Natron (oder 1 TL Backpulver))", () => {
     const out = rows("½ TL Natron (oder 1 TL Backpulver)", [
       { ingredientId: 1, canonicalName: "Natron", aliasName: "Natron", tokens: ["natron"] },
@@ -1512,7 +1547,8 @@ describe("note fragments keep source order, comma-separated", () => {
     );
     expect(out[0].ingredientId).toBe(1);
     expect(out[0].name).toBe("vegetable oil");
-    expect(out[0].notes).toBe("2-3, for frying");
+    // The range note carries its unit ("2-3 cups"), like on the unmatched path.
+    expect(out[0].notes).toBe("2-3 cups, for frying");
   });
 
   it("size, paren amount, then comma-tail prep — all comma-separated, in order (new ingredient)", () => {
