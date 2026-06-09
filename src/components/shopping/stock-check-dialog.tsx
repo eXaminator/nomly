@@ -62,8 +62,10 @@ function StockCheckBody({
   onSaved,
 }: Omit<Props, "open">) {
   // Stable snapshot for the lifetime of the dialog so inputs don't reshuffle
-  // when a background realtime update arrives.
-  const rows = React.useMemo(() => items, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // when a background realtime update arrives. Only still-to-buy items are
+  // relevant: checked-off ones are already handled, so there's nothing to
+  // subtract from their demand.
+  const rows = React.useMemo(() => items.filter((i) => !i.checked), []); // eslint-disable-line react-hooks/exhaustive-deps
   const [qty, setQty] = React.useState<Record<number, string>>(() =>
     Object.fromEntries(
       rows.map((i) => [i.id, i.stock?.quantity != null ? String(i.stock.quantity) : ""]),
