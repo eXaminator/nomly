@@ -10,6 +10,8 @@
  * token.
  */
 
+import { toFractionDisplay } from "@/lib/units/fraction";
+
 const FRACTIONS: Record<string, number> = {
   "½": 0.5,
   "¼": 0.25,
@@ -548,7 +550,16 @@ function round3(n: number): number {
 
 function formatRangeNumber(n: number): string {
   if (Number.isInteger(n)) return String(n);
-  return n.toString().replace(".", ",");
+  // Present range bounds like the main amount: a clean fraction ("1/3", "1/2",
+  // "3/4") when close to one, otherwise a decimal capped at 2 places — never
+  // "0,333333333".
+  const fraction = toFractionDisplay(n);
+  if (fraction) return fraction;
+  return n
+    .toFixed(2)
+    .replace(/0+$/, "")
+    .replace(/[.,]$/, "")
+    .replace(".", ",");
 }
 
 const EMOJI_LEAD_RE =
@@ -797,13 +808,13 @@ function preprocess(raw: string): {
   // Leading "~" (approximation tilde): drop it.
   text = text.replace(/^\s*[~∼]\s*/, "");
 
-  // " / " and " o. " → " or " — keep both alternatives but route them through
-  // the existing NOTE_BOUNDARY logic. The negative lookahead skips German
-  // "o. Ä." / "o. ä." ("oder Ähnliche/-s" = "or similar"), which is a fixed
-  // phrase that belongs in the notes verbatim, not a conjunction.
-  text = text
-    .replace(/\s+\/\s+/g, " or ")
-    .replace(/\s+o\.\s+(?!ä\.)/gi, " or ");
+  // " o. " → " or " — German "oder" shorthand as an alternative separator. The
+  // negative lookahead skips "o. Ä." / "o. ä." ("oder Ähnliche/-s" = "or
+  // similar"), a fixed phrase that belongs in the notes verbatim. A top-level
+  // " / " is already split into alternatives upstream (findOrSeparator); any
+  // slash that reaches here sits inside a note/paren and must survive verbatim
+  // ("fein / grob", "height/bundle") — every special char except parens does.
+  text = text.replace(/\s+o\.\s+(?!ä\.)/gi, " or ");
 
   // Range with repeated unit: "25 g – 50 g" / "100 ml - 200 ml" → "25-50 g"
   // (the duplicated unit is redundant; collapsing it lets the existing range
@@ -1426,8 +1437,10 @@ export function parseIngredientString(
       continue;
     }
     if (t === "," || t === ";") {
-      if (inNotes) noteTokens.push(",");
-      // Another comma ends the in-comma-tail run, even though notes mode
+      // Keep the separator the source used — a ";" stays a ";" in the notes,
+      // not silently rewritten to a comma (every special char survives).
+      if (inNotes) noteTokens.push(t);
+      // Another separator ends the in-comma-tail run, even though notes mode
       // stays on.
       inCommaTail = false;
       continue;

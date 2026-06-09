@@ -256,7 +256,13 @@ function computeHighlights(
   const cur: LineHighlight[] = [];
   const prop: LineHighlight[] = [];
   const notesDiffs: (NotesDiff | undefined)[] = [];
-  const ALL: LineHighlight = { amount: true, name: true, notes: true, mapping: true };
+  const ALL: LineHighlight = {
+    amount: true,
+    name: true,
+    notes: true,
+    mapping: true,
+    optional: true,
+  };
   for (let k = 0; k < n; k++) {
     const c = current[k];
     const d = draft[k];
@@ -289,6 +295,8 @@ function computeHighlights(
       // Identity comparison, not label text: "Brauner Zucker" vs the lowercased
       // source span "brauner Zucker" is the SAME ingredient, not a change.
       mapping: currentMappingId(c) !== draftMappingId(d),
+      // Optional ⇄ required is otherwise invisible (no amount/name/notes change).
+      optional: c.isOptional !== (d.unassigned ? false : d.isOptional),
     };
     cur.push(flags);
     prop.push(flags);

@@ -33,6 +33,10 @@ export type LineHighlight = {
   name?: boolean;
   notes?: boolean;
   mapping?: boolean;
+  /** The optional/required flag differs between the two sides. Shown as a
+   *  highlighted "(optional)" / "(benötigt)" chip so the transition is visible
+   *  (otherwise a become-required change leaves nothing on the proposed side). */
+  optional?: boolean;
 };
 
 export type ReadLineProps = {
@@ -146,9 +150,14 @@ export function RecipeIngredientReadLine({
             )
           )
         ) : null}
-        {!isAlternative && isOptional ? (
-          <span className="ml-1 text-xs text-[var(--color-muted-fg)]">
-            (optional)
+        {!isAlternative && (isOptional || highlight?.optional) ? (
+          <span
+            className={cn(
+              "ml-1 text-xs text-[var(--color-muted-fg)]",
+              highlight?.optional && tone ? hlClass : undefined,
+            )}
+          >
+            {isOptional ? "(optional)" : "(benötigt)"}
           </span>
         ) : null}
         {mappingLabel !== undefined ? (

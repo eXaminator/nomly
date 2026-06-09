@@ -147,19 +147,30 @@ describe("parseIngredientString", () => {
       altWithPrepStripped: null,
     });
   });
-  it("range with fractions: max + note with unit", () => {
+  it("range with fractions: max + note shown as fractions, like the amount", () => {
     const r = parse("1/2-1 cup peanut butter");
     expect(r.quantity).toBe(1);
     expect(r.unitName).toBe("cup");
     expect(r.name).toBe("peanut butter");
-    expect(r.notes).toBe("0,5-1 cup");
+    // Range bounds use the same fraction presentation as the main amount.
+    expect(r.notes).toBe("1/2-1 cup");
   });
-  it("range across token boundaries: max + note with unit", () => {
+  it("range across token boundaries: max + fraction note with unit", () => {
     const r = parse("1- 1 1/2 teaspoons sea salt");
     expect(r.quantity).toBe(1.5);
     expect(r.unitName).toBe("teaspoons");
     expect(r.name).toBe("sea salt");
-    expect(r.notes).toBe("1-1,5 teaspoons");
+    expect(r.notes).toBe("1-1 1/2 teaspoons");
+  });
+  it("range with thirds: fractions, never long decimals", () => {
+    const r = parse("1/3-2/3 cup yogurt");
+    expect(r.quantity).toBeCloseTo(0.667, 2);
+    expect(r.notes).toBe("1/3-2/3 cup");
+  });
+  it("range with a non-fraction decimal caps at 2 places", () => {
+    const r = parse("0,25-0,4 l Wasser");
+    // 0.25 → "1/4" (clean fraction); 0.4 → "0,4" (2-decimal cap, no fraction).
+    expect(r.notes).toBe("1/4-0,4 l");
   });
   it("a unitless range keeps the bare range note", () => {
     // No unit to append — "2-3 Eier" → note stays "2-3".
@@ -265,9 +276,12 @@ describe("parseIngredientString — extended cases", () => {
     expect(r.unitName?.toLowerCase()).toBe("el");
     expect(r.notes).toMatch(/bis 2/);
   });
-  it("' / ' is normalised to 'or' and stays in the name", () => {
+  it("keeps a ' / ' verbatim at the string level (the pipeline splits top-level slash alternatives)", () => {
+    // expandIngredientLine splits "Butter / Margarine" into primary + alt
+    // upstream; a slash reaching parseIngredientString is note text and must
+    // survive verbatim, not be rewritten to "or".
     const r = parse("100 g Butter / Margarine");
-    expect(r.name).toBe("Butter or Margarine");
+    expect(r.name).toBe("Butter / Margarine");
   });
   it("' o. ' is normalised to 'or' and stays in the name", () => {
     const r = parse("1 EL Zucker o. Honig");
@@ -296,6 +310,14 @@ describe("parseIngredientString — extended cases", () => {
       '5 head regular-sized bok choy (quartered, 8-9" in height/bundle, 26.5 oz total)',
     );
     expect(r.notes).toMatch(/height\/bundle/);
+  });
+  it("preserves a spaced slash in a note (does not become 'or')", () => {
+    expect(parse("1 TL Salz (fein / grob)").notes).toBe("fein / grob");
+    expect(parse("200 g Mehl (fein/grob gemahlen)").notes).toBe("fein/grob gemahlen");
+  });
+  it("preserves a semicolon in notes (not rewritten to a comma)", () => {
+    expect(parse("200 g Mehl (Typ 405; gesiebt)").notes).toBe("Typ 405; gesiebt");
+    expect(parse("200 g Mehl, gesiebt; warm").notes).toBe("gesiebt; warm");
   });
   it("'or' alternatives stay in the name", () => {
     const r = parse("6 dried or fresh shiitake mushrooms");
