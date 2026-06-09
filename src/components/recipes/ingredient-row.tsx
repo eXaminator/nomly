@@ -53,22 +53,6 @@ const MIN_AUTO_MATCH_SCORE = 135;
 // recipe line can be set to that spelling; the pick collapses to the real unit.
 const searchUnits = searchUnitsWithAliases;
 
-async function createUnit(name: string): Promise<SelectSearchItem> {
-  // Inline-created units default to dimension="count" since the import form
-  // can't ask the user to pick a dimension. Richer edits live in Epic 7.
-  const r = await fetch("/api/v1/units", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ name, dimension: "count" }),
-  });
-  if (!r.ok) {
-    const err = (await r.json().catch(() => ({}))) as { error?: string };
-    throw new Error(err.error ?? `HTTP ${r.status}`);
-  }
-  const data = (await r.json()) as { id: number; name: string };
-  return { id: data.id, name: data.name };
-}
-
 async function loadDefaultUnits(): Promise<SelectSearchItem[]> {
   return searchUnits("");
 }
@@ -503,8 +487,6 @@ export function IngredientRow({
             search={searchUnits}
             defaultItems={defaultUnits}
             placeholder="Einheit"
-            onCreate={createUnit}
-            createLabelPrefix="als Einheit anlegen"
           />
         </div>
         <IngredientNameInput
@@ -711,8 +693,6 @@ export function IngredientRow({
                 search={searchUnits}
                 defaultItems={defaultUnits}
                 placeholder="Einheit"
-                onCreate={createUnit}
-                createLabelPrefix="als Einheit anlegen"
               />
               <UnitBadge annotation={value.importAnnotation} />
             </div>

@@ -11,25 +11,12 @@ import {
 } from "@/components/units/unit-picker";
 
 /**
- * The app's standard unit picker (alias-aware, create-on-the-fly), wrapped for
- * the shopping-list dialogs. Mirrors the recipe ingredient row: lists canonical
- * units and their aliases, collapses an alias pick to the real unit id via
- * {@link resolveUnitPick}, and can create a new (count) unit inline.
+ * The app's standard unit picker (alias-aware), wrapped for the shopping-list
+ * dialogs. Mirrors the recipe ingredient row: lists canonical units and their
+ * aliases (matching plurals too) and collapses an alias pick to the real unit
+ * id via {@link resolveUnitPick}. New units are created only in Stammdaten —
+ * never inline — so a typo can't mint a duplicate unit.
  */
-async function createUnit(name: string): Promise<SelectSearchItem> {
-  const r = await fetch("/api/v1/units", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ name, dimension: "count" }),
-  });
-  if (!r.ok) {
-    const err = (await r.json().catch(() => ({}))) as { error?: string };
-    throw new Error(err.error ?? `HTTP ${r.status}`);
-  }
-  const data = (await r.json()) as { id: number; name: string };
-  return { id: data.id, name: data.name };
-}
-
 export function UnitSelect({
   value,
   onChange,
@@ -56,8 +43,6 @@ export function UnitSelect({
       placeholder={placeholder}
       className={className}
       disabled={disabled}
-      onCreate={createUnit}
-      createLabelPrefix="als Einheit anlegen"
     />
   );
 }

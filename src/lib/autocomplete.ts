@@ -138,7 +138,9 @@ export function searchUnits(query: string): AutocompleteHit[] {
   const canonical = db
     .select({ id: unit.id, name: unit.name })
     .from(unit)
-    .where(sql`unaccent(${unit.name}) LIKE ${pattern}`)
+    .where(
+      sql`unaccent(${unit.name}) LIKE ${pattern} OR unaccent(${unit.plural}) LIKE ${pattern}`,
+    )
     .orderBy(asc(unit.name))
     .limit(LIMIT)
     .all();
@@ -151,7 +153,9 @@ export function searchUnits(query: string): AutocompleteHit[] {
     })
     .from(unitAlias)
     .innerJoin(unit, eq(unit.id, unitAlias.unitId))
-    .where(sql`unaccent(${unitAlias.name}) LIKE ${pattern}`)
+    .where(
+      sql`unaccent(${unitAlias.name}) LIKE ${pattern} OR unaccent(${unitAlias.plural}) LIKE ${pattern}`,
+    )
     .orderBy(asc(unitAlias.name))
     .limit(LIMIT)
     .all();
@@ -183,7 +187,11 @@ export function searchUnitsWithAliases(query: string): UnitPickerHit[] {
   const canonical = db
     .select({ id: unit.id, name: unit.name })
     .from(unit)
-    .where(sql`unaccent(${unit.name}) LIKE ${pattern}`)
+    // Match the plural too, so a recipe's "cups" surfaces the "Cup" unit
+    // (whose plural is "Cups") instead of stranding the user on "create".
+    .where(
+      sql`unaccent(${unit.name}) LIKE ${pattern} OR unaccent(${unit.plural}) LIKE ${pattern}`,
+    )
     .orderBy(asc(unit.name))
     .limit(LIMIT)
     .all()
@@ -197,7 +205,9 @@ export function searchUnitsWithAliases(query: string): UnitPickerHit[] {
     })
     .from(unitAlias)
     .innerJoin(unit, eq(unit.id, unitAlias.unitId))
-    .where(sql`unaccent(${unitAlias.name}) LIKE ${pattern}`)
+    .where(
+      sql`unaccent(${unitAlias.name}) LIKE ${pattern} OR unaccent(${unitAlias.plural}) LIKE ${pattern}`,
+    )
     .orderBy(asc(unitAlias.name))
     .limit(LIMIT)
     .all()
@@ -352,26 +362,6 @@ export function createIngredient(name: string): { id: number; name: string } {
     .insert(ingredient)
     .values({ name: cleaned })
     .returning({ id: ingredient.id, name: ingredient.name })
-    .all();
-  return inserted[0];
-}
-
-export function createUnit(
-  name: string,
-  dimension: "mass" | "volume" | "count",
-): { id: number; name: string } {
-  const cleaned = norm(name);
-  if (cleaned.length === 0) throw new Error("unit name is required");
-  const existing = db
-    .select({ id: unit.id })
-    .from(unit)
-    .where(eq(unit.name, cleaned))
-    .get();
-  if (existing) throw new Error(`unit "${cleaned}" already exists`);
-  const inserted = db
-    .insert(unit)
-    .values({ name: cleaned, dimension, factor: 1 })
-    .returning({ id: unit.id, name: unit.name })
     .all();
   return inserted[0];
 }
