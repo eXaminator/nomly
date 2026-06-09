@@ -2134,3 +2134,63 @@ describe("optional marker strip preserves the surrounding comma", () => {
     expect(out[0].notes).toBe("kleine, gehackt, je nach Schärfe der Currypaste");
   });
 });
+
+describe("a trailing note-only alternative is shared across the whole group", () => {
+  const catalog: IngredientCatalog = [
+    {
+      ingredientId: 1,
+      canonicalName: "Zitronensaft",
+      aliasName: "Zitronensaft",
+      tokens: ["zitronensaft"],
+    },
+    {
+      ingredientId: 2,
+      canonicalName: "Limettensaft",
+      aliasName: "Limettensaft",
+      tokens: ["limettensaft"],
+    },
+    {
+      ingredientId: 3,
+      canonicalName: "Kidneybohnen",
+      aliasName: "Kidneybohnen",
+      tokens: ["kidneybohnen"],
+    },
+    {
+      ingredientId: 4,
+      canonicalName: "Kichererbsen",
+      aliasName: "Kichererbsen",
+      tokens: ["kichererbsen"],
+    },
+  ];
+
+  it("'(oder nach Geschmack)' applies to the primary AND the alternative", () => {
+    const out = parseIngredientLines(
+      ["2 EL Zitronensaft oder Limettensaft (oder nach Geschmack)"],
+      makeLookups(catalog, ["EL"]),
+    );
+    expect(out).toHaveLength(2);
+    expect(out[0].name).toBe("Zitronensaft");
+    expect(out[0].isAlternative).toBe(false);
+    expect(out[0].notes).toBe("oder nach Geschmack");
+    expect(out[1].name).toBe("Limettensaft");
+    expect(out[1].isAlternative).toBe(true);
+    // The taste note is not a rejected ingredient alternative — it qualifies
+    // the whole group, so the alternative carries it too.
+    expect(out[1].notes).toBe("oder nach Geschmack");
+  });
+
+  it("a rejected INGREDIENT alternative stays on the primary only", () => {
+    const out = parseIngredientLines(
+      ["100 g Kidneybohnen oder Kichererbsen (oder schwarze Bohnen)"],
+      makeLookups(catalog),
+    );
+    expect(out).toHaveLength(2);
+    expect(out[0].name).toBe("Kidneybohnen");
+    expect(out[0].notes).toBe("oder schwarze Bohnen");
+    expect(out[1].name).toBe("Kichererbsen");
+    expect(out[1].isAlternative).toBe(true);
+    // "schwarze Bohnen" is a real (just unmatched) ingredient, not a note —
+    // it folds onto the main ingredient alone.
+    expect(out[1].notes).toBeNull();
+  });
+});

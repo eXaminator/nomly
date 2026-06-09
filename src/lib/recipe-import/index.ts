@@ -1129,19 +1129,31 @@ export function parseIngredientLines(
           resolved.match === "new" &&
           lastPrimaryIndex !== null
         ) {
-          appendAlternativeToNotes(
-            out[lastPrimaryIndex],
-            row.alternativeConnector,
-            piece.trim(),
-          );
-          // The folded text is now part of the primary's NOTES output, so show
-          // its source span (incl. connector) as a note on the primary's line
-          // rather than muting it.
-          if (sourceRange) {
-            (out[lastPrimaryIndex].highlightParts ??= []).push({
-              range: sourceRange,
-              kind: "note",
-            });
+          // A trailing alternative that is PURELY a note phrase ("(oder nach
+          // Geschmack)", "(oder zum Abschmecken)") doesn't belong to one
+          // alternative — it qualifies the whole group (typically the amount),
+          // so fold it onto the primary AND every alternative emitted since.
+          // A rejected INGREDIENT alternative ("(oder schwarze Bohnen)") leaves
+          // a name behind and stays on the primary alone. stripVocabTail is the
+          // same vocabulary gate the no-match path already uses.
+          const isNoteOnly =
+            stripVocabTail(piece.trim()).name.trim().length === 0;
+          const foldEnd = isNoteOnly ? out.length - 1 : lastPrimaryIndex;
+          for (let ti = lastPrimaryIndex; ti <= foldEnd; ti++) {
+            appendAlternativeToNotes(
+              out[ti],
+              row.alternativeConnector,
+              piece.trim(),
+            );
+            // The folded text is now part of this row's NOTES output, so show
+            // its source span (incl. connector) as a note on the row's line
+            // rather than muting it.
+            if (sourceRange) {
+              (out[ti].highlightParts ??= []).push({
+                range: sourceRange,
+                kind: "note",
+              });
+            }
           }
           continue;
         }
