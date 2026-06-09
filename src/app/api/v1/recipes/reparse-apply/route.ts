@@ -11,6 +11,7 @@ import type {
   NewIngredientDefaults,
   RecipeInput,
 } from "@/lib/recipes/types";
+import { newIngredientDefaultsSchema } from "@/lib/stammdaten/ingredient/schema";
 
 const rowSchema = z.object({
   ingredientName: z.string().min(1),
@@ -25,14 +26,6 @@ const rowSchema = z.object({
   fixedAmount: z.boolean(),
   rawLine: z.string().nullable().optional(),
   isAlternative: z.boolean().optional(),
-});
-
-const defaultsSchema = z.object({
-  name: z.string(),
-  defaultCategoryId: z.number().int().nullable(),
-  dietaryClass: z.enum(["vegan", "vegetarian", "meat"]).nullable(),
-  excludeFromShoppingList: z.boolean(),
-  isEquipment: z.boolean(),
 });
 
 const schema = z.object({
@@ -51,7 +44,7 @@ const schema = z.object({
       }),
     )
     .min(1),
-  newIngredientDefaults: z.array(defaultsSchema).optional(),
+  newIngredientDefaults: z.array(newIngredientDefaultsSchema).optional(),
 });
 
 /**

@@ -12,6 +12,10 @@ import {
   unitAlias as unitAliasTable,
 } from "../../db/schema.ts";
 import { resolveUnitLabel, type LabelForm } from "../units/label.ts";
+import {
+  createIngredientCore,
+  type IngredientUpsertInput,
+} from "../stammdaten/ingredient/service.ts";
 import type { RecipeDiet } from "./diet.ts";
 import type {
   AliasWarning,
@@ -101,18 +105,26 @@ function resolveIngredient(
   if (aliased) return aliased.id;
 
   const defaults = defaultsByLowerName?.get(lowered);
-  const inserted = tx
-    .insert(ingredientTable)
-    .values({
-      name: cleaned,
-      defaultCategoryId: defaults?.defaultCategoryId ?? null,
-      dietaryClass: defaults?.dietaryClass ?? null,
-      excludeFromShoppingList: defaults?.excludeFromShoppingList ?? false,
-      isEquipment: defaults?.isEquipment ?? false,
-    })
-    .returning({ id: ingredientTable.id })
-    .all();
-  return inserted[0].id;
+  // Route every brand-new ingredient through the shared creation core so the
+  // recipe-save path persists the same rich fields the full catalog editor
+  // does (default unit, conversions, aliases + their per-alias unit/display,
+  // excluded supermarkets) — all inside the recipe's own transaction, so a
+  // failed save rolls the new ingredient back with it. With no defaults
+  // collected this collapses to a bare canonical insert, as before.
+  return createIngredientCore(tx, {
+    name: cleaned,
+    defaultCategoryId: defaults?.defaultCategoryId ?? null,
+    dietaryClass: defaults?.dietaryClass ?? null,
+    excludeFromShoppingList: defaults?.excludeFromShoppingList ?? false,
+    isEquipment: defaults?.isEquipment ?? false,
+    aliases: defaults?.aliases ?? [],
+    aliasUnitDefaults: defaults?.aliasUnitDefaults ?? [],
+    aliasDisplayNames: defaults?.aliasDisplayNames ?? {},
+    conversions: defaults?.conversions ?? [],
+    defaultUnitId: defaults?.defaultUnitId ?? null,
+    defaultUnitDisplay: defaults?.defaultUnitDisplay ?? null,
+    excludedSupermarketIds: defaults?.excludedSupermarketIds ?? [],
+  });
 }
 
 type AddIngredientAliasResult =
@@ -198,6 +210,13 @@ type NewIngredientDefaultsFromInput = {
   dietaryClass: "vegan" | "vegetarian" | "meat" | null;
   excludeFromShoppingList: boolean;
   isEquipment: boolean;
+  aliases: string[];
+  aliasUnitDefaults: IngredientUpsertInput["aliasUnitDefaults"];
+  aliasDisplayNames: IngredientUpsertInput["aliasDisplayNames"];
+  conversions: IngredientUpsertInput["conversions"];
+  defaultUnitId: number | null;
+  defaultUnitDisplay: string | null;
+  excludedSupermarketIds: number[];
 };
 
 function buildNewIngredientDefaultsMap(
@@ -211,6 +230,13 @@ function buildNewIngredientDefaultsMap(
       dietaryClass: d.dietaryClass,
       excludeFromShoppingList: d.excludeFromShoppingList,
       isEquipment: d.isEquipment,
+      aliases: d.aliases ?? [],
+      aliasUnitDefaults: d.aliasUnitDefaults ?? [],
+      aliasDisplayNames: d.aliasDisplayNames ?? {},
+      conversions: d.conversions ?? [],
+      defaultUnitId: d.defaultUnitId ?? null,
+      defaultUnitDisplay: d.defaultUnitDisplay ?? null,
+      excludedSupermarketIds: d.excludedSupermarketIds ?? [],
     });
   }
   return map;

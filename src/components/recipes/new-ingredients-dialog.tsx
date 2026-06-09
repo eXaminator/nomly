@@ -17,6 +17,12 @@ import {
   SelectSearch,
   type SelectSearchItem,
 } from "@/components/ui/select-search";
+import {
+  AdvancedArticleFields,
+  advancedStateToPayload,
+  emptyAdvancedArticleState,
+  type AdvancedArticleState,
+} from "@/components/ingredients/article-fields/advanced-article-fields";
 import type { NewIngredientDefaults } from "@/lib/recipes/types";
 
 type DietaryClass = "vegan" | "vegetarian" | "meat" | null;
@@ -34,6 +40,7 @@ type RowState = {
   dietaryClass: DietaryClass;
   excludeFromShoppingList: boolean;
   isEquipment: boolean;
+  advanced: AdvancedArticleState;
 };
 
 async function searchCategories(q: string): Promise<SelectSearchItem[]> {
@@ -84,6 +91,7 @@ export function NewIngredientsDialog({
         dietaryClass: null,
         excludeFromShoppingList: false,
         isEquipment: false,
+        advanced: emptyAdvancedArticleState(),
       })),
     );
   }, [open, newNames]);
@@ -104,6 +112,7 @@ export function NewIngredientsDialog({
         dietaryClass: r.dietaryClass,
         excludeFromShoppingList: r.excludeFromShoppingList,
         isEquipment: r.isEquipment,
+        ...advancedStateToPayload(r.advanced),
       })),
     );
   }
@@ -127,8 +136,9 @@ export function NewIngredientsDialog({
             {rows.map((row, idx) => (
               <li
                 key={row.name + idx}
-                className="rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-card)] p-3"
+                className="overflow-hidden rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-card)]"
               >
+                <div className="p-3">
                 <div className="font-medium">{row.name}</div>
                 <div className="mt-3 flex flex-col gap-3">
                   <div className="flex flex-col gap-1">
@@ -205,6 +215,12 @@ export function NewIngredientsDialog({
                     }
                   />
                 </label>
+                </div>
+                <AdvancedArticleFields
+                  name={row.name}
+                  value={row.advanced}
+                  onChange={(advanced) => patch(idx, { advanced })}
+                />
               </li>
             ))}
           </ul>

@@ -18,6 +18,12 @@ import {
   type SelectSearchItem,
 } from "@/components/ui/select-search";
 import { Switch } from "@/components/ui/switch";
+import {
+  AdvancedArticleFields,
+  advancedStateToPayload,
+  emptyAdvancedArticleState,
+  type AdvancedArticleState,
+} from "@/components/ingredients/article-fields/advanced-article-fields";
 
 export type CreatedArticle = {
   id: number;
@@ -91,6 +97,9 @@ function Body({
   const [diet, setDiet] = React.useState<DietValue>(null);
   const [isEquipment, setIsEquipment] = React.useState(false);
   const [excludeFromShoppingList, setExclude] = React.useState(false);
+  const [advanced, setAdvanced] = React.useState<AdvancedArticleState>(
+    emptyAdvancedArticleState,
+  );
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
@@ -108,14 +117,11 @@ function Body({
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           name: trimmed,
-          aliases: [],
-          aliasUnitDefaults: [],
-          subUnits: [],
           defaultCategoryId: category?.id ?? null,
-          purchaseUnitId: null,
           excludeFromShoppingList,
           isEquipment,
           dietaryClass: diet,
+          ...advancedStateToPayload(advanced),
         }),
       });
       if (!res.ok) {
@@ -231,6 +237,16 @@ function Body({
         {error ? (
           <p className="text-sm text-[var(--color-danger)]">{error}</p>
         ) : null}
+        {/* Glue the advanced section to the dialog body's bottom edge: bleed
+            past the body's px-6/pb-4 and match that padding back inside. */}
+        <div className="-mx-6 -mb-4">
+          <AdvancedArticleFields
+            name={name}
+            value={advanced}
+            onChange={setAdvanced}
+            paddingXClassName="px-6"
+          />
+        </div>
       </DialogBody>
       <DialogFooter>
         <Button variant="ghost" onClick={onClose} disabled={saving}>

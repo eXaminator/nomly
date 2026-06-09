@@ -61,6 +61,25 @@ export type NewIngredientDefaults = {
   dietaryClass: "vegan" | "vegetarian" | "meat" | null;
   excludeFromShoppingList: boolean;
   isEquipment: boolean;
+  /** Advanced "enrich the article" fields, mirroring the full catalog editor.
+   *  All optional with empty defaults so the minimal create path stays valid.
+   *  Persisted via {@link createIngredientCore} when the save inserts the row. */
+  aliases?: string[];
+  aliasUnitDefaults?: Array<{
+    aliasName: string;
+    unitId: number | null;
+    unitDisplay: string | null;
+  }>;
+  aliasDisplayNames?: Record<string, string>;
+  conversions?: Array<{
+    fromUnitId: number;
+    toUnitId: number;
+    factor: number;
+    isContainer: boolean;
+  }>;
+  defaultUnitId?: number | null;
+  defaultUnitDisplay?: string | null;
+  excludedSupermarketIds?: number[];
 };
 
 /**

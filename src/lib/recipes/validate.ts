@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { newIngredientDefaultsSchema } from "@/lib/stammdaten/ingredient/schema";
+
 const ingredientSchema = z
   .object({
     ingredientName: z.string().min(1, "Zutat ist erforderlich"),
@@ -26,14 +28,6 @@ const sectionSchema = z.object({
   title: z.string().nullable(),
   instructions: z.string(),
   ingredients: z.array(ingredientSchema),
-});
-
-const newIngredientDefaultsSchema = z.object({
-  name: z.string().min(1),
-  defaultCategoryId: z.number().int().positive().nullable(),
-  dietaryClass: z.enum(["vegan", "vegetarian", "meat"]).nullable(),
-  excludeFromShoppingList: z.boolean(),
-  isEquipment: z.boolean().default(false),
 });
 
 export const recipeInputSchema = z.object({

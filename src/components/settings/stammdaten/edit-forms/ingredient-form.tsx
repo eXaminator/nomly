@@ -1,12 +1,9 @@
 "use client";
 
 import * as React from "react";
-import { AlertTriangle, ArrowLeftRight, Info, Plus, X } from "lucide-react";
 
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { NumberInput } from "@/components/ui/number-input";
 import { SelectSearch } from "@/components/ui/select-search";
 import { Switch } from "@/components/ui/switch";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -17,18 +14,29 @@ import {
   TabsList,
   TabsTrigger,
 } from "@/components/ui/tabs";
-import { cn } from "@/lib/cn";
+
+import { DefaultUnitField } from "@/components/ingredients/article-fields/default-unit-field";
+import { ExcludedSupermarketsField } from "@/components/ingredients/article-fields/excluded-supermarkets-field";
+import { ConversionsEditor } from "@/components/ingredients/article-fields/conversions-editor";
+import { AliasesEditor } from "@/components/ingredients/article-fields/aliases-editor";
 import {
-  searchUnitsWithAliases as searchUnits,
-  resolveUnitPick,
-} from "@/components/units/unit-picker";
+  CrossCollisionNote,
+  useCrossIngredientCollisions,
+} from "@/components/ingredients/article-fields/cross-collisions";
+import {
+  aliasDraftsFromItem,
+  aliasesToPayload,
+  conversionDraftsFromItem,
+  conversionsToPayload,
+  type AliasDraft,
+  type ConversionDraft,
+} from "@/components/ingredients/article-fields/types";
 
 import {
   RecipeReferenceList,
   ReferencePane,
   useImpactData,
 } from "../impact-section";
-import { findAliasCollisions } from "../alias-collisions";
 import { computeRenamePairs } from "../rename-pairs";
 import type { EditFormProps } from "../list-shell";
 
@@ -72,59 +80,21 @@ const DIET_OPTIONS = [
   { value: "meat", label: "Tierisch" },
 ] as const;
 
-type AliasDraft = {
-  key: string;
-  name: string;
-  /** Per-alias default global unit. */
-  defaultUnit: { id: number; name: string } | null;
-  /** Per-alias display rename — shown on recipe rows instead of the alias. */
-  displayName: string;
-};
-
-/**
- * One conversion edge in the editor. Reads "1 ⟨from⟩ = ⟨factor⟩ ⟨to⟩". A
- * container edge (`isContainer`) is the "buy whole packs" rule — the per-
- * component total rounds up to whole ⟨from⟩; a non-container edge is plain
- * normalization (density: "1 ml = 0,5 g"; count breakdown: "1 Stück = 10 Zehe").
- */
-type ConversionDraft = {
-  key: string;
-  from: { id: number; name: string } | null;
-  to: { id: number; name: string } | null;
-  factor: string;
-  isContainer: boolean;
-};
-
 export function IngredientForm({
   item,
   onPayloadChange,
 }: EditFormProps<IngredientItem>) {
   const [name, setName] = React.useState(item?.name ?? "");
   const [conversions, setConversions] = React.useState<ConversionDraft[]>(() =>
-    (item?.conversions ?? []).map((c) => ({
-      key: `existing-${c.id}`,
-      from: { id: c.fromUnitId, name: c.fromUnitName },
-      to: { id: c.toUnitId, name: c.toUnitName },
-      factor: String(c.factor),
-      isContainer: c.isContainer,
-    })),
+    conversionDraftsFromItem(item?.conversions ?? []),
   );
-  const [aliases, setAliases] = React.useState<AliasDraft[]>(() => {
-    const defaultsByAliasLower = new Map<string, { id: number; name: string }>();
-    for (const d of item?.aliasUnitDefaults ?? []) {
-      defaultsByAliasLower.set(d.aliasName.toLowerCase(), {
-        id: d.unitId,
-        name: d.unitName,
-      });
-    }
-    const displayByAlias = item?.aliasDisplayNames ?? {};
-    return (item?.aliases ?? []).map((aliasName) => ({
-      key: `existing-${aliasName}`,
-      name: aliasName,
-      defaultUnit: defaultsByAliasLower.get(aliasName.toLowerCase()) ?? null,
-      displayName: displayByAlias[aliasName] ?? "",
-    }));
-  });
+  const [aliases, setAliases] = React.useState<AliasDraft[]>(() =>
+    aliasDraftsFromItem(
+      item?.aliases ?? [],
+      item?.aliasUnitDefaults ?? [],
+      item?.aliasDisplayNames ?? {},
+    ),
+  );
   // Opt-in: also rewrite the matching display names on existing recipes when
   // the canonical name or an existing alias is renamed here.
   const [propagateRenames, setPropagateRenames] = React.useState(false);
@@ -170,116 +140,25 @@ export function IngredientForm({
     [item, name, aliases],
   );
 
-  // Aliases virtually identical to the canonical name or to another alias —
-  // surfaced as a non-blocking, per-row warning. Keyed by row index.
-  const aliasCollisions = React.useMemo(
-    () => findAliasCollisions(name, aliases.map((a) => a.name)),
-    [name, aliases],
+  // Cross-ingredient collisions for the canonical name + every alias — an
+  // advisory note (the line's unit disambiguates at match time).
+  const crossCollisions = useCrossIngredientCollisions(
+    [name, ...aliases.map((a) => a.name)],
+    item?.id ?? undefined,
   );
-
-  // Cross-ingredient collisions: other ingredients already using the
-  // canonical name or one of these alias names. NOT blocking — the line's
-  // unit disambiguates at match time — so this is an advisory note. Keyed by
-  // lowercased name. Fetched debounced from the read-only collisions
-  // endpoint.
-  const [crossCollisions, setCrossCollisions] = React.useState<
-    Map<string, { ingredientName: string; unitName: string | null }[]>
-  >(new Map());
-  const collisionNamesKey = [name.trim(), ...aliases.map((a) => a.name.trim())].join("\0");
-  React.useEffect(() => {
-    const names = Array.from(
-      new Set(
-        [name, ...aliases.map((a) => a.name)]
-          .map((n) => n.trim())
-          .filter((n) => n.length > 0),
-      ),
-    );
-    if (names.length === 0) {
-      setCrossCollisions(new Map());
-      return;
-    }
-    const ac = new AbortController();
-    const timer = setTimeout(async () => {
-      const next = new Map<
-        string,
-        { ingredientName: string; unitName: string | null }[]
-      >();
-      await Promise.all(
-        names.map(async (n) => {
-          const params = new URLSearchParams({ name: n });
-          if (item?.id != null) params.set("excludeId", String(item.id));
-          try {
-            const res = await fetch(
-              `/api/v1/ingredients/alias-collisions?${params.toString()}`,
-              { signal: ac.signal },
-            );
-            if (!res.ok) return;
-            const body = (await res.json()) as {
-              collisions: { ingredientName: string; unitName: string | null }[];
-            };
-            if (body.collisions.length > 0) next.set(n.toLowerCase(), body.collisions);
-          } catch {
-            // Aborted or network error — advisory only, ignore.
-          }
-        }),
-      );
-      if (!ac.signal.aborted) setCrossCollisions(next);
-    }, 400);
-    return () => {
-      ac.abort();
-      clearTimeout(timer);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [collisionNamesKey, item?.id]);
 
   React.useEffect(() => {
     const trimmedName = name.trim();
-    const aliasNames = aliases.map((a) => a.name.trim()).filter((n) => n.length > 0);
     const valid = trimmedName.length > 0;
-    const conversionsPayload = conversions
-      .filter((c) => {
-        const factor = Number(c.factor.replace(",", "."));
-        return (
-          c.from != null &&
-          c.to != null &&
-          c.from.id !== c.to.id &&
-          Number.isFinite(factor) &&
-          factor > 0
-        );
-      })
-      .map((c) => ({
-        fromUnitId: c.from!.id,
-        toUnitId: c.to!.id,
-        factor: Number(c.factor.replace(",", ".")),
-        isContainer: c.isContainer,
-      }));
-    const aliasUnitDefaultsPayload: Array<{
-      aliasName: string;
-      unitId: number;
-      unitDisplay: string;
-    }> = [];
-    const aliasDisplayNamesPayload: Record<string, string> = {};
-    for (const alias of aliases) {
-      const aliasName = alias.name.trim();
-      if (aliasName.length === 0) continue;
-      if (alias.defaultUnit) {
-        aliasUnitDefaultsPayload.push({
-          aliasName,
-          unitId: alias.defaultUnit.id,
-          // The picked spelling (a unit alias like "clove", or the canonical).
-          unitDisplay: alias.defaultUnit.name,
-        });
-      }
-      const display = alias.displayName.trim();
-      if (display.length > 0) aliasDisplayNamesPayload[aliasName] = display;
-    }
+    const { aliases: aliasNames, aliasUnitDefaults, aliasDisplayNames } =
+      aliasesToPayload(aliases);
     onPayloadChange(
       {
         name: trimmedName,
         aliases: aliasNames,
-        aliasUnitDefaults: aliasUnitDefaultsPayload,
-        aliasDisplayNames: aliasDisplayNamesPayload,
-        conversions: conversionsPayload,
+        aliasUnitDefaults,
+        aliasDisplayNames,
+        conversions: conversionsToPayload(conversions),
         defaultUnitId: canonicalDefault?.id ?? null,
         defaultUnitDisplay: canonicalDefault?.name ?? null,
         defaultCategoryId: category?.id ?? null,
@@ -318,81 +197,6 @@ export function IngredientForm({
     return body.items;
   }
 
-  const searchSupermarkets = React.useCallback(
-    async (q: string) => {
-      const res = await fetch(
-        `/api/v1/supermarkets/manage?q=${encodeURIComponent(q)}`,
-      );
-      if (!res.ok) return [];
-      const body = (await res.json()) as {
-        items: Array<{ id: number; name: string }>;
-      };
-      const taken = new Set(excludedSupermarkets.map((s) => s.id));
-      return body.items
-        .filter((s) => !taken.has(s.id))
-        .map((s) => ({ id: s.id, name: s.name }));
-    },
-    [excludedSupermarkets],
-  );
-
-  function addExcludedSupermarket(picked: { id: number; name: string } | null) {
-    if (!picked) return;
-    setExcludedSupermarkets((prev) =>
-      prev.some((s) => s.id === picked.id)
-        ? prev
-        : [...prev, { id: picked.id, name: picked.name }],
-    );
-  }
-
-  function removeExcludedSupermarket(id: number) {
-    setExcludedSupermarkets((prev) => prev.filter((s) => s.id !== id));
-  }
-
-  function addConversion() {
-    setConversions((prev) => [
-      ...prev,
-      {
-        key: `new-${crypto.randomUUID()}`,
-        from: null,
-        to: null,
-        factor: "1",
-        isContainer: false,
-      },
-    ]);
-  }
-
-  function updateConversion(key: string, partial: Partial<ConversionDraft>) {
-    setConversions((prev) =>
-      prev.map((c) => (c.key === key ? { ...c, ...partial } : c)),
-    );
-  }
-
-  function removeConversion(key: string) {
-    setConversions((prev) => prev.filter((c) => c.key !== key));
-  }
-
-  function addAlias() {
-    setAliases((prev) => [
-      ...prev,
-      {
-        key: `new-${crypto.randomUUID()}`,
-        name: "",
-        defaultUnit: null,
-        displayName: "",
-      },
-    ]);
-  }
-
-  function updateAlias(key: string, partial: Partial<AliasDraft>) {
-    setAliases((prev) =>
-      prev.map((a) => (a.key === key ? { ...a, ...partial } : a)),
-    );
-  }
-
-  function removeAlias(key: string) {
-    setAliases((prev) => prev.filter((a) => a.key !== key));
-  }
-
   /**
    * Promotes an alias to the canonical name by swapping the two roles in the
    * draft: the alias becomes the name (taking its default unit along as the
@@ -427,38 +231,12 @@ export function IngredientForm({
           onChange={(e) => setName(e.target.value)}
           autoFocus
         />
-        {(() => {
-          const hits = crossCollisions.get(name.trim().toLowerCase());
-          if (!hits || hits.length === 0) return null;
-          const label = hits
-            .map((h) =>
-              h.unitName ? `${h.ingredientName} (${h.unitName})` : h.ingredientName,
-            )
-            .join(", ");
-          return (
-            <p className="flex items-center gap-1 text-xs text-[var(--color-muted-fg)]">
-              <Info className="size-3 shrink-0" aria-hidden />
-              Auch verwendet von: {label}. Die Einheit entscheidet beim
-              Zuordnen.
-            </p>
-          );
-        })()}
-      </div>
-
-      <div className="flex flex-col gap-2">
-        <Label>Standard-Einheit des Namens</Label>
-        <p className="text-xs text-[var(--color-muted-fg)]">
-          Optional. Welche Einheit der Import annimmt, wenn die Zutat über
-          ihren kanonischen Namen (ohne Alias) und ohne explizite Einheit
-          erkannt wird. Ohne Default fällt der Import auf „Stück“ zurück.
-        </p>
-        <SelectSearch
-          value={canonicalDefault}
-          onChange={(p) => setCanonicalDefault(resolveUnitPick(p))}
-          search={searchUnits}
-          placeholder="Default-Einheit…"
+        <CrossCollisionNote
+          hits={crossCollisions.get(name.trim().toLowerCase())}
         />
       </div>
+
+      <DefaultUnitField value={canonicalDefault} onChange={setCanonicalDefault} />
 
       <div className="flex flex-col gap-2">
         <Label>Kategorie</Label>
@@ -537,262 +315,34 @@ export function IngredientForm({
         </div>
       </div>
 
-      <div className="flex flex-col gap-2">
-        <Label>Nicht verfügbar bei</Label>
-        <p className="text-xs text-[var(--color-muted-fg)]">
-          Supermärkte, die diesen Artikel nicht führen. Auf der Einkaufsliste
-          werden passende Einträge im jeweiligen Markt ausgegraut.
-        </p>
-        {excludedSupermarkets.length > 0 ? (
-          <ul className="flex flex-wrap gap-1.5">
-            {excludedSupermarkets.map((s) => (
-              <li key={s.id}>
-                <span className="inline-flex items-center gap-1 rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-muted)] py-1 pl-2.5 pr-1 text-sm">
-                  {s.name}
-                  <button
-                    type="button"
-                    onClick={() => removeExcludedSupermarket(s.id)}
-                    aria-label={`${s.name} entfernen`}
-                    className="inline-flex size-5 items-center justify-center rounded-md text-[var(--color-muted-fg)] hover:bg-[var(--color-bg)] hover:text-[var(--color-fg)]"
-                  >
-                    <X className="size-3.5" />
-                  </button>
-                </span>
-              </li>
-            ))}
-          </ul>
-        ) : null}
-        <SelectSearch
-          value={null}
-          onChange={addExcludedSupermarket}
-          search={searchSupermarkets}
-          placeholder="Supermarkt hinzufügen…"
+      <ExcludedSupermarketsField
+        value={excludedSupermarkets}
+        onChange={setExcludedSupermarkets}
+      />
+    </div>
+  );
+
+  const renameFooter =
+    renamePairs.length > 0 ? (
+      <label className="mt-1 flex cursor-pointer items-start gap-2 rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-muted)] px-3 py-2 text-sm">
+        <Checkbox
+          checked={propagateRenames}
+          onCheckedChange={(v) => setPropagateRenames(Boolean(v))}
+          className="mt-0.5"
         />
-      </div>
-
-    </div>
-  );
-
-  const conversionsContent = (
-    <div className="flex flex-col gap-2">
-      <Label>Umrechnungen</Label>
-      <p className="text-xs text-[var(--color-muted-fg)]">
-        Optional. Zutat-spezifische Umrechnungen für die Einkaufsliste — als
-        „1 ⟨von⟩ = ⟨Menge⟩ ⟨nach⟩“. Ohne Gebinde-Haken normalisieren sie nur
-        (z.&nbsp;B. Dichte „1 ml = 0,5 g“); mit Gebinde-Haken wird die
-        aufsummierte Menge auf ganze ⟨von⟩ aufgerundet („1 Glas = 100 g“,
-        „1 Stück = 10 Zehen“).
-      </p>
-      {conversions.length > 0 ? (
-        <ul className="flex flex-col divide-y divide-[var(--color-border)] overflow-hidden rounded-[var(--radius)] border border-[var(--color-border)]">
-          {conversions.map((c) => (
-            <li key={c.key} className="flex flex-col gap-2 px-3 py-2">
-              <div className="flex flex-wrap items-center gap-2 text-xs text-[var(--color-muted-fg)]">
-                <span className="shrink-0">1</span>
-                <div className="min-w-0 flex-1">
-                  <SelectSearch
-                    value={c.from}
-                    onChange={(p) =>
-                      updateConversion(c.key, { from: resolveUnitPick(p) })
-                    }
-                    search={searchUnits}
-                    placeholder="von Einheit"
-                  />
-                </div>
-                <span className="shrink-0">=</span>
-                <div className="w-20">
-                  <NumberInput
-                    value={Number(c.factor.replace(",", ".")) || 0}
-                    onChange={(n) =>
-                      updateConversion(c.key, {
-                        factor: n == null ? "" : String(n),
-                      })
-                    }
-                    min={0.0001}
-                    decimal
-                    aria-label="Faktor"
-                  />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <SelectSearch
-                    value={c.to}
-                    onChange={(p) =>
-                      updateConversion(c.key, { to: resolveUnitPick(p) })
-                    }
-                    search={searchUnits}
-                    placeholder="nach Einheit"
-                  />
-                </div>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => removeConversion(c.key)}
-                  aria-label="Umrechnung entfernen"
-                >
-                  <X className="size-4" />
-                </Button>
-              </div>
-              <label className="flex cursor-pointer items-center gap-2 text-xs text-[var(--color-muted-fg)]">
-                <Checkbox
-                  checked={c.isContainer}
-                  onCheckedChange={(v) =>
-                    updateConversion(c.key, { isContainer: Boolean(v) })
-                  }
-                />
-                Gebinde (auf ganze ⟨von⟩ aufrunden)
-              </label>
-            </li>
-          ))}
-        </ul>
-      ) : null}
-      <Button
-        type="button"
-        variant="outline"
-        size="sm"
-        className="self-start"
-        onClick={addConversion}
-      >
-        <Plus className="size-4" /> Umrechnung hinzufügen
-      </Button>
-    </div>
-  );
-
-  const aliasContent = (
-    <div className="flex flex-col gap-2">
-      <Label>Aliase</Label>
-      <p className="text-xs text-[var(--color-muted-fg)]">
-        Alternative Namen für diese Zutat. Pro Alias lässt sich optional
-        eine Standard-Einheit setzen — z.&nbsp;B. „Knoblauchzehe“ →
-        „Zehe“, oder „Olivenöl extra virgin“ → „ml“. Ohne Default fällt
-        der Import auf die globale Standard-Einheit „Stück“ zurück. Mit einem
-        „Anzeigename“ wird die Zeile umbenannt, wenn dieser Alias trifft —
-        z.&nbsp;B. „Knoblauchzehe“ → Anzeige „Knoblauch“, damit
-        „3&nbsp;Zehen Knoblauch“ statt „3&nbsp;Zehen Knoblauchzehe“ steht.
-      </p>
-      {aliases.length > 0 ? (
-        <ul className="flex flex-col divide-y divide-[var(--color-border)] overflow-hidden rounded-[var(--radius)] border border-[var(--color-border)]">
-          {aliases.map((alias, idx) => {
-            const collision = aliasCollisions.get(idx);
-            return (
-              <li key={alias.key} className="flex flex-col gap-1 px-3 py-2">
-                <div className="flex flex-col gap-2 sm:grid sm:grid-cols-[1fr_1fr_minmax(8rem,12rem)_auto] sm:items-center">
-                  <Input
-                    value={alias.name}
-                    onChange={(e) =>
-                      updateAlias(alias.key, { name: e.target.value })
-                    }
-                    placeholder="Alias-Name"
-                    aria-label="Alias-Name"
-                    className={cn(
-                      collision &&
-                        "ring-1 ring-[var(--color-warning)] focus-visible:ring-[var(--color-warning)]",
-                    )}
-                  />
-                  <Input
-                    value={alias.displayName}
-                    onChange={(e) =>
-                      updateAlias(alias.key, { displayName: e.target.value })
-                    }
-                    placeholder="Anzeigename (optional)"
-                    aria-label="Anzeigename beim Treffer"
-                  />
-                  <SelectSearch
-                    value={alias.defaultUnit}
-                    onChange={(picked) =>
-                      updateAlias(alias.key, {
-                        defaultUnit: resolveUnitPick(picked),
-                      })
-                    }
-                    search={searchUnits}
-                    placeholder="Default-Einheit…"
-                  />
-                  <div className="flex items-center gap-1">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => swapAliasWithName(alias.key)}
-                      disabled={
-                        alias.name.trim().length === 0 ||
-                        name.trim().length === 0
-                      }
-                      aria-label={`${alias.name || "Alias"} zum Namen machen`}
-                      title="Mit dem Namen tauschen — der Alias wird zum Namen des Artikels (inkl. Standard-Einheit), der bisherige Name zum Alias."
-                    >
-                      <ArrowLeftRight className="size-4" />
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => removeAlias(alias.key)}
-                      aria-label={`${alias.name || "Alias"} entfernen`}
-                    >
-                      <X className="size-4" />
-                    </Button>
-                  </div>
-                </div>
-                {collision && (
-                  <p className="flex items-center gap-1 text-xs text-[var(--color-warning)]">
-                    <AlertTriangle className="size-3 shrink-0" aria-hidden />
-                    {collision.collidesWith === "name"
-                      ? "Quasi identisch mit dem Namen."
-                      : "Quasi identisch mit einem anderen Alias."}
-                  </p>
-                )}
-                {(() => {
-                  const hits = crossCollisions.get(alias.name.trim().toLowerCase());
-                  if (!hits || hits.length === 0) return null;
-                  const label = hits
-                    .map((h) =>
-                      h.unitName ? `${h.ingredientName} (${h.unitName})` : h.ingredientName,
-                    )
-                    .join(", ");
-                  return (
-                    <p className="flex items-center gap-1 text-xs text-[var(--color-muted-fg)]">
-                      <Info className="size-3 shrink-0" aria-hidden />
-                      Auch verwendet von: {label}. Die Einheit entscheidet beim
-                      Zuordnen.
-                    </p>
-                  );
-                })()}
-              </li>
-            );
-          })}
-        </ul>
-      ) : null}
-      <Button
-        type="button"
-        variant="outline"
-        size="sm"
-        className="self-start"
-        onClick={addAlias}
-      >
-        <Plus className="size-4" /> Alias hinzufügen
-      </Button>
-      {renamePairs.length > 0 ? (
-        <label className="mt-1 flex cursor-pointer items-start gap-2 rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-muted)] px-3 py-2 text-sm">
-          <Checkbox
-            checked={propagateRenames}
-            onCheckedChange={(v) => setPropagateRenames(Boolean(v))}
-            className="mt-0.5"
-          />
-          <span className="flex-1">
-            <span className="font-medium">
-              Umbenennungen auf bestehende Rezepte übertragen
-            </span>
-            <span className="mt-0.5 block text-xs text-[var(--color-muted-fg)]">
-              Ersetzt den Anzeigenamen in vorhandenen Rezeptzeilen, die exakt
-              so heißen:{" "}
-              {renamePairs.map((p) => `„${p.from}“ → „${p.to}“`).join(", ")}
-              . Sonst bleiben bestehende Rezepte unverändert.
-            </span>
+        <span className="flex-1">
+          <span className="font-medium">
+            Umbenennungen auf bestehende Rezepte übertragen
           </span>
-        </label>
-      ) : null}
-    </div>
-  );
+          <span className="mt-0.5 block text-xs text-[var(--color-muted-fg)]">
+            Ersetzt den Anzeigenamen in vorhandenen Rezeptzeilen, die exakt
+            so heißen:{" "}
+            {renamePairs.map((p) => `„${p.from}“ → „${p.to}“`).join(", ")}
+            . Sonst bleiben bestehende Rezepte unverändert.
+          </span>
+        </span>
+      </label>
+    ) : null;
 
   const recipes = impact.data?.linkedRecipes ?? [];
   return (
@@ -815,8 +365,19 @@ export function IngredientForm({
         ) : null}
       </TabsList>
       <TabsContent value="stammdaten">{stammdatenContent}</TabsContent>
-      <TabsContent value="umrechnungen">{conversionsContent}</TabsContent>
-      <TabsContent value="aliase">{aliasContent}</TabsContent>
+      <TabsContent value="umrechnungen">
+        <ConversionsEditor value={conversions} onChange={setConversions} />
+      </TabsContent>
+      <TabsContent value="aliase">
+        <AliasesEditor
+          value={aliases}
+          onChange={setAliases}
+          name={name}
+          crossCollisions={crossCollisions}
+          onSwapWithName={swapAliasWithName}
+          footer={renameFooter}
+        />
+      </TabsContent>
       {item ? (
         <TabsContent value="rezepte">
           <ReferencePane

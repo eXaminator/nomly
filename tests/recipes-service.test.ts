@@ -680,6 +680,107 @@ describe("createRecipe + getRecipe with alternatives", () => {
   });
 });
 
+describe("createRecipe persists rich new-ingredient defaults", () => {
+  beforeAll(async () => {
+    await seed();
+  });
+
+  it("creates the new ingredient with default unit, conversion, alias and excluded supermarket", async () => {
+    const { db } = await import("@/db");
+    const { ingredient, unit, supermarket } = await import("@/db/schema");
+    const { eq } = await import("drizzle-orm");
+    const { createRecipe } = await import("@/lib/recipes/service");
+    const { getIngredientDetail } = await import(
+      "@/lib/stammdaten/ingredient/service"
+    );
+
+    const stueck = db
+      .insert(unit)
+      .values({ name: "Stück", dimension: "count", factor: 1 })
+      .returning({ id: unit.id })
+      .all()[0].id;
+    const zehe = db
+      .insert(unit)
+      .values({ name: "Zehe", dimension: "count", factor: 1 })
+      .returning({ id: unit.id })
+      .all()[0].id;
+    const rewe = db
+      .insert(supermarket)
+      .values({ name: "REWE" })
+      .returning({ id: supermarket.id })
+      .all()[0].id;
+
+    createRecipe({
+      title: "Knoblauch-Pasta",
+      description: null,
+      servings: 2,
+      prepTimeMin: null,
+      cookTimeMin: null,
+      sourceUrl: null,
+      photoPath: null,
+      tags: [],
+      sections: [
+        {
+          title: null,
+          instructions: "",
+          ingredients: [
+            {
+              ingredientName: "Knoblauch",
+              ingredientId: null,
+              quantity: 2,
+              unitId: zehe,
+              displayUnit: null,
+              notes: null,
+              isOptional: false,
+              fixedAmount: false,
+              isAlternative: false,
+            },
+          ],
+        },
+      ],
+      newIngredientDefaults: [
+        {
+          name: "Knoblauch",
+          defaultCategoryId: null,
+          dietaryClass: "vegan",
+          excludeFromShoppingList: false,
+          isEquipment: false,
+          aliases: ["Knoblauchzehe"],
+          aliasUnitDefaults: [
+            { aliasName: "Knoblauchzehe", unitId: zehe, unitDisplay: null },
+          ],
+          aliasDisplayNames: {},
+          conversions: [
+            { fromUnitId: stueck, toUnitId: zehe, factor: 10, isContainer: true },
+          ],
+          defaultUnitId: zehe,
+          defaultUnitDisplay: null,
+          excludedSupermarketIds: [rewe],
+        },
+      ],
+    });
+
+    const row = db
+      .select({ id: ingredient.id })
+      .from(ingredient)
+      .where(eq(ingredient.name, "Knoblauch"))
+      .get();
+    expect(row).toBeTruthy();
+    const detail = getIngredientDetail(row!.id)!;
+    expect(detail.defaultUnitId).toBe(zehe);
+    expect(detail.aliases).toContain("Knoblauchzehe");
+    expect(detail.conversions).toHaveLength(1);
+    expect(detail.conversions[0]).toMatchObject({
+      fromUnitId: stueck,
+      toUnitId: zehe,
+      factor: 10,
+      isContainer: true,
+    });
+    expect(detail.excludedSupermarkets.map((s) => s.id)).toContain(rewe);
+    expect(detail.aliasUnitDefaults.find((d) => d.aliasName === "Knoblauchzehe")?.unitId).toBe(zehe);
+  });
+});
+
 describe("needsUpdate flag + filter", () => {
   let ids: Ids;
   beforeAll(async () => {

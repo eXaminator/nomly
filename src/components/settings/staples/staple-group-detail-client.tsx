@@ -283,13 +283,19 @@ export function StapleGroupDetailClient({ initial, units }: Props) {
       for (const d of defaults) {
         const payload = {
           name: d.name,
-          aliases: [],
-          aliasUnitDefaults: [],
-          conversions: [],
           defaultCategoryId: d.defaultCategoryId,
           excludeFromShoppingList: d.excludeFromShoppingList,
           isEquipment: d.isEquipment,
           dietaryClass: d.dietaryClass,
+          // Forward the advanced "enrich the article" fields the dialog now
+          // collects (default unit, conversions, aliases, excluded markets).
+          aliases: d.aliases ?? [],
+          aliasUnitDefaults: d.aliasUnitDefaults ?? [],
+          aliasDisplayNames: d.aliasDisplayNames ?? {},
+          conversions: d.conversions ?? [],
+          defaultUnitId: d.defaultUnitId ?? null,
+          defaultUnitDisplay: d.defaultUnitDisplay ?? null,
+          excludedSupermarketIds: d.excludedSupermarketIds ?? [],
         };
         const res = await fetch("/api/v1/ingredients/manage", {
           method: "POST",

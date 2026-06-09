@@ -468,46 +468,62 @@ function validateInput(
   return { name: cleanedName, aliases: cleanedAliases };
 }
 
-export function createIngredient(input: IngredientUpsertInput): IngredientDetail {
+/**
+ * Insert a brand-new ingredient (canonical row + conversions + excluded
+ * supermarkets + aliases with their per-alias unit/display) using the supplied
+ * transaction. Validates name/alias uniqueness first. Returns the new id.
+ *
+ * Shared between {@link createIngredient} (which wraps it in its own
+ * transaction) and the recipe-save path, where a new ingredient must be
+ * created inside the recipe's transaction so it rolls back together with the
+ * recipe on failure. Callers that already proved the name is free (e.g.
+ * `resolveIngredient`) still benefit from the alias dedupe this runs.
+ */
+export function createIngredientCore(
+  tx: Tx,
+  input: IngredientUpsertInput,
+): number {
   const { name, aliases } = validateInput(input);
-  const detail = db.transaction((tx) => {
-    const inserted = tx
-      .insert(ingredient)
-      .values({
-        name,
-        defaultCategoryId: input.defaultCategoryId ?? null,
-        defaultUnitId: input.defaultUnitId ?? null,
-        defaultUnitDisplay: input.defaultUnitDisplay?.trim() || null,
-        excludeFromShoppingList: input.excludeFromShoppingList,
-        isEquipment: input.isEquipment ?? false,
-        dietaryClass: input.dietaryClass,
-      })
-      .returning({ id: ingredient.id })
-      .all();
-    const newId = inserted[0].id;
-    writeConversions(tx, newId, input.conversions ?? []);
-    writeExcludedSupermarkets(tx, newId, input.excludedSupermarketIds ?? []);
-    if (aliases.length > 0) {
-      const defaultsByAlias = mapAliasDefaults(input.aliasUnitDefaults, aliases);
-      const displayByAlias = mapAliasDisplayNames(input.aliasDisplayNames, aliases);
-      tx.insert(ingredientAlias)
-        .values(
-          aliases.map((aliasName) => {
-            const def = defaultsByAlias.get(aliasName.toLowerCase());
-            return {
-              ingredientId: newId,
-              name: aliasName,
-              defaultUnitId: def?.unitId ?? null,
-              defaultUnitDisplay: def?.display ?? null,
-              displayName: displayByAlias.get(aliasName.toLowerCase()) ?? null,
-            };
-          }),
-        )
-        .run();
-    }
-    return newId;
-  });
-  return getIngredientDetail(detail) ?? unreachable();
+  const inserted = tx
+    .insert(ingredient)
+    .values({
+      name,
+      defaultCategoryId: input.defaultCategoryId ?? null,
+      defaultUnitId: input.defaultUnitId ?? null,
+      defaultUnitDisplay: input.defaultUnitDisplay?.trim() || null,
+      excludeFromShoppingList: input.excludeFromShoppingList,
+      isEquipment: input.isEquipment ?? false,
+      dietaryClass: input.dietaryClass,
+    })
+    .returning({ id: ingredient.id })
+    .all();
+  const newId = inserted[0].id;
+  writeConversions(tx, newId, input.conversions ?? []);
+  writeExcludedSupermarkets(tx, newId, input.excludedSupermarketIds ?? []);
+  if (aliases.length > 0) {
+    const defaultsByAlias = mapAliasDefaults(input.aliasUnitDefaults, aliases);
+    const displayByAlias = mapAliasDisplayNames(input.aliasDisplayNames, aliases);
+    tx.insert(ingredientAlias)
+      .values(
+        aliases.map((aliasName) => {
+          const def = defaultsByAlias.get(aliasName.toLowerCase());
+          return {
+            ingredientId: newId,
+            name: aliasName,
+            defaultUnitId: def?.unitId ?? null,
+            defaultUnitDisplay: def?.display ?? null,
+            displayName: displayByAlias.get(aliasName.toLowerCase()) ?? null,
+          };
+        }),
+      )
+      .run();
+  }
+  return newId;
+}
+
+export function createIngredient(input: IngredientUpsertInput): IngredientDetail {
+  const newId = db.transaction((tx) => createIngredientCore(tx, input));
+  return getIngredientDetail(newId) ?? unreachable();
 }
 
 /**
