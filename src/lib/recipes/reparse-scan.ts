@@ -226,6 +226,9 @@ function carriedAlternativeToProposed(g: {
     isOptional: true,
     isAlternative: true,
     fixedAmount: g.quantity == null,
+    // Flag so the diff shows it as "would be removed" with a keep toggle — the
+    // re-parse doesn't reproduce it, so by default applying drops it.
+    carried: true,
   };
 }
 
@@ -483,7 +486,10 @@ export async function scanAllRecipesForReparse(
       derivedIds,
     ).map(carriedAlternativeToProposed);
     const proposed = [...proposedDerived, ...carried];
-    if (!isLineGroupChanged(current, proposed)) continue;
+    // A carried alternative defaults to removal on apply, so its mere presence
+    // is a proposed change — surface the group even when the derived rows
+    // match the current ones.
+    if (carried.length === 0 && !isLineGroupChanged(current, proposed)) continue;
     entries.push({
       recipeId: head.recipeId,
       title: head.title,

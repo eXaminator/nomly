@@ -117,6 +117,13 @@ export type DraftIngredient = {
    *  the best match. Import auto-resolution is NOT a pin. UI-only — never
    *  persisted. */
   pinnedByUser?: boolean;
+  /** Reparse-only: this row is an existing alternative the re-parse does not
+   *  reproduce. Rendered as "would be removed"; dropped on apply unless
+   *  {@link keep} is toggled on. UI-only — never persisted. */
+  carriedRemovable?: boolean;
+  /** Reparse-only: the user pinned this carried alternative to survive the
+   *  apply (overrides the default removal). Session-only, reset each scan. */
+  keep?: boolean;
 };
 
 /**
@@ -218,6 +225,11 @@ export type ParsedIngredientResponse = {
   /** Categorised highlight spans into `rawText` (own amount/name/note +
    *  inherited amount/note) — coloured by kind in the source-line view. */
   highlightParts?: { range: [number, number]; kind: "amount" | "name" | "note" | "dropped" }[];
+  /** Reparse-only: this row is an existing alternative the re-parse does NOT
+   *  reproduce (manual, or a source-line alt the parser no longer extracts).
+   *  The bulk-reparse diff renders it as "would be removed" with a keep toggle;
+   *  it's dropped on apply unless kept. Never set by the line parser. */
+  carried?: boolean;
 };
 
 export function parsedIngredientToDraft(
@@ -282,6 +294,8 @@ export function parsedIngredientToDraft(
     sourceRange: i.sourceRange,
     highlightParts: i.highlightParts,
     importAnnotation: annotation,
+    carriedRemovable: i.carried ?? false,
+    keep: false,
   };
 }
 

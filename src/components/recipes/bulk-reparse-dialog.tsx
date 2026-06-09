@@ -632,6 +632,8 @@ export function BulkReparseDialog({
     entries.forEach((e, i) => {
       if (!states[i]?.selected) return;
       const rows = states[i].draft
+        // A carried alternative is dropped unless the user toggled "keep".
+        .filter((d) => !d.carriedRemovable || d.keep)
         .map(ingredientToPayload)
         .filter((r): r is NonNullable<typeof r> => r !== null);
       for (const row of rows) {
@@ -1026,10 +1028,30 @@ export function BulkReparseDialog({
                                                   isAlternative={d.isAlternative}
                                                   fixedAmount={d.fixedAmount}
                                                   highlight={hi.proposed[k]}
-                                                  tone="added"
+                                                  tone={
+                                                    d.carriedRemovable && !d.keep
+                                                      ? "removed"
+                                                      : "added"
+                                                  }
                                                   mappingLabel={draftMappingLabel(d)}
                                                   notesDiff={hi.notesDiffs[k]?.proposed}
                                                 />
+                                                {d.carriedRemovable ? (
+                                                  <button
+                                                    type="button"
+                                                    className="self-start text-xs text-[var(--color-accent)] hover:underline"
+                                                    onClick={() =>
+                                                      setDraftRow(i, k, {
+                                                        ...d,
+                                                        keep: !d.keep,
+                                                      })
+                                                    }
+                                                  >
+                                                    {d.keep
+                                                      ? "↩ Alternative doch entfernen"
+                                                      : "Alternative behalten (nicht entfernen)"}
+                                                  </button>
+                                                ) : null}
                                                 {showAlias ? (
                                                   <button
                                                     type="button"
