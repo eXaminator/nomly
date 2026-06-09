@@ -2145,6 +2145,12 @@ export type ExpandedIngredientRow =
        *  gemahlen" is Pfeffer's, not Salz's). A line-trailing note in a bare
        *  "A or B, diced" chain stays shareable, so it's left false there. */
       localNote?: boolean;
+      /** A note that trailed a parenthetical alternative in the source
+       *  ("(or 1 large clove), peeled" → "peeled"). It belongs to the primary
+       *  but must land AFTER the alternatives fold in, so it's carried here and
+       *  appended by the caller once the line's rows are all processed —
+       *  appending it to the primary text up front would reorder the notes. */
+      tailNote?: string;
     };
 
 const OPTIONAL_PREFIX_RE =
@@ -2470,16 +2476,18 @@ export function expandIngredientLine(rawLine: string): ExpandedIngredientRow[] {
     // is its own note ("1 kl. Glas Spargelköpfe, Abtropfgew. 115 g").
     const altItems = splitOrOptions(parensAlt.content);
     const rows: ExpandedIngredientRow[] = [];
-    // A note tail after the paren ("(or chili flakes) more to taste") rides
-    // along with the primary so it lands in the primary's notes.
-    const primaryText = parensAlt.tail
-      ? `${parensAlt.primary} ${parensAlt.tail}`.trim()
-      : parensAlt.primary;
+    // A note tail after the paren ("(or 1 large clove), peeled") belongs to the
+    // primary but must land AFTER the alternatives in the notes — appending it
+    // to the primary text here would put it before them. Carry it as tailNote
+    // on the first emitted row instead; the caller appends it once folds are in.
+    const tailNote = parensAlt.tail
+      ? parensAlt.tail.replace(/^[\s,;:–—-]+|[\s,;:–—-]+$/g, "")
+      : "";
     // Re-expand the primary so its OWN "oder"/"alternativ" chain splits too
     // ("Weizenmehl oder Dinkelmehl (oder glutenfrei)" → 3 rows). The first
     // emitted row is the real primary; the rest are its alternatives.
-    if (primaryText.length > 0) {
-      expandIngredientLine(primaryText).forEach((r, idx) => {
+    if (parensAlt.primary.length > 0) {
+      expandIngredientLine(parensAlt.primary).forEach((r, idx) => {
         if (r.kind !== "ingredient") {
           rows.push({ ...r, rawText: original });
           return;
@@ -2488,6 +2496,7 @@ export function expandIngredientLine(rawLine: string): ExpandedIngredientRow[] {
           ...r,
           rawText: original,
           forceOptional: idx === 0 ? baseOptional || r.forceOptional : r.forceOptional,
+          ...(idx === 0 && tailNote ? { tailNote } : {}),
         });
       });
     }

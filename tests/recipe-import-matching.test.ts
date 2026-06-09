@@ -1420,6 +1420,19 @@ describe("alternative amount/unit/notes inheritance", () => {
     );
   });
 
+  it("keeps a note tail after a parenthetical alternative in source order", () => {
+    // "(or 1 large clove), peeled" — the alternative folds into notes and the
+    // trailing "peeled" must come AFTER it, not jump ahead of it.
+    const out = rows(
+      "2 small garlic cloves (or 1 large clove), peeled",
+      [{ ingredientId: 1, canonicalName: "garlic", aliasName: "garlic", tokens: ["garlic"] }],
+      ["clove", "cloves"],
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0].name).toBe("garlic");
+    expect(out[0].notes).toBe("small, or 1 large clove, peeled");
+  });
+
   it("commas off a leading descriptor from a folded alt when the matched name was between them", () => {
     // "red" precedes the matched "chili powder", which is stripped, then the
     // "(or to taste)" note follows — so the note must read "red, or to taste":

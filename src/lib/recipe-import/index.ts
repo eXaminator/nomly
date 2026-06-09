@@ -1043,9 +1043,14 @@ export function parseIngredientLines(
     // (trimmed) source line. `rawText` on emitted rows equals this string.
     const originalTrimmed = rawLine.trim();
     let sourceCursor = 0;
+    // A note that trailed a parenthetical alternative ("(or 1 large clove),
+    // peeled"). Appended to the primary AFTER the line's alternatives fold in,
+    // so it keeps its source order ("small, or 1 large clove, peeled").
+    let pendingTailNote: string | null = null;
 
     for (const row of expandIngredientLine(rawLine)) {
       if (row.kind === "header") continue;
+      if (row.tailNote) pendingTailNote = row.tailNote;
       // Familywall opt-in: pre-resolve "X oder Y" alternatives + adjacent-pair
       // conjunctions (Salz Pfeffer) before the conjunction splitter runs.
       const raw = useFirstWins
@@ -1193,6 +1198,21 @@ export function parseIngredientLines(
           newNameProposals: resolved.newNameProposals,
         });
         if (!row.isAlternative) lastPrimaryIndex = out.length - 1;
+      }
+    }
+    if (pendingTailNote && lastPrimaryIndex !== null) {
+      appendAlternativeToNotes(
+        out[lastPrimaryIndex],
+        null,
+        pendingTailNote,
+        originalTrimmed,
+      );
+      const idx = originalTrimmed.indexOf(pendingTailNote);
+      if (idx >= 0) {
+        (out[lastPrimaryIndex].highlightParts ??= []).push({
+          range: [idx, idx + pendingTailNote.length],
+          kind: "note",
+        });
       }
     }
   }
@@ -1532,6 +1552,7 @@ function parseGroupedIngredientLines(
       let lastPrimaryIndex: number | null = null;
       const originalTrimmed = rawLine.trim();
       let sourceCursor = 0;
+      let pendingTailNote: string | null = null;
 
       for (const row of expandIngredientLine(rawLine)) {
         if (row.kind === "header") {
@@ -1539,6 +1560,7 @@ function parseGroupedIngredientLines(
           lastPrimaryIndex = null;
           continue;
         }
+        if (row.tailNote) pendingTailNote = row.tailNote;
         const raw = useFirstWins
           ? preprocessAlternatives(row.text, knownIngredientKeys)
           : row.text;
@@ -1645,6 +1667,17 @@ function parseGroupedIngredientLines(
           if (!row.isAlternative) {
             lastPrimaryIndex = currentGroup.ingredients.length - 1;
           }
+        }
+      }
+      if (pendingTailNote && lastPrimaryIndex !== null) {
+        const primary = groups[groups.length - 1].ingredients[lastPrimaryIndex];
+        appendAlternativeToNotes(primary, null, pendingTailNote, originalTrimmed);
+        const idx = originalTrimmed.indexOf(pendingTailNote);
+        if (idx >= 0) {
+          (primary.highlightParts ??= []).push({
+            range: [idx, idx + pendingTailNote.length],
+            kind: "note",
+          });
         }
       }
     }
