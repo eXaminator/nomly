@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { Ban, BookOpen, Check, MoreVertical, Pencil, Tags, Trash2, Wrench } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -44,6 +45,10 @@ type Props = {
   onRequestMarkRecipeUpdate: (item: ShoppingItemView) => void;
   /** When true, all non-toggle actions (edit, delete, unavailable) are disabled. */
   disabledOffline?: boolean;
+  /** When set, replaces the 3-dots action menu with this node (e.g. the
+   *  "Hier verfügbar machen" button on the unavailable tab). The row keeps its
+   *  normal look and stays checkable. */
+  trailingAction?: ReactNode;
 };
 
 export function ShoppingItemRow({
@@ -58,6 +63,7 @@ export function ShoppingItemRow({
   onMarkRecipesNeedUpdate,
   onRequestMarkRecipeUpdate,
   disabledOffline = false,
+  trailingAction,
 }: Props) {
   const isUnavailableHere =
     activeSupermarketId != null &&
@@ -141,6 +147,7 @@ export function ShoppingItemRow({
       </div>
 
       <div className="flex shrink-0 items-center gap-1" onClick={(e) => e.stopPropagation()}>
+        {trailingAction ?? (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" size="icon" aria-label="Aktionen" title="Aktionen">
@@ -192,6 +199,7 @@ export function ShoppingItemRow({
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
+        )}
       </div>
     </div>
   );

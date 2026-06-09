@@ -22,7 +22,6 @@ import {
 import { countNeededItemsPerSupermarket } from "@/lib/shopping/supermarket-availability";
 import { resolveSupermarketDeepLink } from "@/lib/shopping/supermarket-deep-link";
 import { ShoppingItemRow } from "./shopping-item-row";
-import { AmountList } from "./amount-list";
 import { MarkRecipeUpdateDialog } from "./mark-recipe-update-dialog";
 import { ShoppingDoneState } from "./shopping-done";
 import { AddItemDialog } from "./add-item-dialog";
@@ -457,7 +456,7 @@ export function ShoppingListView({
     [supermarkets, neededCounts],
   );
 
-  const renderRow = (item: ShoppingItemView) => (
+  const renderRow = (item: ShoppingItemView, trailingAction?: React.ReactNode) => (
     <li key={item.id}>
       <ShoppingItemRow
         item={item}
@@ -471,6 +470,7 @@ export function ShoppingListView({
         onMarkRecipesNeedUpdate={(ids) => void apiMarkRecipesNeedUpdate(ids)}
         onRequestMarkRecipeUpdate={setMarkUpdateItem}
         disabledOffline={disabledOffline}
+        trailingAction={trailingAction}
       />
     </li>
   );
@@ -611,7 +611,7 @@ export function ShoppingListView({
                       {group.label}
                     </h2>
                     <ul className="flex flex-col divide-y divide-[var(--color-border)] rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-card)]">
-                      {group.items.map(renderRow)}
+                      {group.items.map((i) => renderRow(i))}
                     </ul>
                   </section>
                 ))}
@@ -632,7 +632,7 @@ export function ShoppingListView({
               </div>
             ) : (
               <ul className="flex flex-col divide-y divide-[var(--color-border)] rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-card)] opacity-70">
-                {grouped.checkedItems.map(renderRow)}
+                {grouped.checkedItems.map((i) => renderRow(i))}
               </ul>
             )}
           </TabsContent>
@@ -643,17 +643,9 @@ export function ShoppingListView({
               woanders. Hebe die Markierung auf, um sie wieder einzublenden.
             </p>
             <ul className="flex flex-col divide-y divide-[var(--color-border)] rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-card)]">
-              {grouped.unavailableHere.map((item) => (
-                <li
-                  key={item.id}
-                  className="flex items-center gap-2 px-2 py-2 sm:px-3"
-                >
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-                      <span className="font-medium">{item.name}</span>
-                      <AmountList amounts={item.amounts} />
-                    </div>
-                  </div>
+              {grouped.unavailableHere.map((item) =>
+                renderRow(
+                  item,
                   <Button
                     variant="outline"
                     size="sm"
@@ -666,10 +658,11 @@ export function ShoppingListView({
                     }
                   >
                     <RotateCcw className="mr-2 size-4" />
-                    Hier verfügbar machen
-                  </Button>
-                </li>
-              ))}
+                    <span className="hidden sm:inline">Hier verfügbar machen</span>
+                    <span className="sm:hidden">Verfügbar</span>
+                  </Button>,
+                ),
+              )}
             </ul>
           </TabsContent>
         </Tabs>
