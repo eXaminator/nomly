@@ -110,7 +110,11 @@ export function RecipeIngredientReadLine({
       className={cn(
         "flex items-start gap-2",
         (isOptional || isAlternative) && "italic opacity-65",
-        struck && "text-[var(--color-muted-fg)] line-through opacity-65",
+        // Strike the WHOLE row. line-through on the flex container doesn't reach
+        // blockified flex items / inline-block children (name, notes, mapping
+        // chip), so force it on every descendant too.
+        struck &&
+          "text-[var(--color-muted-fg)] line-through opacity-65 [&_*]:line-through",
       )}
     >
       {isAlternative ? (
