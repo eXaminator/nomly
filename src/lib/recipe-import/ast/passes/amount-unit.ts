@@ -9,7 +9,7 @@ const TEXT_QUARTER = new Set(["viertel", "quarter"]);
 /** Size words that may sit between the quantity and the unit ("1 small bunch",
  *  "1 kl. Dose"). They are SKIPPED so the unit is still found, but NOT consumed
  *  — they stay verbatim in the note. */
-const SIZE_MODIFIERS = new Set([
+export const SIZE_MODIFIERS = new Set([
   "small", "large", "medium", "big", "jumbo", "tiny", "huge",
   "klein", "kleine", "kleiner", "kleines", "kleinen", "kl",
   "gross", "groß", "große", "großer", "großes", "großen", "grosse",

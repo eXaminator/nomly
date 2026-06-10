@@ -5,6 +5,25 @@ import {
   type IngredientCatalog,
 } from "../../matching";
 import type { Leaf } from "../render-notes";
+import { SIZE_MODIFIERS } from "./amount-unit";
+
+const normWord = (s: string): string => s.toLowerCase().replace(/[.,:!?]+$/, "");
+
+/** Usage prefixes — everything from here on is a note ("zum Bestreuen"). */
+const USAGE_PREFIX = new Set(["zum", "zur", "für", "fürs", "for"]);
+/** Note-boundary markers (example/abbreviation lead-ins). */
+const NOTE_BOUNDARY = new Set(["bzw", "z.b", "zb", "ggf", "alternativ", "alternative"]);
+
+/** True when `region[i]` begins a vocab tail that belongs in the notes, not the
+ *  name (usage prefix, "to taste", "nach Geschmack/Belieben", note boundary). */
+function isVocabBoundary(region: Leaf[], i: number): boolean {
+  const w = normWord(region[i].text);
+  if (USAGE_PREFIX.has(w) || NOTE_BOUNDARY.has(w)) return true;
+  const next = region[i + 1] ? normWord(region[i + 1].text) : "";
+  if (w === "to" && next === "taste") return true;
+  if (w === "nach" && (next === "geschmack" || next === "belieben")) return true;
+  return false;
+}
 
 export type MatchResult = {
   matched: boolean;
@@ -102,15 +121,37 @@ export function applyMatch(
   };
 }
 
-/** No catalog hit: the name is the depth-0 run up to the first top-level comma;
- *  the rest stays as notes. (Vocab-tail stripping is handled in a later pass.) */
+/**
+ * No catalog hit: the name is the core depth-0 word/number run up to the first
+ * top-level comma, with leading size modifiers and a trailing vocab phrase
+ * ("to taste", "zum Bestreuen") left UNCONSUMED so they fall into the notes —
+ * mirroring the legacy no-match name (stripVocabTail + size peel).
+ */
 function noMatch(source: string, remainder: Leaf[]): MatchResult {
-  const nameLeaves: Leaf[] = [];
+  // Depth-0 word/number leaves before the first top-level comma (paren content
+  // is skipped, not a boundary, so "(225g) large shrimp" still finds "shrimp").
+  const region: Leaf[] = [];
   for (const lf of remainder) {
     if (lf.kind === "comma" && lf.depth === 0) break;
-    if (lf.depth > 0 || lf.kind === "open" || lf.kind === "close") break;
-    nameLeaves.push(lf);
+    if (lf.depth !== 0) continue;
+    if (lf.kind === "word" || lf.kind === "number") region.push(lf);
   }
+  let start = 0;
+  while (
+    start < region.length &&
+    region[start].kind === "word" &&
+    SIZE_MODIFIERS.has(normWord(region[start].text))
+  ) {
+    start += 1;
+  }
+  let end = region.length;
+  for (let i = start; i < region.length; i++) {
+    if (isVocabBoundary(region, i)) {
+      end = i;
+      break;
+    }
+  }
+  const nameLeaves = region.slice(start, end);
   if (nameLeaves.length === 0) return EMPTY;
   for (const lf of nameLeaves) {
     lf.consumed = true;

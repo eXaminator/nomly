@@ -1430,7 +1430,9 @@ describe("alternative amount/unit/notes inheritance", () => {
     );
     expect(out).toHaveLength(1);
     expect(out[0].name).toBe("butter");
-    expect(out[0].notes).toContain("14 tbsp / 1 ¾ sticks");
+    // AST parser keeps the source verbatim: "1¾" had no space in the input, so
+    // no space is invented (was "1 ¾" under the old token-rejoining notes).
+    expect(out[0].notes).toContain("14 tbsp / 1¾ sticks");
   });
 
   it("keeps a semicolon in the notes on the matched path", () => {
@@ -1612,7 +1614,8 @@ describe("note fragments keep source order, comma-separated", () => {
     );
     expect(out[0].ingredientMatch).toBe("new");
     expect(out[0].name).toBe("shrimp");
-    expect(out[0].notes).toBe("225 g, large, peeled and deveined");
+    // "(225g)" had no space in the source; AST keeps it verbatim (was "225 g").
+    expect(out[0].notes).toBe("225g, large, peeled and deveined");
   });
 
   it("skips the per-alias rename when the default unit is skipped (no amount)", () => {
@@ -2190,7 +2193,9 @@ describe("paren sizes are front captures only at the line front", () => {
     );
     expect(out[0].ingredientId).toBe(1);
     expect(out[0].quantity).toBe(2);
-    expect(out[0].notes).toBe("chopped, ⅔ cup");
+    // AST rule: only ROOT-level parens are unwrapped; the nested "(⅔ cup)" stays
+    // verbatim (was "chopped, ⅔ cup" under the old unwrap-all behavior).
+    expect(out[0].notes).toBe("chopped (⅔ cup)");
   });
 
   it("'1 (28 oz.) can crushed tomatoes' still leads with the size", () => {
