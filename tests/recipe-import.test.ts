@@ -210,35 +210,26 @@ describe("parseIngredientString", () => {
     // 0.25 → "1/4" (clean fraction); 0.4 → "0,4" (2-decimal cap, no fraction).
     expect(r.notes).toBe("1/4-0,4 l");
   });
-  it("a unitless range keeps the bare range note", () => {
-    // No unit to append — "2-3 Eier" → note stays "2-3".
+  it("a unitless range keeps the bare range note (pipeline defaults the unit)", () => {
+    // The range note has no unit to append → stays "2-3"; the pipeline then
+    // fills the empty unit slot with the global default (Stück).
     const r = parse("2-3 Eier");
     expect(r.quantity).toBe(3);
-    expect(r.unitName).toBeNull();
+    expect(r.unitName).toBe("Stück");
     expect(r.name).toBe("Eier");
     expect(r.notes).toBe("2-3");
   });
-  it("leaves unitless ingredients alone", () => {
+  it("a quantity with no unit gets the default unit", () => {
     expect(parse("3 Eier")).toMatchObject({
       quantity: 3,
-      unitName: null,
+      unitName: "Stück",
       name: "Eier",
       notes: null,
       isOptional: false,
     });
   });
-  it("keeps 'nach Geschmack' in the name — vocab applies only on no-match", () => {
-    // The phrase is NOT stripped at string level anymore: the matcher must
-    // see the pristine line. A matched line routes the phrase to notes via
-    // uncovered tokens; an unmatched one via stripVocabTail.
-    expect(parse("Salz nach Geschmack")).toMatchObject({
-      quantity: null,
-      unitName: null,
-      name: "Salz nach Geschmack",
-      notes: null,
-      isOptional: false,
-    });
-  });
+  // (Removed: "nach Geschmack stays in the name" — the pipeline routes the
+  //  phrase to notes; covered by recipe-import-matching's vocab tests.)
   it("accepts a DB-added alias like 'Pck.' without parser changes", () => {
     expect(parse("1 Pck. Blätterteig")).toMatchObject({
       quantity: 1,
@@ -282,15 +273,9 @@ describe("parseIngredientString — extended cases", () => {
     expect(r.name).toBe("Puderzucker");
     expect(r.notes?.toLowerCase()).toContain("etwas");
   });
-  it("usage suffix 'zum Bestreuen' stays in the name at string level", () => {
-    // Pristine for the matcher; stripVocabTail cleans it on the no-match path.
-    const r = parse("Etwas Puderzucker zum Bestreuen");
-    expect(r.name).toBe("Puderzucker zum Bestreuen");
-  });
-  it("dash-separated 'Flaked Almond - to taste' keeps the phrase in the name", () => {
-    const r = parse("Flaked Almond - to taste");
-    expect(r.name).toBe("Flaked Almond to taste");
-  });
+  // (Removed: "zum Bestreuen"/"Flaked Almond - to taste" stay-in-name tested the
+  //  old standalone parser's no-vocab-strip contract. The pipeline routes such
+  //  phrases to notes — covered by recipe-import-matching's vocab tests.)
   it("amount at the end via colon: 'Flohsamenschalenpulver: 30 g'", () => {
     const r = parse("Flohsamenschalenpulver: 30 g");
     expect(r.quantity).toBe(30);
@@ -309,17 +294,9 @@ describe("parseIngredientString — extended cases", () => {
     expect(r.unitName?.toLowerCase()).toBe("el");
     expect(r.notes).toMatch(/bis 2/);
   });
-  it("keeps a ' / ' verbatim at the string level (the pipeline splits top-level slash alternatives)", () => {
-    // expandIngredientLine splits "Butter / Margarine" into primary + alt
-    // upstream; a slash reaching parseIngredientString is note text and must
-    // survive verbatim, not be rewritten to "or".
-    const r = parse("100 g Butter / Margarine");
-    expect(r.name).toBe("Butter / Margarine");
-  });
-  it("' o. ' is normalised to 'or' and stays in the name", () => {
-    const r = parse("1 EL Zucker o. Honig");
-    expect(r.name).toBe("Zucker or Honig");
-  });
+  // (Removed: "Butter / Margarine" / "Zucker o. Honig" stay-in-name tested the
+  //  standalone parser; the pipeline splits these into primary + alternative —
+  //  covered by recipe-import-matching's alternative tests.)
   it("'nach Belieben' is captured as a note, never an optional flag", () => {
     const r = parse("Salz nach Belieben");
     expect(r.isOptional).toBe(false);
