@@ -48,8 +48,19 @@ function assembleNotes(
   return tidyNote(`${rangeFrag}${sep}${rendered}`);
 }
 
+/** Rewrite the "Name: qty unit" colon-amount form to "qty unit Name" so the
+ *  amount pass finds the leading quantity ("Mehl: 500 g" → "500 g Mehl"). Only
+ *  fires when the post-colon side is an amount (contains a digit/fraction);
+ *  list/section colons ("Topping: cheese") are left untouched. */
+function colonAmountInvert(source: string): string {
+  const m = /^\s*([^:]+?):\s*([\d.,/\s½¼¾⅓⅔⅛⅜⅝⅞–-]+(?:\s+\p{L}{1,30}\.?)?)\s*$/u.exec(source);
+  if (m && /[\d½¼¾⅓⅔⅛⅜⅝⅞]/.test(m[2])) return `${m[2].trim()} ${m[1].trim()}`;
+  return source;
+}
+
 /** Parse one ingredient segment into a structured row. */
-export function parseSegment(source: string, lookups: SegmentLookups): ParsedRow {
+export function parseSegment(rawSource: string, lookups: SegmentLookups): ParsedRow {
+  const source = colonAmountInvert(rawSource);
   const leaves: Leaf[] = lex(source).map((t) => ({ ...t }));
   const isOptional = applyOptional(leaves);
   // Prep noun ("Juice of …") runs before the amount pass so the quantity that

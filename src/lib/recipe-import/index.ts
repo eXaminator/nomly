@@ -1059,15 +1059,16 @@ export function parseIngredientLines(
         : row.text;
       for (const piece of splitConjunctions(raw, splitOpts)) {
         const parsed = parseIngredientString(piece, knownUnitTokens);
-        // AST note: the faithful, source-verbatim-minus-consumed note. Computed
-        // per piece via the AST pipeline; replaces the legacy token-rejoined
-        // note (which dropped semicolons and other punctuation).
-        const astNote = parseSegment(piece, {
+        // AST parse of this piece — the source of truth for quantity, unit, and
+        // the faithful source-verbatim-minus-consumed note. (Name + candidate
+        // matches still come from the legacy resolve below.)
+        const astSeg = parseSegment(piece, {
           knownUnitTokens,
           catalog: lookups.ingredientCatalog ?? [],
           catalogIndex: lookups.ingredientCatalogIndex,
           threshold,
-        }).notes;
+        });
+        const astNote = astSeg.notes;
         const sourceRange = findSegmentRange(
           originalTrimmed,
           piece,
@@ -1131,8 +1132,8 @@ export function parseIngredientLines(
         }
         const initialUnit = resolveUnit(
           lookups.units,
-          parsed.unitName,
-          parsed.quantity,
+          astSeg.unitName,
+          astSeg.quantity,
         );
         const resolved = resolveIngredientForRow(parsed, piece, lookups, threshold);
         // Fold an unmatched alternative back into its primary's notes instead
@@ -1174,9 +1175,9 @@ export function parseIngredientLines(
           }
           continue;
         }
-        const final = pickFinalUnit(initialUnit, resolved.defaultUnit, parsed.quantity);
+        const final = pickFinalUnit(initialUnit, resolved.defaultUnit, astSeg.quantity);
         out.push({
-          quantity: parsed.quantity,
+          quantity: astSeg.quantity,
           unit: final.resolved,
           unitMatch: final.match,
           rawUnit: final.rawUnit,
@@ -1198,7 +1199,7 @@ export function parseIngredientLines(
           // No parsed quantity → treat the amount as constant. Catches
           // "Salz nach Geschmack" / "etwas Olivenöl" so changing the meal's
           // portion size doesn't multiply a non-existent number.
-          fixedAmount: parsed.quantity === null,
+          fixedAmount: astSeg.quantity === null,
           // For expanded rows (Optional:, alternativ:, list-after-colon,
           // each:), surface the user's ORIGINAL full line in rawText —
           // makes it clear in the import-review UI which source line each
