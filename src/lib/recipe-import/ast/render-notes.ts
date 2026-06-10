@@ -61,6 +61,8 @@ export function renderNote(source: string, leaves: readonly Leaf[]): string | nu
 /** Collapse whitespace + comma runs, trim edge separators; empty → null. */
 export function tidyNote(s: string): string | null {
   const t = s
+    // Drop invisible formatting chars (soft hyphen, zero-width, BOM).
+    .replace(/[­​-‍﻿]/gu, "")
     .replace(/\s+/g, " ")
     .replace(/\s*,\s*/g, ", ")
     .replace(/(?:,\s*){2,}/g, ", ")

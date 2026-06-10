@@ -47,9 +47,11 @@ function isVocabBoundary(region: Leaf[], i: number): boolean {
   return false;
 }
 
-/** Leading filler words ("of caster sugar" → "caster sugar") — dropped from the
- *  no-match name entirely (not kept as notes). */
-const NAME_FILLER = new Set(["of", "von", "vom"]);
+/** Leading filler words ("of caster sugar" → "caster sugar", "and Salz" →
+ *  "Salz") — dropped from the no-match name entirely (not kept as notes). */
+const NAME_FILLER = new Set([
+  "of", "von", "vom", "and", "und", "the", "der", "die", "das", "plus", "to",
+]);
 
 export type MatchResult = {
   matched: boolean;
@@ -275,6 +277,9 @@ function noMatch(
   }
   const name = source
     .slice(nameLeaves[0].start, nameLeaves[nameLeaves.length - 1].end)
+    .replace(/[­​-‍﻿]/gu, "") // invisible formatting chars
+    .replace(/\s*[-–—]\s+|\s+[-–—]\s*/g, " ") // spaced separator dash → space
+    .replace(/\s+/g, " ")
     .trim();
   const cleanedNotes = renderNote(source, leaves);
   // "Aufgeräumt" (cleaned) + "Wie eingegeben" (the full region, nothing peeled)
