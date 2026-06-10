@@ -277,6 +277,16 @@ function computeHighlights(
       notesDiffs.push(undefined);
       continue;
     }
+    // A carried alternative the re-parse drops is, by default, being deleted —
+    // its current/proposed values are identical, so the normal field-by-field
+    // diff finds nothing. Force a full highlight so it reads as a removed row
+    // (red), not an unchanged one. "Keep" clears this (it's then preserved).
+    if (d.carriedRemovable && !d.keep) {
+      cur.push(ALL);
+      prop.push(ALL);
+      notesDiffs.push(undefined);
+      continue;
+    }
     const flags: LineHighlight = {
       // Compare the quantity-inflected unit label on both sides, so a pure
       // singular/plural difference collapses to the same string (no highlight)
