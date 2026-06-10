@@ -1,4 +1,4 @@
-import { parseIngredientString } from "./ingredient.ts";
+import { parseSegment } from "./ast/parse-line.ts";
 
 /**
  * Split a clipboard blob into one cell per line. Newlines AND tabs become
@@ -17,7 +17,7 @@ function classifyLine(
   line: string,
   knownUnitTokens: ReadonlySet<string>,
 ): "quantity-only" | "name-only" | "complete" {
-  const parsed = parseIngredientString(line, knownUnitTokens);
+  const parsed = parseSegment(line, { knownUnitTokens, catalog: [] });
   const hasName = parsed.name.trim().length > 0;
   const hasQuantity = parsed.quantity !== null;
   if (hasQuantity && !hasName) return "quantity-only";

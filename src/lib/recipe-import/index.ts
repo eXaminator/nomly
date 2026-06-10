@@ -32,16 +32,12 @@ import {
 import {
   detectSectionHeader,
   expandIngredientLine,
-  isPrepLeadingToken,
   normalizeForMatch,
-  parseIngredientString,
   isStandaloneDescriptor,
   preprocessAlternatives,
   splitConjunctions,
   stripVocabTail,
-  tidyRemainderFragment,
   tokenizeEntryNameForCatalog,
-  type ParsedIngredient,
 } from "./ingredient.ts";
 import {
   MIN_AUTO_MATCH_SCORE,
