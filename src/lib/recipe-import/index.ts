@@ -24,7 +24,6 @@ import { parseIsoDurationToMinutes } from "./duration.ts";
 import { parseSegment } from "./ast/parse-line.ts";
 import {
   amountPrefixRange,
-  decomposeSegment,
   findSegmentRange,
   trailingNoteRange,
   type HighlightPart,
@@ -934,36 +933,6 @@ function applyAlternativeInheritance(rows: ImportedIngredient[]): void {
     if (hi > i) inheritWithinGroup(rows, i, hi);
     i = hi + 1;
   }
-}
-
-/** Categorised highlight parts for a row's OWN segment — amount/name/note,
- *  re-based onto the full line. Undefined when the segment isn't located. */
-function ownHighlightParts(
-  line: string,
-  sourceRange: SourceRange | null,
-  piece: string,
-  parsed: { quantity: number | null; unitName: string | null },
-  resolved: { name: string; sourceName: string | null; notes: string | null },
-): HighlightPart[] | undefined {
-  if (!sourceRange) return undefined;
-  const seg = line.slice(sourceRange[0], sourceRange[1]);
-  // For an alternative the segment leads with the connector ("oder 1 TL …");
-  // the parsed `piece` is the connector-free content, so its offset in the
-  // segment tells the decomposer where the amount really begins.
-  const pieceTrimmed = piece.trim();
-  const ci = seg.lastIndexOf(pieceTrimmed);
-  const contentStart = ci > 0 ? ci : 0;
-  return decomposeSegment(
-    seg,
-    parsed.quantity !== null,
-    parsed.unitName,
-    resolved.sourceName ?? resolved.name,
-    resolved.notes,
-    contentStart,
-  ).map((p) => ({
-    range: [sourceRange[0] + p.range[0], sourceRange[0] + p.range[1]] as SourceRange,
-    kind: p.kind,
-  }));
 }
 
 /**
