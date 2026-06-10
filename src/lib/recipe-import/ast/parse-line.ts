@@ -60,6 +60,15 @@ function assembleNotes(
   return tidyNote(`${rangeFrag}${sep}${rendered}`);
 }
 
+/** Strip inline pluralization markers a word carries ("Tomate(n)" → "Tomate",
+ *  "Dose/n" → "Dose") — they're orthographic, not notes, and the legacy
+ *  `normalize` dropped them before matching. */
+function stripPluralMarkers(source: string): string {
+  return source
+    .replace(/(\p{L})\((?:n|en|s|nen|innen)\)/giu, "$1")
+    .replace(/(\p{L})\/(?:n|en|s|innen)(?=\P{L}|$)/giu, "$1");
+}
+
 /** Rewrite the "Name: qty unit" colon-amount form to "qty unit Name" so the
  *  amount pass finds the leading quantity ("Mehl: 500 g" → "500 g Mehl"). Only
  *  fires when the post-colon side is an amount (contains a digit/fraction);
@@ -72,7 +81,7 @@ function colonAmountInvert(source: string): string {
 
 /** Parse one ingredient segment into a structured row. */
 export function parseSegment(rawSource: string, lookups: SegmentLookups): ParsedRow {
-  const source = colonAmountInvert(rawSource);
+  const source = colonAmountInvert(stripPluralMarkers(rawSource));
   const leaves: Leaf[] = lex(source).map((t) => ({ ...t }));
   const isOptional = applyOptional(leaves);
   // Prep noun ("Juice of …") runs before the amount pass so the quantity that

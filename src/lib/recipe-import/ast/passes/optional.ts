@@ -44,6 +44,27 @@ export function applyOptional(leaves: Leaf[]): boolean {
     }
   }
 
+  // "n. B." (nach Belieben abbreviation) → optional. Spelled-out "nach
+  // Belieben" stays a note (handled elsewhere); only the abbreviation flips it.
+  for (let i = 0; i + 1 < leaves.length; i++) {
+    const a = leaves[i];
+    if (a.kind !== "word" || a.consumed || a.text.toLowerCase() !== "n") continue;
+    let j = i + 1;
+    if (leaves[j]?.kind === "punct" && leaves[j].text === ".") j += 1;
+    const b = leaves[j];
+    if (b && b.kind === "word" && b.text.toLowerCase() === "b") {
+      isOptional = true;
+      for (let k = i; k <= j; k++) {
+        leaves[k].consumed = true;
+        leaves[k].role = "optional-marker";
+      }
+      if (leaves[j + 1]?.kind === "punct" && leaves[j + 1].text === "." && leaves[j + 1].start === b.end) {
+        leaves[j + 1].consumed = true;
+        leaves[j + 1].role = "optional-marker";
+      }
+    }
+  }
+
   for (let i = 0; i < leaves.length; i++) {
     const lf = leaves[i];
     if (lf.kind !== "word" || lf.consumed) continue;

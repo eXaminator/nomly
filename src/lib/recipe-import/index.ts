@@ -1058,15 +1058,16 @@ export function parseIngredientLines(
         ? preprocessAlternatives(row.text, knownIngredientKeys)
         : row.text;
       for (const piece of splitConjunctions(raw, splitOpts)) {
-        const parsed = parseIngredientString(piece, knownUnitTokens);
-        // AST parse of this piece — the source of truth for quantity, unit, and
-        // the faithful source-verbatim-minus-consumed note. (Name + candidate
-        // matches still come from the legacy resolve below.)
+        // ONE AST parse of this piece is the single source of truth: quantity,
+        // unit, faithful notes, name, ingredient match, candidate pills, and
+        // new-name proposals — all from one lex + one match.
         const astSeg = parseSegment(piece, {
           knownUnitTokens,
           catalog: lookups.ingredientCatalog ?? [],
           catalogIndex: lookups.ingredientCatalogIndex,
           threshold,
+          lineUnitId: (name, qty) =>
+            resolveUnit(lookups.units, name, qty).resolved?.id ?? null,
         });
         const astNote = astSeg.notes;
         const sourceRange = findSegmentRange(
@@ -1078,7 +1079,7 @@ export function parseIngredientLines(
         if (sourceRange) sourceCursor = sourceRange[1];
         // An optional marker makes the WHOLE block optional: when it sits on an
         // alternative ("… (oder X, optional)"), flag the primary too.
-        if (parsed.isOptional && row.isAlternative && lastPrimaryIndex !== null) {
+        if (astSeg.isOptional && row.isAlternative && lastPrimaryIndex !== null) {
           out[lastPrimaryIndex].isOptional = true;
         }
         // Skip the row when the parser couldn't pull a real ingredient name
@@ -1088,22 +1089,29 @@ export function parseIngredientLines(
         // a garbage row in the global ingredient catalog ("2 Prise" as an
         // ingredient). Same for fragments produced by conjunction splitting
         // that turn out to be empty.
-        if (parsed.name.trim().length === 0) {
+        if (astSeg.name.trim().length === 0) {
           // A nameless ALTERNATIVE ("1/2 large head" — the same ingredient in
           // a different amount, no article of its own) can't become a row;
-          // fold it into the primary's notes instead of dropping it.
+          // fold it into the primary's notes instead of dropping it. A purely
+          // note-only alt ("(oder nach Geschmack)" — no amount/unit) qualifies
+          // the WHOLE group, so it folds onto the primary AND every alternative
+          // emitted since; an amount-only one folds onto the primary alone.
           if (row.isAlternative && lastPrimaryIndex !== null) {
-            appendAlternativeToNotes(
-              out[lastPrimaryIndex],
-              row.alternativeConnector,
-              piece.trim(),
-              originalTrimmed,
-            );
-            if (sourceRange) {
-              (out[lastPrimaryIndex].highlightParts ??= []).push({
-                range: sourceRange,
-                kind: "note",
-              });
+            const isNoteOnly = astSeg.quantity === null && astSeg.unitName === null;
+            const foldEnd = isNoteOnly ? out.length - 1 : lastPrimaryIndex;
+            for (let ti = lastPrimaryIndex; ti <= foldEnd; ti++) {
+              appendAlternativeToNotes(
+                out[ti],
+                row.alternativeConnector,
+                piece.trim(),
+                originalTrimmed,
+              );
+              if (sourceRange) {
+                (out[ti].highlightParts ??= []).push({
+                  range: sourceRange,
+                  kind: "note",
+                });
+              }
             }
           }
           continue;
@@ -1111,23 +1119,23 @@ export function parseIngredientLines(
         // Defensive: a colon still in the parsed name means none of the
         // expansion rules caught the line. Drop rather than pollute the
         // catalog with a colon-bearing ingredient name.
-        if (parsed.name.includes(":")) continue;
+        if (astSeg.name.includes(":")) continue;
         // Familywall opt-in: drop rows whose name is a bare descriptor token
         // ("frische", "fresh", "red") with no head noun — usually truncated
         // source lines like "8 frische" or "1 cup fresh". Without this, the
         // first such row creates a "frische" canonical and subsequent
         // "frische X" lines tie at score 130 between the orphan and the real
         // head-noun canonical, cascading more orphan matches.
-        if (useFirstWins && isStandaloneDescriptor(parsed.name)) continue;
+        if (useFirstWins && isStandaloneDescriptor(astSeg.name)) continue;
         // A leading "or X" / "oder X" almost always means we just split a
         // conjunction that connected alternatives. Attach as a note on the
         // previous row instead of creating a separate ingredient.
-        const leadingOr = /^(?:or|oder)\s+(.+)/i.exec(parsed.name.trim());
+        const leadingOr = /^(?:or|oder)\s+(.+)/i.exec(astSeg.name.trim());
         if (leadingOr && out.length > 0) {
           const alt = leadingOr[1];
           const prev = out[out.length - 1];
           prev.notes = prev.notes ? `${prev.notes}, oder ${alt}` : `oder ${alt}`;
-          if (parsed.isOptional || row.forceOptional) prev.isOptional = true;
+          if (astSeg.isOptional || row.forceOptional) prev.isOptional = true;
           continue;
         }
         const initialUnit = resolveUnit(
@@ -1135,7 +1143,6 @@ export function parseIngredientLines(
           astSeg.unitName,
           astSeg.quantity,
         );
-        const resolved = resolveIngredientForRow(parsed, piece, lookups, threshold);
         // Fold an unmatched alternative back into its primary's notes instead
         // of creating an "orphan new-ingredient" row. Most recipe "or"s mean
         // "or you could use this instead" rather than a parallel shopping
@@ -1143,7 +1150,7 @@ export function parseIngredientLines(
         // user's intent is information for the cook, not a second purchase.
         if (
           row.isAlternative &&
-          resolved.match === "new" &&
+          !astSeg.matched &&
           lastPrimaryIndex !== null
         ) {
           // A trailing alternative that is PURELY a note phrase ("(oder nach
@@ -1175,25 +1182,31 @@ export function parseIngredientLines(
           }
           continue;
         }
-        const final = pickFinalUnit(initialUnit, resolved.defaultUnit, astSeg.quantity);
+        const final = pickFinalUnit(initialUnit, astSeg.defaultUnit, astSeg.quantity);
         out.push({
           quantity: astSeg.quantity,
           unit: final.resolved,
           unitMatch: final.match,
           rawUnit: final.rawUnit,
           sourceRange: sourceRange ?? undefined,
-          highlightParts: ownHighlightParts(originalTrimmed, sourceRange, piece, parsed, resolved),
-          name: resolved.name,
-          ingredientId: resolved.ingredientId,
-          ingredientMatch: resolved.match,
-          canonicalIngredientName: resolved.canonicalIngredientName,
-          sourceName: resolved.sourceName,
+          highlightParts: ownHighlightParts(
+            originalTrimmed,
+            sourceRange,
+            piece,
+            { quantity: astSeg.quantity, unitName: astSeg.unitName },
+            { name: astSeg.name, sourceName: astSeg.sourceName, notes: astNote },
+          ),
+          name: astSeg.name,
+          ingredientId: astSeg.ingredientId,
+          ingredientMatch: astSeg.matched ? "existing" : "new",
+          canonicalIngredientName: astSeg.canonicalName,
+          sourceName: astSeg.sourceName,
           notes: astNote,
           // Equipment-flagged ingredients (Backpapier, Einmachgläser …)
           // default to optional so the user decides per-recipe whether they
           // actually need to shop them. `forceOptional` carries through
           // Optional:/alternativ: wrappers from the expansion pass.
-          isOptional: parsed.isOptional || resolved.isEquipment || row.forceOptional,
+          isOptional: astSeg.isOptional || astSeg.isEquipment || row.forceOptional,
           isAlternative: row.isAlternative,
           localNote: row.localNote,
           // No parsed quantity → treat the amount as constant. Catches
@@ -1205,8 +1218,8 @@ export function parseIngredientLines(
           // makes it clear in the import-review UI which source line each
           // resulting ingredient came from.
           rawText: row.rawText !== row.text ? row.rawText : piece.trim(),
-          candidateMatches: resolved.candidateMatches,
-          newNameProposals: resolved.newNameProposals,
+          candidateMatches: astSeg.candidateMatches,
+          newNameProposals: astSeg.newNameProposals,
         });
         if (!row.isAlternative) lastPrimaryIndex = out.length - 1;
       }

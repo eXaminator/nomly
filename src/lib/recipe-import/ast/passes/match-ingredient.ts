@@ -183,11 +183,11 @@ export function applyMatch(
       : best.aliasName;
   const canonicalName =
     name.toLowerCase() === best.canonicalName.toLowerCase() ? null : best.canonicalName;
+  // The matched source span verbatim — set whenever there's a covered span
+  // (legacy computeNameAndNotes returns it unconditionally; the fold-separator
+  // logic relies on it to detect a pre-name descriptor).
   let sourceName: string | null = null;
-  if (maxEnd > 0) {
-    const span = source.slice(minStart, maxEnd).trim();
-    if (span.length > 0 && span.toLowerCase() !== name.toLowerCase()) sourceName = span;
-  }
+  if (maxEnd > 0) sourceName = source.slice(minStart, maxEnd).trim() || null;
   return {
     matched: true,
     ingredientId: best.ingredientId,
