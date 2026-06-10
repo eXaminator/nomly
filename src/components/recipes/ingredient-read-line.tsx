@@ -102,7 +102,9 @@ export function RecipeIngredientReadLine({
   const hlClass =
     tone === "added"
       ? "rounded bg-[color-mix(in_srgb,#22c55e,transparent_75%)] px-0.5"
-      : "rounded bg-[color-mix(in_srgb,#ef4444,transparent_80%)] px-0.5";
+      : // Brighter, slightly more opaque red on dark backgrounds so the
+        // removed-side highlight stays legible.
+        "rounded bg-[color-mix(in_srgb,#ef4444,transparent_80%)] px-0.5 dark:bg-[color-mix(in_srgb,#f87171,transparent_68%)]";
   const mark = (on: boolean | undefined, node: ReactNode) =>
     on && tone ? <span className={hlClass}>{node}</span> : node;
   return (
