@@ -7,6 +7,7 @@ import type { HighlightPart } from "../source-ranges";
 import { lex } from "./lexer";
 import { renderNote, tidyNote, type Leaf } from "./render-notes";
 import { renderHighlights } from "./render-highlights";
+import { applyLeadingNoise } from "./passes/leading-noise";
 import { applyOptional } from "./passes/optional";
 import { applyPluralMarkers } from "./passes/plural-marker";
 import { applyPrepNoun } from "./passes/prep-noun";
@@ -75,6 +76,8 @@ export function parseSegment(source: string, lookups: SegmentLookups): ParsedRow
   const leaves: Leaf[] = lex(source).map((t) => ({ ...t }));
   // Annotate (don't rewrite) inline plural markers "Tomate(n)" → dropped.
   applyPluralMarkers(leaves);
+  // Drop leading punctuation/symbol noise ("+ 100 ml", "*Pfeffer", "▢ …").
+  applyLeadingNoise(leaves);
   const isOptional = applyOptional(leaves);
   // Prep noun ("Juice of …") runs before the amount pass so the quantity that
   // follows the dropped connector is still found; its text leads the notes.

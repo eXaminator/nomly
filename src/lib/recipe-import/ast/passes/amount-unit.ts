@@ -63,7 +63,19 @@ export function applyAmountUnit(
 
   if (cur < groups.length) {
     const w = wordKey(groups[cur]);
-    if (TEXT_ONE.has(w)) {
+    const next = cur + 1 < groups.length ? wordKey(groups[cur + 1]) : "";
+    if (TEXT_ONE.has(w) && TEXT_HALF.has(next)) {
+      // "eine halbe Tasse" → 0.5
+      quantity = 0.5;
+      consumeGroup(groups[cur], "amount");
+      consumeGroup(groups[cur + 1], "amount");
+      cur += 2;
+    } else if (TEXT_ONE.has(w) && TEXT_QUARTER.has(next)) {
+      quantity = 0.25;
+      consumeGroup(groups[cur], "amount");
+      consumeGroup(groups[cur + 1], "amount");
+      cur += 2;
+    } else if (TEXT_ONE.has(w)) {
       quantity = 1;
       consumeGroup(groups[cur], "amount");
       cur += 1;

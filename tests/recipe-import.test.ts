@@ -4,11 +4,11 @@ import {
   detectSectionHeader,
   expandIngredientLine,
   normalizeForMatch,
-  parseIngredientString,
   splitConjunctions,
   stripVocabTail,
   tidyRemainderFragment,
 } from "@/lib/recipe-import/ingredient";
+import { parseSegment } from "@/lib/recipe-import/ast/parse-line";
 import {
   asImageUrl,
   asInstructionGroups,
@@ -70,7 +70,7 @@ const TEST_UNITS = new Set(
     "x", "tin", "tins", "bd", "bd.", "stick", "sticks",
   ].map((u) => u.toLowerCase()),
 );
-const parse = (raw: string) => parseIngredientString(raw, TEST_UNITS);
+const parse = (raw: string) => parseSegment(raw, { knownUnitTokens: TEST_UNITS, catalog: [] });
 
 describe("parseIngredientString", () => {
   it("splits qty + unit + name", () => {
