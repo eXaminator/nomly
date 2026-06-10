@@ -105,14 +105,6 @@ export function RecipeIngredientReadLine({
       : "rounded bg-[color-mix(in_srgb,#ef4444,transparent_80%)] px-0.5";
   const mark = (on: boolean | undefined, node: ReactNode) =>
     on && tone ? <span className={hlClass}>{node}</span> : node;
-  // Removal scenarios mirror a deleted row: the attribute shows red on the
-  // current side (it still has it) and STRUCK on the proposed side (it's gone).
-  // On the proposed side ("added" tone) the flag differs and this side LACKS
-  // the attribute → it was removed, so render a struck placeholder of it.
-  const optionalRemoved =
-    !isOptional && !!highlight?.optional && tone === "added";
-  const alternativeRemoved =
-    !isAlternative && !!highlight?.alternative && tone === "added";
   return (
     <div
       className={cn(
@@ -125,12 +117,11 @@ export function RecipeIngredientReadLine({
           "text-[var(--color-muted-fg)] line-through opacity-65 [&_*]:line-through",
       )}
     >
-      {isAlternative || alternativeRemoved ? (
+      {isAlternative ? (
         <span
           className={cn(
             "mt-0.5 shrink-0",
-            isAlternative && highlight?.alternative && tone ? hlClass : undefined,
-            alternativeRemoved && "opacity-50 line-through",
+            highlight?.alternative && tone ? hlClass : undefined,
           )}
         >
           <CornerDownRight
@@ -180,12 +171,11 @@ export function RecipeIngredientReadLine({
             )
           )
         ) : null}
-        {!isAlternative && (isOptional || optionalRemoved) ? (
+        {!isAlternative && isOptional ? (
           <span
             className={cn(
               "ml-1 text-xs text-[var(--color-muted-fg)]",
-              isOptional && highlight?.optional && tone ? hlClass : undefined,
-              optionalRemoved && "line-through",
+              highlight?.optional && tone ? hlClass : undefined,
             )}
           >
             (optional)
