@@ -46,7 +46,7 @@
  */
 
 import { canonicalizeMatchToken, normalizeForMatch } from "./ingredient.ts";
-import { lex } from "./ast/lexer.ts";
+import { lex, type Lexeme } from "./ast/lexer.ts";
 import { leavesToCandidateTokens } from "./ast/candidate-tokens.ts";
 
 export type CatalogEntry = {
@@ -613,10 +613,21 @@ export function findIngredientCandidates(
   catalog: IngredientCatalog,
   options: FindCandidatesOptions = {},
 ): { matches: IngredientCandidateMatch[]; candidate: CandidateToken[] } {
-  // One tokenizer: the AST lexer, projected to matcher candidate tokens. Parity
-  // with the former tokenizeCandidate/…JoinDashes is asserted in
-  // tests/ast-candidate-parity.test.ts.
-  const leaves = lex(candidateText);
+  return findIngredientCandidatesFromLeaves(lex(candidateText), catalog, options);
+}
+
+/**
+ * Match over AST leaves directly — the single-tokenization entry. The returned
+ * `candidate` tokens carry `leafStart`/`leafEnd` back into `leaves`, so a
+ * caller that already has an AST maps a match's covered tokens straight to its
+ * own leaves (no `matchText` reconstruction, no re-lex, no raw-text walk).
+ */
+export function findIngredientCandidatesFromLeaves(
+  leaves: readonly Lexeme[],
+  catalog: IngredientCatalog,
+  options: FindCandidatesOptions = {},
+): { matches: IngredientCandidateMatch[]; candidate: CandidateToken[] } {
+  // One tokenizer: the AST lexer, projected to matcher candidate tokens.
   const primary = leavesToCandidateTokens(leaves, false);
   if (primary.length === 0) return { matches: [], candidate: primary };
   const joined = leavesToCandidateTokens(leaves, true);

@@ -1,9 +1,10 @@
 import {
-  findIngredientCandidates,
+  findIngredientCandidatesFromLeaves,
   MIN_AUTO_MATCH_SCORE,
   type CatalogBlockIndex,
   type IngredientCatalog,
 } from "../../matching";
+import type { AstCandidateToken } from "../candidate-tokens";
 import type { Leaf } from "../render-notes";
 import { SIZE_MODIFIERS } from "./amount-unit";
 
@@ -72,24 +73,12 @@ export function applyMatch(
   catalog: IngredientCatalog,
   opts: { index?: CatalogBlockIndex; threshold?: number } = {},
 ): MatchResult {
+  // The matcher reads the SAME leaves (single tokenization). Each returned
+  // candidate token carries leafStart/leafEnd back into `remainder`, so a
+  // match's covered tokens map straight to leaves — no matchText, no raw-walk.
   const remainder = leaves.filter((l) => !l.consumed);
-  let matchText = "";
-  const leafRange: { leaf: Leaf; s: number; e: number }[] = [];
-  let prevEnd = -1;
-  for (const lf of remainder) {
-    if (matchText.length > 0) {
-      const gap = prevEnd >= 0 ? source.slice(prevEnd, lf.start) : "";
-      if (gap.length > 0) matchText += " ";
-    }
-    const s = matchText.length;
-    matchText += lf.text;
-    leafRange.push({ leaf: lf, s, e: matchText.length });
-    prevEnd = lf.end;
-  }
-  if (matchText.trim().length === 0) return EMPTY;
-
-  const { matches, candidate } = findIngredientCandidates(
-    matchText,
+  const { matches } = findIngredientCandidatesFromLeaves(
+    remainder,
     catalog,
     opts.index ? { index: opts.index } : undefined,
   );
@@ -97,32 +86,24 @@ export function applyMatch(
   const best = matches[0];
   if (!best || best.score < threshold) return noMatch(source, remainder);
 
-  const covered = new Set(best.coveredCandidateTokens);
-  let cursor = 0;
+  const tokens = best.candidate as AstCandidateToken[];
   let minStart = Number.POSITIVE_INFINITY;
   let maxEnd = -1;
-  for (let ti = 0; ti < candidate.length; ti++) {
-    const raw = candidate[ti].raw;
-    const at = matchText.indexOf(raw, cursor);
-    if (at < 0) continue;
-    const cs = at;
-    const ce = at + raw.length;
-    cursor = ce;
-    if (!covered.has(ti)) continue;
-    for (const lr of leafRange) {
-      if (lr.s < ce && lr.e > cs) {
-        lr.leaf.consumed = true;
-        lr.leaf.role = "ingredient";
-      }
+  for (const ti of best.coveredCandidateTokens) {
+    const tok = tokens[ti];
+    if (!tok) continue;
+    for (let li = tok.leafStart; li <= tok.leafEnd; li++) {
+      remainder[li].consumed = true;
+      remainder[li].role = "ingredient";
     }
-    minStart = Math.min(minStart, cs);
-    maxEnd = Math.max(maxEnd, ce);
+    minStart = Math.min(minStart, remainder[tok.leafStart].start);
+    maxEnd = Math.max(maxEnd, remainder[tok.leafEnd].end);
   }
 
   const name = best.displayName ?? best.aliasName;
   let sourceName: string | null = null;
   if (maxEnd > 0) {
-    const span = matchText.slice(minStart, maxEnd).trim();
+    const span = source.slice(minStart, maxEnd).trim();
     if (span.length > 0 && span.toLowerCase() !== name.toLowerCase()) sourceName = span;
   }
   return {
