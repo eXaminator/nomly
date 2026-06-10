@@ -1,9 +1,19 @@
 import type { Lexeme } from "./lexer";
 
+/** The role a semantic pass assigned to a token. Drives highlight kinds and
+ *  documents why a token was consumed. */
+export type Role =
+  | "amount"
+  | "unit"
+  | "ingredient"
+  | "connector"
+  | "optional-marker"
+  | "prep-noun";
+
 /** A lexeme annotated by the semantic passes. `consumed` marks a token that a
  *  structured field claimed (amount / unit / ingredient / connector / optional
  *  marker) — consumed tokens leave the note and become a comma boundary. */
-export type Leaf = Lexeme & { consumed?: boolean };
+export type Leaf = Lexeme & { consumed?: boolean; role?: Role };
 
 /**
  * Render a row's note from its leaves, per the note rule:
