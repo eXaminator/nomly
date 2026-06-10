@@ -773,12 +773,12 @@ export function parseIngredientLines(
           unitMatch: final.match,
           rawUnit: final.rawUnit,
           sourceRange: sourceRange ?? undefined,
-          highlightParts: ownHighlightParts(
+          highlightParts: astHighlights(
             originalTrimmed,
             sourceRange,
             piece,
-            { quantity: astSeg.quantity, unitName: astSeg.unitName },
-            { name: astSeg.name, sourceName: astSeg.sourceName, notes: astNote },
+            row.alternativeConnector,
+            astSeg.highlightParts,
           ),
           name: astSeg.name,
           ingredientId: astSeg.ingredientId,
@@ -964,6 +964,40 @@ function ownHighlightParts(
     range: [sourceRange[0] + p.range[0], sourceRange[0] + p.range[1]] as SourceRange,
     kind: p.kind,
   }));
+}
+
+/**
+ * Re-base the AST's piece-relative highlight spans onto the full line. The
+ * segment may lead with the alternative's connector ("oder …"), which the piece
+ * doesn't include — so spans rebase from where the piece actually starts in the
+ * segment, and the connector itself is added as a "dropped" span.
+ */
+function astHighlights(
+  line: string,
+  sourceRange: SourceRange | null,
+  piece: string,
+  connector: string | null,
+  parts: HighlightPart[],
+): HighlightPart[] | undefined {
+  if (!sourceRange) return undefined;
+  const seg = line.slice(sourceRange[0], sourceRange[1]);
+  const ci = seg.lastIndexOf(piece.trim());
+  const contentStart = ci > 0 ? ci : 0;
+  const base = sourceRange[0] + contentStart;
+  const out: HighlightPart[] = parts.map((p) => ({
+    kind: p.kind,
+    range: [base + p.range[0], base + p.range[1]] as SourceRange,
+  }));
+  if (connector && contentStart > 0) {
+    const cIdx = seg.toLowerCase().indexOf(connector.toLowerCase());
+    if (cIdx >= 0) {
+      out.unshift({
+        kind: "dropped",
+        range: [sourceRange[0] + cIdx, sourceRange[0] + cIdx + connector.length],
+      });
+    }
+  }
+  return out;
 }
 
 /** Re-base a within-segment range onto the full line and stash it as an
@@ -1266,12 +1300,12 @@ function parseGroupedIngredientLines(
             quantity: astSeg.quantity,
             unit: final.resolved,
             sourceRange: sourceRange ?? undefined,
-            highlightParts: ownHighlightParts(
+            highlightParts: astHighlights(
               originalTrimmed,
               sourceRange,
               piece,
-              { quantity: astSeg.quantity, unitName: astSeg.unitName },
-              { name: astSeg.name, sourceName: astSeg.sourceName, notes: astNote },
+              row.alternativeConnector,
+              astSeg.highlightParts,
             ),
             unitMatch: final.match,
             rawUnit: final.rawUnit,

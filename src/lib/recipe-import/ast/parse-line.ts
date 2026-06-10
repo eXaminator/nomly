@@ -3,8 +3,10 @@ import type {
   IngredientCatalog,
 } from "../matching";
 import type { ImportedCandidateMatch, ImportedNameProposal } from "../index";
+import type { HighlightPart } from "../source-ranges";
 import { lex } from "./lexer";
 import { renderNote, tidyNote, type Leaf } from "./render-notes";
+import { renderHighlights } from "./render-highlights";
 import { applyOptional } from "./passes/optional";
 import { applyPluralMarkers } from "./passes/plural-marker";
 import { applyPrepNoun } from "./passes/prep-noun";
@@ -31,6 +33,9 @@ export type ParsedRow = {
   defaultUnit: { id: number; name: string } | null;
   candidateMatches: ImportedCandidateMatch[];
   newNameProposals: ImportedNameProposal[];
+  /** Categorised highlight spans for the row's own segment, relative to the
+   *  piece source (the caller rebases onto the full line). */
+  highlightParts: HighlightPart[];
 };
 
 export type SegmentLookups = {
@@ -109,5 +114,7 @@ export function parseSegment(source: string, lookups: SegmentLookups): ParsedRow
     newNameProposals: m.newNameProposals.map((p, i) =>
       i === 0 ? { ...p, notes } : p,
     ),
+    // Highlights fall out of the annotated leaf roles (one source of truth).
+    highlightParts: renderHighlights(source, leaves),
   };
 }

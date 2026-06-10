@@ -24,12 +24,16 @@ export function groupByWhitespace(source: string, leaves: readonly Leaf[]): Grou
     const crossNumWord =
       (lastKind === "number" && lf.kind === "word") ||
       (lastKind === "word" && lf.kind === "number");
+    // Already-consumed leaves (plural markers, optional markers) contribute
+    // their leaves to the group but NOT their text, so amount/unit detection
+    // sees the live token ("Dose/n" → "Dose", "/n" consumed).
+    const text = lf.consumed ? "" : lf.text;
     if (prev && source.slice(prev.end, lf.start) === "" && !crossNumWord) {
-      prev.text += lf.text;
+      prev.text += text;
       prev.leaves.push(lf);
       prev.end = lf.end;
     } else {
-      groups.push({ text: lf.text, leaves: [lf], start: lf.start, end: lf.end });
+      groups.push({ text, leaves: [lf], start: lf.start, end: lf.end });
     }
   }
   return groups;
