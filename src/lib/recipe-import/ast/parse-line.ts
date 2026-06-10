@@ -1,4 +1,8 @@
-import type { CatalogBlockIndex, IngredientCatalog } from "../matching";
+import type {
+  CatalogBlockIndex,
+  IngredientCatalog,
+} from "../matching";
+import type { ImportedCandidateMatch, ImportedNameProposal } from "../index";
 import { lex } from "./lexer";
 import { renderNote, tidyNote, type Leaf } from "./render-notes";
 import { applyOptional } from "./passes/optional";
@@ -21,6 +25,10 @@ export type ParsedRow = {
   isOptional: boolean;
   fixedAmount: boolean;
   matched: boolean;
+  isEquipment: boolean;
+  defaultUnit: { id: number; name: string } | null;
+  candidateMatches: ImportedCandidateMatch[];
+  newNameProposals: ImportedNameProposal[];
 };
 
 export type SegmentLookups = {
@@ -97,5 +105,13 @@ export function parseSegment(rawSource: string, lookups: SegmentLookups): Parsed
     isOptional,
     fixedAmount: quantity === null,
     matched: m.matched,
+    isEquipment: m.isEquipment,
+    defaultUnit: m.defaultUnit,
+    candidateMatches: m.candidateMatches,
+    // The "Aufgeräumt" proposal's notes should match the row's assembled notes
+    // (range/prep prefix included), not just the bare render.
+    newNameProposals: m.newNameProposals.map((p, i) =>
+      i === 0 ? { ...p, notes } : p,
+    ),
   };
 }

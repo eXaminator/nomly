@@ -5,8 +5,9 @@ import {
   type IngredientCandidateMatch,
   type IngredientCatalog,
 } from "../../matching";
+import type { ImportedCandidateMatch, ImportedNameProposal } from "../../index";
 import type { AstCandidateToken } from "../candidate-tokens";
-import type { Leaf } from "../render-notes";
+import { renderNote, type Leaf } from "../render-notes";
 import { SIZE_MODIFIERS } from "./amount-unit";
 
 const normWord = (s: string): string => s.toLowerCase().replace(/[.,:!?]+$/, "");
@@ -56,6 +57,10 @@ export type MatchResult = {
   defaultUnit: { id: number; name: string } | null;
   /** All ranked matches (for the candidate-pill UI). */
   matches: IngredientCandidateMatch[];
+  /** Ranked candidate pills (alias name + faithful per-candidate notes). */
+  candidateMatches: ImportedCandidateMatch[];
+  /** New-ingredient name proposals (no-match path only). */
+  newNameProposals: ImportedNameProposal[];
 };
 
 const EMPTY: MatchResult = {
@@ -67,7 +72,53 @@ const EMPTY: MatchResult = {
   isEquipment: false,
   defaultUnit: null,
   matches: [],
+  candidateMatches: [],
+  newNameProposals: [],
 };
+
+/** Per-candidate notes: render with this candidate's covered leaves temporarily
+ *  marked consumed (on top of the already-consumed amount/unit/optional), then
+ *  restored — so each pill shows its own faithful remainder. */
+function candidateNotes(
+  source: string,
+  leaves: readonly Leaf[],
+  remainder: Leaf[],
+  m: IngredientCandidateMatch,
+): string | null {
+  const tokens = m.candidate as AstCandidateToken[];
+  const marked: Leaf[] = [];
+  for (const ti of m.coveredCandidateTokens) {
+    const tok = tokens[ti];
+    if (!tok) continue;
+    for (let li = tok.leafStart; li <= tok.leafEnd; li++) {
+      const lf = remainder[li];
+      if (lf && !lf.consumed) {
+        lf.consumed = true;
+        marked.push(lf);
+      }
+    }
+  }
+  const notes = renderNote(source, leaves);
+  for (const lf of marked) lf.consumed = false;
+  return notes;
+}
+
+function toCandidate(
+  source: string,
+  leaves: readonly Leaf[],
+  remainder: Leaf[],
+  m: IngredientCandidateMatch,
+): ImportedCandidateMatch {
+  return {
+    ingredientId: m.ingredientId,
+    canonicalName: m.canonicalName,
+    matchedName: m.aliasName,
+    score: m.score,
+    name: m.aliasName,
+    notes: candidateNotes(source, leaves, remainder, m),
+    isEquipment: m.isEquipment ?? false,
+  };
+}
 
 /**
  * Run the catalog matcher over the segment's unconsumed leaves, mark the
@@ -99,7 +150,12 @@ export function applyMatch(
     lineUnitId: opts.lineUnitId ?? null,
   });
   const best = matches[0];
-  if (!best || best.score < threshold) return noMatch(source, remainder);
+  // Built on the base state (amount/unit/optional consumed, no ingredient yet),
+  // before the best match is marked — so each pill renders independently.
+  const candidateMatches = matches.map((m) => toCandidate(source, leaves, remainder, m));
+  if (!best || best.score < threshold) {
+    return noMatch(source, leaves, remainder, candidateMatches);
+  }
 
   const tokens = best.candidate as AstCandidateToken[];
   let minStart = Number.POSITIVE_INFINITY;
@@ -141,6 +197,8 @@ export function applyMatch(
     isEquipment: best.isEquipment ?? false,
     defaultUnit: best.defaultUnit ?? null,
     matches,
+    candidateMatches,
+    newNameProposals: [],
   };
 }
 
@@ -150,7 +208,12 @@ export function applyMatch(
  * ("to taste", "zum Bestreuen") left UNCONSUMED so they fall into the notes —
  * mirroring the legacy no-match name (stripVocabTail + size peel).
  */
-function noMatch(source: string, remainder: Leaf[]): MatchResult {
+function noMatch(
+  source: string,
+  leaves: Leaf[],
+  remainder: Leaf[],
+  candidateMatches: ImportedCandidateMatch[],
+): MatchResult {
   // Depth-0 word/number leaves before the first top-level comma (paren content
   // is skipped, not a boundary, so "(225g) large shrimp" still finds "shrimp").
   const region: Leaf[] = [];
@@ -177,7 +240,9 @@ function noMatch(source: string, remainder: Leaf[]): MatchResult {
   // Peel trailing size/prep words ("onion chopped" → name "onion").
   while (end > start && strippable(region[end - 1])) end -= 1;
   const nameLeaves = region.slice(start, end);
-  if (nameLeaves.length === 0) return EMPTY;
+  if (nameLeaves.length === 0) {
+    return { ...EMPTY, candidateMatches };
+  }
   for (const lf of nameLeaves) {
     lf.consumed = true;
     lf.role = "ingredient";
@@ -185,5 +250,38 @@ function noMatch(source: string, remainder: Leaf[]): MatchResult {
   const name = source
     .slice(nameLeaves[0].start, nameLeaves[nameLeaves.length - 1].end)
     .trim();
-  return { matched: false, ingredientId: null, name, canonicalName: null, sourceName: null };
+  const cleanedNotes = renderNote(source, leaves);
+  // "Aufgeräumt" (cleaned) + "Wie eingegeben" (the full region, nothing peeled)
+  // when they differ — mirrors the legacy two-proposal pair.
+  const proposals: ImportedNameProposal[] = [
+    { name, notes: cleanedNotes, label: "Aufgeräumt" },
+  ];
+  const rawName =
+    region.length > 0
+      ? source.slice(region[0].start, region[region.length - 1].end).trim()
+      : name;
+  if (rawName.toLowerCase() !== name.toLowerCase()) {
+    const extra: Leaf[] = [];
+    for (const lf of region) {
+      if (!lf.consumed) {
+        lf.consumed = true;
+        extra.push(lf);
+      }
+    }
+    const rawNotes = renderNote(source, leaves);
+    for (const lf of extra) lf.consumed = false;
+    proposals.push({ name: rawName, notes: rawNotes, label: "Wie eingegeben" });
+  }
+  return {
+    matched: false,
+    ingredientId: null,
+    name,
+    canonicalName: null,
+    sourceName: null,
+    isEquipment: false,
+    defaultUnit: null,
+    matches: [],
+    candidateMatches,
+    newNameProposals: proposals,
+  };
 }
