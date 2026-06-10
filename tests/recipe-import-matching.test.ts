@@ -1433,6 +1433,20 @@ describe("alternative amount/unit/notes inheritance", () => {
     expect(out[0].notes).toContain("14 tbsp / 1 ¾ sticks");
   });
 
+  it("keeps a semicolon in the notes on the matched path", () => {
+    // "(1-inch; about 10 cups)" — the semicolon must survive into the matched
+    // row's notes, not be swallowed when the candidate tokens are re-joined
+    // (the candidate tokenizer split on ";" without remembering it).
+    const out = rows(
+      "12 ounces crusty whole-wheat bread, cubed (1-inch; about 10 cups)",
+      [{ ingredientId: 1, canonicalName: "bread", aliasName: "bread", tokens: ["bread"] }],
+      ["ounce", "ounces"],
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0].name).toBe("bread");
+    expect(out[0].notes).toContain("1-inch; about 10 cups");
+  });
+
   it("keeps a note tail after a parenthetical alternative in source order", () => {
     // "(or 1 large clove), peeled" — the alternative folds into notes and the
     // trailing "peeled" must come AFTER it, not jump ahead of it.

@@ -167,12 +167,21 @@ export function tokenizeCandidate(text: string): CandidateToken[] {
     // Intra-word dashes split for MATCHING ("Cherry-Tomate" → 2 tokens) but are
     // likewise remembered so notes restore "whole-wheat".
     let pendingSlash = false;
+    let pendingSemicolon = false;
     for (const piece of segment
       .replace(/(?<!\d)\/|\/(?!\d)/g, " / ")
-      .split(/[\s;]+/u)) {
+      // A semicolon splits for MATCHING but, like the slash above, is kept as
+      // its own piece and remembered as a "; " separator on the next token so
+      // notes reconstruction restores it ("1-inch; about 10 cups").
+      .replace(/;/g, " ; ")
+      .split(/\s+/u)) {
       if (piece.length === 0) continue;
       if (piece === "/") {
         pendingSlash = true;
+        continue;
+      }
+      if (piece === ";") {
+        pendingSemicolon = true;
         continue;
       }
       const subs = piece.split(/([-–—])/);
@@ -191,14 +200,19 @@ export function tokenizeCandidate(text: string): CandidateToken[] {
         parenDepth = Math.max(0, parenDepth + opens - closes);
         const normalized = canonicalizeMatchToken(normalizeForMatch(raw));
         if (normalized.length === 0) continue;
-        // A leading separator the source used, restored verbatim in notes: a
-        // " / " from a non-fraction slash takes priority over an intra-word
-        // dash (a slashed token can't also be dash-joined to its predecessor).
-        const leadingSep = pendingSlash && !pendingComma
-          ? " / "
-          : pendingDash !== undefined && !pendingComma
-            ? pendingDash
-            : undefined;
+        // A leading separator the source used, restored verbatim in notes. A
+        // comma is handled separately (precededByComma); otherwise an outer
+        // "; " wins over a " / " slash, which wins over an intra-word dash (a
+        // token can carry only one immediate predecessor separator).
+        const leadingSep = pendingComma
+          ? undefined
+          : pendingSemicolon
+            ? "; "
+            : pendingSlash
+              ? " / "
+              : pendingDash !== undefined
+                ? pendingDash
+                : undefined;
         out.push({
           raw,
           normalized,
@@ -210,6 +224,7 @@ export function tokenizeCandidate(text: string): CandidateToken[] {
         pendingComma = false;
         pendingDash = undefined;
         pendingSlash = false;
+        pendingSemicolon = false;
         emittedInPiece = true;
       }
     }
