@@ -28,6 +28,10 @@ export type SegmentLookups = {
   catalog: IngredientCatalog;
   catalogIndex?: CatalogBlockIndex;
   threshold?: number;
+  /** Resolve the line's unit id from its (raw) name + quantity — the matcher's
+   *  canned-vs-fresh decider. Injected by the caller (closure over the unit
+   *  lookup) to avoid an index.ts import cycle. */
+  lineUnitId?: (unitName: string | null, quantity: number | null) => number | null;
 };
 
 /**
@@ -74,6 +78,8 @@ export function parseSegment(rawSource: string, lookups: SegmentLookups): Parsed
   const m = applyMatch(source, leaves, lookups.catalog, {
     index: lookups.catalogIndex,
     threshold: lookups.threshold,
+    quantity,
+    lineUnitId: lookups.lineUnitId?.(unitName, quantity) ?? null,
   });
   const rendered = renderNote(source, leaves);
   const baseNotes = assembleNotes(rangeExpression, unitName, rendered);

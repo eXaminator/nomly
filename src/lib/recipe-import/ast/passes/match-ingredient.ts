@@ -2,6 +2,7 @@ import {
   findIngredientCandidatesFromLeaves,
   MIN_AUTO_MATCH_SCORE,
   type CatalogBlockIndex,
+  type IngredientCandidateMatch,
   type IngredientCatalog,
 } from "../../matching";
 import type { AstCandidateToken } from "../candidate-tokens";
@@ -42,13 +43,19 @@ function isVocabBoundary(region: Leaf[], i: number): boolean {
 export type MatchResult = {
   matched: boolean;
   ingredientId: number | null;
-  /** Display name — the matched alias verbatim, or the name-region text on the
-   *  no-match path. */
+  /** Display name — the per-alias rename (when its default unit survives), else
+   *  the matched alias verbatim, or the name-region text on the no-match path. */
   name: string;
   canonicalName: string | null;
   /** The original source span the matched alias replaced, when it differs from
    *  the alias (e.g. "Zwiebeln" → alias "Zwiebel"). Null otherwise. */
   sourceName: string | null;
+  /** Equipment flag of the matched entry — caller ORs into isOptional. */
+  isEquipment: boolean;
+  /** Default unit of the matched alias entry, if any. */
+  defaultUnit: { id: number; name: string } | null;
+  /** All ranked matches (for the candidate-pill UI). */
+  matches: IngredientCandidateMatch[];
 };
 
 const EMPTY: MatchResult = {
@@ -57,32 +64,40 @@ const EMPTY: MatchResult = {
   name: "",
   canonicalName: null,
   sourceName: null,
+  isEquipment: false,
+  defaultUnit: null,
+  matches: [],
 };
 
 /**
- * Run the catalog matcher over the segment's unconsumed leaves and mark the
- * matched ingredient leaves consumed (role "ingredient"). The matcher
- * (`matching.ts`) is reused unchanged: we build a `matchText` from the
- * remainder leaves, remember each leaf's offset into it, then walk the
- * matcher's returned candidate tokens (whose `raw` is exact source text) to map
- * `coveredCandidateTokens` back to our leaves. Mutates `leaves`.
+ * Run the catalog matcher over the segment's unconsumed leaves, mark the
+ * matched ingredient leaves consumed (role "ingredient"), and resolve the
+ * display name exactly as the legacy `resolveIngredientForRow` does: a
+ * per-alias `displayName` rename applies only while its default unit survives
+ * (the line carried an amount), otherwise the alias name is kept. The matcher
+ * reads the SAME leaves — each candidate token carries leafStart/leafEnd back
+ * into `remainder`, so covered tokens map straight to leaves. Mutates `leaves`.
  */
 export function applyMatch(
   source: string,
   leaves: Leaf[],
   catalog: IngredientCatalog,
-  opts: { index?: CatalogBlockIndex; threshold?: number } = {},
+  opts: {
+    index?: CatalogBlockIndex;
+    threshold?: number;
+    /** Row quantity — gates the per-alias rename (see defaultUnitDropped). */
+    quantity?: number | null;
+    /** Resolved line unit id — the matcher's canned-vs-fresh decider. */
+    lineUnitId?: number | null;
+  } = {},
 ): MatchResult {
-  // The matcher reads the SAME leaves (single tokenization). Each returned
-  // candidate token carries leafStart/leafEnd back into `remainder`, so a
-  // match's covered tokens map straight to leaves — no matchText, no raw-walk.
   const remainder = leaves.filter((l) => !l.consumed);
-  const { matches } = findIngredientCandidatesFromLeaves(
-    remainder,
-    catalog,
-    opts.index ? { index: opts.index } : undefined,
-  );
   const threshold = opts.threshold ?? MIN_AUTO_MATCH_SCORE;
+  const { matches } = findIngredientCandidatesFromLeaves(remainder, catalog, {
+    index: opts.index,
+    gateScore: threshold,
+    lineUnitId: opts.lineUnitId ?? null,
+  });
   const best = matches[0];
   if (!best || best.score < threshold) return noMatch(source, remainder);
 
@@ -100,7 +115,18 @@ export function applyMatch(
     maxEnd = Math.max(maxEnd, remainder[tok.leafEnd].end);
   }
 
-  const name = best.displayName ?? best.aliasName;
+  // Per-alias rename only makes sense with the default unit it pairs with; when
+  // the line has no amount that unit is dropped (see pickFinalUnit), so keep the
+  // alias name then.
+  const quantity = opts.quantity ?? null;
+  const defaultUnitDropped =
+    best.defaultUnit != null && !(quantity !== null && quantity > 0);
+  const name =
+    !defaultUnitDropped && best.displayName?.trim()
+      ? best.displayName.trim()
+      : best.aliasName;
+  const canonicalName =
+    name.toLowerCase() === best.canonicalName.toLowerCase() ? null : best.canonicalName;
   let sourceName: string | null = null;
   if (maxEnd > 0) {
     const span = source.slice(minStart, maxEnd).trim();
@@ -110,8 +136,11 @@ export function applyMatch(
     matched: true,
     ingredientId: best.ingredientId,
     name,
-    canonicalName: best.canonicalName,
+    canonicalName,
     sourceName,
+    isEquipment: best.isEquipment ?? false,
+    defaultUnit: best.defaultUnit ?? null,
+    matches,
   };
 }
 
