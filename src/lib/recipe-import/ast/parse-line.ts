@@ -2,6 +2,7 @@ import type { CatalogBlockIndex, IngredientCatalog } from "../matching";
 import { lex } from "./lexer";
 import { renderNote, tidyNote, type Leaf } from "./render-notes";
 import { applyOptional } from "./passes/optional";
+import { applyPrepNoun } from "./passes/prep-noun";
 import { applyAmountUnit } from "./passes/amount-unit";
 import { applyMatch } from "./passes/match-ingredient";
 
@@ -51,6 +52,9 @@ function assembleNotes(
 export function parseSegment(source: string, lookups: SegmentLookups): ParsedRow {
   const leaves: Leaf[] = lex(source).map((t) => ({ ...t }));
   const isOptional = applyOptional(leaves);
+  // Prep noun ("Juice of …") runs before the amount pass so the quantity that
+  // follows the dropped connector is still found; its text leads the notes.
+  const prepNote = applyPrepNoun(leaves);
   const { quantity, unitName, rangeExpression } = applyAmountUnit(
     source,
     leaves,
@@ -61,7 +65,10 @@ export function parseSegment(source: string, lookups: SegmentLookups): ParsedRow
     threshold: lookups.threshold,
   });
   const rendered = renderNote(source, leaves);
-  const notes = assembleNotes(rangeExpression, unitName, rendered);
+  const baseNotes = assembleNotes(rangeExpression, unitName, rendered);
+  const notes = prepNote
+    ? tidyNote([prepNote, baseNotes].filter((s) => s != null && s.length > 0).join(", "))
+    : baseNotes;
   return {
     quantity,
     unitName,

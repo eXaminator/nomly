@@ -9,6 +9,19 @@ import { SIZE_MODIFIERS } from "./amount-unit";
 
 const normWord = (s: string): string => s.toLowerCase().replace(/[.,:!?]+$/, "");
 
+/** Leading/trailing cooking-prep words that peel off a no-match name into the
+ *  notes ("ground cumin" → name "cumin", note "ground"). A representative
+ *  subset of the legacy PREP_LEADING_TOKENS. */
+const PREP_WORDS = new Set([
+  "chopped", "sliced", "diced", "grated", "minced", "halved", "quartered",
+  "peeled", "rinsed", "drained", "cooked", "crushed", "melted", "softened",
+  "beaten", "shredded", "ground", "soaked", "rolled", "seeded", "stemmed",
+  "trimmed", "crumbled", "finely", "coarsely", "thinly", "thickly", "roughly",
+  "lightly", "freshly", "well", "fresh",
+  "gehackt", "geschnitten", "gewürfelt", "gerieben", "geschält", "gepresst",
+  "fein", "grob", "frisch", "frische", "frischer", "heiß", "kalt", "warm",
+]);
+
 /** Usage prefixes — everything from here on is a note ("zum Bestreuen"). */
 const USAGE_PREFIX = new Set(["zum", "zur", "für", "fürs", "for"]);
 /** Note-boundary markers (example/abbreviation lead-ins). */
@@ -136,21 +149,23 @@ function noMatch(source: string, remainder: Leaf[]): MatchResult {
     if (lf.depth !== 0) continue;
     if (lf.kind === "word" || lf.kind === "number") region.push(lf);
   }
+  const strippable = (lf: Leaf): boolean =>
+    lf.kind === "word" &&
+    (SIZE_MODIFIERS.has(normWord(lf.text)) || PREP_WORDS.has(normWord(lf.text)));
+
   let start = 0;
-  while (
-    start < region.length &&
-    region[start].kind === "word" &&
-    SIZE_MODIFIERS.has(normWord(region[start].text))
-  ) {
-    start += 1;
-  }
   let end = region.length;
-  for (let i = start; i < region.length; i++) {
+  // Peel leading size/prep words ("large", "ground") — they stay in notes.
+  while (start < end && strippable(region[start])) start += 1;
+  // Cut a trailing vocab phrase ("to taste", "zum X") into the notes.
+  for (let i = start; i < end; i++) {
     if (isVocabBoundary(region, i)) {
       end = i;
       break;
     }
   }
+  // Peel trailing size/prep words ("onion chopped" → name "onion").
+  while (end > start && strippable(region[end - 1])) end -= 1;
   const nameLeaves = region.slice(start, end);
   if (nameLeaves.length === 0) return EMPTY;
   for (const lf of nameLeaves) {

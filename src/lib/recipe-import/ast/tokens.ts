@@ -11,22 +11,19 @@ export type Group = {
   end: number;
 };
 
-const numberish = (k: Leaf["kind"]): boolean =>
-  k === "number" || k === "dash" || k === "slash";
-
 /** Group leaves by source adjacency (no intervening whitespace), but always
- *  break at a number↔word boundary so a glued amount+unit like "200g" stays
- *  two groups ("200", "g") while a numeric run ("100-200", "1/2") and a
- *  word+punct abbreviation ("geh.", "z.B.") stay merged. */
+ *  break where a number is DIRECTLY adjacent to a word so a glued amount+unit
+ *  like "200g" stays two groups ("200", "g"). A dash between them does NOT
+ *  break, so a numeric run ("100-200", "1/2"), a size compound ("12-count",
+ *  "28-ounce") and a word+punct abbreviation ("geh.", "z.B.") stay merged. */
 export function groupByWhitespace(source: string, leaves: readonly Leaf[]): Group[] {
   const groups: Group[] = [];
   for (const lf of leaves) {
     const prev = groups[groups.length - 1];
     const lastKind = prev?.leaves[prev.leaves.length - 1].kind;
     const crossNumWord =
-      lastKind !== undefined &&
-      ((numberish(lastKind) && lf.kind === "word") ||
-        (lastKind === "word" && lf.kind === "number"));
+      (lastKind === "number" && lf.kind === "word") ||
+      (lastKind === "word" && lf.kind === "number");
     if (prev && source.slice(prev.end, lf.start) === "" && !crossNumWord) {
       prev.text += lf.text;
       prev.leaves.push(lf);

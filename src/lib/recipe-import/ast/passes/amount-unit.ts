@@ -78,13 +78,26 @@ export function applyAmountUnit(
 
   const isUnit = (g: Group): boolean =>
     knownUnitTokens.has(g.text.toLowerCase()) || knownUnitTokens.has(norm(g.text));
+  // A size compound like "12-count" / "28-ounce" — a number dashed to a word.
+  const isSizeCompound = (g: Group): boolean => /^\d+[-–]\p{L}+\.?$/u.test(g.text);
+  // A group that is part of a parenthetical ("(28", "oz.)") — skip it when
+  // hunting for the unit so "(28 oz.) can" still finds "can".
+  const isParenGroup = (g: Group): boolean =>
+    g.leaves.some((l) => l.depth > 0 || l.kind === "open" || l.kind === "close");
 
   let unitName: string | null = null;
-  // Skip size modifiers between the quantity and the unit ("1 small bunch") —
-  // they're not consumed (they stay in the note), but they mustn't hide the
-  // unit behind them.
+  // Skip size modifiers / size compounds / parenthetical groups between the
+  // quantity and the unit ("1 small bunch", "1 12-count package",
+  // "1 (28 oz.) can") — they're not consumed (they stay in the note), but they
+  // mustn't hide the unit behind them.
   let probe = cur;
-  while (probe < groups.length && SIZE_MODIFIERS.has(norm(groups[probe].text)) && !isUnit(groups[probe])) {
+  while (
+    probe < groups.length &&
+    !isUnit(groups[probe]) &&
+    (SIZE_MODIFIERS.has(norm(groups[probe].text)) ||
+      isSizeCompound(groups[probe]) ||
+      isParenGroup(groups[probe]))
+  ) {
     probe += 1;
   }
   if (probe < groups.length && isUnit(groups[probe])) {
