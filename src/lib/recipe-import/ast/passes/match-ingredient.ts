@@ -25,6 +25,10 @@ const PREP_WORDS = new Set([
   "fein", "grob", "frisch", "frische", "frischer", "heiß", "kalt", "warm",
 ]);
 
+/** Vague amount words ("etwas Öl", "some salt") — peel off a no-match name into
+ *  the notes, mirroring the legacy TEXT_AMOUNT_VAGUE handling. */
+const VAGUE_WORDS = new Set(["etwas", "some", "wenig", "little", "bit", "touch"]);
+
 /** Usage prefixes — everything from here on is a note ("zum Bestreuen"). */
 const USAGE_PREFIX = new Set(["zum", "zur", "für", "fürs", "for"]);
 /** Note-boundary markers (example/abbreviation lead-ins). */
@@ -38,8 +42,14 @@ function isVocabBoundary(region: Leaf[], i: number): boolean {
   const next = region[i + 1] ? normWord(region[i + 1].text) : "";
   if (w === "to" && next === "taste") return true;
   if (w === "nach" && (next === "geschmack" || next === "belieben")) return true;
+  // "z.B." / "z. B." — the lexer splits it into "z" + "b"; treat as a boundary.
+  if (w === "z" && next === "b") return true;
   return false;
 }
+
+/** Leading filler words ("of caster sugar" → "caster sugar") — dropped from the
+ *  no-match name entirely (not kept as notes). */
+const NAME_FILLER = new Set(["of", "von", "vom"]);
 
 export type MatchResult = {
   matched: boolean;
@@ -224,12 +234,28 @@ function noMatch(
   }
   const strippable = (lf: Leaf): boolean =>
     lf.kind === "word" &&
-    (SIZE_MODIFIERS.has(normWord(lf.text)) || PREP_WORDS.has(normWord(lf.text)));
+    (SIZE_MODIFIERS.has(normWord(lf.text)) ||
+      PREP_WORDS.has(normWord(lf.text)) ||
+      VAGUE_WORDS.has(normWord(lf.text)));
 
   let start = 0;
   let end = region.length;
-  // Peel leading size/prep words ("large", "ground") — they stay in notes.
-  while (start < end && strippable(region[start])) start += 1;
+  // Peel leading words: filler ("of") is dropped entirely; size/prep/vague
+  // ("large", "ground", "etwas") stay in the notes.
+  while (start < end) {
+    const lf = region[start];
+    if (lf.kind === "word" && NAME_FILLER.has(normWord(lf.text))) {
+      lf.consumed = true;
+      lf.role = "connector";
+      start += 1;
+      continue;
+    }
+    if (strippable(lf)) {
+      start += 1;
+      continue;
+    }
+    break;
+  }
   // Cut a trailing vocab phrase ("to taste", "zum X") into the notes.
   for (let i = start; i < end; i++) {
     if (isVocabBoundary(region, i)) {

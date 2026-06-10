@@ -81,7 +81,10 @@ function colonAmountInvert(source: string): string {
 
 /** Parse one ingredient segment into a structured row. */
 export function parseSegment(rawSource: string, lookups: SegmentLookups): ParsedRow {
-  const source = colonAmountInvert(stripPluralMarkers(rawSource));
+  // Glue a spaced German decimal ("0, 5" → "0,5") so the amount pass reads it
+  // as one number (mirrors the legacy normalize step).
+  const deSpaced = rawSource.replace(/(\d),\s+(\d)/g, "$1,$2");
+  const source = colonAmountInvert(stripPluralMarkers(deSpaced));
   const leaves: Leaf[] = lex(source).map((t) => ({ ...t }));
   const isOptional = applyOptional(leaves);
   // Prep noun ("Juice of …") runs before the amount pass so the quantity that
