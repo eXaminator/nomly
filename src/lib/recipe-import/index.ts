@@ -21,6 +21,7 @@ import {
   extractIngredientGroupsFromHtml,
 } from "./html-groups.ts";
 import { parseIsoDurationToMinutes } from "./duration.ts";
+import { parseSegment } from "./ast/parse-line.ts";
 import {
   amountPrefixRange,
   decomposeSegment,
@@ -1058,6 +1059,15 @@ export function parseIngredientLines(
         : row.text;
       for (const piece of splitConjunctions(raw, splitOpts)) {
         const parsed = parseIngredientString(piece, knownUnitTokens);
+        // AST note: the faithful, source-verbatim-minus-consumed note. Computed
+        // per piece via the AST pipeline; replaces the legacy token-rejoined
+        // note (which dropped semicolons and other punctuation).
+        const astNote = parseSegment(piece, {
+          knownUnitTokens,
+          catalog: lookups.ingredientCatalog ?? [],
+          catalogIndex: lookups.ingredientCatalogIndex,
+          threshold,
+        }).notes;
         const sourceRange = findSegmentRange(
           originalTrimmed,
           piece,
@@ -1177,7 +1187,7 @@ export function parseIngredientLines(
           ingredientMatch: resolved.match,
           canonicalIngredientName: resolved.canonicalIngredientName,
           sourceName: resolved.sourceName,
-          notes: resolved.notes,
+          notes: astNote,
           // Equipment-flagged ingredients (Backpapier, Einmachgläser …)
           // default to optional so the user decides per-recipe whether they
           // actually need to shop them. `forceOptional` carries through

@@ -6,6 +6,20 @@ const TEXT_ONE = new Set(["ein", "eine", "einen", "einem", "einer", "eins", "a",
 const TEXT_HALF = new Set(["halber", "halbe", "halbes", "halben", "half"]);
 const TEXT_QUARTER = new Set(["viertel", "quarter"]);
 
+/** Size words that may sit between the quantity and the unit ("1 small bunch",
+ *  "1 kl. Dose"). They are SKIPPED so the unit is still found, but NOT consumed
+ *  — they stay verbatim in the note. */
+const SIZE_MODIFIERS = new Set([
+  "small", "large", "medium", "big", "jumbo", "tiny", "huge",
+  "klein", "kleine", "kleiner", "kleines", "kleinen", "kl",
+  "gross", "groß", "große", "großer", "großes", "großen", "grosse",
+  "mittel", "mittlere", "mittlerer", "mittelgroß", "mittelgross",
+  "heaped", "heaping", "level", "gehäuft", "gestrichen", "gestrichener",
+  "gestrichene", "geh",
+]);
+
+const norm = (s: string): string => s.toLowerCase().replace(/[.,]+$/, "");
+
 export type AmountUnit = {
   quantity: number | null;
   unitName: string | null;
@@ -62,13 +76,38 @@ export function applyAmountUnit(
     }
   }
 
+  const isUnit = (g: Group): boolean =>
+    knownUnitTokens.has(g.text.toLowerCase()) || knownUnitTokens.has(norm(g.text));
+
   let unitName: string | null = null;
-  if (cur < groups.length) {
-    const g = groups[cur];
-    const lower = g.text.toLowerCase();
-    if (knownUnitTokens.has(lower) || knownUnitTokens.has(lower.replace(/\.$/, ""))) {
-      consumeGroup(g, "unit");
-      unitName = g.text.replace(/\.$/, "");
+  // Skip size modifiers between the quantity and the unit ("1 small bunch") —
+  // they're not consumed (they stay in the note), but they mustn't hide the
+  // unit behind them.
+  let probe = cur;
+  while (probe < groups.length && SIZE_MODIFIERS.has(norm(groups[probe].text)) && !isUnit(groups[probe])) {
+    probe += 1;
+  }
+  if (probe < groups.length && isUnit(groups[probe])) {
+    consumeGroup(groups[probe], "unit");
+    unitName = groups[probe].text.replace(/\.$/, "");
+    if (quantity === null) quantity = 1;
+    cur = probe + 1;
+  } else {
+    // Trailing-unit fallback: "1 garlic clove" — the unit follows the name. Only
+    // fire when the name region (up to the first comma/paren) has no interior
+    // number (guards "1-inch pieces") and the LAST token is a known unit with a
+    // name in front of it.
+    const region: Group[] = [];
+    for (let k = cur; k < groups.length; k++) {
+      const g = groups[k];
+      if (g.leaves.some((l) => l.depth === 0 && (l.kind === "comma" || l.kind === "open"))) break;
+      region.push(g);
+    }
+    const hasNumber = region.some((g) => g.leaves.some((l) => l.kind === "number"));
+    const last = region[region.length - 1];
+    if (!hasNumber && region.length >= 2 && last && isUnit(last)) {
+      consumeGroup(last, "unit");
+      unitName = last.text.replace(/\.$/, "");
       if (quantity === null) quantity = 1;
     }
   }

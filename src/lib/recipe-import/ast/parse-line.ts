@@ -38,10 +38,13 @@ function assembleNotes(
   unitName: string | null,
   rendered: string | null,
 ): string | null {
-  const frags: string[] = [];
-  if (rangeExpression) frags.push(unitName ? `${rangeExpression} ${unitName}` : rangeExpression);
-  if (rendered) frags.push(rendered);
-  return tidyNote(frags.join(", "));
+  if (!rangeExpression) return rendered;
+  const rangeFrag = unitName ? `${rangeExpression} ${unitName}` : rangeExpression;
+  if (!rendered) return tidyNote(rangeFrag);
+  // With a unit the range reads as a measurement ("2-3 cups, for frying" —
+  // comma); without one it glues to a trailing modifier ("5-6 große").
+  const sep = unitName ? ", " : " ";
+  return tidyNote(`${rangeFrag}${sep}${rendered}`);
 }
 
 /** Parse one ingredient segment into a structured row. */
