@@ -46,6 +46,8 @@
  */
 
 import { canonicalizeMatchToken, normalizeForMatch } from "./ingredient.ts";
+import { lex } from "./ast/lexer.ts";
+import { leavesToCandidateTokens } from "./ast/candidate-tokens.ts";
 
 export type CatalogEntry = {
   /** The ingredient row this entry resolves to. */
@@ -142,146 +144,23 @@ export type CandidateToken = {
 };
 
 /**
- * Split a candidate into tokens. Commas are dropped as delimiters BUT flip
- * every following token to `postComma: true` (and mark the immediately-next
- * token `precededByComma: true`). Other separators (whitespace, semicolon,
- * slash, dash) split without affecting the comma flags.
+ * Split a candidate into matcher tokens. Thin wrapper over the single
+ * tokenizer — the AST lexer projected to candidate tokens
+ * ({@link leavesToCandidateTokens}). Commas are delimiters (flip `postComma`
+ * cumulatively, `precededByComma` on the next token); whitespace / semicolon /
+ * slash / intra-word dash split but are remembered as `joinedByDash`.
  */
 export function tokenizeCandidate(text: string): CandidateToken[] {
-  const out: CandidateToken[] = [];
-  let postComma = false;
-  let pendingComma = false;
-  let parenDepth = 0;
-  // Keep commas as their own pieces so we can flip the flags as we cross them.
-  for (const segment of text.split(/(,)/u)) {
-    if (segment === ",") {
-      postComma = true;
-      pendingComma = true;
-      continue;
-    }
-    // Keep fraction slashes ("1/2") as one token — notes are reconstructed
-    // from raw tokens and must not degrade to "1 2". A non-fraction slash
-    // ("und/oder", "14 tbsp / 1 sticks") splits for MATCHING but is remembered
-    // as a " / " separator on the next token (via `joinedByDash`) so notes
-    // reconstruction restores the slash — every special char survives in notes.
-    // Intra-word dashes split for MATCHING ("Cherry-Tomate" → 2 tokens) but are
-    // likewise remembered so notes restore "whole-wheat".
-    let pendingSlash = false;
-    let pendingSemicolon = false;
-    for (const piece of segment
-      .replace(/(?<!\d)\/|\/(?!\d)/g, " / ")
-      // A semicolon splits for MATCHING but, like the slash above, is kept as
-      // its own piece and remembered as a "; " separator on the next token so
-      // notes reconstruction restores it ("1-inch; about 10 cups").
-      .replace(/;/g, " ; ")
-      .split(/\s+/u)) {
-      if (piece.length === 0) continue;
-      if (piece === "/") {
-        pendingSlash = true;
-        continue;
-      }
-      if (piece === ";") {
-        pendingSemicolon = true;
-        continue;
-      }
-      const subs = piece.split(/([-–—])/);
-      let pendingDash: string | undefined;
-      let emittedInPiece = false;
-      for (const sub of subs) {
-        if (/^[-–—]$/.test(sub)) {
-          if (emittedInPiece) pendingDash = sub;
-          continue;
-        }
-        if (sub.length === 0) continue;
-        const raw = sub;
-        const opens = (raw.match(/\(/g) ?? []).length;
-        const closes = (raw.match(/\)/g) ?? []).length;
-        const inParens = parenDepth > 0 || opens > 0;
-        parenDepth = Math.max(0, parenDepth + opens - closes);
-        const normalized = canonicalizeMatchToken(normalizeForMatch(raw));
-        if (normalized.length === 0) continue;
-        // A leading separator the source used, restored verbatim in notes. A
-        // comma is handled separately (precededByComma); otherwise an outer
-        // "; " wins over a " / " slash, which wins over an intra-word dash (a
-        // token can carry only one immediate predecessor separator).
-        const leadingSep = pendingComma
-          ? undefined
-          : pendingSemicolon
-            ? "; "
-            : pendingSlash
-              ? " / "
-              : pendingDash !== undefined
-                ? pendingDash
-                : undefined;
-        out.push({
-          raw,
-          normalized,
-          postComma,
-          precededByComma: pendingComma,
-          inParens,
-          ...(leadingSep !== undefined ? { joinedByDash: leadingSep } : {}),
-        });
-        pendingComma = false;
-        pendingDash = undefined;
-        pendingSlash = false;
-        pendingSemicolon = false;
-        emittedInPiece = true;
-      }
-    }
-  }
-  return out;
+  return leavesToCandidateTokens(lex(text), false);
 }
 
 /**
- * Alternative tokenisation that strips dashes appearing between two letters
- * before splitting. Produced so the matcher can also see the compound-noun
- * reading of inputs like "Paprika-Pulver" (→ one token "paprikapulver") and
- * align them against catalog entries that store the closed form
- * ("Paprikapulver"). Returns the same shape as {@link tokenizeCandidate};
- * the caller decides whether the two forms produced the same tokens (in
- * which case it can skip the second matcher pass).
+ * Alternative tokenisation that keeps an intra-letter dash inside the token
+ * ("Paprika-Pulver" → one `paprikapulver` token) so it aligns against a
+ * closed-form catalog entry. Same single-tokenizer projection, joinDashes mode.
  */
 export function tokenizeCandidateJoinDashes(text: string): CandidateToken[] {
-  // Do NOT split on intra-letter dashes here: keep "Paprika-Pulver" as one
-  // token so it can align against a closed-form catalog entry
-  // ("Paprikapulver"). Only `normalized` drops the dash for matching; `raw` is
-  // retained for note reconstruction (the display name comes from the alias).
-  const out: CandidateToken[] = [];
-  let postComma = false;
-  let pendingComma = false;
-  let parenDepth = 0;
-  for (const segment of text.split(/(,)/u)) {
-    if (segment === ",") {
-      postComma = true;
-      pendingComma = true;
-      continue;
-    }
-    // Split on whitespace / semicolon / slash, but not on dashes between
-    // letters. Standalone / padded dashes still separate (handled by the
-    // surrounding whitespace).
-    for (const raw of segment
-      .replace(/(?<!\d)\/|\/(?!\d)/g, " ")
-      .split(/[\s;]+/u)) {
-      if (raw.length === 0) continue;
-      const opens = (raw.match(/\(/g) ?? []).length;
-      const closes = (raw.match(/\)/g) ?? []).length;
-      const inParens = parenDepth > 0 || opens > 0;
-      parenDepth = Math.max(0, parenDepth + opens - closes);
-      const normalized = canonicalizeMatchToken(
-        normalizeForMatch(raw.replace(/(\p{L})[-–—](\p{L})/gu, "$1$2")),
-      );
-      if (normalized.length === 0) continue;
-      out.push({
-        raw,
-        normalized,
-        postComma,
-        precededByComma: pendingComma,
-        inParens,
-      });
-      pendingComma = false;
-    }
-  }
-  return out;
+  return leavesToCandidateTokens(lex(text), true);
 }
 
 function sameTokens(a: CandidateToken[], b: CandidateToken[]): boolean {
@@ -734,9 +613,13 @@ export function findIngredientCandidates(
   catalog: IngredientCatalog,
   options: FindCandidatesOptions = {},
 ): { matches: IngredientCandidateMatch[]; candidate: CandidateToken[] } {
-  const primary = tokenizeCandidate(candidateText);
+  // One tokenizer: the AST lexer, projected to matcher candidate tokens. Parity
+  // with the former tokenizeCandidate/…JoinDashes is asserted in
+  // tests/ast-candidate-parity.test.ts.
+  const leaves = lex(candidateText);
+  const primary = leavesToCandidateTokens(leaves, false);
   if (primary.length === 0) return { matches: [], candidate: primary };
-  const joined = tokenizeCandidateJoinDashes(candidateText);
+  const joined = leavesToCandidateTokens(leaves, true);
   const variants: CandidateToken[][] =
     joined.length > 0 && !sameTokens(primary, joined)
       ? [primary, joined]
