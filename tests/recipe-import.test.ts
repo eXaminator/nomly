@@ -76,8 +76,23 @@ const CONTAINER_TOKENS = new Set([
   "dose", "dosen", "can", "cans", "package", "packages", "packung",
   "packungen", "päckchen", "pkg", "pck", "tin", "tins", "bag", "bags",
 ]);
+// Display casing for the resolved unit name (the pipeline canonicalises; the
+// old standalone parser echoed the verbatim token).
+const UNIT_CASING: Record<string, string> = {
+  tl: "TL", el: "EL", esslöffel: "Esslöffel", teelöffel: "Teelöffel",
+  tasse: "Tasse", tassen: "Tassen", pck: "Pck", "pck.": "Pck.",
+  packung: "Packung", packungen: "Packungen", päckchen: "Päckchen",
+  dose: "Dose", dosen: "Dosen", stück: "Stück", stk: "Stk",
+  bund: "Bund", bündel: "Bündel", prise: "Prise", prisen: "Prisen",
+  msp: "Msp", messerspitze: "Messerspitze", zehe: "Zehe", zehen: "Zehen",
+  handvoll: "Handvoll", bd: "Bd", "bd.": "Bd.", zentimeter: "Zentimeter",
+};
 const UNIT_ENTRIES = [...TEST_UNITS].map(
-  (name, i) => [name, { id: i + 1, name, isContainer: CONTAINER_TOKENS.has(name) }] as const,
+  (name, i) =>
+    [
+      name,
+      { id: i + 1, name: UNIT_CASING[name] ?? name, isContainer: CONTAINER_TOKENS.has(name) },
+    ] as const,
 );
 const TEST_LOOKUPS: ParseLookups = {
   units: {
@@ -113,10 +128,8 @@ describe("parseIngredientString", () => {
       quantity: 500,
       unitName: "g",
       name: "Hackfleisch",
-      commaTailText: "",
       notes: null,
       isOptional: false,
-      altWithPrepStripped: null,
     });
   });
   it("separates notes after a comma", () => {
@@ -124,10 +137,8 @@ describe("parseIngredientString", () => {
       quantity: 200,
       unitName: "g",
       name: "Speck",
-      commaTailText: "gewürfelt",
       notes: "gewürfelt",
       isOptional: false,
-      altWithPrepStripped: null,
     });
   });
   it("handles German decimals", () => {
@@ -135,10 +146,8 @@ describe("parseIngredientString", () => {
       quantity: 0.5,
       unitName: "l",
       name: "Sahne",
-      commaTailText: "",
       notes: null,
       isOptional: false,
-      altWithPrepStripped: null,
     });
   });
   it("handles fractions", () => {
@@ -153,10 +162,8 @@ describe("parseIngredientString", () => {
       quantity: 0.5,
       unitName: "TL",
       name: "Salz",
-      commaTailText: "",
       notes: null,
       isOptional: false,
-      altWithPrepStripped: null,
     });
   });
   it("strips leading 'ca.'", () => {
@@ -164,10 +171,8 @@ describe("parseIngredientString", () => {
       quantity: 300,
       unitName: "ml",
       name: "Brühe",
-      commaTailText: "",
       notes: null,
       isOptional: false,
-      altWithPrepStripped: null,
     });
   });
   it("uses the max of a range and records the range — with its unit — in notes", () => {
@@ -175,11 +180,9 @@ describe("parseIngredientString", () => {
       quantity: 200,
       unitName: "g",
       name: "Käse",
-      commaTailText: "",
       // The range note carries the unit it ranges over, like the amount does.
       notes: "100-200 g",
       isOptional: false,
-      altWithPrepStripped: null,
     });
   });
   it("range with fractions: max + note shown as fractions, like the amount", () => {
@@ -220,10 +223,8 @@ describe("parseIngredientString", () => {
       quantity: 3,
       unitName: null,
       name: "Eier",
-      commaTailText: "",
       notes: null,
       isOptional: false,
-      altWithPrepStripped: null,
     });
   });
   it("keeps 'nach Geschmack' in the name — vocab applies only on no-match", () => {
@@ -234,7 +235,6 @@ describe("parseIngredientString", () => {
       quantity: null,
       unitName: null,
       name: "Salz nach Geschmack",
-      commaTailText: "",
       notes: null,
       isOptional: false,
     });
@@ -244,10 +244,8 @@ describe("parseIngredientString", () => {
       quantity: 1,
       unitName: "Pck",
       name: "Blätterteig",
-      commaTailText: "",
       notes: null,
       isOptional: false,
-      altWithPrepStripped: null,
     });
   });
 });
