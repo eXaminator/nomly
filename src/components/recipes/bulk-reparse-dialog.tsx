@@ -279,11 +279,13 @@ function computeHighlights(
     }
     // A carried alternative the re-parse drops is, by default, being deleted —
     // its current/proposed values are identical, so the normal field-by-field
-    // diff finds nothing. Force a full highlight so it reads as a removed row
-    // (red), not an unchanged one. "Keep" clears this (it's then preserved).
+    // diff finds nothing. Show it as a removed row: fully red on the CURRENT
+    // side; the PROPOSED side is struck through (no red), so it reads as "going
+    // away". "Keep" clears this (it's then preserved). The struck styling is
+    // applied via the read-line's `struck` prop in the proposed render.
     if (d.carriedRemovable && !d.keep) {
       cur.push(ALL);
-      prop.push(ALL);
+      prop.push({});
       notesDiffs.push(undefined);
       continue;
     }
@@ -1050,11 +1052,8 @@ export function BulkReparseDialog({
                                                   isAlternative={d.isAlternative}
                                                   fixedAmount={d.fixedAmount}
                                                   highlight={hi.proposed[k]}
-                                                  tone={
-                                                    d.carriedRemovable && !d.keep
-                                                      ? "removed"
-                                                      : "added"
-                                                  }
+                                                  tone="added"
+                                                  struck={d.carriedRemovable && !d.keep}
                                                   mappingLabel={draftMappingLabel(d)}
                                                   notesDiff={hi.notesDiffs[k]?.proposed}
                                                 />

@@ -64,6 +64,10 @@ export type ReadLineProps = {
    *  (new/proposed side, green). */
   highlight?: LineHighlight;
   tone?: "removed" | "added";
+  /** Strike the whole line through — used on the PROPOSED side for a row that
+   *  won't exist after applying (a carried alternative being deleted), so it
+   *  reads as "going away" rather than a green/red change. */
+  struck?: boolean;
   /** Word-level diff segments for THIS side's notes (see diffNotes). When
    *  provided (and the notes are flagged changed), only the changed words
    *  are tinted instead of the whole notes string. */
@@ -91,6 +95,7 @@ export function RecipeIngredientReadLine({
   mappingLabel,
   highlight,
   tone,
+  struck = false,
   notesDiff,
 }: ReadLineProps) {
   // Subtle tint: green for the new/proposed side, red for the old/current side.
@@ -105,6 +110,7 @@ export function RecipeIngredientReadLine({
       className={cn(
         "flex items-start gap-2",
         (isOptional || isAlternative) && "italic opacity-65",
+        struck && "text-[var(--color-muted-fg)] line-through opacity-65",
       )}
     >
       {isAlternative ? (
