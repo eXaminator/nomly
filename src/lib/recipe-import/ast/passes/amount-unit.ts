@@ -40,7 +40,20 @@ export function applyAmountUnit(
   leaves: Leaf[],
   knownUnitTokens: ReadonlySet<string>,
 ): AmountUnit {
-  const groups = groupByWhitespace(source, leaves);
+  const rawGroups = groupByWhitespace(source, leaves);
+  // Merge a spaced German decimal across the gap ("0," + "5" → "0,5") in place —
+  // no source rewrite, the merged group keeps both groups' leaves and offsets.
+  const groups: Group[] = [];
+  for (const g of rawGroups) {
+    const last = groups[groups.length - 1];
+    if (last && /\d[.,]$/.test(last.text) && /^\d/.test(g.text)) {
+      last.text += g.text;
+      last.leaves.push(...g.leaves);
+      last.end = g.end;
+    } else {
+      groups.push({ ...g, leaves: [...g.leaves] });
+    }
+  }
   // Skip leading groups already consumed (e.g. an "opt." marker).
   let cur = 0;
   while (cur < groups.length && groups[cur].leaves.every((l) => l.consumed)) cur += 1;

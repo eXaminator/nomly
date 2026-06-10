@@ -9,6 +9,7 @@ import { applyOptional } from "./passes/optional";
 import { applyPluralMarkers } from "./passes/plural-marker";
 import { applyPrepNoun } from "./passes/prep-noun";
 import { applyAmountUnit } from "./passes/amount-unit";
+import { applyColonAmount } from "./passes/colon-amount";
 import { applyMatch } from "./passes/match-ingredient";
 
 /** The structured result of parsing one ingredient segment (no alternatives /
@@ -61,22 +62,11 @@ function assembleNotes(
   return tidyNote(`${rangeFrag}${sep}${rendered}`);
 }
 
-/** Rewrite the "Name: qty unit" colon-amount form to "qty unit Name" so the
- *  amount pass finds the leading quantity ("Mehl: 500 g" → "500 g Mehl"). Only
- *  fires when the post-colon side is an amount (contains a digit/fraction);
- *  list/section colons ("Topping: cheese") are left untouched. */
-function colonAmountInvert(source: string): string {
-  const m = /^\s*([^:]+?):\s*([\d.,/\s½¼¾⅓⅔⅛⅜⅝⅞–-]+(?:\s+\p{L}{1,30}\.?)?)\s*$/u.exec(source);
-  if (m && /[\d½¼¾⅓⅔⅛⅜⅝⅞]/.test(m[2])) return `${m[2].trim()} ${m[1].trim()}`;
-  return source;
-}
-
-/** Parse one ingredient segment into a structured row. */
-export function parseSegment(rawSource: string, lookups: SegmentLookups): ParsedRow {
-  // Glue a spaced German decimal ("0, 5" → "0,5") so the amount pass reads it
-  // as one number (mirrors the legacy normalize step).
-  const deSpaced = rawSource.replace(/(\d),\s+(\d)/g, "$1,$2");
-  const source = colonAmountInvert(deSpaced);
+/** Parse one ingredient segment into a structured row. The lexer runs over the
+ *  ORIGINAL source exactly once; every transformation (plural markers, colon
+ *  amount, decimal glue) is an in-place AST annotation, never a source rewrite,
+ *  so leaf offsets stay faithful to the input. */
+export function parseSegment(source: string, lookups: SegmentLookups): ParsedRow {
   const leaves: Leaf[] = lex(source).map((t) => ({ ...t }));
   // Annotate (don't rewrite) inline plural markers "Tomate(n)" → dropped.
   applyPluralMarkers(leaves);
@@ -84,11 +74,11 @@ export function parseSegment(rawSource: string, lookups: SegmentLookups): Parsed
   // Prep noun ("Juice of …") runs before the amount pass so the quantity that
   // follows the dropped connector is still found; its text leads the notes.
   const prepNote = applyPrepNoun(leaves);
-  const { quantity, unitName, rangeExpression } = applyAmountUnit(
-    source,
-    leaves,
-    lookups.knownUnitTokens,
-  );
+  // The inverted "Name: qty unit" form extracts its amount from after the colon
+  // in place; otherwise the normal leading-amount pass runs.
+  const { quantity, unitName, rangeExpression } =
+    applyColonAmount(source, leaves, lookups.knownUnitTokens) ??
+    applyAmountUnit(source, leaves, lookups.knownUnitTokens);
   const m = applyMatch(source, leaves, lookups.catalog, {
     index: lookups.catalogIndex,
     threshold: lookups.threshold,
