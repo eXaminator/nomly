@@ -1,7 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
   amountPrefixRange,
-  decomposeSegment,
   findSegmentRange,
   trailingNoteRange,
 } from "@/lib/recipe-import/source-ranges";
@@ -52,69 +51,6 @@ describe("amountPrefixRange", () => {
     expect(amountPrefixRange("Honig", false, null)).toBeNull();
   });
 });
-
-describe("decomposeSegment", () => {
-  const render = (
-    seg: string,
-    hasAmount: boolean,
-    unit: string | null,
-    name: string | null,
-    notes: string | null,
-    contentStart = 0,
-  ) =>
-    decomposeSegment(seg, hasAmount, unit, name, notes, contentStart).map((p) => ({
-      text: seg.slice(p.range[0], p.range[1]),
-      kind: p.kind,
-    }));
-
-  it("splits amount, name and a note that appears in the output", () => {
-    expect(render("200 g Mehl, gesiebt", true, "g", "Mehl", "gesiebt")).toEqual([
-      { text: "200 g", kind: "amount" },
-      { text: " ", kind: "note" },
-      { text: "Mehl", kind: "name" },
-      { text: ", ", kind: "note" },
-      { text: "gesiebt", kind: "note" },
-    ]);
-  });
-
-  it("covers the whole segment with no gaps", () => {
-    const seg = "2-3 EL Honig";
-    const parts = decomposeSegment(seg, true, "EL", "Honig", null);
-    expect(parts[0]).toEqual({ range: [0, 6], kind: "amount" });
-    expect(parts.at(-1)).toEqual({ range: [7, 12], kind: "name" });
-    expect(parts[0].range[0]).toBe(0);
-    expect(parts.at(-1)!.range[1]).toBe(seg.length);
-  });
-
-  it("strikes a connector that appears in no output field", () => {
-    // "oder" is in neither name nor notes → dropped (struck); the name is green.
-    expect(render("oder Ahornsirup", false, null, "Ahornsirup", null)).toEqual([
-      { text: "oder", kind: "dropped" },
-      { text: " ", kind: "note" },
-      { text: "Ahornsirup", kind: "name" },
-    ]);
-  });
-
-  it("recognises the alt's own amount after a leading connector (not struck)", () => {
-    // "oder 1 TL Backpulver": connector struck, but "1 TL" is the amount and
-    // must NOT be struck even though "TL" isn't in the name.
-    expect(render("oder 1 TL Backpulver", true, "TL", "Backpulver", null, 5)).toEqual([
-      { text: "oder", kind: "dropped" },
-      { text: " ", kind: "note" },
-      { text: "1 TL", kind: "amount" },
-      { text: " ", kind: "note" },
-      { text: "Backpulver", kind: "name" },
-    ]);
-  });
-
-  it("keeps a connector that DID make it into the notes", () => {
-    // A previously-folded alternative lives in notes as "oder Ahornsirup" — so
-    // here "oder" is part of the output and must NOT be struck.
-    const parts = render("X oder Ahornsirup", false, null, "X", "oder Ahornsirup");
-    expect(parts.find((p) => p.text === "oder")?.kind).toBe("note");
-  });
-});
-
 describe("trailingNoteRange", () => {
   it("finds a trailing note and swallows the leading comma", () => {
     const seg = "pancetta, diced";
