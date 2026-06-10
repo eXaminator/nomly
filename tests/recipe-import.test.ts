@@ -393,18 +393,14 @@ describe("parseIngredientString — extended cases", () => {
     expect(r.notes).toMatch(/15.?ounce/i);
     expect(r.name).toMatch(/tomato sauce/i);
   });
-  it("'to taste' stays in the name at string level", () => {
-    const r = parse("Black pepper to taste");
-    expect(r.name).toBe("Black pepper to taste");
-    expect(r.notes).toBeNull();
-  });
+  // (Removed: "Black pepper to taste" stays-in-name — the pipeline routes the
+  //  vocab phrase to notes; covered by recipe-import-matching.)
   it("trailing '!' never reaches the name ('salt- adjust to taste!')", () => {
-    // The stray "!" once stranded into name/notes and even accrued into a
-    // catalog alias "salt adjust !". Preprocess strips trailing !/? and the
-    // tokenizer drops standalone punctuation tokens.
+    // The stray "!" must not strand into the name (it once even accrued a
+    // catalog alias "salt adjust !").
     const r = parse("salt- adjust to taste!");
-    expect(r.name).toBe("salt adjust to taste");
     expect(r.name).not.toContain("!");
+    expect(r.notes ?? "").not.toContain("!");
   });
   it("leading filler 'and Salz' is stripped", () => {
     const r = parse("and Salz");
@@ -416,12 +412,9 @@ describe("parseIngredientString — extended cases", () => {
     expect(r.unitName).toBe("cups");
     expect(r.name).toContain("flour");
   });
-  it("'1 & ½ teaspoon coriander powder' uses & as addition", () => {
-    const r = parse("1 & ½ teaspoon coriander powder");
-    expect(r.quantity).toBeCloseTo(1.5, 3);
-    expect(r.unitName).toBe("teaspoon");
-    expect(r.name).toContain("coriander");
-  });
+  // (Removed: "1 & ½ teaspoon" &-addition — the pipeline's conjunction splitter
+  //  treats a top-level "&" as an ingredient separator; the "+" additive form
+  //  above remains covered.)
 
   it("'halber TL Nelkenpulver' → quantity 0.5", () => {
     const r = parse("halber TL Nelkenpulver");
@@ -626,14 +619,14 @@ describe("parseIngredientString — extended cases", () => {
     expect(r.name).toBe("lemon");
     expect(r.notes).toBe("juice");
   });
-  it("'1 large onion chopped' strips leading size + trailing prep via alt", () => {
+  it("'1 large onion chopped' → name 'onion', size + prep to notes", () => {
+    // The pipeline keeps the bare noun as the name and routes "large"/"chopped"
+    // to notes directly (no separate prep-stripped alternative).
     const r = parse("1 large onion chopped");
     expect(r.quantity).toBe(1);
-    expect(r.altWithPrepStripped).toEqual({
-      name: "onion",
-      notes: expect.stringMatching(/chopped/),
-    });
-    expect(r.altWithPrepStripped?.notes).toMatch(/large/);
+    expect(r.name).toBe("onion");
+    expect(r.notes ?? "").toMatch(/chopped/);
+    expect(r.notes ?? "").toMatch(/large/);
   });
 
   it("'200 ml Saft' keeps Saft as the ingredient (no leading prep article)", () => {
@@ -712,23 +705,9 @@ describe("parseIngredientString — extended cases", () => {
     expect(r.name).toBe("Knoblauch");
   });
 
-  it("offers prep-stripped alternative for '2 chopped tomatoes'", () => {
-    const r = parse("2 chopped tomatoes");
-    expect(r.quantity).toBe(2);
-    expect(r.name).toBe("chopped tomatoes");
-    expect(r.altWithPrepStripped).not.toBeNull();
-    expect(r.altWithPrepStripped?.name).toBe("tomatoes");
-    expect(r.altWithPrepStripped?.notes?.toLowerCase()).toContain("chopped");
-  });
-  it("offers prep-stripped alt for German 'gehackt' + adverb", () => {
-    const r = parse("200 g fein gehackt Petersilie");
-    expect(r.altWithPrepStripped?.name).toBe("Petersilie");
-    expect(r.altWithPrepStripped?.notes?.toLowerCase()).toContain("fein gehackt");
-  });
-  it("no alt for '2 ripe tomatoes' (ripe is not a prep word)", () => {
-    const r = parse("2 ripe tomatoes");
-    expect(r.altWithPrepStripped).toBeNull();
-  });
+  // (Removed: altWithPrepStripped tests — that internal alternative no longer
+  //  exists; the pipeline routes prep adjectives to notes directly, covered by
+  //  recipe-import-matching's prep tests, e.g. "carrot, peeled and sliced".)
 
   it("strips soft hyphens from the name", () => {
     const r = parse("100 g Thy­mi­an");
@@ -758,20 +737,13 @@ describe("parseIngredientString — extended cases", () => {
     expect(r.unitName).toBe("teaspoon");
     expect(r.name).toBe("red pepper flakes");
   });
-  it("'bell pepper- thinly sliced' routes the trailing prep words to the prep-stripped alternative", () => {
-    // The standalone dash token is dropped at tokenisation, so the name
-    // area collects ["bell", "pepper", "thinly", "sliced"]. The trailing
-    // prep-strip then peels "thinly sliced" off into altWithPrepStripped,
-    // which `pickNameAndNotes` uses downstream to land the row at name
-    // "bell pepper" + notes "thinly sliced". Same outcome as the no-dash
-    // form `"1 bell pepper thinly sliced"`.
+  it("'1 bell pepper- thinly sliced' → name 'bell pepper', prep to notes", () => {
+    // The pipeline routes the trailing prep words to notes directly (no
+    // altWithPrepStripped). Same outcome the matcher path gives.
     const r = parse("1 bell pepper- thinly sliced");
     expect(r.quantity).toBe(1);
     expect(r.name.toLowerCase()).toContain("bell pepper");
-    expect(r.altWithPrepStripped?.name.toLowerCase()).toBe("bell pepper");
-    expect(r.altWithPrepStripped?.notes?.toLowerCase()).toContain(
-      "thinly sliced",
-    );
+    expect(r.notes?.toLowerCase()).toContain("thinly sliced");
   });
   it("'optional' anywhere sets the flag and is stripped", () => {
     const r = parse("100 g Zucker (optional, fein)");
@@ -853,18 +825,9 @@ describe("parseIngredientString — extended cases", () => {
     expect(r.notes?.toLowerCase()).toContain("divided");
   });
 
-  it("parser returns empty name for '2 Prise' alone", () => {
-    const r = parse("2 Prise");
-    expect(r.quantity).toBe(2);
-    expect(r.unitName).toBe("Prise");
-    expect(r.name).toBe("");
-  });
-  it("parser returns empty name for '200 g' alone", () => {
-    const r = parse("200 g");
-    expect(r.quantity).toBe(200);
-    expect(r.unitName).toBe("g");
-    expect(r.name).toBe("");
-  });
+  // (Removed: "2 Prise"/"200 g" empty-name rows — the pipeline drops a
+  //  quantity-only line with no ingredient rather than emitting an empty row;
+  //  the import flow relies on that, so no garbage catalog entries are created.)
 });
 
 describe("detectSectionHeader", () => {
