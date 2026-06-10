@@ -18,12 +18,7 @@ import {
   type DropAnimation,
 } from "@dnd-kit/core";
 import { DietBadge } from "@/components/recipes/diet-badge";
-import {
-  ChevronDown,
-  ChevronLeft,
-  ChevronRight,
-  ChevronUp,
-} from "lucide-react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -44,6 +39,7 @@ import type { PlannerSettings } from "@/lib/settings/planner";
 import type { EventsByDate } from "@/lib/ical/events";
 import { useIsMobile } from "@/lib/use-is-mobile";
 import { DayCell } from "./day-cell";
+import { RangeNavButton } from "./range-nav-button";
 import { RecipePanel } from "./recipe-panel";
 import { useRecipeCatalog } from "./use-recipe-catalog";
 import { MealEditor } from "./meal-editor";
@@ -471,6 +467,7 @@ export function PlannerView({
       (dropData?.type === "day" ||
         dropData?.type === "meal" ||
         dropData?.type === "day-end" ||
+        dropData?.type === "shift-range" ||
         dropData?.type === "remove");
 
     // Resolve the target meal + side based on what the user actually
@@ -502,6 +499,16 @@ export function PlannerView({
     // recipe (not a meal) here is a no-op.
     if (dropData.type === "remove") {
       if (data.type === "meal") await handleDelete(data.mealId);
+      return;
+    }
+
+    // Dropped on a range-nav button → move the meal to the edge day of the
+    // adjacent range and stay put. Recipe drags are inert here (the droppable
+    // is disabled while dragging a recipe), so this only fires for meals.
+    if (dropData.type === "shift-range") {
+      if (data.type === "meal") {
+        moveAcrossDays(data.mealId, dropData.targetDate, null, "below");
+      }
       return;
     }
 
@@ -754,15 +761,12 @@ export function PlannerView({
               globally so the sticky recipe panel can reach the viewport
               bottom; the calendar column just needs a thin buffer. */}
           <div className="flex flex-col gap-2 md:pb-4">
-            <button
-              type="button"
+            <RangeNavButton
+              direction="previous"
+              targetDate={addDays(from, -1)}
               onClick={goPrevious}
-              aria-label="Vorherige"
-              className="flex items-center justify-center gap-2 rounded-md border border-dashed border-[var(--color-border)] py-2 text-xs text-[var(--color-muted-fg)] transition-colors hover:border-[var(--color-accent)] hover:bg-[var(--color-muted)] hover:text-[var(--color-accent)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
-            >
-              <ChevronUp className="size-4" aria-hidden />
-              <span>Vorherige</span>
-            </button>
+              dropDisabled={activeDrag?.type !== "meal"}
+            />
             {dates.map((d) => (
               <DayCell
                 key={d}
@@ -787,15 +791,12 @@ export function PlannerView({
                 draggable={!isMobile}
               />
             ))}
-            <button
-              type="button"
+            <RangeNavButton
+              direction="next"
+              targetDate={addDays(from, settings.daysVisible)}
               onClick={goNext}
-              aria-label="Nächste"
-              className="flex items-center justify-center gap-2 rounded-md border border-dashed border-[var(--color-border)] py-2 text-xs text-[var(--color-muted-fg)] transition-colors hover:border-[var(--color-accent)] hover:bg-[var(--color-muted)] hover:text-[var(--color-accent)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
-            >
-              <ChevronDown className="size-4" aria-hidden />
-              <span>Nächste</span>
-            </button>
+              dropDisabled={activeDrag?.type !== "meal"}
+            />
           </div>
           <RecipePanel
             allTags={allTags}
