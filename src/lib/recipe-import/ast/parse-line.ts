@@ -6,6 +6,7 @@ import type { ImportedCandidateMatch, ImportedNameProposal } from "../index";
 import { lex } from "./lexer";
 import { renderNote, tidyNote, type Leaf } from "./render-notes";
 import { applyOptional } from "./passes/optional";
+import { applyPluralMarkers } from "./passes/plural-marker";
 import { applyPrepNoun } from "./passes/prep-noun";
 import { applyAmountUnit } from "./passes/amount-unit";
 import { applyMatch } from "./passes/match-ingredient";
@@ -60,15 +61,6 @@ function assembleNotes(
   return tidyNote(`${rangeFrag}${sep}${rendered}`);
 }
 
-/** Strip inline pluralization markers a word carries ("Tomate(n)" → "Tomate",
- *  "Dose/n" → "Dose") — they're orthographic, not notes, and the legacy
- *  `normalize` dropped them before matching. */
-function stripPluralMarkers(source: string): string {
-  return source
-    .replace(/(\p{L})\((?:n|en|s|nen|innen)\)/giu, "$1")
-    .replace(/(\p{L})\/(?:n|en|s|innen)(?=\P{L}|$)/giu, "$1");
-}
-
 /** Rewrite the "Name: qty unit" colon-amount form to "qty unit Name" so the
  *  amount pass finds the leading quantity ("Mehl: 500 g" → "500 g Mehl"). Only
  *  fires when the post-colon side is an amount (contains a digit/fraction);
@@ -84,8 +76,10 @@ export function parseSegment(rawSource: string, lookups: SegmentLookups): Parsed
   // Glue a spaced German decimal ("0, 5" → "0,5") so the amount pass reads it
   // as one number (mirrors the legacy normalize step).
   const deSpaced = rawSource.replace(/(\d),\s+(\d)/g, "$1,$2");
-  const source = colonAmountInvert(stripPluralMarkers(deSpaced));
+  const source = colonAmountInvert(deSpaced);
   const leaves: Leaf[] = lex(source).map((t) => ({ ...t }));
+  // Annotate (don't rewrite) inline plural markers "Tomate(n)" → dropped.
+  applyPluralMarkers(leaves);
   const isOptional = applyOptional(leaves);
   // Prep noun ("Juice of …") runs before the amount pass so the quantity that
   // follows the dropped connector is still found; its text leads the notes.
