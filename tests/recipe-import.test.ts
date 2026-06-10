@@ -4,11 +4,11 @@ import {
   detectSectionHeader,
   expandIngredientLine,
   normalizeForMatch,
-  parseIngredientString,
   splitConjunctions,
   stripVocabTail,
   tidyRemainderFragment,
 } from "@/lib/recipe-import/ingredient";
+import { parseIngredientLines, type ParseLookups } from "@/lib/recipe-import";
 import {
   asImageUrl,
   asInstructionGroups,
@@ -70,7 +70,42 @@ const TEST_UNITS = new Set(
     "x", "tin", "tins", "bd", "bd.", "stick", "sticks",
   ].map((u) => u.toLowerCase()),
 );
-const parse = (raw: string) => parseIngredientString(raw, TEST_UNITS);
+// Build a ParseLookups from TEST_UNITS (no catalog) so parse() exercises the
+// real production pipeline (expand → split → AST parseSegment).
+const CONTAINER_TOKENS = new Set([
+  "dose", "dosen", "can", "cans", "package", "packages", "packung",
+  "packungen", "päckchen", "pkg", "pck", "tin", "tins", "bag", "bags",
+]);
+const UNIT_ENTRIES = [...TEST_UNITS].map(
+  (name, i) => [name, { id: i + 1, name, isContainer: CONTAINER_TOKENS.has(name) }] as const,
+);
+const TEST_LOOKUPS: ParseLookups = {
+  units: {
+    byNameOrAlias: new Map(UNIT_ENTRIES),
+    byCanonicalName: new Map(UNIT_ENTRIES),
+    byId: new Map(UNIT_ENTRIES.map(([, e]) => [e.id, e] as const)),
+    containerTokens: CONTAINER_TOKENS,
+    globalDefaultUnitId: null,
+  },
+  ingredients: new Map(),
+  ingredientCatalog: [],
+};
+
+/** Run the full production pipeline on a single line and adapt the
+ *  ImportedIngredient row back to the legacy ParsedIngredient-ish shape the
+ *  assertions below use. */
+const parse = (raw: string) => {
+  const out = parseIngredientLines([raw], TEST_LOOKUPS);
+  const r = out[0];
+  return {
+    quantity: r?.quantity ?? null,
+    unitName: r?.unit?.name ?? r?.rawUnit ?? null,
+    name: r?.name ?? "",
+    notes: r?.notes ?? null,
+    isOptional: r?.isOptional ?? false,
+    fixedAmount: r?.fixedAmount ?? true,
+  };
+};
 
 describe("parseIngredientString", () => {
   it("splits qty + unit + name", () => {
