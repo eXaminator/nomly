@@ -160,14 +160,21 @@ export function tokenizeCandidate(text: string): CandidateToken[] {
       continue;
     }
     // Keep fraction slashes ("1/2") as one token — notes are reconstructed
-    // from raw tokens and must not degrade to "1 2". Letter slashes
-    // ("und/oder") still split. Intra-word dashes split for MATCHING (so
-    // "Cherry-Tomate" aligns against a 2-token entry) but remember the dash
-    // via `joinedByDash` so notes reconstruction restores "whole-wheat".
+    // from raw tokens and must not degrade to "1 2". A non-fraction slash
+    // ("und/oder", "14 tbsp / 1 sticks") splits for MATCHING but is remembered
+    // as a " / " separator on the next token (via `joinedByDash`) so notes
+    // reconstruction restores the slash — every special char survives in notes.
+    // Intra-word dashes split for MATCHING ("Cherry-Tomate" → 2 tokens) but are
+    // likewise remembered so notes restore "whole-wheat".
+    let pendingSlash = false;
     for (const piece of segment
-      .replace(/(?<!\d)\/|\/(?!\d)/g, " ")
+      .replace(/(?<!\d)\/|\/(?!\d)/g, " / ")
       .split(/[\s;]+/u)) {
       if (piece.length === 0) continue;
+      if (piece === "/") {
+        pendingSlash = true;
+        continue;
+      }
       const subs = piece.split(/([-–—])/);
       let pendingDash: string | undefined;
       let emittedInPiece = false;
@@ -184,18 +191,25 @@ export function tokenizeCandidate(text: string): CandidateToken[] {
         parenDepth = Math.max(0, parenDepth + opens - closes);
         const normalized = canonicalizeMatchToken(normalizeForMatch(raw));
         if (normalized.length === 0) continue;
+        // A leading separator the source used, restored verbatim in notes: a
+        // " / " from a non-fraction slash takes priority over an intra-word
+        // dash (a slashed token can't also be dash-joined to its predecessor).
+        const leadingSep = pendingSlash && !pendingComma
+          ? " / "
+          : pendingDash !== undefined && !pendingComma
+            ? pendingDash
+            : undefined;
         out.push({
           raw,
           normalized,
           postComma,
           precededByComma: pendingComma,
           inParens,
-          ...(pendingDash !== undefined && !pendingComma
-            ? { joinedByDash: pendingDash }
-            : {}),
+          ...(leadingSep !== undefined ? { joinedByDash: leadingSep } : {}),
         });
         pendingComma = false;
         pendingDash = undefined;
+        pendingSlash = false;
         emittedInPiece = true;
       }
     }

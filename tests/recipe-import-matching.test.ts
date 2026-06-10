@@ -1420,6 +1420,19 @@ describe("alternative amount/unit/notes inheritance", () => {
     );
   });
 
+  it("keeps a non-fraction slash in the notes on the matched path", () => {
+    // "(14 tbsp / 1¾ sticks)" — the slash must survive into the matched row's
+    // notes, not be swallowed when the candidate tokens are re-joined.
+    const out = rows(
+      "200g (14 tbsp / 1¾ sticks) unsalted butter, clarified",
+      [{ ingredientId: 1, canonicalName: "butter", aliasName: "butter", tokens: ["butter"] }],
+      ["tbsp", "stick", "sticks"],
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0].name).toBe("butter");
+    expect(out[0].notes).toContain("14 tbsp / 1 ¾ sticks");
+  });
+
   it("keeps a note tail after a parenthetical alternative in source order", () => {
     // "(or 1 large clove), peeled" — the alternative folds into notes and the
     // trailing "peeled" must come AFTER it, not jump ahead of it.
