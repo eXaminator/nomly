@@ -262,6 +262,7 @@ function computeHighlights(
     notes: true,
     mapping: true,
     optional: true,
+    alternative: true,
   };
   for (let k = 0; k < n; k++) {
     const c = current[k];
@@ -297,6 +298,9 @@ function computeHighlights(
       mapping: currentMappingId(c) !== draftMappingId(d),
       // Optional ⇄ required is otherwise invisible (no amount/name/notes change).
       optional: c.isOptional !== (d.unassigned ? false : d.isOptional),
+      // Alternative ⇄ main: tints the indent icon so a (manual) alternative the
+      // re-parse promotes to a main ingredient is visible.
+      alternative: c.isAlternative !== (d.unassigned ? false : d.isAlternative),
     };
     cur.push(flags);
     prop.push(flags);

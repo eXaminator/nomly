@@ -33,10 +33,14 @@ export type LineHighlight = {
   name?: boolean;
   notes?: boolean;
   mapping?: boolean;
-  /** The optional/required flag differs between the two sides. Shown as a
-   *  highlighted "(optional)" / "(benötigt)" chip so the transition is visible
-   *  (otherwise a become-required change leaves nothing on the proposed side). */
+  /** The optional/required flag differs between the two sides. Tints the
+   *  "(optional)" chip — red on the side that loses it (becomes mandatory),
+   *  green on the side that gains it (becomes optional), like every other diff. */
   optional?: boolean;
+  /** The alternative/main flag differs. Tints the alternative indent icon —
+   *  red on the side that loses it (becomes a main ingredient), green on the
+   *  side that gains it (becomes an alternative). */
+  alternative?: boolean;
 };
 
 export type ReadLineProps = {
@@ -104,10 +108,17 @@ export function RecipeIngredientReadLine({
       )}
     >
       {isAlternative ? (
-        <CornerDownRight
-          className="mt-0.5 size-4 shrink-0 text-[var(--color-muted-fg)]"
-          aria-hidden="true"
-        />
+        <span
+          className={cn(
+            "mt-0.5 shrink-0",
+            highlight?.alternative && tone ? hlClass : undefined,
+          )}
+        >
+          <CornerDownRight
+            className="size-4 text-[var(--color-muted-fg)]"
+            aria-hidden="true"
+          />
+        </span>
       ) : null}
       <span className="inline-flex min-w-12 shrink-0 items-center gap-1 font-mono text-[var(--color-muted-fg)]">
         {fixedAmount ? (
@@ -150,14 +161,14 @@ export function RecipeIngredientReadLine({
             )
           )
         ) : null}
-        {!isAlternative && (isOptional || highlight?.optional) ? (
+        {!isAlternative && isOptional ? (
           <span
             className={cn(
               "ml-1 text-xs text-[var(--color-muted-fg)]",
               highlight?.optional && tone ? hlClass : undefined,
             )}
           >
-            {isOptional ? "(optional)" : "(benötigt)"}
+            (optional)
           </span>
         ) : null}
         {mappingLabel !== undefined ? (
