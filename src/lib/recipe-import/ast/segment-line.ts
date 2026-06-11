@@ -65,6 +65,13 @@ const ALT_LEADER_WORDS = new Set([
 ]);
 const OR_WORDS = new Set(["oder", "or"]);
 const CONJ_WORDS = new Set(["und", "and"]);
+/** Well-known adjacent pairs that read as two ingredients even without a
+ *  conjunction ("Salz Pfeffer") — split only in the Familywall first-wins mode
+ *  (mirrors the legacy preprocessAlternatives injection). */
+const KNOWN_PAIRS: ReadonlyArray<readonly [string, string]> = [
+  ["salz", "pfeffer"],
+  ["salt", "pepper"],
+];
 
 /** A depth-0 word leaf whose text equals one of `set` (normalised). */
 function isWordIn(l: Leaf, set: ReadonlySet<string>): boolean {
@@ -386,7 +393,11 @@ function segmentRange(
       const primaryText = source.slice(all[segs[0].from].start, all[primaryEnd - 1].end).trim();
       void primaryLastWord;
       const allNonEmpty = segs.every((s) => s.to > s.from);
-      if (allNonEmpty && !endsWithDash && !preIsHeadlessModifier(primaryText)) {
+      // The dash-compound stem ("Weizen- oder Dinkelmehl") is kept as ONE
+      // ingredient by default; in first-wins (Familywall) it splits into a
+      // primary + alternative (the legacy preprocessAlternatives behaviour).
+      const dashBlocks = endsWithDash && !opts.useFirstWins;
+      if (allNonEmpty && !dashBlocks && !preIsHeadlessModifier(primaryText)) {
         const out: LineSegment[] = [];
         segs.forEach((s, idx) => {
           // Strip a leading substitute marker on alternatives ("or sub X").
@@ -537,6 +548,9 @@ type ParenAlt = {
   contentTo: number;
   leader: string; // connector for the first alternative
   tailFrom: number; // index after close (for the trailing note)
+  /** A leading nested paren BEFORE the leader ("((10 g) oder X)") that belongs
+   *  to the primary — its leaf range [from,to), hoisted onto the primary. */
+  leadParen: [number, number] | null;
 };
 
 /**
@@ -579,8 +593,10 @@ function extractParenAlt(
   // Leader word inside the paren (first content leaf), tolerating a leading
   // "or"/"oder" before an explicit marker.
   let cf = open + 1;
+  let leadParen: [number, number] | null = null;
   // A leading nested paren that PRECEDES the leader belongs to the primary
-  // ("((10 g) oder X)") — skip it for leader detection (hoisted below).
+  // ("((10 g) oder X)") — skip it for leader detection and hoist it onto the
+  // primary.
   const firstInner = all[cf];
   if (firstInner?.kind === "open") {
     // skip the nested group
@@ -599,6 +615,7 @@ function extractParenAlt(
     // only treat as lead-paren when an alt leader follows it
     const after = nextContentWord(all, j, close);
     if (after && (OR_WORDS.has(norm(after.text)) || ALT_LEADER_WORDS.has(norm(after.text)))) {
+      leadParen = [cf, j];
       cf = j;
     }
   }
@@ -630,6 +647,7 @@ function extractParenAlt(
     contentTo: close,
     leader: connector,
     tailFrom: close + 1,
+    leadParen,
   };
 }
 
@@ -659,8 +677,22 @@ function buildParenAlt(
         return;
       }
       hasPrimary = hasPrimary || !s.isAlternative;
+      // Hoist a leading paren note ("((10 g) oder X)" → "(10 g)" is the
+      // primary's note) onto the FIRST primary segment's leaves so it parses as
+      // a note on the primary, not dropped.
+      let leaves = s.leaves;
+      if (idx === 0 && alt.leadParen) {
+        // The lead-paren sits INSIDE the outer alt paren (one level deeper), so
+        // normalise by baseDepth+1 — its "(" then reads as a root paren on the
+        // primary and unwraps to a plain note ("(10 g)" → "10 g").
+        const hoisted = all
+          .slice(alt.leadParen[0], alt.leadParen[1])
+          .map((l) => ({ ...l, depth: Math.max(0, l.depth - (baseDepth + 1)) }));
+        leaves = [...s.leaves, ...hoisted];
+      }
       out.push({
         ...s,
+        leaves,
         rawText: source.trim(),
         forceOptional: idx === 0 ? optional || s.forceOptional : s.forceOptional,
         ...(idx === 0 && tail ? { tailNote: tail } : {}),
@@ -713,13 +745,31 @@ function conjunctionSplit(
     }
   }
 
+  // First-wins (Familywall): a well-known adjacent pair with no conjunction
+  // ("Salz Pfeffer") reads as two ingredients — split between them.
+  if (opts.useFirstWins) {
+    for (let i = from; i + 1 < to; i++) {
+      const a = all[i];
+      const b = all[i + 1];
+      if (a.depth !== depth || b.depth !== depth || a.kind !== "word" || b.kind !== "word") {
+        continue;
+      }
+      if (KNOWN_PAIRS.some(([x, y]) => x === norm(a.text) && y === norm(b.text))) {
+        return [
+          { from, to: i + 1, rawText: source.slice(all[from].start, a.end).trim() },
+          { from: i + 1, to, rawText: source.slice(b.start, all[to - 1].end).trim() },
+        ];
+      }
+    }
+  }
+
   const commaIdx = firstTopComma(all, from, to, depth);
   const seps = conjSeparators(all, from, to, depth).filter((sep) => {
     // Comma guard: a conjunction after the first top-level comma connects prep.
     if (commaIdx >= 0 && sep.at > commaIdx) return false;
-    // Dash-compound: "Weizen- und …" (the token before ends with a dash).
-    const prev = all[sep.at - 1];
-    if (prev && prev.kind === "dash" && prev.end === all[sep.at].start) return false;
+    // Dash-compound: "Weizen- und …" (the leaf before the separator is a dash,
+    // i.e. the preceding token ends with a dash — even across whitespace).
+    if (all[sep.at - 1]?.kind === "dash") return false;
     // Color-adjective guard: parallel adjectives modify one downstream noun.
     const before = prevContentWord(all, sep.at, from);
     const after = nextContentWord(all, sep.at + sep.span, to);

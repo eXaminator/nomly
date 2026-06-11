@@ -2,13 +2,29 @@ import { describe, it, expect } from "vitest";
 import { parseIsoDurationToMinutes } from "@/lib/recipe-import/duration";
 import {
   detectSectionHeader,
-  expandIngredientLine,
   normalizeForMatch,
-  splitConjunctions,
   stripVocabTail,
   tidyRemainderFragment,
 } from "@/lib/recipe-import/ingredient";
 import { parseIngredientLines, type ParseLookups } from "@/lib/recipe-import";
+import { segmentLine, type LineSegment } from "@/lib/recipe-import/ast/segment-line";
+import { lex } from "@/lib/recipe-import/ast/lexer";
+
+/** Test helper: AST-segment a line and return its ingredient segments. */
+function segs(
+  line: string,
+  opts: Partial<{ useFirstWins: boolean }> = {},
+): Extract<LineSegment, { kind: "ingredient" }>[] {
+  const trimmed = line.trim();
+  return segmentLine(trimmed, lex(trimmed).map((t) => ({ ...t })), {
+    containerTokens: new Set(),
+    knownIngredients: new Set(),
+    useFirstWins: opts.useFirstWins ?? false,
+  }).filter((s): s is Extract<LineSegment, { kind: "ingredient" }> => s.kind === "ingredient");
+}
+/** The segText of each ingredient segment — mirrors the legacy splitConjunctions
+ *  string output for the conjunction/guard tests. */
+const segTexts = (line: string): string[] => segs(line).map((s) => s.segText);
 import {
   asImageUrl,
   asInstructionGroups,
@@ -857,57 +873,49 @@ describe("detectSectionHeader", () => {
   });
 });
 
-describe("splitConjunctions", () => {
+describe("segmentLine — conjunction splitting", () => {
   it("does nothing for a normal line", () => {
-    expect(splitConjunctions("200 g Mehl")).toEqual(["200 g Mehl"]);
+    expect(segTexts("200 g Mehl")).toEqual(["200 g Mehl"]);
   });
   it("splits on ' und '", () => {
-    expect(splitConjunctions("Salz und Pfeffer")).toEqual(["Salz", "Pfeffer"]);
+    expect(segTexts("Salz und Pfeffer")).toEqual(["Salz", "Pfeffer"]);
   });
   it("splits on ' & '", () => {
-    expect(splitConjunctions("Salz & Pfeffer")).toEqual(["Salz", "Pfeffer"]);
+    expect(segTexts("Salz & Pfeffer")).toEqual(["Salz", "Pfeffer"]);
   });
   it("splits on ' and '", () => {
-    expect(splitConjunctions("Salt and Pepper")).toEqual(["Salt", "Pepper"]);
+    expect(segTexts("Salt and Pepper")).toEqual(["Salt", "Pepper"]);
   });
   it("keeps 'yellow and red grape tomatoes' as one ingredient (color + color)", () => {
     // Regression: family-wall "Chickpea Salad" recipe had this line and
     // we were splitting into "2 cups mixed yellow" + "red grape tomatoes",
     // producing a phantom "yellow" ingredient.
-    expect(
-      splitConjunctions(
-        "2 cups mixed yellow and red grape tomatoes (halved)",
-      ),
-    ).toEqual(["2 cups mixed yellow and red grape tomatoes (halved)"]);
+    expect(segTexts("2 cups mixed yellow and red grape tomatoes (halved)")).toEqual([
+      "2 cups mixed yellow and red grape tomatoes (halved)",
+    ]);
   });
   it("keeps 'gelbe und rote Paprika' as one ingredient", () => {
-    expect(splitConjunctions("gelbe und rote Paprika")).toEqual([
-      "gelbe und rote Paprika",
-    ]);
+    expect(segTexts("gelbe und rote Paprika")).toEqual(["gelbe und rote Paprika"]);
   });
   it("still splits when the conjunction sits between real ingredients", () => {
-    expect(splitConjunctions("yogurt and milk")).toEqual(["yogurt", "milk"]);
+    expect(segTexts("yogurt and milk")).toEqual(["yogurt", "milk"]);
   });
-  it("keeps 'Weizen- oder Dinkelmehl' as one ingredient", () => {
-    expect(splitConjunctions("Weizen- und Dinkelmehl")).toEqual([
-      "Weizen- und Dinkelmehl",
+  it("keeps 'Weizen- und Dinkelmehl' as one ingredient (dash stem)", () => {
+    expect(segTexts("Weizen- und Dinkelmehl")).toEqual(["Weizen- und Dinkelmehl"]);
+  });
+  it("does not split inside parentheses (separator at depth > 0)", () => {
+    expect(segTexts("1 medium onion (½ finely chopped & ½ sliced)")).toEqual([
+      "1 medium onion (½ finely chopped & ½ sliced)",
     ]);
   });
-  it("does not split inside parentheses", () => {
-    expect(
-      splitConjunctions("1 medium onion (½ finely chopped & ½ sliced)"),
-    ).toEqual(["1 medium onion (½ finely chopped & ½ sliced)"]);
-  });
   it("does not split inside brackets", () => {
-    expect(splitConjunctions("Salz [Meersalz und Steinsalz]")).toEqual([
+    expect(segTexts("Salz [Meersalz und Steinsalz]")).toEqual([
       "Salz [Meersalz und Steinsalz]",
     ]);
   });
-  it("does not split before a cooking-prep verb", () => {
+  it("does not split before a cooking-prep verb (after a top-level comma)", () => {
     expect(
-      splitConjunctions(
-        "1 pound Persian cucumbers, halved lengthwise and cut into 1/2-inch pieces",
-      ),
+      segTexts("1 pound Persian cucumbers, halved lengthwise and cut into 1/2-inch pieces"),
     ).toEqual([
       "1 pound Persian cucumbers, halved lengthwise and cut into 1/2-inch pieces",
     ]);
@@ -1110,79 +1118,74 @@ describe("asInstructionGroups", () => {
   });
 });
 
-describe("expandIngredientLine — parenthetical alternatives", () => {
-  const ingredients = (raw: string) =>
-    expandIngredientLine(raw).filter((r) => r.kind === "ingredient");
-
+describe("segmentLine — parenthetical alternatives", () => {
   it("splits a trailing '(oder X)' paren into a primary + alternative", () => {
-    const rows = ingredients(
+    const rows = segs(
       "400 g Kidneybohnen (oder schwarze Bohnen aus der Dose (abgespült und abgetropft))",
     );
     expect(rows).toHaveLength(2);
-    expect(rows[0]).toMatchObject({ text: "400 g Kidneybohnen", isAlternative: false });
+    expect(rows[0]).toMatchObject({ segText: "400 g Kidneybohnen", isAlternative: false });
     expect(rows[1].isAlternative).toBe(true);
-    expect(rows[1].text).toMatch(/schwarze Bohnen/);
+    expect(rows[1].segText).toMatch(/schwarze Bohnen/);
     // The nested prep paren rides along with the alternative, not the primary.
-    expect(rows[1].text).toMatch(/abgespült und abgetropft/);
+    expect(rows[1].segText).toMatch(/abgespült und abgetropft/);
   });
 
   it("still treats a plain trailing note paren as a note (not an alternative)", () => {
-    const rows = ingredients("200 g Mehl (gesiebt)");
+    const rows = segs("200 g Mehl (gesiebt)");
     expect(rows).toHaveLength(1);
     expect(rows[0].isAlternative).toBe(false);
   });
 
   it("preserves the English 'or' connector (doesn't anglicise to 'oder')", () => {
-    const rows = expandIngredientLine("3/4 teaspoon salt (or to taste)");
-    const alt = rows.find((r) => r.kind === "ingredient" && r.isAlternative);
-    expect(alt?.alternativeConnector).toBe("or");
+    const alt = segs("3/4 teaspoon salt (or to taste)").find((r) => r.isAlternative);
+    expect(alt?.connector).toBe("or");
   });
 
   it("keeps a German 'oder' connector as 'oder'", () => {
-    const rows = expandIngredientLine("100 g Zucker (oder Honig)");
-    const alt = rows.find((r) => r.kind === "ingredient" && r.isAlternative);
-    expect(alt?.alternativeConnector).toBe("oder");
+    const alt = segs("100 g Zucker (oder Honig)").find((r) => r.isAlternative);
+    expect(alt?.connector).toBe("oder");
   });
 
   it("re-expands an 'oder' chain in the primary alongside a paren alternative", () => {
     // "Weizenmehl oder Dinkelmehl (oder glutenfreies Mehl)" → 3 ingredients.
-    const rows = ingredients("80 g Weizenmehl oder Dinkelmehl (oder glutenfreies Mehl)");
+    const rows = segs("80 g Weizenmehl oder Dinkelmehl (oder glutenfreies Mehl)");
     expect(rows).toHaveLength(3);
-    expect(rows[0]).toMatchObject({ text: "80 g Weizenmehl", isAlternative: false });
-    expect(rows[1]).toMatchObject({ text: "Dinkelmehl", isAlternative: true });
-    expect(rows[2]).toMatchObject({ text: "glutenfreies Mehl", isAlternative: true });
+    expect(rows[0]).toMatchObject({ segText: "80 g Weizenmehl", isAlternative: false });
+    expect(rows[1]).toMatchObject({ segText: "Dinkelmehl", isAlternative: true });
+    expect(rows[2]).toMatchObject({ segText: "glutenfreies Mehl", isAlternative: true });
   });
 
   it("splits a primary 'oder' chain even when a paren note-alt follows", () => {
-    const rows = ingredients("2 EL Zitronensaft oder Limettensaft (oder nach Geschmack)");
+    const rows = segs("2 EL Zitronensaft oder Limettensaft (oder nach Geschmack)");
     // Zitronensaft (primary) + Limettensaft (alt) + nach Geschmack (alt note)
     expect(rows.length).toBeGreaterThanOrEqual(2);
-    expect(rows[0]).toMatchObject({ text: "2 EL Zitronensaft", isAlternative: false });
-    expect(rows[1]).toMatchObject({ text: "Limettensaft", isAlternative: true });
+    expect(rows[0]).toMatchObject({ segText: "2 EL Zitronensaft", isAlternative: false });
+    expect(rows[1]).toMatchObject({ segText: "Limettensaft", isAlternative: true });
   });
 
   it("keeps an ingredient,note comma inside a paren alternative as ONE alternative", () => {
     // "Abtropfgew. 115 g" is a note on the alternative, not a second one — so
     // there must be exactly one extra alternative (one 'oder', not two).
-    const rows = ingredients(
-      "200 g Spargelspitzen (oder 1 kl. Glas Spargelköpfe, Abtropfgew. 115 g)",
-    );
+    const rows = segs("200 g Spargelspitzen (oder 1 kl. Glas Spargelköpfe, Abtropfgew. 115 g)");
     expect(rows).toHaveLength(2);
-    expect(rows[1].text).toBe("1 kl. Glas Spargelköpfe, Abtropfgew. 115 g");
+    expect(rows[1].segText).toBe("1 kl. Glas Spargelköpfe, Abtropfgew. 115 g");
   });
 
   it("hoists a leading paren note out of a '((10 g) oder X)' alternative", () => {
-    const rows = ingredients("1/2 EL Melasse ((10 g) oder Ahornsirup)");
+    const rows = segs("1/2 EL Melasse ((10 g) oder Ahornsirup)");
     expect(rows).toHaveLength(2);
-    expect(rows[0].text).toBe("1/2 EL Melasse (10 g)");
-    expect(rows[1]).toMatchObject({ text: "Ahornsirup", isAlternative: true });
+    expect(rows[0]).toMatchObject({ segText: "1/2 EL Melasse", isAlternative: false });
+    // The "(10 g)" note is hoisted onto the primary's leaves (not dropped).
+    expect(rows[0].leaves.map((l) => l.text).join("")).toContain("10");
+    expect(rows[1]).toMatchObject({ segText: "Ahornsirup", isAlternative: true });
   });
 
   it("does not split a decimal comma inside a parenthetical alternative", () => {
     // "1,5 TL Apfelessig" must stay ONE alternative — the comma is a decimal
     // point, not a list separator.
-    const rows = ingredients("1,5 EL Zitronensaft (oder 1,5 TL Apfelessig)");
+    const rows = segs("1,5 EL Zitronensaft (oder 1,5 TL Apfelessig)");
     expect(rows).toHaveLength(2);
-    expect(rows[1].text).toBe("1,5 TL Apfelessig");
+    expect(rows[1].segText).toBe("1,5 TL Apfelessig");
   });
 });
