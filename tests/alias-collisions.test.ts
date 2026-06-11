@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { aliasDedupKey } from "@/lib/recipe-import/ingredient";
+import { aliasDedupKey } from "@/lib/recipe-import/ast/candidate-tokens";
 import { findAliasCollisions } from "@/components/settings/stammdaten/alias-collisions";
 
 describe("aliasDedupKey", () => {

@@ -1,5 +1,6 @@
 import { canonicalizeMatchToken, normalizeForMatch } from "../ingredient";
 import type { CandidateToken } from "../matching";
+import { lex } from "./lexer";
 import type { Leaf } from "./render-notes";
 
 /** A matcher candidate token projected from the AST leaves, carrying the leaf
@@ -140,4 +141,27 @@ export function leavesToCandidateTokens(
   }
   flush();
   return out;
+}
+
+/**
+ * Tokenize a catalog name (canonical or alias) with the SAME tokenizer the
+ * candidate (recipe-line) side uses — lex the name, then project its leaves
+ * through {@link leavesToCandidateTokens} (no dash-join) and take the
+ * normalised token of each. The single source of truth for "what tokens does
+ * the matcher see for this name" on both sides; used to build the catalog and
+ * to detect virtually-identical aliases.
+ */
+export function tokenizeEntryNameForCatalog(name: string): string[] {
+  return leavesToCandidateTokens(lex(name), false).map((t) => t.normalized);
+}
+
+/**
+ * Collapse a name to the key the matcher would compare on: its catalog tokens
+ * joined by a space. Two names with the same key are "virtually identical" —
+ * they differ only in case, diacritics, ß, separators (hyphen/slash/comma) or
+ * the &/und/and conjunction, so the matcher cannot tell them apart. Used to
+ * warn when an alias duplicates the canonical name or another alias.
+ */
+export function aliasDedupKey(name: string): string {
+  return tokenizeEntryNameForCatalog(name).join(" ");
 }

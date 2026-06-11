@@ -241,36 +241,6 @@ export function canonicalizeMatchToken(normalized: string): string {
   return CONJUNCTION_TOKENS.has(normalized) ? "und" : normalized;
 }
 
-/**
- * Tokenize a catalog name (canonical or alias) the way the matcher's catalog
- * side does: split on the same separators as the candidate tokenizer (space,
- * comma, semicolon, slash, hyphen/dashes), then normalise + conjunction-fold
- * each piece. The single source of truth for "what tokens does the matcher
- * see for this name" — used both to build the catalog and to detect aliases
- * that are virtually identical to one another.
- */
-export function tokenizeEntryNameForCatalog(name: string): string[] {
-  const out: string[] = [];
-  for (const piece of name.split(/[\s,;/\-–—]+/u)) {
-    if (piece.length === 0) continue;
-    const normalized = canonicalizeMatchToken(normalizeForMatch(piece));
-    if (normalized.length === 0) continue;
-    out.push(normalized);
-  }
-  return out;
-}
-
-/**
- * Collapse a name to the key the matcher would compare on: its catalog tokens
- * joined by a space. Two names with the same key are "virtually identical" —
- * they differ only in case, diacritics, ß, separators (hyphen/slash/comma) or
- * the &/und/and conjunction, so the matcher cannot tell them apart. Used to
- * warn when an alias duplicates the canonical name or another alias.
- */
-export function aliasDedupKey(name: string): string {
-  return tokenizeEntryNameForCatalog(name).join(" ");
-}
-
 function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

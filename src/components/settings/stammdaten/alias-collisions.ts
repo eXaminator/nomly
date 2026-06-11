@@ -1,4 +1,4 @@
-import { aliasDedupKey } from "@/lib/recipe-import/ingredient";
+import { aliasDedupKey } from "@/lib/recipe-import/ast/candidate-tokens";
 
 /** Why an alias is flagged: it folds onto the canonical name, or onto another
  *  alias in the same list. */

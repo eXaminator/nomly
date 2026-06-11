@@ -35,8 +35,8 @@ import {
   normalizeForMatch,
   isStandaloneDescriptor,
   stripVocabTail,
-  tokenizeEntryNameForCatalog,
 } from "./ingredient.ts";
+import { tokenizeEntryNameForCatalog } from "./ast/candidate-tokens.ts";
 import {
   MIN_AUTO_MATCH_SCORE,
   type CatalogBlockIndex,
