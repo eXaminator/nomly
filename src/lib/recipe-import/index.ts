@@ -21,7 +21,9 @@ import {
   extractIngredientGroupsFromHtml,
 } from "./html-groups.ts";
 import { parseIsoDurationToMinutes } from "./duration.ts";
-import { parseSegment } from "./ast/parse-line.ts";
+import { parseSegment, parseLeaves } from "./ast/parse-line.ts";
+import { lex } from "./ast/lexer.ts";
+import { segmentLine } from "./ast/segment-line.ts";
 import {
   amountPrefixRange,
   findSegmentRange,
@@ -619,28 +621,26 @@ export function parseIngredientLines(
     // the alternative doesn't match a catalog article. Scoped per rawLine so
     // an alt from this line never folds into a primary from a previous line.
     let lastPrimaryIndex: number | null = null;
-    // Cursor for mapping each emitted piece back to a char range in the
-    // (trimmed) source line. `rawText` on emitted rows equals this string.
     const originalTrimmed = rawLine.trim();
-    let sourceCursor = 0;
     // A note that trailed a parenthetical alternative ("(or 1 large clove),
     // peeled"). Appended to the primary AFTER the line's alternatives fold in,
     // so it keeps its source order ("small, or 1 large clove, peeled").
     let pendingTailNote: string | null = null;
 
-    for (const row of expandIngredientLine(rawLine)) {
-      if (row.kind === "header") continue;
-      if (row.tailNote) pendingTailNote = row.tailNote;
-      // Familywall opt-in: pre-resolve "X oder Y" alternatives + adjacent-pair
-      // conjunctions (Salz Pfeffer) before the conjunction splitter runs.
-      const raw = useFirstWins
-        ? preprocessAlternatives(row.text, knownIngredientKeys)
-        : row.text;
-      for (const piece of splitConjunctions(raw, splitOpts)) {
-        // ONE AST parse of this piece is the single source of truth: quantity,
-        // unit, faithful notes, name, ingredient match, candidate pills, and
-        // new-name proposals — all from one lex + one match.
-        const astSeg = parseSegment(piece, {
+    // Lex the line ONCE; segment it on the AST (depth-aware), parse each segment
+    // from its own leaves — no re-lexing, no string-level splitting.
+    const lineLeaves = lex(originalTrimmed).map((t) => ({ ...t }));
+    for (const seg of segmentLine(originalTrimmed, lineLeaves, {
+      containerTokens: lookups.units.containerTokens,
+      knownIngredients: knownIngredientKeys,
+      useFirstWins,
+    })) {
+      if (seg.kind === "header") continue;
+      if (seg.tailNote) pendingTailNote = seg.tailNote;
+      {
+        const piece = seg.segText;
+        // ONE AST parse of this segment is the single source of truth.
+        const astSeg = parseLeaves(originalTrimmed, seg.leaves, {
           knownUnitTokens,
           containerTokens: lookups.units.containerTokens,
           catalog: lookups.ingredientCatalog ?? [],
@@ -650,16 +650,10 @@ export function parseIngredientLines(
             resolveUnit(lookups.units, name, qty).resolved?.id ?? null,
         });
         const astNote = astSeg.notes;
-        const sourceRange = findSegmentRange(
-          originalTrimmed,
-          piece,
-          sourceCursor,
-          row.isAlternative,
-        );
-        if (sourceRange) sourceCursor = sourceRange[1];
+        const sourceRange = seg.range;
         // An optional marker makes the WHOLE block optional: when it sits on an
         // alternative ("… (oder X, optional)"), flag the primary too.
-        if (astSeg.isOptional && row.isAlternative && lastPrimaryIndex !== null) {
+        if (astSeg.isOptional && seg.isAlternative && lastPrimaryIndex !== null) {
           out[lastPrimaryIndex].isOptional = true;
         }
         // Skip the row when the parser couldn't pull a real ingredient name
@@ -676,14 +670,14 @@ export function parseIngredientLines(
           // note-only alt ("(oder nach Geschmack)" — no amount/unit) qualifies
           // the WHOLE group, so it folds onto the primary AND every alternative
           // emitted since; an amount-only one folds onto the primary alone.
-          if (row.isAlternative && lastPrimaryIndex !== null) {
+          if (seg.isAlternative && lastPrimaryIndex !== null) {
             const isNoteOnly = astSeg.quantity === null && astSeg.unitName === null;
             const foldEnd = isNoteOnly ? out.length - 1 : lastPrimaryIndex;
             for (let ti = lastPrimaryIndex; ti <= foldEnd; ti++) {
               appendAlternativeToNotes(
                 out[ti],
-                row.alternativeConnector,
-                piece.trim(),
+                seg.connector,
+                piece,
                 originalTrimmed,
               );
               if (sourceRange) {
@@ -715,7 +709,7 @@ export function parseIngredientLines(
           const alt = leadingOr[1];
           const prev = out[out.length - 1];
           prev.notes = prev.notes ? `${prev.notes}, oder ${alt}` : `oder ${alt}`;
-          if (astSeg.isOptional || row.forceOptional) prev.isOptional = true;
+          if (astSeg.isOptional || seg.forceOptional) prev.isOptional = true;
           continue;
         }
         const initialUnit = resolveUnit(
@@ -729,7 +723,7 @@ export function parseIngredientLines(
         // entry — when the catalog doesn't recognise the alternative, the
         // user's intent is information for the cook, not a second purchase.
         if (
-          row.isAlternative &&
+          seg.isAlternative &&
           !astSeg.matched &&
           lastPrimaryIndex !== null
         ) {
@@ -741,13 +735,13 @@ export function parseIngredientLines(
           // a name behind and stays on the primary alone. stripVocabTail is the
           // same vocabulary gate the no-match path already uses.
           const isNoteOnly =
-            stripVocabTail(piece.trim()).name.trim().length === 0;
+            stripVocabTail(piece).name.trim().length === 0;
           const foldEnd = isNoteOnly ? out.length - 1 : lastPrimaryIndex;
           for (let ti = lastPrimaryIndex; ti <= foldEnd; ti++) {
             appendAlternativeToNotes(
               out[ti],
-              row.alternativeConnector,
-              piece.trim(),
+              seg.connector,
+              piece,
               originalTrimmed,
             );
             // The folded text is now part of this row's NOTES output, so show
@@ -773,7 +767,7 @@ export function parseIngredientLines(
             originalTrimmed,
             sourceRange,
             piece,
-            row.alternativeConnector,
+            seg.connector,
             astSeg.highlightParts,
           ),
           name: astSeg.name,
@@ -786,22 +780,21 @@ export function parseIngredientLines(
           // default to optional so the user decides per-recipe whether they
           // actually need to shop them. `forceOptional` carries through
           // Optional:/alternativ: wrappers from the expansion pass.
-          isOptional: astSeg.isOptional || astSeg.isEquipment || row.forceOptional,
-          isAlternative: row.isAlternative,
-          localNote: row.localNote,
+          isOptional: astSeg.isOptional || astSeg.isEquipment || seg.forceOptional,
+          isAlternative: seg.isAlternative,
+          localNote: seg.localNote,
           // No parsed quantity → treat the amount as constant. Catches
           // "Salz nach Geschmack" / "etwas Olivenöl" so changing the meal's
           // portion size doesn't multiply a non-existent number.
           fixedAmount: astSeg.quantity === null,
-          // For expanded rows (Optional:, alternativ:, list-after-colon,
-          // each:), surface the user's ORIGINAL full line in rawText —
-          // makes it clear in the import-review UI which source line each
-          // resulting ingredient came from.
-          rawText: row.rawText !== row.text ? row.rawText : piece.trim(),
+          // The segmenter supplies rawText: the whole line for expanded rows
+          // (Optional:, alternativ:, colon-lists, or-chains) so the review UI
+          // shows the source line, the sub-piece for plain conjunction splits.
+          rawText: seg.rawText,
           candidateMatches: astSeg.candidateMatches,
           newNameProposals: astSeg.newNameProposals,
         });
-        if (!row.isAlternative) lastPrimaryIndex = out.length - 1;
+        if (!seg.isAlternative) lastPrimaryIndex = out.length - 1;
       }
     }
     if (pendingTailNote && lastPrimaryIndex !== null) {
@@ -946,21 +939,25 @@ function astHighlights(
   parts: HighlightPart[],
 ): HighlightPart[] | undefined {
   if (!sourceRange) return undefined;
-  const seg = line.slice(sourceRange[0], sourceRange[1]);
-  const ci = seg.lastIndexOf(piece.trim());
-  const contentStart = ci > 0 ? ci : 0;
-  const base = sourceRange[0] + contentStart;
-  const out: HighlightPart[] = parts.map((p) => ({
-    kind: p.kind,
-    range: [base + p.range[0], base + p.range[1]] as SourceRange,
-  }));
-  if (connector && contentStart > 0) {
-    const cIdx = seg.toLowerCase().indexOf(connector.toLowerCase());
-    if (cIdx >= 0) {
-      out.unshift({
-        kind: "dropped",
-        range: [sourceRange[0] + cIdx, sourceRange[0] + cIdx + connector.length],
-      });
+  void piece;
+  // `parts` already carry ABSOLUTE offsets into `line` (the segment was parsed
+  // from leaves whose offsets index the whole line). The only thing to add is a
+  // "dropped" highlight for an alternative's connector, which sits in the gap
+  // between sourceRange start and the first content part.
+  const out: HighlightPart[] = parts.map((p) => ({ kind: p.kind, range: p.range }));
+  if (connector) {
+    const contentStart = parts.length
+      ? Math.min(...parts.map((p) => p.range[0]))
+      : sourceRange[1];
+    if (contentStart > sourceRange[0]) {
+      const lead = line.slice(sourceRange[0], contentStart);
+      const cIdx = lead.toLowerCase().indexOf(connector.toLowerCase());
+      if (cIdx >= 0) {
+        out.unshift({
+          kind: "dropped",
+          range: [sourceRange[0] + cIdx, sourceRange[0] + cIdx + connector.length],
+        });
+      }
     }
   }
   return out;

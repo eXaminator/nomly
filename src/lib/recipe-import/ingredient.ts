@@ -526,7 +526,7 @@ const COLOR_ADJECTIVE_BASES = new Set([
   "grau",
 ]);
 
-function isColorAdjective(token: string): boolean {
+export function isColorAdjective(token: string): boolean {
   const lower = token.toLowerCase();
   if (COLOR_ADJECTIVE_BASES.has(lower)) return true;
   for (const suffix of ["er", "en", "es", "em", "e"]) {
@@ -1082,7 +1082,7 @@ function splitOrChain(
  * what distinguishes the two; the post side starts with a descriptor in both
  * ("fresh …", "brauner …"), so a post-only test can't tell them apart.
  */
-function preIsHeadlessModifier(pre: string): boolean {
+export function preIsHeadlessModifier(pre: string): boolean {
   const tokens = pre.trim().toLowerCase().split(/\s+/).filter(Boolean);
   // Drop leading quantity-shaped tokens (numbers, ranges, fractions).
   let i = 0;
