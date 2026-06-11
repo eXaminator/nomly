@@ -13,6 +13,11 @@ import type { Leaf } from "../render-notes";
  * A space breaks the sequence: "Brot (alt)" is NOT a marker (the "(" doesn't
  * abut "Brot"), so it stays a normal parenthetical. Mutates `leaves`.
  */
+// A plural ENDING is lowercase ("n", "er", "e", "nen", …). A capitalized suffix
+// after the "/" or inside the "(…)" is a separate word — an alternative, not a
+// plural marker ("Dose/Glas", "Dose(Becher)") — and must stay verbatim.
+const isPluralEnding = (w: string): boolean => /^\p{Ll}/u.test(w);
+
 export function applyPluralMarkers(leaves: Leaf[]): void {
   for (let i = 0; i < leaves.length; i++) {
     const lf = leaves[i];
@@ -26,6 +31,7 @@ export function applyPluralMarkers(leaves: Leaf[]): void {
       const close = leaves[i + 2];
       if (
         inner?.kind === "word" &&
+        isPluralEnding(inner.text) &&
         inner.start === lf.end &&
         close?.kind === "close" &&
         close.start === inner.end
@@ -43,7 +49,7 @@ export function applyPluralMarkers(leaves: Leaf[]): void {
     // "/letters" form: slash, suffix letters — adjacent.
     if (lf.kind === "slash") {
       const inner = leaves[i + 1];
-      if (inner?.kind === "word" && inner.start === lf.end) {
+      if (inner?.kind === "word" && isPluralEnding(inner.text) && inner.start === lf.end) {
         lf.role = "plural-marker";
         inner.role = "plural-marker";
         inner.depth = prev.depth;

@@ -1031,6 +1031,17 @@ describe("colon-in-name treated as section + listed items", () => {
     });
   });
 
+  it("a capitalized '/word' is an alternative, not a plural marker ('Dose/Glas' stays in the note)", () => {
+    const catalog: IngredientCatalog = [
+      { ingredientId: 1, canonicalName: "Kichererbsen", aliasName: "Kichererbsen", tokens: ["kichererbsen"] },
+    ];
+    const out = parseIngredientLines(["100 g Kichererbsen (aus der Dose/Glas)"], makeLookups(catalog));
+    expect(out[0].name).toBe("Kichererbsen");
+    // "Glas" is a word/alternative (capitalized), not a plural ending — the
+    // whole "aus der Dose/Glas" stays in the note, Glas is not part of the name.
+    expect(out[0].notes).toBe("aus der Dose/Glas");
+  });
+
   it("attaches a post-unit connector ('Pinch of …') to the unit, even with a leading prep before the match", () => {
     const catalog: IngredientCatalog = [
       { ingredientId: 1, canonicalName: "red pepper flakes", aliasName: "red pepper flakes", tokens: ["red", "pepper", "flakes"] },
