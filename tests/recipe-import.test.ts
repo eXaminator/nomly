@@ -390,7 +390,9 @@ describe("parseIngredientString — extended cases", () => {
     const r = parse("1 15- ounce can tomato sauce");
     expect(r.quantity).toBe(1);
     expect(r.unitName?.toLowerCase()).toBe("can");
-    expect(r.notes).toMatch(/15.?ounce/i);
+    // The note keeps the source spelling verbatim ("15- ounce") — the AST
+    // renderer no longer silently collapses the user's dash+space.
+    expect(r.notes).toMatch(/15-\s?ounce/i);
     expect(r.name).toMatch(/tomato sauce/i);
   });
   // (Removed: "Black pepper to taste" stays-in-name — the pipeline routes the

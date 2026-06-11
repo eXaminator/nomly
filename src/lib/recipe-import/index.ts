@@ -642,6 +642,7 @@ export function parseIngredientLines(
         // new-name proposals — all from one lex + one match.
         const astSeg = parseSegment(piece, {
           knownUnitTokens,
+          containerTokens: lookups.units.containerTokens,
           catalog: lookups.ingredientCatalog ?? [],
           catalogIndex: lookups.ingredientCatalogIndex,
           threshold,
@@ -1176,6 +1177,7 @@ function parseGroupedIngredientLines(
           // parseIngredientLines (quantity/unit/notes/name/match/candidates).
           const astSeg = parseSegment(piece, {
             knownUnitTokens,
+            containerTokens: lookups.units.containerTokens,
             catalog: lookups.ingredientCatalog ?? [],
             catalogIndex: lookups.ingredientCatalogIndex,
             threshold,

@@ -10,7 +10,7 @@ import { renderHighlights } from "./render-highlights";
 import { applyLeadingNoise } from "./passes/leading-noise";
 import { applyOptional } from "./passes/optional";
 import { applyPluralMarkers } from "./passes/plural-marker";
-import { applyPrepNoun } from "./passes/prep-noun";
+import { applyPrepNoun, applyLeadingNotePhrase } from "./passes/prep-noun";
 import { applyAmountUnit } from "./passes/amount-unit";
 import { applyColonAmount } from "./passes/colon-amount";
 import { applyMatch } from "./passes/match-ingredient";
@@ -41,6 +41,11 @@ export type ParsedRow = {
 
 export type SegmentLookups = {
   knownUnitTokens: ReadonlySet<string>;
+  /** Container units (Dose/can/package…). When the segment carries one, the
+   *  matcher keeps a leading prep adjective in the name ("crushed tomatoes")
+   *  rather than peeling it to the notes — the adjective is part of the canned
+   *  product. */
+  containerTokens?: ReadonlySet<string>;
   catalog: IngredientCatalog;
   catalogIndex?: CatalogBlockIndex;
   threshold?: number;
@@ -82,21 +87,37 @@ export function parseSegment(source: string, lookups: SegmentLookups): ParsedRow
   // Prep noun ("Juice of …") runs before the amount pass so the quantity that
   // follows the dropped connector is still found; its text leads the notes.
   const prepNote = applyPrepNoun(leaves);
+  // A leading fixed note phrase before the amount ("Nach Belieben 1 Eigelb") —
+  // moved to the notes so the amount pass reaches the quantity behind it.
+  const leadNote = applyLeadingNotePhrase(leaves);
   // The inverted "Name: qty unit" form extracts its amount from after the colon
   // in place; otherwise the normal leading-amount pass runs.
   const { quantity, unitName, rangeExpression } =
     applyColonAmount(source, leaves, lookups.knownUnitTokens) ??
     applyAmountUnit(source, leaves, lookups.knownUnitTokens);
+  // Does the segment carry a container unit? (Scans the source words once.)
+  const hasContainer =
+    lookups.containerTokens != null &&
+    lookups.containerTokens.size > 0 &&
+    source
+      .toLowerCase()
+      .split(/[^\p{L}\p{N}]+/u)
+      .some((w) => lookups.containerTokens!.has(w));
   const m = applyMatch(source, leaves, lookups.catalog, {
     index: lookups.catalogIndex,
     threshold: lookups.threshold,
     quantity,
     lineUnitId: lookups.lineUnitId?.(unitName, quantity) ?? null,
+    units: lookups.knownUnitTokens,
+    hasContainer,
   });
   const rendered = renderNote(source, leaves);
   const baseNotes = assembleNotes(rangeExpression, unitName, rendered);
-  const notes = prepNote
-    ? tidyNote([prepNote, baseNotes].filter((s) => s != null && s.length > 0).join(", "))
+  // Note prefixes captured before the amount (prep noun, leading note phrase)
+  // lead the assembled notes, in source order.
+  const prefixes = [prepNote, leadNote].filter((s) => s != null && s.length > 0);
+  const notes = prefixes.length
+    ? tidyNote([...prefixes, baseNotes].filter((s) => s != null && s.length > 0).join(", "))
     : baseNotes;
   return {
     quantity,

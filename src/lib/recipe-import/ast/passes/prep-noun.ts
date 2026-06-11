@@ -46,3 +46,34 @@ export function applyPrepNoun(leaves: Leaf[]): string | null {
   }
   return note;
 }
+
+/** Leading note phrases that sit BEFORE the amount ("Nach Belieben 1 Eigelb").
+ *  Each is a [first, second] word pair; the phrase is moved to the notes so the
+ *  amount pass sees the quantity and the matcher never folds it into the name. */
+const LEADING_NOTE_PAIRS: ReadonlyArray<readonly [string, string]> = [
+  ["nach", "belieben"],
+  ["nach", "geschmack"],
+];
+
+/**
+ * If the segment leads with a fixed note phrase ("Nach Belieben", "nach
+ * Geschmack") sitting before the amount, consume both words (kept as a note via
+ * the returned text) so the amount pass can reach the quantity behind them and
+ * the matcher won't absorb the phrase into the ingredient name. Mutates
+ * `leaves`. Returns the verbatim phrase text, or null when none leads.
+ */
+export function applyLeadingNotePhrase(leaves: Leaf[]): string | null {
+  const words = leaves.filter((l) => l.depth === 0 && !l.consumed);
+  if (words.length < 2) return null;
+  const [first, second] = words;
+  if (first.kind !== "word" || second.kind !== "word") return null;
+  const k1 = norm(first.text);
+  const k2 = norm(second.text);
+  if (!LEADING_NOTE_PAIRS.some(([a, b]) => a === k1 && b === k2)) return null;
+  const note = `${first.text} ${second.text}`;
+  first.consumed = true;
+  first.role = "prep-noun";
+  second.consumed = true;
+  second.role = "prep-noun";
+  return note;
+}

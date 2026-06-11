@@ -19,8 +19,8 @@ function kindOf(source: string, lf: Leaf): HighlightKind {
   const isBracketDelim = (lf.kind === "open" || lf.kind === "close") && lf.bracket;
   const isSpacedDash =
     lf.kind === "dash" &&
-    ((lf.start === 0 || /\s/.test(source[lf.start - 1])) ||
-      (lf.end >= source.length || /\s/.test(source[lf.end])));
+    (lf.start === 0 || /\s/.test(source[lf.start - 1])) &&
+    (lf.end >= source.length || /\s/.test(source[lf.end]));
   if (lf.consumed || isParenRootDelim || isBracketDelim || isSpacedDash) return "dropped";
   return "note";
 }

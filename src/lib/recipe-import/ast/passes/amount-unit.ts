@@ -1,4 +1,4 @@
-import { consumeQuantity } from "../numeric";
+import { consumeQuantity, parseSingleNumericToken, formatRangeNumber, round3 } from "../numeric";
 import type { Leaf } from "../render-notes";
 import { consumeGroup, groupByWhitespace, type Group } from "../tokens";
 
@@ -46,10 +46,16 @@ export function applyAmountUnit(
   const groups: Group[] = [];
   for (const g of rawGroups) {
     const last = groups[groups.length - 1];
-    if (last && /\d[.,]$/.test(last.text) && /^\d/.test(g.text)) {
-      last.text += g.text;
-      last.leaves.push(...g.leaves);
-      last.end = g.end;
+    const decimalGlue = last != null && /\d[.,]$/.test(last.text) && /^\d/.test(g.text);
+    // A size compound spelled with a space after the dash ("15- ounce") — fuse
+    // it into one "15-ounce" group so it reads as a size note, not as part of a
+    // mixed-number amount ("1 15-" → 16). Offsets stay faithful for the notes.
+    const spacedSizeCompound =
+      last != null && /^\d+[-–]$/.test(last.text) && /^\p{L}+\.?$/u.test(g.text);
+    if (decimalGlue || spacedSizeCompound) {
+      last!.text += g.text;
+      last!.leaves.push(...g.leaves);
+      last!.end = g.end;
     } else {
       groups.push({ ...g, leaves: [...g.leaves] });
     }
@@ -73,20 +79,84 @@ export function applyAmountUnit(
       cur += 1; // skip (left in the notes), not consumed
       continue;
     }
-    // A leading "nach Belieben" / "nach Geschmack" note phrase before the
-    // amount ("Nach Belieben 1 Eigelb") — left in the notes, stepped over.
-    if (k === "nach" && cur + 1 < groups.length) {
-      const k2 = norm(groups[cur + 1].text);
-      if (k2 === "belieben" || k2 === "geschmack") {
-        cur += 2;
-        continue;
-      }
-    }
     break;
   }
 
   let quantity: number | null = null;
   let rangeExpression: string | null = null;
+  let unitName: string | null = null;
+
+  const isUnit = (g: Group): boolean =>
+    knownUnitTokens.has(g.text.toLowerCase()) || knownUnitTokens.has(norm(g.text));
+  // A size compound like "12-count" / "28-ounce" / "4-inch" — a number dashed to
+  // a word.
+  const isSizeCompound = (g: Group): boolean => /^\d+[-–]\p{L}+\.?$/u.test(g.text);
+  // A group that is part of a parenthetical ("(28", "oz.)") — skip it when
+  // hunting for the unit so "(28 oz.) can" still finds "can".
+  const isParenGroup = (g: Group): boolean =>
+    g.leaves.some((l) => l.depth > 0 || l.kind === "open" || l.kind === "close");
+
+  // A range that repeats its unit on both sides ("25 g – 50 g", "1 cup - 2
+  // cups"): number unit – number [unit]. The numeric run can't span the
+  // interleaved unit, so detect the shape here and collapse it to a range.
+  const isDashGroup = (g: Group | undefined): boolean =>
+    g != null && g.leaves.length === 1 && g.leaves[0].kind === "dash";
+  if (cur + 3 < groups.length && quantity === null && !isSizeCompound(groups[cur])) {
+    const g0 = groups[cur];
+    const g1 = groups[cur + 1];
+    const g2 = groups[cur + 2];
+    const g3 = groups[cur + 3];
+    const g4 = groups[cur + 4];
+    const n1 = g0 ? parseSingleNumericToken(g0.text) : null;
+    const n2 = g3 ? parseSingleNumericToken(g3.text) : null;
+    if (
+      n1 != null &&
+      n2 != null &&
+      g1 != null &&
+      isUnit(g1) &&
+      isDashGroup(g2) &&
+      ((g1.start === 0 || /\s/.test(source[g1.start - 1] ?? " ")))
+    ) {
+      const sameUnitTail = g4 != null && isUnit(g4) && norm(g4.text) === norm(g1.text);
+      quantity = round3(Math.max(n1, n2));
+      rangeExpression = `${formatRangeNumber(n1)}-${formatRangeNumber(n2)}`;
+      unitName = g1.text.replace(/\.$/, "");
+      consumeGroup(g0, "amount");
+      consumeGroup(g1, "unit");
+      consumeGroup(g2, "connector");
+      consumeGroup(g3, "amount");
+      if (sameUnitTail) consumeGroup(g4!, "unit");
+      cur += sameUnitTail ? 5 : 4;
+    }
+  }
+
+  // A LEADING size compound with no amount yet ("4-inch stems"). If the word
+  // part is itself a unit AND no other unit follows (no container like
+  // "12-count package" / "1 (28-ounce) can"), the compound IS the amount+unit:
+  // "4-inch" → 4 + inch. Otherwise it stays a size note and the probe below
+  // finds the real (container) unit.
+  if (cur < groups.length && quantity === null && isSizeCompound(groups[cur])) {
+    const g = groups[cur];
+    const numLeaf = g.leaves.find((l) => l.kind === "number");
+    const wordLeaf = g.leaves.find((l) => l.kind === "word");
+    const wordIsUnit =
+      wordLeaf != null &&
+      (knownUnitTokens.has(wordLeaf.text.toLowerCase()) ||
+        knownUnitTokens.has(norm(wordLeaf.text)));
+    const unitAhead = groups.slice(cur + 1).some((other) => isUnit(other));
+    if (numLeaf && wordLeaf && wordIsUnit && !unitAhead) {
+      const n = parseSingleNumericToken(numLeaf.text);
+      if (n != null) {
+        quantity = n;
+        for (const l of g.leaves) {
+          l.consumed = true;
+          l.role = l.kind === "number" ? "amount" : l.kind === "word" ? "unit" : "connector";
+        }
+        unitName = wordLeaf.text.replace(/\.$/, "");
+        cur += 1;
+      }
+    }
+  }
 
   const ARTICLES = new Set(["a", "an", "ein", "eine", "einen", "einem", "einer", "eins"]);
   const dropArticle = () => {
@@ -138,16 +208,6 @@ export function applyAmountUnit(
     }
   }
 
-  const isUnit = (g: Group): boolean =>
-    knownUnitTokens.has(g.text.toLowerCase()) || knownUnitTokens.has(norm(g.text));
-  // A size compound like "12-count" / "28-ounce" — a number dashed to a word.
-  const isSizeCompound = (g: Group): boolean => /^\d+[-–]\p{L}+\.?$/u.test(g.text);
-  // A group that is part of a parenthetical ("(28", "oz.)") — skip it when
-  // hunting for the unit so "(28 oz.) can" still finds "can".
-  const isParenGroup = (g: Group): boolean =>
-    g.leaves.some((l) => l.depth > 0 || l.kind === "open" || l.kind === "close");
-
-  let unitName: string | null = null;
   // Skip size modifiers / size compounds / parenthetical groups between the
   // quantity and the unit ("1 small bunch", "1 12-count package",
   // "1 (28 oz.) can") — they're not consumed (they stay in the note), but they

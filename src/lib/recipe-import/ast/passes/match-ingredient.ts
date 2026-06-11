@@ -152,6 +152,12 @@ export function applyMatch(
     quantity?: number | null;
     /** Resolved line unit id — the matcher's canned-vs-fresh decider. */
     lineUnitId?: number | null;
+    /** Known unit tokens — lets the no-match path peel a secondary "1 stick"
+     *  amount off the front of the name into the notes. */
+    units?: ReadonlySet<string>;
+    /** The segment carries a container unit — keep a leading prep adjective in
+     *  the name ("can crushed tomatoes" → "crushed tomatoes"). */
+    hasContainer?: boolean;
   } = {},
 ): MatchResult {
   const remainder = leaves.filter((l) => !l.consumed);
@@ -166,7 +172,7 @@ export function applyMatch(
   // before the best match is marked — so each pill renders independently.
   const candidateMatches = matches.map((m) => toCandidate(source, leaves, remainder, m));
   if (!best || best.score < threshold) {
-    return noMatch(source, leaves, remainder, candidateMatches);
+    return noMatch(source, leaves, remainder, candidateMatches, opts.units, opts.hasContainer);
   }
 
   const tokens = best.candidate as AstCandidateToken[];
@@ -225,6 +231,8 @@ function noMatch(
   leaves: Leaf[],
   remainder: Leaf[],
   candidateMatches: ImportedCandidateMatch[],
+  units?: ReadonlySet<string>,
+  hasContainer?: boolean,
 ): MatchResult {
   // Depth-0 word/number leaves before the first top-level comma (paren content
   // is skipped, not a boundary, so "(225g) large shrimp" still finds "shrimp").
@@ -239,6 +247,14 @@ function noMatch(
     (SIZE_MODIFIERS.has(normWord(lf.text)) ||
       PREP_WORDS.has(normWord(lf.text)) ||
       VAGUE_WORDS.has(normWord(lf.text)));
+  // When the line carries a container unit ("can crushed tomatoes"), a leading
+  // prep adjective is part of the canned product name — don't peel it off the
+  // front. Size/vague modifiers still peel.
+  const leadStrippable = (lf: Leaf): boolean =>
+    hasContainer
+      ? lf.kind === "word" &&
+        (SIZE_MODIFIERS.has(normWord(lf.text)) || VAGUE_WORDS.has(normWord(lf.text)))
+      : strippable(lf);
 
   let start = 0;
   let end = region.length;
@@ -252,8 +268,25 @@ function noMatch(
       start += 1;
       continue;
     }
-    if (strippable(lf)) {
+    if (leadStrippable(lf)) {
       start += 1;
+      continue;
+    }
+    if (lf.kind === "number") {
+      // A leading size compound glued by a dash ("12-count rolls", "4-inch
+      // stems") — keep BOTH the number and its compounded word in the notes,
+      // never split them into the name.
+      const glued = source[lf.end] !== undefined && !/\s/.test(source[lf.end]);
+      const nxt = region[start + 1];
+      if (glued && nxt && nxt.kind === "word") {
+        start += 2;
+        continue;
+      }
+      // Peel a leading SECONDARY amount ("½ cup 1 stick unsalted butter" → the
+      // primary "½ cup" is already consumed; "1 stick" stays in the notes) — a
+      // standalone number optionally followed by a known unit word.
+      start += 1;
+      if (nxt && nxt.kind === "word" && units?.has(normWord(nxt.text))) start += 1;
       continue;
     }
     break;

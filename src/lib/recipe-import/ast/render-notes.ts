@@ -33,13 +33,14 @@ export function renderNote(source: string, leaves: readonly Leaf[]): string | nu
     const isParenRootDelim =
       (lf.kind === "open" || lf.kind === "close") && lf.depth === 0 && !lf.bracket;
     const isBracketDelim = (lf.kind === "open" || lf.kind === "close") && lf.bracket;
-    // A dash with whitespace on either side is a SEPARATOR the user wrote
-    // ("Kohl - in Streifen") → it becomes a comma boundary. An intra-word dash
-    // ("1-inch", "whole-wheat") has no surrounding space and stays verbatim.
+    // A dash with whitespace on BOTH sides is a SEPARATOR the user wrote
+    // ("Kohl - in Streifen") → it becomes a comma boundary. A dash glued to a
+    // token on one side ("1-inch", "whole-wheat", "15- ounce") is part of that
+    // token and stays verbatim.
     const isSpacedDash =
       lf.kind === "dash" &&
-      ((lf.start === 0 || /\s/.test(source[lf.start - 1])) ||
-        (lf.end >= source.length || /\s/.test(source[lf.end])));
+      (lf.start === 0 || /\s/.test(source[lf.start - 1])) &&
+      (lf.end >= source.length || /\s/.test(source[lf.end]));
     const removed = lf.consumed === true || isParenRootDelim || isBracketDelim || isSpacedDash;
 
     if (removed) {
@@ -64,7 +65,14 @@ export function tidyNote(s: string): string | null {
     // Drop invisible formatting chars (soft hyphen, zero-width, BOM).
     .replace(/[­​-‍﻿]/gu, "")
     .replace(/\s+/g, " ")
-    .replace(/\s*,\s*/g, ", ")
+    // Normalise comma separators to ", " — but leave a German decimal comma
+    // ("0,4") untouched (no spaces, flanked by digits).
+    .replace(/\s*,\s*/g, (m, offset: number, str: string) => {
+      if (m === "," && /\d/.test(str[offset - 1] ?? "") && /\d/.test(str[offset + 1] ?? "")) {
+        return ",";
+      }
+      return ", ";
+    })
     .replace(/(?:,\s*){2,}/g, ", ")
     // Trim stray edge punctuation left by a removed boundary word — a dangling
     // connector dash, a trailing "!" etc. Mid-note punctuation (a ";" between

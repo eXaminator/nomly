@@ -23,7 +23,9 @@ export function groupByWhitespace(source: string, leaves: readonly Leaf[]): Grou
     const lastKind = prev?.leaves[prev.leaves.length - 1].kind;
     const crossNumWord =
       (lastKind === "number" && lf.kind === "word") ||
-      (lastKind === "word" && lf.kind === "number");
+      (lastKind === "word" && lf.kind === "number") ||
+      // Inch symbol after a number is its own unit token: "1\"" → "1" + '"'.
+      (lastKind === "number" && lf.kind === "punct" && lf.text === '"');
     // Already-consumed leaves (plural markers, optional markers) contribute
     // their leaves to the group but NOT their text, so amount/unit detection
     // sees the live token ("Dose/n" → "Dose", "/n" consumed).
