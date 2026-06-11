@@ -20,6 +20,10 @@ export const SIZE_MODIFIERS = new Set([
 
 const norm = (s: string): string => s.toLowerCase().replace(/[.,]+$/, "");
 
+/** Connectors that link the unit to the ingredient ("Pinch of …", "Dose von …").
+ *  Consumed onto the unit so they never reach the notes. */
+const POST_UNIT_CONNECTORS = new Set(["of", "von", "vom"]);
+
 export type AmountUnit = {
   quantity: number | null;
   unitName: string | null;
@@ -231,6 +235,14 @@ export function applyAmountUnit(
     unitName = groups[probe].text.replace(/\.$/, "");
     if (quantity === null) quantity = 1;
     cur = probe + 1;
+    // A connector right after the unit ("Pinch OF …", "1 can OF …") links the
+    // unit to the ingredient and is meaningless on its own — attach it to the
+    // unit (highlighted with it, kept out of the notes), regardless of what
+    // follows (a leading prep word like "crushed" must not hide it).
+    if (cur < groups.length && POST_UNIT_CONNECTORS.has(norm(groups[cur].text))) {
+      consumeGroup(groups[cur], "unit");
+      cur += 1;
+    }
   } else {
     // Trailing-unit fallback: "1 garlic clove" — the unit follows the name. Only
     // fire when the name region (up to the first comma/paren) has no interior

@@ -1031,6 +1031,20 @@ describe("colon-in-name treated as section + listed items", () => {
     });
   });
 
+  it("attaches a post-unit connector ('Pinch of …') to the unit, even with a leading prep before the match", () => {
+    const catalog: IngredientCatalog = [
+      { ingredientId: 1, canonicalName: "red pepper flakes", aliasName: "red pepper flakes", tokens: ["red", "pepper", "flakes"] },
+    ];
+    const out = parseIngredientLines(
+      ["Pinch of crushed red pepper flakes"],
+      makeLookups(catalog, ["pinch"]),
+    );
+    expect(out[0].name).toBe("red pepper flakes");
+    // "of" belongs to the unit (highlighted with it), NOT the notes; the leading
+    // prep "crushed" stays in the notes.
+    expect(out[0].notes).toBe("crushed");
+  });
+
   it("matches a soft-hyphenated line ('Knob­lauch') to the clean catalog name", () => {
     // Recipe sources sprinkle soft hyphens (U+00AD) for hyphenation; they must
     // be stripped for matching or every word looks like a new ingredient.
