@@ -14,6 +14,7 @@ import { applyPrepNoun, applyLeadingNotePhrase } from "./passes/prep-noun";
 import { applyAmountUnit } from "./passes/amount-unit";
 import { applyColonAmount } from "./passes/colon-amount";
 import { applyMatch } from "./passes/match-ingredient";
+import { collapseRedundantParens } from "./passes/redundant-parens";
 
 /** The structured result of parsing one ingredient segment (no alternatives /
  *  conjunctions yet — that's the segmentation layer). A subset of
@@ -111,6 +112,9 @@ export function parseSegment(source: string, lookups: SegmentLookups): ParsedRow
     units: lookups.knownUnitTokens,
     hasContainer,
   });
+  // Flatten redundant "double" parens ("((1 1/4 cups))") before the note/
+  // highlight renderers so the surviving single layer unwraps normally.
+  collapseRedundantParens(leaves);
   const rendered = renderNote(source, leaves);
   const baseNotes = assembleNotes(rangeExpression, unitName, rendered);
   // Note prefixes captured before the amount (prep noun, leading note phrase)

@@ -188,6 +188,31 @@ export function applyMatch(
     minStart = Math.min(minStart, remainder[tok.leafStart].start);
     maxEnd = Math.max(maxEnd, remainder[tok.leafEnd].end);
   }
+  if (maxEnd > 0) {
+    // The matched name is one continuous span — mark every leaf inside it
+    // (interior dashes/punctuation included) as the name, so nothing between
+    // the first and last matched token leaks into the notes.
+    for (const lf of leaves) {
+      if (lf.start >= minStart && lf.end <= maxEnd) {
+        lf.consumed = true;
+        lf.role = "ingredient";
+      }
+    }
+    // A filler ("of"/"von") stranded between the consumed unit and the matched
+    // span connects them and is meaningless alone — attribute it to the UNIT
+    // (so the highlighter colours "can of" together) and keep it out of notes.
+    const spanFirst = leaves.findIndex((l) => l.start === minStart);
+    for (let k = spanFirst - 1; k >= 0; k--) {
+      const l = leaves[k];
+      if (l.consumed || l.depth !== 0) break;
+      if (l.kind === "word" && NAME_FILLER.has(normWord(l.text))) {
+        l.consumed = true;
+        l.role = "unit";
+        continue;
+      }
+      break;
+    }
+  }
 
   // Per-alias rename only makes sense with the default unit it pairs with; when
   // the line has no amount that unit is dropped (see pickFinalUnit), so keep the
@@ -258,13 +283,15 @@ function noMatch(
 
   let start = 0;
   let end = region.length;
-  // Peel leading words: filler ("of") is dropped entirely; size/prep/vague
-  // ("large", "ground", "etwas") stay in the notes.
+  // Peel leading words: a filler ("of"/"von") connects the unit to the
+  // ingredient and is meaningless on its own — attribute it to the UNIT (so the
+  // highlighter colours "can of" together) and keep it out of the notes.
+  // Size/prep/vague ("large", "ground", "etwas") stay in the notes.
   while (start < end) {
     const lf = region[start];
     if (lf.kind === "word" && NAME_FILLER.has(normWord(lf.text))) {
       lf.consumed = true;
-      lf.role = "connector";
+      lf.role = "unit";
       start += 1;
       continue;
     }
@@ -304,9 +331,17 @@ function noMatch(
   if (nameLeaves.length === 0) {
     return { ...EMPTY, candidateMatches };
   }
-  for (const lf of nameLeaves) {
-    lf.consumed = true;
-    lf.role = "ingredient";
+  // The name is ONE continuous span: mark every leaf within it — interior
+  // dashes/punctuation included ("pull-apart") — as the name, so nothing
+  // between the first and last name token leaks into the notes and the whole
+  // span highlights as the name.
+  const nameStart = nameLeaves[0].start;
+  const nameEnd = nameLeaves[nameLeaves.length - 1].end;
+  for (const lf of leaves) {
+    if (lf.start >= nameStart && lf.end <= nameEnd) {
+      lf.consumed = true;
+      lf.role = "ingredient";
+    }
   }
   const name = source
     .slice(nameLeaves[0].start, nameLeaves[nameLeaves.length - 1].end)
