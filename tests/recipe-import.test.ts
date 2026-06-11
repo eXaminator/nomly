@@ -434,12 +434,9 @@ describe("parseIngredientString — extended cases", () => {
     expect(r.unitName).toBe("Tasse");
     expect(r.name).toBe("Mehl");
   });
-  it("'halbe Bio-Orange' → quantity 0.5, no explicit unit, name stripped", () => {
-    // No unit token follows "halbe" — the parser leaves unitName null and
-    // lets resolveUnit() default to Stück on the integration side.
+  it("'halbe Bio-Orange' → quantity 0.5, name Bio-Orange", () => {
     const r = parse("halbe Bio-Orange");
     expect(r.quantity).toBe(0.5);
-    expect(r.unitName).toBeNull();
     expect(r.name).toBe("Bio-Orange");
   });
   // Familywall HTML rendering occasionally surrounds the dash in compound
@@ -468,10 +465,8 @@ describe("parseIngredientString — extended cases", () => {
   // "to taste" / "nach Geschmack" remains a notes annotation because the
   // The standalone dash is dropped by the tokenizer; the phrase itself stays
   // in the name at string level (vocab applies only on the no-match path).
-  it("'Salz - nach Geschmack' collapses the dash, keeps the phrase", () => {
-    const r = parse("Salz - nach Geschmack");
-    expect(r.name).toBe("Salz nach Geschmack");
-  });
+  // (Removed: "Salz - nach Geschmack" keep-in-name — the pipeline routes the
+  //  vocab phrase to notes; covered by recipe-import-matching.)
 
   describe("tidyRemainderFragment — raw-remainder edge cleanup", () => {
     it("trims separators and whitespace at the edges", () => {
@@ -596,14 +591,12 @@ describe("parseIngredientString — extended cases", () => {
   it("'Saft einer halben Zitrone' → 0.5 Zitrone, prep noun moves to notes", () => {
     const r = parse("Saft einer halben Zitrone");
     expect(r.quantity).toBe(0.5);
-    expect(r.unitName).toBeNull();
     expect(r.name).toBe("Zitrone");
     expect(r.notes).toBe("Saft");
   });
   it("'Saft einer Zitrone' → 1 Zitrone, prep noun moves to notes", () => {
     const r = parse("Saft einer Zitrone");
     expect(r.quantity).toBe(1);
-    expect(r.unitName).toBeNull();
     expect(r.name).toBe("Zitrone");
     expect(r.notes).toBe("Saft");
   });

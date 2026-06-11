@@ -73,6 +73,15 @@ export function applyAmountUnit(
       cur += 1; // skip (left in the notes), not consumed
       continue;
     }
+    // A leading "nach Belieben" / "nach Geschmack" note phrase before the
+    // amount ("Nach Belieben 1 Eigelb") — left in the notes, stepped over.
+    if (k === "nach" && cur + 1 < groups.length) {
+      const k2 = norm(groups[cur + 1].text);
+      if (k2 === "belieben" || k2 === "geschmack") {
+        cur += 2;
+        continue;
+      }
+    }
     break;
   }
 
