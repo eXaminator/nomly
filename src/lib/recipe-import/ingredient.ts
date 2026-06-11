@@ -10,6 +10,8 @@
  * token.
  */
 
+import { lex } from "./ast/lexer.ts";
+
 /**
  * Words that, when they appear standalone in the name area, mark the
  * boundary into "notes" — typically a list of alternatives or examples
@@ -145,39 +147,68 @@ const EMOJI_LEAD_RE =
  *   - line is all-caps (4+ letters), e.g. "FÜR DEN GRANATAPFELGUSS"
  */
 export function detectSectionHeader(raw: string): string | null {
-  let text = raw.trim();
+  const text = raw.trim();
   if (text.length === 0) return null;
+  // Lex once; the structural decisions (brackets, "Part N", dash rules, the
+  // trailing colon, all-caps) read off the leaves. Only the emoji probe stays
+  // character-level — an emoji isn't its own lexeme kind.
+  const leaves = lex(text);
+  if (leaves.length === 0) return null;
+  const first = leaves[0];
+  const last = leaves[leaves.length - 1];
 
-  // Strip surrounding bracket-noise that often wraps section titles in pasted
-  // recipes: "[Sauce]" → "Sauce".
-  text = text.replace(/^\[|\]$/g, "").trim();
-
-  // "Part 1: Sauce" / "Teil 2: Beilage" — strip the leading "Part N:" prefix
-  // and use whatever follows the colon as the section title. When nothing
-  // follows, keep the "Part N" label.
-  const partMatch = /^(?:part|teil)\s+\d+\s*[:.]?\s*(.*)$/i.exec(text);
-  if (partMatch) {
-    const rest = partMatch[1].trim();
-    return rest.length > 0 ? rest : text.trim();
+  // "[Sauce]" — a bracket pair wrapping the whole line: classify the inside.
+  if (
+    leaves.length >= 2 &&
+    first.kind === "open" && first.bracket &&
+    last.kind === "close" && last.bracket
+  ) {
+    return detectSectionHeader(text.slice(first.end, last.start));
   }
 
-  if (/^[-–—]{2,}/.test(text) || /[-–—]{2,}$/.test(text)) {
-    return text.replace(/^[-–—\s]+|[-–—\s]+$/g, "").trim() || null;
+  // "Part 1: Sauce" / "Teil 2: Beilage" — leading "part"/"teil" + number; the
+  // title is whatever follows (an optional ":"/"." after the number is dropped).
+  if (
+    first.kind === "word" && /^(?:part|teil)$/i.test(first.text) &&
+    leaves[1]?.kind === "number"
+  ) {
+    let i = 2;
+    if (leaves[i]?.kind === "punct" && (leaves[i].text === ":" || leaves[i].text === ".")) {
+      i += 1;
+    }
+    const rest = leaves[i] ? text.slice(leaves[i].start).trim() : "";
+    return rest.length > 0 ? rest : text;
   }
 
+  // Leading/trailing run of 2+ dashes ("--- For the sauce ---").
+  let lead = 0;
+  while (leaves[lead]?.kind === "dash") lead += 1;
+  let trail = 0;
+  while (leaves[leaves.length - 1 - trail]?.kind === "dash") trail += 1;
+  if (lead >= 2 || trail >= 2) {
+    const startLeaf = leaves[lead];
+    const endLeaf = leaves[leaves.length - 1 - trail];
+    if (!startLeaf || !endLeaf || startLeaf.start > endLeaf.start) return null;
+    return text.slice(startLeaf.start, endLeaf.end).trim() || null;
+  }
+
+  // Leading emoji.
   if (EMOJI_LEAD_RE.test(text)) {
     return text.replace(EMOJI_LEAD_RE, "").trim() || null;
   }
 
-  if (/:\s*$/.test(text)) {
-    return text.replace(/:\s*$/, "").trim() || null;
+  // Ends with a colon ("Für den Teig:" → "Für den Teig").
+  if (last.kind === "punct" && last.text === ":") {
+    return text.slice(0, last.start).trim() || null;
   }
 
-  // All-caps detection: ≥4 letters, no lowercase letters at all. Tolerates
-  // umlauts and basic punctuation.
-  const letters = text.match(/\p{L}/gu) ?? [];
+  // All-caps: ≥4 letters across the word leaves, none lowercase.
+  const letters = leaves
+    .filter((l) => l.kind === "word")
+    .flatMap((l) => [...l.text])
+    .filter((c) => /\p{L}/u.test(c));
   if (letters.length >= 4 && letters.every((c) => c === c.toLocaleUpperCase("de"))) {
-    return text.trim();
+    return text;
   }
 
   return null;
