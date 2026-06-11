@@ -6,6 +6,9 @@ import type { Leaf } from "./render-notes";
  * {@link renderNote}:
  *  - amount/unit → "amount"; ingredient → "name";
  *  - prep noun → "note" (its text leads the notes);
+ *  - a pluralization marker: the suffix LETTERS belong to the matched name
+ *    ("Aubergine(n)" — the "n" is part of "Auberginen") → "name"; the
+ *    punctuation "(" ")" "/" around it → "dropped";
  *  - anything removed from the notes (consumed markers/connectors, root-level
  *    parens/brackets, a spaced separator dash) → "dropped";
  *  - everything kept verbatim (incl. nested parens) → "note".
@@ -14,7 +17,7 @@ function kindOf(source: string, lf: Leaf): HighlightKind {
   if (lf.role === "amount" || lf.role === "unit") return "amount";
   if (lf.role === "ingredient") return "name";
   if (lf.role === "prep-noun") return "note";
-  if (lf.role === "plural-marker") return "dropped";
+  if (lf.role === "plural-marker") return lf.kind === "word" ? "name" : "dropped";
   const isParenRootDelim =
     (lf.kind === "open" || lf.kind === "close") && lf.depth === 0 && !lf.bracket;
   const isBracketDelim = (lf.kind === "open" || lf.kind === "close") && lf.bracket;
