@@ -162,9 +162,13 @@ function orSeparators(all: readonly Leaf[], from: number, to: number, depth: num
     if (isWordIn(l, OR_WORDS)) {
       cand = { at: i, span: 1, word: norm(l.text) };
     } else if (l.kind === "slash") {
-      // A standalone " / " separator, not a glued plural marker (handled
-      // earlier) or a fraction.
-      cand = { at: i, span: 1, word: "/" };
+      // A standalone " / " separator has whitespace on a side. A slash glued to
+      // tokens on BOTH sides ("Dose/n", "1/2") is a plural marker / fraction,
+      // not an or-separator.
+      const prev = all[i - 1];
+      const next = all[i + 1];
+      const gluedBoth = prev && next && prev.end === l.start && l.end === next.start;
+      if (!gluedBoth) cand = { at: i, span: 1, word: "/" };
     } else if (l.kind === "word" && norm(l.text) === "o") {
       // "o." short for "oder": word "o" + punct "." — but NOT "o. ä." (similar).
       const dot = all[i + 1];

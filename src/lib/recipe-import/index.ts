@@ -1156,23 +1156,25 @@ function parseGroupedIngredientLines(
       // rather than into a primary from a previous line. Cleared each new line.
       let lastPrimaryIndex: number | null = null;
       const originalTrimmed = rawLine.trim();
-      let sourceCursor = 0;
       let pendingTailNote: string | null = null;
 
-      for (const row of expandIngredientLine(rawLine)) {
-        if (row.kind === "header") {
-          groups.push({ title: row.title, ingredients: [] });
+      const lineLeaves = lex(originalTrimmed).map((t) => ({ ...t }));
+      for (const seg of segmentLine(originalTrimmed, lineLeaves, {
+        containerTokens: lookups.units.containerTokens,
+        knownIngredients: knownIngredientKeys,
+        useFirstWins,
+      })) {
+        if (seg.kind === "header") {
+          groups.push({ title: seg.title, ingredients: [] });
           lastPrimaryIndex = null;
           continue;
         }
-        if (row.tailNote) pendingTailNote = row.tailNote;
-        const raw = useFirstWins
-          ? preprocessAlternatives(row.text, knownIngredientKeys)
-          : row.text;
-        for (const piece of splitConjunctions(raw, splitOpts)) {
-          // ONE AST parse per piece — same single-pass path as
+        if (seg.tailNote) pendingTailNote = seg.tailNote;
+        {
+          const piece = seg.segText;
+          // ONE AST parse per segment — same single-pass path as
           // parseIngredientLines (quantity/unit/notes/name/match/candidates).
-          const astSeg = parseSegment(piece, {
+          const astSeg = parseLeaves(originalTrimmed, seg.leaves, {
             knownUnitTokens,
             containerTokens: lookups.units.containerTokens,
             catalog: lookups.ingredientCatalog ?? [],
@@ -1182,23 +1184,17 @@ function parseGroupedIngredientLines(
               resolveUnit(lookups.units, name, qty).resolved?.id ?? null,
           });
           const astNote = astSeg.notes;
-          const sourceRange = findSegmentRange(
-            originalTrimmed,
-            piece,
-            sourceCursor,
-            row.isAlternative,
-          );
-          if (sourceRange) sourceCursor = sourceRange[1];
+          const sourceRange = seg.range;
           if (astSeg.name.trim().length === 0) {
             // A nameless ALTERNATIVE folds into the primary's notes. A note-only
             // one (no amount/unit) qualifies the whole group; an amount-only one
             // ("1/2 large head") folds onto the primary alone.
-            if (row.isAlternative && lastPrimaryIndex !== null) {
+            if (seg.isAlternative && lastPrimaryIndex !== null) {
               const g = groups[groups.length - 1];
               const isNoteOnly = astSeg.quantity === null && astSeg.unitName === null;
               const foldEnd = isNoteOnly ? g.ingredients.length - 1 : lastPrimaryIndex;
               for (let ti = lastPrimaryIndex; ti <= foldEnd; ti++) {
-                appendAlternativeToNotes(g.ingredients[ti], row.alternativeConnector, piece.trim(), originalTrimmed);
+                appendAlternativeToNotes(g.ingredients[ti], seg.connector, piece, originalTrimmed);
                 if (sourceRange) {
                   (g.ingredients[ti].highlightParts ??= []).push({ range: sourceRange, kind: "note" });
                 }
@@ -1210,7 +1206,7 @@ function parseGroupedIngredientLines(
           // expansion rules caught this line. Use the WHOLE original input as
           // the new section title so no information is silently dropped.
           if (astSeg.name.includes(":")) {
-            groups.push({ title: row.rawText, ingredients: [] });
+            groups.push({ title: seg.rawText, ingredients: [] });
             continue;
           }
           // Familywall opt-in: drop bare-descriptor rows — see comment in
@@ -1218,7 +1214,7 @@ function parseGroupedIngredientLines(
           if (useFirstWins && isStandaloneDescriptor(astSeg.name)) continue;
           const currentGroup = groups[groups.length - 1];
           // An optional marker on an alternative flags the whole block optional.
-          if (astSeg.isOptional && row.isAlternative && lastPrimaryIndex !== null) {
+          if (astSeg.isOptional && seg.isAlternative && lastPrimaryIndex !== null) {
             currentGroup.ingredients[lastPrimaryIndex].isOptional = true;
           }
           const leadingOr = /^(?:or|oder)\s+(.+)/i.exec(astSeg.name.trim());
@@ -1226,7 +1222,7 @@ function parseGroupedIngredientLines(
             const alt = leadingOr[1];
             const prev = currentGroup.ingredients[currentGroup.ingredients.length - 1];
             prev.notes = prev.notes ? `${prev.notes}, oder ${alt}` : `oder ${alt}`;
-            if (astSeg.isOptional || row.forceOptional) prev.isOptional = true;
+            if (astSeg.isOptional || seg.forceOptional) prev.isOptional = true;
             continue;
           }
           const initialUnit = resolveUnit(
@@ -1237,17 +1233,17 @@ function parseGroupedIngredientLines(
           // See parseIngredientLines: unmatched alternatives fold back into
           // the primary's notes instead of becoming orphan new-ingredient rows.
           if (
-            row.isAlternative &&
+            seg.isAlternative &&
             !astSeg.matched &&
             lastPrimaryIndex !== null
           ) {
-            const isNoteOnly = stripVocabTail(piece.trim()).name.trim().length === 0;
+            const isNoteOnly = stripVocabTail(piece).name.trim().length === 0;
             const foldEnd = isNoteOnly ? currentGroup.ingredients.length - 1 : lastPrimaryIndex;
             for (let ti = lastPrimaryIndex; ti <= foldEnd; ti++) {
               appendAlternativeToNotes(
                 currentGroup.ingredients[ti],
-                row.alternativeConnector,
-                piece.trim(),
+                seg.connector,
+                piece,
                 originalTrimmed,
               );
               if (sourceRange) {
@@ -1268,7 +1264,7 @@ function parseGroupedIngredientLines(
               originalTrimmed,
               sourceRange,
               piece,
-              row.alternativeConnector,
+              seg.connector,
               astSeg.highlightParts,
             ),
             unitMatch: final.match,
@@ -1283,17 +1279,17 @@ function parseGroupedIngredientLines(
             // Einmachgläser …) auto-default to optional. `forceOptional`
             // carries through Optional:/alternativ:/optional-garnish-title
             // wrappers from the expansion pass.
-            isOptional: astSeg.isOptional || astSeg.isEquipment || row.forceOptional,
-            isAlternative: row.isAlternative,
-            localNote: row.localNote,
+            isOptional: astSeg.isOptional || astSeg.isEquipment || seg.forceOptional,
+            isAlternative: seg.isAlternative,
+            localNote: seg.localNote,
             fixedAmount: astSeg.quantity === null,
-            // Expanded rows surface the user's ORIGINAL full line so the
-            // import-review UI can show where each row came from.
-            rawText: row.rawText !== row.text ? row.rawText : piece.trim(),
+            // The segmenter supplies rawText (whole line for expanded rows, the
+            // sub-piece for plain conjunction splits).
+            rawText: seg.rawText,
             candidateMatches: astSeg.candidateMatches,
             newNameProposals: astSeg.newNameProposals,
           });
-          if (!row.isAlternative) {
+          if (!seg.isAlternative) {
             lastPrimaryIndex = currentGroup.ingredients.length - 1;
           }
         }
