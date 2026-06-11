@@ -24,7 +24,7 @@
 
 import { describe, it, expect } from "vitest";
 
-import { parseIngredientString } from "@/lib/recipe-import/ingredient";
+import { parseIngredientLines, type ParseLookups } from "@/lib/recipe-import";
 
 /**
  * The full set of unit tokens the parser sees in production — names +
@@ -76,6 +76,86 @@ const TEST_UNITS = new Set(
     "Beutel", "Beuteln", "sachet", "sachets", "bag", "bags",
   ].map((u) => u.toLowerCase()),
 );
+
+// Container tokens: when a line carries one, the matcher keeps a leading prep
+// adjective in the name (canned-product rule).
+const CONTAINER_TOKENS = new Set(
+  [
+    "packung", "packungen", "päckchen", "pck", "pck.", "pkg", "pkg.", "pckg", "pckg.",
+    "package", "packages", "packet", "packets",
+    "dose", "dosen", "can", "cans", "tin", "tins",
+    "glas", "gläser", "jar", "jars",
+    "tube", "tuben", "tubes",
+    "flasche", "flaschen", "bottle", "bottles",
+    "karton", "kartons", "carton", "cartons",
+    "schachtel", "schachteln", "box", "boxes",
+    "beutel", "beuteln", "sachet", "sachets", "bag", "bags",
+  ],
+);
+
+// Display casing for the resolved unit name (the pipeline canonicalises; the
+// old standalone parser echoed the verbatim token). Aliases not listed default
+// to their lowercased token.
+const UNIT_CASING: Record<string, string> = {
+  tl: "TL", el: "EL", esslöffel: "Esslöffel", "eßlöffel": "Esslöffel",
+  teelöffel: "Teelöffel", tasse: "Tasse", tassen: "Tassen",
+  gramm: "Gramm", kilo: "Kilo", kilogramm: "Kilogramm",
+  liter: "Liter", milliliter: "Milliliter",
+  prise: "Prise", prisen: "Prisen", messerspitze: "Messerspitze",
+  msp: "Msp", "msp.": "Msp.", stück: "Stück", stk: "Stk", "stk.": "Stk.",
+  bund: "Bund", bündel: "Bündel", zweig: "Zweig", zweige: "Zweige",
+  zehe: "Zehe", zehen: "Zehen", zoll: "Zoll", zentimeter: "Zentimeter",
+  handvoll: "Handvoll", packung: "Packung", packungen: "Packungen",
+  päckchen: "Päckchen", pck: "Pck", "pck.": "Pck.", dose: "Dose", dosen: "Dosen",
+  glas: "Glas", gläser: "Gläser", tube: "Tube", tuben: "Tuben",
+  flasche: "Flasche", flaschen: "Flaschen", karton: "Karton", kartons: "Kartons",
+  schachtel: "Schachtel", schachteln: "Schachteln", beutel: "Beutel", beuteln: "Beuteln",
+  pfund: "Pfund",
+};
+
+const UNIT_ENTRIES = [...TEST_UNITS].map(
+  (name, i) =>
+    [
+      name,
+      { id: i + 1, name: UNIT_CASING[name] ?? name, isContainer: CONTAINER_TOKENS.has(name) },
+    ] as const,
+);
+const TEST_LOOKUPS: ParseLookups = {
+  units: {
+    byNameOrAlias: new Map(UNIT_ENTRIES),
+    byCanonicalName: new Map(UNIT_ENTRIES),
+    byId: new Map(UNIT_ENTRIES.map(([, e]) => [e.id, e] as const)),
+    containerTokens: CONTAINER_TOKENS,
+    globalDefaultUnitId: null,
+  },
+  ingredients: new Map(),
+  ingredientCatalog: [],
+};
+
+/** The legacy ParsedIngredient-ish shape the scoring below reads, produced by
+ *  running the real production pipeline on a single line. */
+type ParsedShape = {
+  quantity: number | null;
+  unitName: string | null;
+  name: string;
+  notes: string | null;
+  isOptional: boolean;
+};
+
+/** Run the full production pipeline on one line and adapt the first emitted
+ *  ImportedIngredient back to {@link ParsedShape}. The raw unit token is
+ *  preferred so the report echoes the source spelling like the old parser. */
+function parse(raw: string): ParsedShape {
+  const out = parseIngredientLines([raw], TEST_LOOKUPS);
+  const r = out[0];
+  return {
+    quantity: r?.quantity ?? null,
+    unitName: r?.rawUnit ?? r?.unit?.name ?? null,
+    name: r?.name ?? "",
+    notes: r?.notes ?? null,
+    isOptional: r?.isOptional ?? false,
+  };
+}
 
 type Ideal = {
   quantity?: number | null;
@@ -276,7 +356,7 @@ describe("familywall golden coverage", () => {
     const partials: string[] = [];
 
     for (const c of CASES) {
-      const r = parseIngredientString(c.raw, TEST_UNITS);
+      const r = parse(c.raw);
       const verdict = score(c, r);
       if (verdict.kind === "exact") {
         exact += 1;
@@ -317,39 +397,19 @@ type ScoreResult =
   | { kind: "partial"; reasons: string[] }
   | { kind: "fail"; reasons: string[] };
 
-function score(
-  c: Case,
-  r: ReturnType<typeof parseIngredientString>,
-): ScoreResult {
-  // For non-container lines, the integration layer (pickNameAndNotes)
-  // may switch to `altWithPrepStripped` — try that as a fallback when the
-  // main parse doesn't match the ideal on name. We score against whichever
-  // variant gets closer to the ideal so the test reflects production
-  // behaviour, not just the raw parseIngredientString output.
-  const main = scoreOne(c, r.name, r.notes);
-  if (main.kind === "exact") return main;
-  if (r.altWithPrepStripped) {
-    const alt = scoreOne(c, r.altWithPrepStripped.name, r.altWithPrepStripped.notes);
-    // Prefer the alt only if it's strictly better than the main path.
-    if (alt.kind === "exact") return alt;
-    if (alt.kind === "partial" && main.kind === "fail") return alt;
-  }
-  return main;
+function score(c: Case, r: ParsedShape): ScoreResult {
+  // The pipeline already picks the production name/notes (prep-strip,
+  // canned-product rule, vocab tails) — there's no separate variant to try.
+  return scoreOne(c, r, r.name, r.notes);
 }
 
 function scoreOne(
   c: Case,
+  r: ParsedShape,
   actualName: string,
   actualNotes: string | null,
 ): ScoreResult {
   const reasons: string[] = [];
-  // Use the full parsed result to also check quantity / unit / isOptional —
-  // those don't change between main and alt.
-  // (Read from a closure-less version by passing the full result in c.raw
-  // would be cleaner, but quantity/unit/isOptional are stable across
-  // variants — we keep the current parsed object via a side channel below.)
-  // For simplicity we re-parse here; the cost is negligible.
-  const r = parseIngredientString(c.raw, TEST_UNITS);
 
   const qOk = numEq(c.ideal.quantity, r.quantity);
   if (!qOk) reasons.push(`quantity ${c.ideal.quantity} ≠ ${r.quantity}`);
