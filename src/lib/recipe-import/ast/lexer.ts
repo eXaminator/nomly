@@ -92,10 +92,11 @@ export function lex(source: string): Lexeme[] {
       i += 1;
       continue;
     }
-    if (isDigit(ch) || isFraction(ch)) {
+    if (isDigit(ch) || isFraction(ch) || (ch === "." && isDigit(source[i + 1]))) {
       // A numeric run keeps digit-flanked separators (German decimal "0,5",
       // fraction "1/2", decimal "1.5") inside the single token; a bare slash or
-      // dash is left as its own token.
+      // dash is left as its own token. A leading-dot decimal (".5") begins the
+      // run at the dot so it isn't mistaken for leading punctuation noise.
       let j = i + 1;
       while (j < n) {
         const c = source[j];
