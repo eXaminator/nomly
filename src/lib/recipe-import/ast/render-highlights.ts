@@ -14,6 +14,7 @@ function kindOf(source: string, lf: Leaf): HighlightKind {
   if (lf.role === "amount" || lf.role === "unit") return "amount";
   if (lf.role === "ingredient") return "name";
   if (lf.role === "prep-noun") return "note";
+  if (lf.role === "plural-marker") return "dropped";
   const isParenRootDelim =
     (lf.kind === "open" || lf.kind === "close") && lf.depth === 0 && !lf.bracket;
   const isBracketDelim = (lf.kind === "open" || lf.kind === "close") && lf.bracket;

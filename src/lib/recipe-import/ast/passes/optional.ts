@@ -15,10 +15,11 @@ const OPTIONAL_WORDS = new Set([
   "fakultativ",
 ]);
 
-/** Two-word optional markers. */
+/** Two-word optional markers. "bei Bedarf" / "nach Bedarf" are deliberately NOT
+ *  here — like "nach Belieben" they stay verbatim in the note and never flip the
+ *  flag. */
 const OPTIONAL_PAIRS = new Set([
   "wenn vorhanden",
-  "bei bedarf",
   "if available",
   "if needed",
 ]);

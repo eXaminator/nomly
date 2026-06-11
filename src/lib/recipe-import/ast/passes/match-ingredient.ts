@@ -41,7 +41,10 @@ function isVocabBoundary(region: Leaf[], i: number): boolean {
   if (USAGE_PREFIX.has(w) || NOTE_BOUNDARY.has(w)) return true;
   const next = region[i + 1] ? normWord(region[i + 1].text) : "";
   if (w === "to" && next === "taste") return true;
-  if (w === "nach" && (next === "geschmack" || next === "belieben")) return true;
+  if (w === "nach" && (next === "geschmack" || next === "belieben" || next === "bedarf")) return true;
+  // "bei Bedarf" reads like "nach Bedarf"/"nach Belieben": a usage note, not
+  // part of the name and not an optional flag.
+  if (w === "bei" && next === "bedarf") return true;
   // "z.B." / "z. B." — the lexer splits it into "z" + "b"; treat as a boundary.
   if (w === "z" && next === "b") return true;
   return false;
@@ -182,6 +185,7 @@ export function applyMatch(
     const tok = tokens[ti];
     if (!tok) continue;
     for (let li = tok.leafStart; li <= tok.leafEnd; li++) {
+      if (remainder[li].role === "plural-marker") continue; // stays transparent
       remainder[li].consumed = true;
       remainder[li].role = "ingredient";
     }
@@ -193,10 +197,10 @@ export function applyMatch(
     // (interior dashes/punctuation included) as the name, so nothing between
     // the first and last matched token leaks into the notes.
     for (const lf of leaves) {
-      if (lf.start >= minStart && lf.end <= maxEnd) {
-        lf.consumed = true;
-        lf.role = "ingredient";
-      }
+      if (lf.start < minStart || lf.end > maxEnd) continue;
+      if (lf.role === "plural-marker") continue; // stays transparent
+      lf.consumed = true;
+      lf.role = "ingredient";
     }
     // A filler ("of"/"von") stranded between the consumed unit and the matched
     // span connects them and is meaningless alone — attribute it to the UNIT
@@ -338,13 +342,24 @@ function noMatch(
   const nameStart = nameLeaves[0].start;
   const nameEnd = nameLeaves[nameLeaves.length - 1].end;
   for (const lf of leaves) {
-    if (lf.start >= nameStart && lf.end <= nameEnd) {
-      lf.consumed = true;
-      lf.role = "ingredient";
-    }
+    if (lf.start < nameStart || lf.end > nameEnd) continue;
+    // Pluralization-marker punctuation stays transparent (dropped from the
+    // displayed name below); everything else in the span IS the name.
+    if (lf.role === "plural-marker") continue;
+    lf.consumed = true;
+    lf.role = "ingredient";
   }
-  const name = source
-    .slice(nameLeaves[0].start, nameLeaves[nameLeaves.length - 1].end)
+  // Build the displayed name from the span, dropping pluralization-marker
+  // punctuation so the glued letters read as one word ("Ei(er)" → "Eier").
+  let rawNameStr = "";
+  let cursor = nameStart;
+  for (const lf of leaves) {
+    if (lf.role !== "plural-marker" || lf.start < nameStart || lf.end > nameEnd) continue;
+    rawNameStr += source.slice(cursor, lf.start);
+    cursor = lf.end;
+  }
+  rawNameStr += source.slice(cursor, nameEnd);
+  const name = rawNameStr
     .replace(/[­​-‍﻿]/gu, "") // invisible formatting chars
     .replace(/\s*[-–—]\s+|\s+[-–—]\s*/g, " ") // spaced separator dash → space
     .replace(/\s+/g, " ")

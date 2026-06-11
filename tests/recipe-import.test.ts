@@ -399,10 +399,11 @@ describe("parseIngredientString — extended cases", () => {
   //  vocab phrase to notes; covered by recipe-import-matching.)
   it("trailing '!' never reaches the name ('salt- adjust to taste!')", () => {
     // The stray "!" must not strand into the name (it once even accrued a
-    // catalog alias "salt adjust !").
+    // catalog alias "salt adjust !"). It IS kept in the notes — "!"/"?" are
+    // meaningful sentence punctuation the user wrote (see "(doch, wirklich!)").
     const r = parse("salt- adjust to taste!");
     expect(r.name).not.toContain("!");
-    expect(r.notes ?? "").not.toContain("!");
+    expect(r.notes ?? "").toContain("!"); // "!" stays in the note
   });
   it("leading filler 'and Salz' is stripped", () => {
     const r = parse("and Salz");

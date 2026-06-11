@@ -1848,11 +1848,12 @@ describe("vocab rules apply only on the no-match path", () => {
     expect(out[0].notes).toContain("zum Bestreuen");
   });
 
-  it("matched: 'salt- adjust to taste!' → clean notes, no stranded punctuation", () => {
+  it("matched: 'salt- adjust to taste!' → clean notes, trailing '!' kept", () => {
     const out = parseIngredientLines(["salt- adjust to taste!"], makeLookups(catalog));
     expect(out[0].ingredientId).toBe(3);
     expect(out[0].name).toBe("salt");
-    expect(out[0].notes).toBe("adjust to taste");
+    // "!"/"?" are meaningful sentence punctuation — kept verbatim in the note.
+    expect(out[0].notes).toBe("adjust to taste!");
   });
 
   it("matched: 'Öl z.B. Olivenöl' → the earlier generic wins; example → notes", () => {

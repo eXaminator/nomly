@@ -1,13 +1,17 @@
 import type { Leaf } from "../render-notes";
 
-const PLURAL_SUFFIXES = new Set(["n", "en", "s", "nen", "innen"]);
-
 /**
- * Mark inline pluralization markers a word carries — "Tomate(n)", "Dose/n" —
- * as dropped, WITHOUT rewriting the source. The marker leaves are consumed
- * (role "connector") so they leave the match input and the notes and render as
- * "dropped" in highlights, while the leaves keep their original offsets.
- * Mutates `leaves`.
+ * Annotate inline pluralization markers a word carries — "Tomate(n)", "Ei(er)",
+ * "Dose/n", "Zweig/e", "Pita-Brot(e)" — WITHOUT rewriting the source. Both the
+ * marker PUNCTUATION ("(", ")", "/") AND the suffix letters get role
+ * "plural-marker": both are dropped from the DISPLAYED name and the notes (so
+ * the base word shows — "Tomate(n)" → "Tomate"). For MATCHING the punctuation
+ * is skipped while the suffix WORD glues onto the base ("Ei(er)" → looks up
+ * "Eier", "Dose/n" → unit "Dosen"). The "/()" are simply IGNORED for matching;
+ * we don't validate the suffix, so any glued marker works.
+ *
+ * A space breaks the sequence: "Brot (alt)" is NOT a marker (the "(" doesn't
+ * abut "Brot"), so it stays a normal parenthetical. Mutates `leaves`.
  */
 export function applyPluralMarkers(leaves: Leaf[]): void {
   for (let i = 0; i < leaves.length; i++) {
@@ -16,37 +20,33 @@ export function applyPluralMarkers(leaves: Leaf[]): void {
     // Must directly follow a word (no whitespace): "Tomate(n)", "Dose/n".
     if (!prev || prev.kind !== "word" || lf.start !== prev.end) continue;
 
-    // "(n)" form: open, inner suffix word, close — all adjacent.
+    // "(letters)" form: open, inner letters, close — all adjacent.
     if (lf.kind === "open" && !lf.bracket) {
       const inner = leaves[i + 1];
       const close = leaves[i + 2];
       if (
         inner?.kind === "word" &&
-        PLURAL_SUFFIXES.has(inner.text.toLowerCase()) &&
         inner.start === lf.end &&
         close?.kind === "close" &&
         close.start === inner.end
       ) {
-        for (const m of [lf, inner, close]) {
-          m.consumed = true;
-          m.role = "connector";
-        }
+        lf.role = "plural-marker";
+        close.role = "plural-marker";
+        inner.role = "plural-marker";
+        // Promote the suffix out of the paren nesting so it reads as part of the
+        // base word (depth-0), not parenthetical content.
+        inner.depth = prev.depth;
         i += 2;
       }
       continue;
     }
-    // "/n" form: slash, suffix word — adjacent.
+    // "/letters" form: slash, suffix letters — adjacent.
     if (lf.kind === "slash") {
       const inner = leaves[i + 1];
-      if (
-        inner?.kind === "word" &&
-        PLURAL_SUFFIXES.has(inner.text.toLowerCase()) &&
-        inner.start === lf.end
-      ) {
-        for (const m of [lf, inner]) {
-          m.consumed = true;
-          m.role = "connector";
-        }
+      if (inner?.kind === "word" && inner.start === lf.end) {
+        lf.role = "plural-marker";
+        inner.role = "plural-marker";
+        inner.depth = prev.depth;
         i += 1;
       }
     }

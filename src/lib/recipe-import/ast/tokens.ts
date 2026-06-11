@@ -26,10 +26,12 @@ export function groupByWhitespace(source: string, leaves: readonly Leaf[]): Grou
       (lastKind === "word" && lf.kind === "number") ||
       // Inch symbol after a number is its own unit token: "1\"" → "1" + '"'.
       (lastKind === "number" && lf.kind === "punct" && lf.text === '"');
-    // Already-consumed leaves (plural markers, optional markers) contribute
-    // their leaves to the group but NOT their text, so amount/unit detection
-    // sees the live token ("Dose/n" → "Dose", "/n" consumed).
-    const text = lf.consumed ? "" : lf.text;
+    // Consumed leaves (optional markers) and the WHOLE pluralization marker
+    // (punctuation + suffix) contribute their leaves to the group but NOT their
+    // text, so unit detection sees the BASE token ("Dose/n" → "Dose"). Units are
+    // seeded in the singular, so the base — not the joined plural — is the
+    // lookup key. (Ingredient matching keeps the suffix; see candidate-tokens.)
+    const text = lf.consumed || lf.role === "plural-marker" ? "" : lf.text;
     if (prev && source.slice(prev.end, lf.start) === "" && !crossNumWord) {
       prev.text += text;
       prev.leaves.push(lf);

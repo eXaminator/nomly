@@ -8,7 +8,11 @@ export type Role =
   | "ingredient"
   | "connector"
   | "optional-marker"
-  | "prep-noun";
+  | "prep-noun"
+  // Pluralization-marker punctuation ("(" ")" "/" in "Ei(er)", "Dose/n"): the
+  // letters glue to the base word for matching/display; this punctuation is
+  // transparent — dropped from notes/highlights, never a comma boundary.
+  | "plural-marker";
 
 /** A lexeme annotated by the semantic passes. `consumed` marks a token that a
  *  structured field claimed (amount / unit / ingredient / connector / optional
@@ -41,10 +45,18 @@ export function renderNote(source: string, leaves: readonly Leaf[]): string | nu
       lf.kind === "dash" &&
       (lf.start === 0 || /\s/.test(source[lf.start - 1])) &&
       (lf.end >= source.length || /\s/.test(source[lf.end]));
-    const removed = lf.consumed === true || isParenRootDelim || isBracketDelim || isSpacedDash;
+    // A pluralization marker ("(er)", "/n") is fully transparent: dropped from
+    // the note like a paren, but it never introduces a comma boundary.
+    const isPluralMarker = lf.role === "plural-marker";
+    const removed =
+      lf.consumed === true ||
+      isParenRootDelim ||
+      isBracketDelim ||
+      isSpacedDash ||
+      isPluralMarker;
 
     if (removed) {
-      if (started) pendingBreak = true;
+      if (started && !isPluralMarker) pendingBreak = true;
       continue;
     }
     if (!started) {
@@ -75,10 +87,11 @@ export function tidyNote(s: string): string | null {
     })
     .replace(/(?:,\s*){2,}/g, ", ")
     // Trim stray edge punctuation left by a removed boundary word — a dangling
-    // connector dash, a trailing "!" etc. Mid-note punctuation (a ";" between
-    // clauses) is untouched.
-    .replace(/^[\s,;:!?*."'·\-–—]+/, "")
-    .replace(/[\s,;:!?*"'·\-–—]+$/, "")
+    // connector dash, comma, colon etc. Mid-note punctuation (a ";" between
+    // clauses) is untouched. "!"/"?" are kept: they're meaningful sentence
+    // punctuation the user actually wrote ("(doch, wirklich!)").
+    .replace(/^[\s,;:*."'·\-–—]+/, "")
+    .replace(/[\s,;:*"'·\-–—]+$/, "")
     .trim();
   return t.length > 0 ? t : null;
 }

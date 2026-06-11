@@ -88,6 +88,11 @@ export function leavesToCandidateTokens(
 
   for (let i = 0; i < leaves.length; i++) {
     const lf = leaves[i];
+    // A pluralization marker's PUNCTUATION ("(" ")" "/" in "Ei(er)", "Zweig/e")
+    // is transparent for matching: skip it so the base + suffix glue into one
+    // token ("eier", "zweige"). The suffix WORD is kept (it's content). Its leaf
+    // offsets still bridge the adjacency below.
+    if (lf.role === "plural-marker" && lf.kind !== "word") continue;
     const prev = leaves[i - 1];
     const gap = prev ? lf.start > prev.end : false;
 

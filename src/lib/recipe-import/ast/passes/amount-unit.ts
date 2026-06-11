@@ -97,10 +97,14 @@ export function applyAmountUnit(
     g.leaves.some((l) => l.depth > 0 || l.kind === "open" || l.kind === "close");
 
   // A range that repeats its unit on both sides ("25 g – 50 g", "1 cup - 2
-  // cups"): number unit – number [unit]. The numeric run can't span the
-  // interleaved unit, so detect the shape here and collapse it to a range.
-  const isDashGroup = (g: Group | undefined): boolean =>
-    g != null && g.leaves.length === 1 && g.leaves[0].kind === "dash";
+  // cups", "¼ tsp to ½ tsp"): number unit <connector> number [unit]. The
+  // numeric run can't span the interleaved unit, so detect the shape here and
+  // collapse it to a range. The connector is a dash group or a "to"/"bis" word.
+  const isRangeConnector = (g: Group | undefined): boolean =>
+    g != null &&
+    ((g.leaves.length === 1 && g.leaves[0].kind === "dash") ||
+      norm(g.text) === "to" ||
+      norm(g.text) === "bis");
   if (cur + 3 < groups.length && quantity === null && !isSizeCompound(groups[cur])) {
     const g0 = groups[cur];
     const g1 = groups[cur + 1];
@@ -114,7 +118,7 @@ export function applyAmountUnit(
       n2 != null &&
       g1 != null &&
       isUnit(g1) &&
-      isDashGroup(g2) &&
+      isRangeConnector(g2) &&
       ((g1.start === 0 || /\s/.test(source[g1.start - 1] ?? " ")))
     ) {
       const sameUnitTail = g4 != null && isUnit(g4) && norm(g4.text) === norm(g1.text);

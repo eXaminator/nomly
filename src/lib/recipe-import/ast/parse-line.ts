@@ -64,14 +64,57 @@ function assembleNotes(
   rangeExpression: string | null,
   unitName: string | null,
   rendered: string | null,
+  rangeSep: ", " | " ",
 ): string | null {
   if (!rangeExpression) return rendered;
   const rangeFrag = unitName ? `${rangeExpression} ${unitName}` : rangeExpression;
   if (!rendered) return tidyNote(rangeFrag);
   // With a unit the range reads as a measurement ("2-3 cups, for frying" —
-  // comma); without one it glues to a trailing modifier ("5-6 große").
-  const sep = unitName ? ", " : " ";
+  // comma). Without one the separator depends on what sat between the range and
+  // the remainder: a comma if a CONTENT token (the ingredient) was removed
+  // there ("4-5 scallions, finely sliced" → "4-5, finely sliced"), a space if
+  // the remainder abuts the range directly ("5-6 große").
+  const sep = unitName ? ", " : rangeSep;
   return tidyNote(`${rangeFrag}${sep}${rendered}`);
+}
+
+/**
+ * The separator between a unitless range note and the verbatim remainder: a
+ * comma when a consumed CONTENT token (ingredient/unit/marker) was skipped
+ * between the range's last amount leaf and the first surviving note leaf;
+ * otherwise a space. Mirrors the note rule "a removed token is a comma
+ * boundary, unless it's a fully-ignored paren".
+ */
+function rangeNoteSeparator(source: string, leaves: readonly Leaf[]): ", " | " " {
+  let lastAmountEnd = -1;
+  for (const lf of leaves) {
+    if (lf.role === "amount") lastAmountEnd = Math.max(lastAmountEnd, lf.end);
+  }
+  if (lastAmountEnd < 0) return " ";
+  const isIgnored = (lf: Leaf): boolean =>
+    ((lf.kind === "open" || lf.kind === "close") && lf.depth === 0 && !lf.bracket) ||
+    ((lf.kind === "open" || lf.kind === "close") && lf.bracket);
+  let firstNoteStart = Number.POSITIVE_INFINITY;
+  for (const lf of leaves) {
+    if (lf.start < lastAmountEnd) continue;
+    if (lf.consumed || isIgnored(lf)) continue;
+    firstNoteStart = lf.start;
+    break;
+  }
+  if (!Number.isFinite(firstNoteStart)) return " ";
+  for (const lf of leaves) {
+    if (lf.start < lastAmountEnd || lf.end > firstNoteStart) continue;
+    if (
+      lf.consumed &&
+      (lf.role === "ingredient" ||
+        lf.role === "unit" ||
+        lf.role === "optional-marker" ||
+        lf.role === "connector")
+    ) {
+      return ", ";
+    }
+  }
+  return " ";
 }
 
 /** Parse one ingredient segment into a structured row. The lexer runs over the
@@ -116,7 +159,12 @@ export function parseSegment(source: string, lookups: SegmentLookups): ParsedRow
   // highlight renderers so the surviving single layer unwraps normally.
   collapseRedundantParens(leaves);
   const rendered = renderNote(source, leaves);
-  const baseNotes = assembleNotes(rangeExpression, unitName, rendered);
+  const baseNotes = assembleNotes(
+    rangeExpression,
+    unitName,
+    rendered,
+    rangeNoteSeparator(source, leaves),
+  );
   // Note prefixes captured before the amount (prep noun, leading note phrase)
   // lead the assembled notes, in source order.
   const prefixes = [prepNote, leadNote].filter((s) => s != null && s.length > 0);
