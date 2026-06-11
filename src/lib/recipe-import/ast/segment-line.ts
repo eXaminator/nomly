@@ -4,6 +4,7 @@ import {
   normalizeForMatch,
   preIsHeadlessModifier,
 } from "../ingredient";
+import type { HighlightPart } from "../source-ranges";
 import type { Leaf } from "./render-notes";
 
 /**
@@ -34,6 +35,15 @@ export type LineSegment =
       connector: string | null;
       localNote: boolean;
       tailNote: string | null;
+      /** Compound-elision rows ("Weizen- oder Dinkelmehl" → "Weizenmehl") have
+       *  a SYNTHESIZED name that isn't a contiguous source slice. When set, the
+       *  orchestrator parses THIS string (amount + stitched name) instead of
+       *  `leaves`, and uses `highlightOverride` for the source attribution. */
+      syntheticSource?: string;
+      /** Explicit highlight spans (absolute into the original line) for a
+       *  synthetic row: the shared amount, the stem item, and the borrowed
+       *  suffix substring of the head word. */
+      highlightOverride?: HighlightPart[];
     };
 
 export type SegmentOptions = {
@@ -380,6 +390,13 @@ function segmentRange(
     }
   }
 
+  // ── Compound-elision list: "Weizen- oder Dinkelmehl", "Mandel-, Hafer- oder
+  //    Kokosdrink" → one row per stem, each borrowing the head's suffix. ──────
+  {
+    const elided = expandElision(source, all, from, to, baseDepth, optional, opts);
+    if (elided) return elided;
+  }
+
   // ── "oder"/"or"/"/"/"o." chain ────────────────────────────────────────────
   {
     const seps = orSeparators(all, from, to, baseDepth);
@@ -393,11 +410,9 @@ function segmentRange(
       const primaryText = source.slice(all[segs[0].from].start, all[primaryEnd - 1].end).trim();
       void primaryLastWord;
       const allNonEmpty = segs.every((s) => s.to > s.from);
-      // The dash-compound stem ("Weizen- oder Dinkelmehl") is kept as ONE
-      // ingredient by default; in first-wins (Familywall) it splits into a
-      // primary + alternative (the legacy preprocessAlternatives behaviour).
-      const dashBlocks = endsWithDash && !opts.useFirstWins;
-      if (allNonEmpty && !dashBlocks && !preIsHeadlessModifier(primaryText)) {
+      // A dash-compound stem ("Weizen- oder Dinkelmehl") that the elision
+      // expander above could NOT resolve (no catalog hit) stays ONE ingredient.
+      if (allNonEmpty && !endsWithDash && !preIsHeadlessModifier(primaryText)) {
         const out: LineSegment[] = [];
         segs.forEach((s, idx) => {
           // Strip a leading substitute marker on alternatives ("or sub X").
@@ -538,6 +553,114 @@ function sliceBySeps(
     start = sep.at + sep.span;
   }
   out.push({ from: start, to, connector });
+  return out;
+}
+
+/** Index of the last word leaf in [a,b), or -1. */
+function lastWordIdx(all: readonly Leaf[], a: number, b: number): number {
+  for (let i = b - 1; i >= a; i--) if (all[i].kind === "word") return i;
+  return -1;
+}
+
+/** The longest suffix T of `head` (≥2 chars) such that `stem + T` is a known
+ *  catalog ingredient for at least one stem. The catalog is the dictionary that
+ *  decides where the head's shared suffix begins ("Kokos|drink"). */
+function sharedSuffix(head: string, stems: string[], known: ReadonlySet<string>): string | null {
+  for (let len = Math.min(head.length - 1, 14); len >= 2; len--) {
+    const t = head.slice(-len);
+    if (stems.some((s) => known.has(normalizeForMatch(s + t)))) return t;
+  }
+  return null;
+}
+
+/**
+ * German compound-elision list: "Weizen- oder Dinkelmehl", "500 ml Mandel-,
+ * Hafer-, Soja- oder Kokosdrink". Non-final items are stems (a trailing "-"
+ * marks the elision; a missing dash on one item is tolerated once the pattern
+ * is triggered); the final item is the full head compound. Each stem borrows
+ * the head's shared suffix (see {@link sharedSuffix}) → one synthesized row per
+ * stem + the head, with the leading amount shared. Returns null when it isn't
+ * an elision list or no catalog suffix validates (caller keeps it as one row).
+ */
+function expandElision(
+  source: string,
+  all: Leaf[],
+  from: number,
+  to: number,
+  baseDepth: number,
+  optional: boolean,
+  opts: SegmentOptions,
+): LineSegment[] | null {
+  const items = splitListItems(all, from, to, baseDepth);
+  if (items.length < 2) return null;
+  const headRange = items[items.length - 1];
+  // The head is a full compound — it must NOT end with a trailing dash.
+  if (all[headRange[1] - 1]?.kind === "dash") return null;
+  const stemRanges = items.slice(0, -1);
+  // The pattern triggers only when at least one stem carries the elision dash.
+  if (!stemRanges.some(([, b]) => all[b - 1]?.kind === "dash")) return null;
+
+  const headLast = all[headRange[1] - 1];
+  const headText = source.slice(all[headRange[0]].start, headLast.end).trim();
+  const stemWordIdxs = stemRanges.map(([a, b]) => lastWordIdx(all, a, b));
+  if (stemWordIdxs.some((i) => i < 0)) return null;
+  const stems = stemWordIdxs.map((i) => all[i].text);
+
+  const t = sharedSuffix(headText, stems, opts.knownIngredients);
+  if (t == null) return null;
+
+  // Shared amount = item0 from its start up to its stem word.
+  const firstStemIdx = stemWordIdxs[0];
+  const amountStart = all[stemRanges[0][0]].start;
+  const amountHl: HighlightPart | null =
+    firstStemIdx > stemRanges[0][0]
+      ? { kind: "amount", range: [amountStart, all[firstStemIdx - 1].end] }
+      : null;
+  const amountText = amountHl ? source.slice(amountHl.range[0], amountHl.range[1]).trim() : "";
+  const amountPrefix = amountText ? `${amountText} ` : "";
+  const suffixSpan: [number, number] = [headLast.end - t.length, headLast.end];
+
+  const out: LineSegment[] = [];
+  stemRanges.forEach(([, b], k) => {
+    const stemWord = all[stemWordIdxs[k]];
+    const name = stemWord.text + t;
+    const stemEnd = all[b - 1].kind === "dash" ? all[b - 1].end : stemWord.end;
+    const hl: HighlightPart[] = [];
+    if (amountHl) hl.push(amountHl);
+    hl.push({ kind: "name", range: [stemWord.start, stemEnd] });
+    hl.push({ kind: "name", range: suffixSpan });
+    out.push({
+      kind: "ingredient",
+      leaves: [],
+      range: [stemWord.start, stemEnd],
+      segText: name,
+      rawText: source.trim(),
+      forceOptional: k === 0 ? optional : true,
+      isAlternative: k > 0,
+      connector: k > 0 ? "oder" : null,
+      localNote: false,
+      tailNote: null,
+      syntheticSource: amountPrefix + name,
+      highlightOverride: hl,
+    });
+  });
+  const headHl: HighlightPart[] = [];
+  if (amountHl) headHl.push(amountHl);
+  headHl.push({ kind: "name", range: [all[headRange[0]].start, headLast.end] });
+  out.push({
+    kind: "ingredient",
+    leaves: [],
+    range: [all[headRange[0]].start, headLast.end],
+    segText: headText,
+    rawText: source.trim(),
+    forceOptional: true,
+    isAlternative: true,
+    connector: "oder",
+    localNote: false,
+    tailNote: null,
+    syntheticSource: amountPrefix + headText,
+    highlightOverride: headHl,
+  });
   return out;
 }
 

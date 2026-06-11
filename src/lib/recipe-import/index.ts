@@ -631,16 +631,21 @@ export function parseIngredientLines(
       if (seg.tailNote) pendingTailNote = seg.tailNote;
       {
         const piece = seg.segText;
-        // ONE AST parse of this segment is the single source of truth.
-        const astSeg = parseLeaves(originalTrimmed, seg.leaves, {
+        const segLookups = {
           knownUnitTokens,
           containerTokens: lookups.units.containerTokens,
           catalog: lookups.ingredientCatalog ?? [],
           catalogIndex: lookups.ingredientCatalogIndex,
           threshold,
-          lineUnitId: (name, qty) =>
+          lineUnitId: (name: string | null, qty: number | null) =>
             resolveUnit(lookups.units, name, qty).resolved?.id ?? null,
-        });
+        };
+        // ONE AST parse of this segment is the single source of truth. A
+        // compound-elision row (syntheticSource) parses its stitched name +
+        // shared amount string; everything else parses its own leaves.
+        const astSeg = seg.syntheticSource
+          ? parseSegment(seg.syntheticSource, segLookups)
+          : parseLeaves(originalTrimmed, seg.leaves, segLookups);
         const astNote = astSeg.notes;
         const sourceRange = seg.range;
         // An optional marker makes the WHOLE block optional: when it sits on an
@@ -717,6 +722,7 @@ export function parseIngredientLines(
         if (
           seg.isAlternative &&
           !astSeg.matched &&
+          !seg.syntheticSource &&
           lastPrimaryIndex !== null
         ) {
           // A trailing alternative that is PURELY a note phrase ("(oder nach
@@ -755,13 +761,9 @@ export function parseIngredientLines(
           unitMatch: final.match,
           rawUnit: final.rawUnit,
           sourceRange: sourceRange ?? undefined,
-          highlightParts: astHighlights(
-            originalTrimmed,
-            sourceRange,
-            piece,
-            seg.connector,
-            astSeg.highlightParts,
-          ),
+          highlightParts:
+            seg.highlightOverride ??
+            astHighlights(originalTrimmed, sourceRange, piece, seg.connector, astSeg.highlightParts),
           name: astSeg.name,
           ingredientId: astSeg.ingredientId,
           ingredientMatch: astSeg.matched ? "existing" : "new",
@@ -1162,15 +1164,18 @@ function parseGroupedIngredientLines(
           const piece = seg.segText;
           // ONE AST parse per segment — same single-pass path as
           // parseIngredientLines (quantity/unit/notes/name/match/candidates).
-          const astSeg = parseLeaves(originalTrimmed, seg.leaves, {
+          const segLookups = {
             knownUnitTokens,
             containerTokens: lookups.units.containerTokens,
             catalog: lookups.ingredientCatalog ?? [],
             catalogIndex: lookups.ingredientCatalogIndex,
             threshold,
-            lineUnitId: (name, qty) =>
+            lineUnitId: (name: string | null, qty: number | null) =>
               resolveUnit(lookups.units, name, qty).resolved?.id ?? null,
-          });
+          };
+          const astSeg = seg.syntheticSource
+            ? parseSegment(seg.syntheticSource, segLookups)
+            : parseLeaves(originalTrimmed, seg.leaves, segLookups);
           const astNote = astSeg.notes;
           const sourceRange = seg.range;
           if (astSeg.name.trim().length === 0) {
@@ -1223,6 +1228,7 @@ function parseGroupedIngredientLines(
           if (
             seg.isAlternative &&
             !astSeg.matched &&
+            !seg.syntheticSource &&
             lastPrimaryIndex !== null
           ) {
             const isNoteOnly = stripVocabTail(piece).name.trim().length === 0;
@@ -1248,13 +1254,9 @@ function parseGroupedIngredientLines(
             quantity: astSeg.quantity,
             unit: final.resolved,
             sourceRange: sourceRange ?? undefined,
-            highlightParts: astHighlights(
-              originalTrimmed,
-              sourceRange,
-              piece,
-              seg.connector,
-              astSeg.highlightParts,
-            ),
+            highlightParts:
+              seg.highlightOverride ??
+              astHighlights(originalTrimmed, sourceRange, piece, seg.connector, astSeg.highlightParts),
             unitMatch: final.match,
             rawUnit: final.rawUnit,
             name: astSeg.name,

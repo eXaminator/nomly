@@ -960,13 +960,75 @@ describe("colon-in-name treated as section + listed items", () => {
     expect(out[1].isAlternative).toBe(true);
   });
 
-  it("'oder' does NOT split when pre-separator ends with a dash (compound stem like 'Weizen- oder Dinkelmehl')", () => {
+  it("dash-compound 'Weizen- oder Dinkelmehl' stays ONE ingredient when the stitched compound isn't in the catalog (no-hit fallback)", () => {
+    // Empty catalog → the elision expander can't validate "Weizenmehl", so it
+    // doesn't split; the line is kept as one ingredient. (The catalogued case —
+    // which DOES split into Weizenmehl + Dinkelmehl — is covered below.)
     const out = parseIngredientLines(
       ["200 g Weizen- oder Dinkelmehl"],
       makeLookups([]),
     );
     expect(out).toHaveLength(1);
     expect(out[0].name.toLowerCase()).toMatch(/weizen.*dinkelmehl|weizenmehl/);
+  });
+
+  describe("compound-elision expansion (German shared-suffix lists)", () => {
+    it("'Weizen- oder Dinkelmehl' → Weizenmehl (primary) + Dinkelmehl (alt), borrowing 'mehl'", () => {
+      const catalog: IngredientCatalog = [
+        { ingredientId: 1, canonicalName: "Weizenmehl", aliasName: "Weizenmehl", tokens: ["weizenmehl"] },
+        { ingredientId: 2, canonicalName: "Dinkelmehl", aliasName: "Dinkelmehl", tokens: ["dinkelmehl"] },
+      ];
+      const line = "200 g Weizen- oder Dinkelmehl";
+      const out = parseIngredientLines([line], makeLookups(catalog));
+      expect(out.map((r) => r.name)).toEqual(["Weizenmehl", "Dinkelmehl"]);
+      expect(out[0].isAlternative).toBe(false);
+      expect(out[1].isAlternative).toBe(true);
+      expect(out.every((r) => r.quantity === 200)).toBe(true);
+      // The primary "Weizenmehl" consumed "Weizen-" + the borrowed "mehl" of
+      // "Dinkelmehl" — both highlighted as name on the original line.
+      const names = (out[0].highlightParts ?? [])
+        .filter((p) => p.kind === "name")
+        .map((p) => line.slice(p.range[0], p.range[1]));
+      expect(names).toEqual(["Weizen-", "mehl"]);
+    });
+
+    it("multi-stem list fans out into one row per stem + the head, sharing the amount; a missing dash ('Cashew') is tolerated", () => {
+      const names = ["Mandeldrink", "Haferdrink", "Sojadrink", "Reisdrink", "Cashewdrink", "Kokosdrink"];
+      const catalog: IngredientCatalog = names.map((n, i) => ({
+        ingredientId: i + 1,
+        canonicalName: n,
+        aliasName: n,
+        tokens: [n.toLowerCase()],
+      }));
+      const out = parseIngredientLines(
+        ["500 ml Mandel-, Hafer-, Soja-, Reis-, Cashew oder Kokosdrink"],
+        makeLookups(catalog, ["ml"]),
+      );
+      expect(out.map((r) => r.name)).toEqual(names);
+      expect(out.every((r) => r.quantity === 500 && r.unit?.name === "ml")).toBe(true);
+      expect(out[0].isAlternative).toBe(false);
+      expect(out.slice(1).every((r) => r.isAlternative)).toBe(true);
+    });
+
+    it("does NOT expand a 'z. B.' example note — one ingredient, note kept verbatim", () => {
+      const catalog: IngredientCatalog = [
+        { ingredientId: 1, canonicalName: "Pflanzenmilch", aliasName: "Pflanzenmilch", tokens: ["pflanzenmilch"] },
+        { ingredientId: 2, canonicalName: "Mandeldrink", aliasName: "Mandeldrink", tokens: ["mandeldrink"] },
+        { ingredientId: 3, canonicalName: "Kokosdrink", aliasName: "Kokosdrink", tokens: ["kokosdrink"] },
+      ];
+      const out = parseIngredientLines(
+        ["500 ml Pflanzenmilch (z. B. Mandel-, Hafer- oder Kokosdrink)"],
+        makeLookups(catalog, ["ml"]),
+      );
+      expect(out).toHaveLength(1);
+      expect(out[0].name).toBe("Pflanzenmilch");
+      expect(out[0].notes).toMatch(/z\. ?B\. Mandel-, Hafer- oder Kokosdrink/);
+    });
+
+    it("no catalog hit → keeps the dash-compound as one ingredient (does not invent a split)", () => {
+      const out = parseIngredientLines(["200 g Weizen- oder Dinkelmehl"], makeLookups([]));
+      expect(out).toHaveLength(1);
+    });
   });
 
   it("'alternative' / 'alternativly' word (with or without colon) splits into primary + optional alternative", () => {
