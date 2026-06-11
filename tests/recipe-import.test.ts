@@ -1137,6 +1137,13 @@ describe("segmentLine — parenthetical alternatives", () => {
     expect(rows[0].isAlternative).toBe(false);
   });
 
+  it("sees through a redundant double paren '((or X))' to the alternative", () => {
+    const rows = segs("16 ounces ziti pasta ((or penne))");
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toMatchObject({ segText: "16 ounces ziti pasta", isAlternative: false });
+    expect(rows[1]).toMatchObject({ segText: "penne", isAlternative: true });
+  });
+
   it("preserves the English 'or' connector (doesn't anglicise to 'oder')", () => {
     const alt = segs("3/4 teaspoon salt (or to taste)").find((r) => r.isAlternative);
     expect(alt?.connector).toBe("or");

@@ -671,6 +671,9 @@ type ParenAlt = {
   contentTo: number;
   leader: string; // connector for the first alternative
   tailFrom: number; // index after close (for the trailing note)
+  /** Depth of the alt content (open.depth + 1) — higher than baseDepth+1 when a
+   *  redundant wrapping paren was peeled ("((or penne))"). */
+  contentDepth: number;
   /** A leading nested paren BEFORE the leader ("((10 g) oder X)") that belongs
    *  to the primary — its leaf range [from,to), hoisted onto the primary. */
   leadParen: [number, number] | null;
@@ -713,9 +716,44 @@ function extractParenAlt(
     }
   }
   if (open < 0) return null;
-  // Leader word inside the paren (first content leaf), tolerating a leading
-  // "or"/"oder" before an explicit marker.
-  let cf = open + 1;
+  // Peel a redundant paren that wraps the WHOLE content ("((or penne))" →
+  // "(or penne)") so the leader inside is found. The OUTER open/close stay for
+  // the primary boundary + tail; innerOpen/innerClose drive leader/content.
+  let innerOpen = open;
+  let innerClose = close;
+  for (;;) {
+    let cFirst = -1;
+    let cLast = -1;
+    for (let i = innerOpen + 1; i < innerClose; i++) {
+      if (cFirst < 0) cFirst = i;
+      cLast = i;
+    }
+    if (
+      cFirst < 0 ||
+      all[cFirst].kind !== "open" || all[cFirst].bracket ||
+      all[cLast].kind !== "close" || all[cLast].bracket
+    ) {
+      break;
+    }
+    // cFirst's matching close must be cLast (a single wrapping paren).
+    let d = 0;
+    let match = -1;
+    for (let i = cFirst; i <= cLast; i++) {
+      if (all[i].kind === "open") d += 1;
+      else if (all[i].kind === "close") {
+        d -= 1;
+        if (d === 0) {
+          match = i;
+          break;
+        }
+      }
+    }
+    if (match !== cLast) break;
+    innerOpen = cFirst;
+    innerClose = cLast;
+  }
+  // Leader word inside the (innermost) paren, tolerating a leading "or"/"oder".
+  let cf = innerOpen + 1;
   let leadParen: [number, number] | null = null;
   // A leading nested paren that PRECEDES the leader belongs to the primary
   // ("((10 g) oder X)") — skip it for leader detection and hoist it onto the
@@ -725,7 +763,7 @@ function extractParenAlt(
     // skip the nested group
     let d = 0;
     let j = cf;
-    for (; j < close; j++) {
+    for (; j < innerClose; j++) {
       if (all[j].kind === "open") d += 1;
       else if (all[j].kind === "close") {
         d -= 1;
@@ -736,20 +774,20 @@ function extractParenAlt(
       }
     }
     // only treat as lead-paren when an alt leader follows it
-    const after = nextContentWord(all, j, close);
+    const after = nextContentWord(all, j, innerClose);
     if (after && (OR_WORDS.has(norm(after.text)) || ALT_LEADER_WORDS.has(norm(after.text)))) {
       leadParen = [cf, j];
       cf = j;
     }
   }
-  const leadWord = nextContentWord(all, cf, close);
+  const leadWord = nextContentWord(all, cf, innerClose);
   if (!leadWord) return null;
   let leaderIdx = all.indexOf(leadWord, cf);
   let leader = norm(leadWord.text);
   let isOr = OR_WORDS.has(leader);
   // "(or alternativ X)" — tolerate a leading or/oder before an explicit marker.
   if (isOr) {
-    const nextW = nextContentWord(all, leaderIdx + 1, close);
+    const nextW = nextContentWord(all, leaderIdx + 1, innerClose);
     if (nextW && ALT_LEADER_WORDS.has(norm(nextW.text))) {
       leaderIdx = all.indexOf(nextW, leaderIdx + 1);
       leader = norm(nextW.text);
@@ -767,7 +805,8 @@ function extractParenAlt(
     open,
     close,
     contentFrom,
-    contentTo: close,
+    contentTo: innerClose,
+    contentDepth: all[innerOpen].depth + 1,
     leader: connector,
     tailFrom: close + 1,
     leadParen,
@@ -823,10 +862,10 @@ function buildParenAlt(
     });
   }
   // Alternative items: split the paren content by "oder"/"or" at the content's
-  // depth (baseDepth+1). Commas stay glued (a comma inside an alternative is its
-  // own note). Conjunctions ("&"/"und") are NOT split here — they conjoin prep
-  // inside the single alternative.
-  const contentDepth = baseDepth + 1;
+  // depth (deeper than baseDepth+1 when a redundant wrapping paren was peeled).
+  // Commas stay glued (a comma inside an alternative is its own note).
+  // Conjunctions ("&"/"und") are NOT split — they conjoin prep within one alt.
+  const contentDepth = alt.contentDepth;
   const orSeps = orSeparators(all, alt.contentFrom, alt.contentTo, contentDepth);
   const itemRanges = sliceBySeps(all, alt.contentFrom, alt.contentTo, orSeps);
   itemRanges.forEach((r, idx) => {
