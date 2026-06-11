@@ -26,18 +26,14 @@ import { lex } from "./ast/lexer.ts";
 import { segmentLine } from "./ast/segment-line.ts";
 import {
   amountPrefixRange,
-  findSegmentRange,
   trailingNoteRange,
   type HighlightPart,
   type SourceRange,
 } from "./source-ranges.ts";
 import {
   detectSectionHeader,
-  expandIngredientLine,
   normalizeForMatch,
   isStandaloneDescriptor,
-  preprocessAlternatives,
-  splitConjunctions,
   stripVocabTail,
   tokenizeEntryNameForCatalog,
 } from "./ingredient.ts";
@@ -602,10 +598,6 @@ export function parseIngredientLines(
     ...lookups.units.byNameOrAlias.keys(),
   ]);
   const knownIngredientKeys = new Set(lookups.ingredients.keys());
-  const splitOpts = {
-    containerTokens: lookups.units.containerTokens,
-    knownIngredients: knownIngredientKeys,
-  };
   const threshold = options.autoMatchScoreThreshold ?? MIN_AUTO_MATCH_SCORE;
   const useFirstWins = options.alternativesMode === "first-wins";
   const out: ImportedIngredient[] = [];
@@ -1127,10 +1119,6 @@ function parseGroupedIngredientLines(
     ...lookups.units.byNameOrAlias.keys(),
   ]);
   const knownIngredientKeys = new Set(lookups.ingredients.keys());
-  const splitOpts = {
-    containerTokens: lookups.units.containerTokens,
-    knownIngredients: knownIngredientKeys,
-  };
   const threshold = options.autoMatchScoreThreshold ?? MIN_AUTO_MATCH_SCORE;
   const useFirstWins = options.alternativesMode === "first-wins";
   const groups: ParsedSectionGroup[] = [];
