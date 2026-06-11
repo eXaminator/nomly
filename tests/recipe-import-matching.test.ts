@@ -1031,6 +1031,19 @@ describe("colon-in-name treated as section + listed items", () => {
     });
   });
 
+  it("matches a soft-hyphenated line ('Knob­lauch') to the clean catalog name", () => {
+    // Recipe sources sprinkle soft hyphens (U+00AD) for hyphenation; they must
+    // be stripped for matching or every word looks like a new ingredient.
+    const catalog: IngredientCatalog = [
+      { ingredientId: 1, canonicalName: "Knoblauch", aliasName: "Knoblauch", tokens: ["knoblauch"] },
+    ];
+    const line = "2 Zehen Knob\u00ADlauch"; // \u00AD = soft hyphen
+    const out = parseIngredientLines([line], makeLookups(catalog, ["zehen"]));
+    expect(out[0].ingredientId).toBe(1);
+    expect(out[0].ingredientMatch).toBe("existing");
+    expect(out[0].name).toBe("Knoblauch");
+  });
+
   it("'alternative' / 'alternativly' word (with or without colon) splits into primary + optional alternative", () => {
     const catalog: IngredientCatalog = [
       { ingredientId: 1, canonicalName: "Tahini", aliasName: "Tahini", tokens: ["tahini"] },

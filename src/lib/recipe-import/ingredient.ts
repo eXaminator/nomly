@@ -217,10 +217,14 @@ export function detectSectionHeader(raw: string): string | null {
 /**
  * Normalize a string for accent/diacritic-insensitive matching. Used by
  * downstream lookups so "Möhre" matches "Moehre" / "Mohre" / "möhre"
- * (after lower-casing).
+ * (after lower-casing). Invisible formatting chars (soft hyphen, zero-width
+ * spaces, BOM) are stripped first — recipe sources sprinkle soft hyphens for
+ * hyphenation ("Knob­lauch"), and without this they'd never match the clean
+ * catalog name ("Knoblauch").
  */
 export function normalizeForMatch(s: string): string {
   return s
+    .replace(/[\u00AD\u200B\u200C\u200D\uFEFF]/gu, "")
     .normalize("NFD")
     .replace(/[̀-ͯ]/g, "")
     .replace(/ß/g, "ss")
