@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
-import { ChevronDown, ChevronRight, Loader2, Volume2, VolumeX } from "lucide-react";
+import { ChevronDown, ChevronRight, Loader2, ScanText, Volume2, VolumeX } from "lucide-react";
 import {
   DndContext,
   KeyboardSensor,
@@ -943,6 +943,12 @@ export function BulkReparseDialog({
                               st.draft,
                               inflect,
                             );
+                            // The freshly-parsed proposal (what the draft started
+                            // as). "Dirty" means the user manually edited it, so
+                            // the original side offers a reparse/revert button.
+                            const pristine = entry.proposed.map(parsedIngredientToDraft);
+                            const dirty =
+                              JSON.stringify(st.draft) !== JSON.stringify(pristine);
                             return (
                               <div key={i} className="flex flex-col gap-2 px-3 py-2">
                                 <div className="flex items-start gap-2">
@@ -962,6 +968,19 @@ export function BulkReparseDialog({
                                       >
                                         Original: „{entry.rawLine}“
                                       </p>
+                                      {dirty ? (
+                                        <button
+                                          type="button"
+                                          className="shrink-0 rounded p-1 text-[var(--color-muted-fg)] hover:bg-[var(--color-muted)] hover:text-[var(--color-fg)]"
+                                          title="Aus der Originalzeile neu parsen (verwirft die manuellen Änderungen)."
+                                          aria-label="Aus Originalzeile neu parsen"
+                                          onClick={() =>
+                                            setEntryState(i, { draft: pristine })
+                                          }
+                                        >
+                                          <ScanText className="size-3.5" />
+                                        </button>
+                                      ) : null}
                                       <button
                                         type="button"
                                         className="shrink-0 rounded p-1 text-[var(--color-muted-fg)] hover:bg-[var(--color-muted)] hover:text-[var(--color-fg)]"
