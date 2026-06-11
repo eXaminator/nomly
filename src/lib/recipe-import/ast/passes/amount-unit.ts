@@ -54,12 +54,38 @@ export function applyAmountUnit(
       groups.push({ ...g, leaves: [...g.leaves] });
     }
   }
-  // Skip leading groups already consumed (e.g. an "opt." marker).
+  // Skip leading groups already consumed (e.g. an "opt." marker), leading size
+  // modifiers ("Heaping 1 tsp" — stay in notes), and drop a leading remainder
+  // connector ("plus 1 tsp", "to ½ tsp").
   let cur = 0;
-  while (cur < groups.length && groups[cur].leaves.every((l) => l.consumed)) cur += 1;
+  while (cur < groups.length) {
+    if (groups[cur].leaves.every((l) => l.consumed)) {
+      cur += 1;
+      continue;
+    }
+    const k = norm(groups[cur].text);
+    if (k === "plus" || k === "to") {
+      consumeGroup(groups[cur], "connector");
+      cur += 1;
+      continue;
+    }
+    if (SIZE_MODIFIERS.has(k)) {
+      cur += 1; // skip (left in the notes), not consumed
+      continue;
+    }
+    break;
+  }
 
   let quantity: number | null = null;
   let rangeExpression: string | null = null;
+
+  const ARTICLES = new Set(["a", "an", "ein", "eine", "einen", "einem", "einer", "eins"]);
+  const dropArticle = () => {
+    if (cur < groups.length && ARTICLES.has(wordKey(groups[cur]))) {
+      consumeGroup(groups[cur], "amount");
+      cur += 1;
+    }
+  };
 
   if (cur < groups.length) {
     const w = wordKey(groups[cur]);
@@ -83,10 +109,12 @@ export function applyAmountUnit(
       quantity = 0.5;
       consumeGroup(groups[cur], "amount");
       cur += 1;
+      dropArticle(); // "half a teaspoon" → drop "a"
     } else if (TEXT_QUARTER.has(w)) {
       quantity = 0.25;
       consumeGroup(groups[cur], "amount");
       cur += 1;
+      dropArticle();
     } else {
       const work = groups.slice(cur).map((g) => g.text);
       const before = work.length;
