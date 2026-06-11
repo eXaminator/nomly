@@ -1,32 +1,8 @@
 import { describe, it, expect } from "vitest";
 import {
   amountPrefixRange,
-  findSegmentRange,
   trailingNoteRange,
 } from "@/lib/recipe-import/source-ranges";
-
-describe("findSegmentRange", () => {
-  const line = "80 g Weizenmehl oder Dinkelmehl (oder glutenfreies Mehl)";
-
-  it("locates the primary segment from the start", () => {
-    expect(findSegmentRange(line, "80 g Weizenmehl", 0, false)).toEqual([0, 15]);
-  });
-
-  it("extends an alternative's start over its 'oder' connector", () => {
-    // " oder Dinkelmehl" — the kept span includes "oder".
-    const r = findSegmentRange(line, "Dinkelmehl", 15, true)!;
-    expect(line.slice(r[0], r[1])).toBe("oder Dinkelmehl");
-  });
-
-  it("handles a connector behind an opening paren", () => {
-    const r = findSegmentRange(line, "glutenfreies Mehl", 31, true)!;
-    expect(line.slice(r[0], r[1])).toBe("oder glutenfreies Mehl");
-  });
-
-  it("returns null when the segment is not a literal substring", () => {
-    expect(findSegmentRange(line, "Roggenmehl", 0, true)).toBeNull();
-  });
-});
 
 describe("amountPrefixRange", () => {
   it("covers a range amount plus its unit", () => {

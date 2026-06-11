@@ -19,34 +19,6 @@ export type SourceRange = [number, number];
 export type HighlightKind = "amount" | "name" | "note" | "dropped";
 export type HighlightPart = { range: SourceRange; kind: HighlightKind };
 
-const CONNECTOR_TAIL_RE =
-  /(?:^|[\s(,;–-])((?:oder|or|bzw|alternativ\w*|ersatzweise|notfalls|substituted?(?:\s+with)?|sub)\.?\s*:?\s*)$/i;
-
-/**
- * Locate `segment` in `original` at or after `cursor`. For an alternative,
- * extend the start left to swallow a leading connector ("oder", "or",
- * "Alternativ:") so the kept span reads "oder Ahornsirup", and the fold-back
- * text reproduces the source. Returns null when the segment isn't a literal
- * substring (e.g. the parser reassembled it).
- */
-export function findSegmentRange(
-  original: string,
-  segment: string,
-  cursor: number,
-  withConnector: boolean,
-): SourceRange | null {
-  const trimmed = segment.trim();
-  if (trimmed.length === 0) return null;
-  const idx = original.indexOf(trimmed, cursor);
-  if (idx < 0) return null;
-  let start = idx;
-  if (withConnector) {
-    const before = original.slice(cursor, idx);
-    const m = CONNECTOR_TAIL_RE.exec(before);
-    if (m) start = idx - m[1].length;
-  }
-  return [start, idx + trimmed.length];
-}
 
 const AMOUNT_PREFIX_RE =
   /^\s*(?:ca\.?\s*|approx\.?\s*|etwa\s*)?[\d¼½¾⅓⅔⅛⅜⅝⅞]+(?:[.,/]\s*\d+)*(?:\s*[-–]\s*[\d¼½¾⅓⅔⅛⅜⅝⅞]+(?:[.,/]\s*\d+)*)?(?:\s+\d+\s*\/\s*\d+)?/u;
