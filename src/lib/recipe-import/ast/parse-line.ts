@@ -117,12 +117,27 @@ function rangeNoteSeparator(source: string, leaves: readonly Leaf[]): ", " | " "
   return " ";
 }
 
-/** Parse one ingredient segment into a structured row. The lexer runs over the
- *  ORIGINAL source exactly once; every transformation (plural markers, colon
- *  amount, decimal glue) is an in-place AST annotation, never a source rewrite,
- *  so leaf offsets stay faithful to the input. */
+/** Parse one ingredient segment into a structured row by lexing the source. A
+ *  convenience wrapper over {@link parseLeaves} for callers that have only a
+ *  string; the segmentation layer lexes the whole line ONCE and calls
+ *  parseLeaves per segment instead. */
 export function parseSegment(source: string, lookups: SegmentLookups): ParsedRow {
-  const leaves: Leaf[] = lex(source).map((t) => ({ ...t }));
+  return parseLeaves(source, lex(source).map((t) => ({ ...t })), lookups);
+}
+
+/**
+ * Parse one ingredient segment from its already-lexed leaves into a structured
+ * row. `source` is the FULL original line (leaf offsets index into it, so the
+ * note/highlight renderers slice it directly); `leaves` is this segment's slice
+ * of the leaf array. Every transformation is an in-place AST annotation, never
+ * a source rewrite, so leaf offsets stay faithful to the input. The lexer has
+ * already run (exactly once for the whole line) before this is called.
+ */
+export function parseLeaves(
+  source: string,
+  leaves: Leaf[],
+  lookups: SegmentLookups,
+): ParsedRow {
   // Annotate (don't rewrite) inline plural markers "Tomate(n)" → dropped.
   applyPluralMarkers(leaves);
   // Drop leading punctuation/symbol noise ("+ 100 ml", "*Pfeffer", "▢ …").
@@ -139,14 +154,14 @@ export function parseSegment(source: string, lookups: SegmentLookups): ParsedRow
   const { quantity, unitName, rangeExpression } =
     applyColonAmount(source, leaves, lookups.knownUnitTokens) ??
     applyAmountUnit(source, leaves, lookups.knownUnitTokens);
-  // Does the segment carry a container unit? (Scans the source words once.)
+  // Does the segment carry a container unit? Scans THIS segment's word leaves
+  // (not the whole line) so a container in a sibling segment doesn't leak in.
   const hasContainer =
     lookups.containerTokens != null &&
     lookups.containerTokens.size > 0 &&
-    source
-      .toLowerCase()
-      .split(/[^\p{L}\p{N}]+/u)
-      .some((w) => lookups.containerTokens!.has(w));
+    leaves.some(
+      (lf) => lf.kind === "word" && lookups.containerTokens!.has(lf.text.toLowerCase()),
+    );
   const m = applyMatch(source, leaves, lookups.catalog, {
     index: lookups.catalogIndex,
     threshold: lookups.threshold,
