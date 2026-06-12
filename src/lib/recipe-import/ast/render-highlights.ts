@@ -21,16 +21,9 @@ function kindOf(source: string, lf: Leaf): HighlightKind {
   const isParenRootDelim =
     (lf.kind === "open" || lf.kind === "close") && lf.depth === 0 && !lf.bracket;
   const isBracketDelim = (lf.kind === "open" || lf.kind === "close") && lf.bracket;
-  // A dash flanked by digits ("150 - 200 g") is a numeric range — it stays part
-  // of the note, not a dropped separator.
-  const numBefore = /\d/.test(source.slice(0, lf.start).replace(/\s+$/u, "").slice(-1));
-  const numAfter = /\d/.test(source.slice(lf.end).replace(/^\s+/u, "").slice(0, 1));
-  const isSpacedDash =
-    lf.kind === "dash" &&
-    (lf.start === 0 || /\s/.test(source[lf.start - 1])) &&
-    (lf.end >= source.length || /\s/.test(source[lf.end])) &&
-    !(numBefore && numAfter);
-  if (lf.consumed || isParenRootDelim || isBracketDelim || isSpacedDash) return "dropped";
+  // An unconsumed dash survives in the note (verbatim), so it highlights as a
+  // note, not a dropped separator — comma boundaries come from consumed spans.
+  if (lf.consumed || isParenRootDelim || isBracketDelim) return "dropped";
   return "note";
 }
 

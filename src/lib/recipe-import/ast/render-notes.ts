@@ -19,14 +19,6 @@ export type Role =
  *  marker) — consumed tokens leave the note and become a comma boundary. */
 export type Leaf = Lexeme & { consumed?: boolean; role?: Role };
 
-/** True when a dash is flanked by digits (ignoring surrounding whitespace) —
- *  a numeric range ("150 - 200 g") that must survive, not a clause separator. */
-function isRangeDash(source: string, lf: Leaf): boolean {
-  const before = source.slice(0, lf.start).replace(/\s+$/u, "").slice(-1);
-  const after = source.slice(lf.end).replace(/^\s+/u, "").slice(0, 1);
-  return /\d/.test(before) && /\d/.test(after);
-}
-
 /**
  * Render a row's note from its leaves, per the note rule:
  *  - consumed tokens are removed; a removed run between survivors → a single `, `;
@@ -45,24 +37,16 @@ export function renderNote(source: string, leaves: readonly Leaf[]): string | nu
     const isParenRootDelim =
       (lf.kind === "open" || lf.kind === "close") && lf.depth === 0 && !lf.bracket;
     const isBracketDelim = (lf.kind === "open" || lf.kind === "close") && lf.bracket;
-    // A dash with whitespace on BOTH sides is a SEPARATOR the user wrote
-    // ("Kohl - in Streifen") → it becomes a comma boundary. A dash glued to a
-    // token on one side ("1-inch", "whole-wheat", "15- ounce") is part of that
-    // token and stays verbatim. A dash flanked by NUMBERS ("150 - 200 g") is a
-    // numeric range and survives, even when spaced.
-    const isSpacedDash =
-      lf.kind === "dash" &&
-      (lf.start === 0 || /\s/.test(source[lf.start - 1])) &&
-      (lf.end >= source.length || /\s/.test(source[lf.end])) &&
-      !isRangeDash(source, lf);
     // A pluralization marker ("(er)", "/n") is fully transparent: dropped from
     // the note like a paren, but it never introduces a comma boundary.
     const isPluralMarker = lf.role === "plural-marker";
+    // A dash the parser DIDN'T consume just survives verbatim ("150 - 200 g",
+    // "fein - gehackt"). Comma boundaries come from CONSUMED spans, not from a
+    // user-written dash; a leading "- " is cleaned by tidyNote's edge-trim.
     const removed =
       lf.consumed === true ||
       isParenRootDelim ||
       isBracketDelim ||
-      isSpacedDash ||
       isPluralMarker;
 
     if (removed) {
@@ -96,6 +80,12 @@ export function tidyNote(s: string): string | null {
       return ", ";
     })
     .replace(/(?:,\s*){2,}/g, ", ")
+    // A spaced dash right next to a comma boundary is redundant — the comma
+    // (from a removed span) already separates the clauses, so drop the dash
+    // ("small head, - sliced" → "small head, sliced"). A dash NOT adjacent to a
+    // comma survives ("150 - 200 g", "fein - gehackt").
+    .replace(/,\s*[-–—]\s+/g, ", ")
+    .replace(/\s+[-–—]\s*,/g, ",")
     // Trim stray edge punctuation left by a removed boundary word — a dangling
     // connector dash, comma, colon etc. Mid-note punctuation (a ";" between
     // clauses) is untouched. "!"/"?" are kept: they're meaningful sentence
