@@ -64,6 +64,10 @@ export function renderNote(source: string, leaves: readonly Leaf[]): string | nu
     if (!started) {
       out = lf.text;
       started = true;
+    } else if (lf.text === "*") {
+      // A footnote marker attaches to the preceding note text ("gemahlen*"),
+      // never a new comma clause — even across a dropped ")" ("(gemahlen)*").
+      out += lf.text;
     } else {
       // `breakBefore` marks a leaf whose preceding source is NOT contiguous with
       // the previous surviving leaf — set by a fold that renders the primary +

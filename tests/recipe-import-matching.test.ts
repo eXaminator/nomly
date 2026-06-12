@@ -1274,6 +1274,17 @@ describe("parseIngredientLines — unmatched alternative → proposed row", () =
     expect(out[1].isAlternative).toBe(true);
   });
 
+  it("attaches a footnote '*' directly to the preceding note ('(gemahlen)*' → 'gemahlen*')", () => {
+    const catalog: IngredientCatalog = [
+      { ingredientId: 1, canonicalName: "Kreuzkümmel", aliasName: "Kreuzkümmel", tokens: ["kreuzkümmel"] },
+    ];
+    const out = parseIngredientLines(
+      ["1/2 TL Kreuzkümmel (gemahlen)*"],
+      makeLookups(catalog, ["tl"]),
+    );
+    expect(out[0].notes).toBe("gemahlen*");
+  });
+
   it("emits a same-ingredient alternative as its own row (no synonym fold)", () => {
     // "Gelbwurz" is an alias of "Kurkuma" → both resolve to id 1. The
     // alternative is still surfaced as its own row, not folded as a synonym.
