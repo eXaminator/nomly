@@ -40,6 +40,10 @@ export type LineSegment =
       connectorLeaves?: Leaf[];
       localNote: boolean;
       tailNote: string | null;
+      /** Leaves of a tail note after a parenthetical alternative ("(or X),
+       *  peeled" → ", peeled") — cloned, depth-normalized. Folded onto the
+       *  primary via the AST at end of line. */
+      tailNoteLeaves?: Leaf[];
       /** Compound-elision rows ("Weizen- oder Dinkelmehl" → "Weizenmehl") have
        *  a SYNTHESIZED name that isn't a contiguous source slice. When set, the
        *  orchestrator parses THIS string (amount + stitched name) instead of
@@ -859,6 +863,12 @@ function buildParenAlt(
     alt.tailFrom < to
       ? source.slice(all[alt.tailFrom].start, all[to - 1].end).replace(/^[\s,;:–—-]+|[\s,;:–—-]+$/g, "").trim()
       : "";
+  const tailLeaves =
+    alt.tailFrom < to
+      ? all
+          .slice(alt.tailFrom, to)
+          .map((l) => ({ ...l, depth: Math.max(0, l.depth - baseDepth) }))
+      : [];
   // Primary = [from, open). Re-expand so its own or/alternativ chain splits.
   let hasPrimary = false;
   if (alt.open > from) {
@@ -887,7 +897,7 @@ function buildParenAlt(
         leaves,
         rawText: source.trim(),
         forceOptional: idx === 0 ? optional || s.forceOptional : s.forceOptional,
-        ...(idx === 0 && tail ? { tailNote: tail } : {}),
+        ...(idx === 0 && tail ? { tailNote: tail, tailNoteLeaves: tailLeaves } : {}),
       });
     });
   }

@@ -603,8 +603,8 @@ export function parseIngredientLines(
   const useFirstWins = options.alternativesMode === "first-wins";
   const out: ImportedIngredient[] = [];
   // Per emitted-row state for AST note re-rendering when an alternative folds
-  // into a row (keyed by index into `out`).
-  const foldTargets = new Map<number, FoldTarget>();
+  // into a row (keyed by the row object so it works across lines/groups).
+  const foldTargets = new WeakMap<ImportedIngredient, FoldTarget>();
   for (const rawLine of lines) {
     // Section headers (e.g. "Für den Teig:", "FÜR DIE FÜLLUNG") aren't
     // ingredients — section-aware callers use parseIngredientLinesIntoSections.
@@ -621,7 +621,7 @@ export function parseIngredientLines(
     // A note that trailed a parenthetical alternative ("(or 1 large clove),
     // peeled"). Appended to the primary AFTER the line's alternatives fold in,
     // so it keeps its source order ("small, or 1 large clove, peeled").
-    let pendingTailNote: string | null = null;
+    let pendingTailLeaves: Leaf[] | null = null;
 
     // Lex the line ONCE; segment it on the AST (depth-aware), parse each segment
     // from its own leaves — no re-lexing, no string-level splitting.
@@ -632,7 +632,7 @@ export function parseIngredientLines(
       useFirstWins,
     })) {
       if (seg.kind === "header") continue;
-      if (seg.tailNote) pendingTailNote = seg.tailNote;
+      if (seg.tailNoteLeaves && seg.tailNoteLeaves.length) pendingTailLeaves = seg.tailNoteLeaves;
       {
         const piece = seg.segText;
         const segLookups = {
@@ -675,7 +675,7 @@ export function parseIngredientLines(
             const isNoteOnly = astSeg.quantity === null && astSeg.unitName === null;
             const foldEnd = isNoteOnly ? out.length - 1 : lastPrimaryIndex;
             for (let ti = lastPrimaryIndex; ti <= foldEnd; ti++) {
-              const target = foldTargets.get(ti);
+              const target = foldTargets.get(out[ti]);
               if (target) {
                 const note = foldAlternativeIntoNote(
                   originalTrimmed,
@@ -709,11 +709,16 @@ export function parseIngredientLines(
         // A leading "or X" / "oder X" almost always means we just split a
         // conjunction that connected alternatives. Attach as a note on the
         // previous row instead of creating a separate ingredient.
-        const leadingOr = /^(?:or|oder)\s+(.+)/i.exec(astSeg.name.trim());
+        const leadingOr = /^(?:or|oder)\s+/i.test(astSeg.name.trim());
         if (leadingOr && out.length > 0) {
-          const alt = leadingOr[1];
           const prev = out[out.length - 1];
-          prev.notes = prev.notes ? `${prev.notes}, oder ${alt}` : `oder ${alt}`;
+          const target = foldTargets.get(prev);
+          if (target) {
+            // The whole segment ("or X") folds onto the previous row; its own
+            // "or"/"oder" leaf is the connector, so pass no separate connector.
+            const note = foldAlternativeIntoNote(originalTrimmed, target, [], seg.leaves);
+            if (note !== null) prev.notes = note;
+          }
           if (astSeg.isOptional || seg.forceOptional) prev.isOptional = true;
           continue;
         }
@@ -744,7 +749,7 @@ export function parseIngredientLines(
             stripVocabTail(piece).name.trim().length === 0;
           const foldEnd = isNoteOnly ? out.length - 1 : lastPrimaryIndex;
           for (let ti = lastPrimaryIndex; ti <= foldEnd; ti++) {
-            const target = foldTargets.get(ti);
+            const target = foldTargets.get(out[ti]);
             if (target) {
               const note = foldAlternativeIntoNote(
                 originalTrimmed,
@@ -802,7 +807,8 @@ export function parseIngredientLines(
         });
         // Remember enough to re-render this row's note if a later alternative
         // folds into it (synthetic rows have no source-faithful leaves).
-        foldTargets.set(out.length - 1, {
+        foldTargets.set(out[out.length - 1], {
+          source: originalTrimmed,
           leaves: seg.syntheticSource ? null : seg.leaves,
           ctx: astSeg.noteContext,
           folds: [],
@@ -810,20 +816,18 @@ export function parseIngredientLines(
         if (!seg.isAlternative) lastPrimaryIndex = out.length - 1;
       }
     }
-    if (pendingTailNote && lastPrimaryIndex !== null) {
-      appendAlternativeToNotes(
-        out[lastPrimaryIndex],
-        null,
-        pendingTailNote,
-        originalTrimmed,
-      );
-      const idx = originalTrimmed.indexOf(pendingTailNote);
-      if (idx >= 0) {
-        (out[lastPrimaryIndex].highlightParts ??= []).push({
-          range: [idx, idx + pendingTailNote.length],
-          kind: "note",
-        });
+    if (pendingTailLeaves && lastPrimaryIndex !== null) {
+      const target = foldTargets.get(out[lastPrimaryIndex]);
+      if (target) {
+        const note = foldAlternativeIntoNote(originalTrimmed, target, [], pendingTailLeaves);
+        if (note !== null) out[lastPrimaryIndex].notes = note;
       }
+      const tailStart = pendingTailLeaves[0].start;
+      const tailEnd = pendingTailLeaves[pendingTailLeaves.length - 1].end;
+      (out[lastPrimaryIndex].highlightParts ??= []).push({
+        range: [tailStart, tailEnd],
+        kind: "note",
+      });
     }
   }
   applyAlternativeInheritance(out);
@@ -838,115 +842,50 @@ export function parseIngredientLines(
  * `leaves` marks a synthetic row that can't be re-rendered from source leaves.
  */
 type FoldTarget = {
+  /** The source line `leaves` index into (a fold from another line is rebased
+   *  into a combined coordinate space against this). */
+  source: string;
   leaves: Leaf[] | null;
   ctx: NoteContext;
+  /** Each fold group, already rebased into `source` coordinates. */
   folds: Leaf[][];
 };
 
 /** Append an alternative segment's leaves as a fold group onto `target` and
  *  return the re-rendered note. The fold's text survives (consumed cleared);
- *  the AST — not a string concat — joins it after the row's own note. */
+ *  the AST — not a string concat — joins it after the row's own note. When the
+ *  fold comes from a DIFFERENT source line (a leading "oder X" attaching to the
+ *  previous line's row), its leaves are rebased past the target's source so a
+ *  single renderNote pass sees a consistent coordinate space. */
 function foldAlternativeIntoNote(
-  source: string,
+  foldSource: string,
   target: FoldTarget,
   connectorLeaves: readonly Leaf[],
   contentLeaves: readonly Leaf[],
 ): string | null {
   if (!target.leaves) return null;
-  const content = contentLeaves.map((l) => ({ ...l, consumed: false }));
-  target.folds.push([...connectorLeaves.map((l) => ({ ...l })), ...content]);
+  const sameSource = foldSource === target.source;
+  const shift = sameSource ? 0 : target.source.length + 1;
+  const rebase = (l: Leaf): Leaf =>
+    shift ? { ...l, start: l.start + shift, end: l.end + shift } : { ...l };
+  const content = contentLeaves.map((l) => ({ ...rebase(l), consumed: false }));
+  target.folds.push([...connectorLeaves.map(rebase), ...content]);
+  // The combined source: the row's own line, then (for a cross-line fold) the
+  // fold's line appended, so rebased offsets resolve.
+  const combined = sameSource ? target.source : `${target.source} ${foldSource}`;
   let unionEnd = target.leaves.reduce((m, l) => Math.max(m, l.end), 0);
   const foldLeaves: Leaf[] = [];
   for (const group of target.folds) {
     if (group.length === 0) continue;
     const g = group.map((l) => ({ ...l }));
     // A fold group whose connector is NOT source-adjacent to the running union
-    // end (a row-alternative was skipped, or it sat inside an alt paren) starts
-    // a fresh ", " clause instead of slicing the intervening source.
-    if (/\S/.test(source.slice(unionEnd, g[0].start))) g[0].breakBefore = true;
+    // end (a row-alternative was skipped, an alt paren sat between, or it came
+    // from another line) starts a fresh ", " clause instead of slicing the gap.
+    if (/\S/.test(combined.slice(unionEnd, g[0].start))) g[0].breakBefore = true;
     foldLeaves.push(...g);
     unionEnd = g.reduce((m, l) => Math.max(m, l.end), unionEnd);
   }
-  return assembleRowNote(source, target.leaves, foldLeaves, target.ctx);
-}
-
-function appendAlternativeToNotes(
-  target: ImportedIngredient,
-  connector: string | null,
-  altText: string,
-  source: string,
-): void {
-  const fragment = connector
-    ? `${connector} ${altText}`.trim()
-    : altText.trim();
-  if (fragment.length === 0) return;
-  if (!target.notes) {
-    target.notes = fragment;
-    return;
-  }
-  const sep = alternativeNoteSeparator(target, source, connector, altText);
-  target.notes = `${target.notes}${sep}${fragment}`;
-}
-
-/**
- * Separator to place before a folded alternative in the notes. The rule:
- * keep the source text between the previous note and this alternative AS IS,
- * unless something was stripped there (the matched name, a consumed unit) —
- * then a comma stands in for the removed words.
- *
- *   "red chili powder (or to taste)" → "red, or to taste"  (name removed)
- *   "…Zucker, Reis oder Rübensirup"  → "…Reis oder Rübensirup" (nothing removed)
- *   "…pieces, or small florets"      → "…pieces, or small florets" (source comma)
- *
- * Falls back to the local "comma right before the connector?" check when the
- * source span of the previous note can't be located.
- */
-function alternativeNoteSeparator(
-  target: ImportedIngredient,
-  source: string,
-  connector: string | null,
-  altText: string,
-): string {
-  const lc = source.toLowerCase();
-  const connectorStart = connector
-    ? lc.indexOf(`${connector} ${altText}`.toLowerCase())
-    : -1;
-  // When the matched ingredient name sits between an earlier note and this
-  // alternative ("red [chili powder] (or to taste)"), it was stripped — a comma
-  // stands in for the removed name. The name's own highlight is "name"-kind, so
-  // a "note" highlight that STARTS before it is a genuine pre-name descriptor.
-  if (connectorStart >= 0 && target.sourceName) {
-    const nameStart = lc.indexOf(target.sourceName.toLowerCase());
-    const nameEnd = nameStart >= 0 ? nameStart + target.sourceName.length : -1;
-    const hasPreNameNote = (target.highlightParts ?? []).some(
-      (p) =>
-        p.kind === "note" &&
-        p.range[0] < nameStart &&
-        /[\p{L}\p{N}]/u.test(source.slice(p.range[0], p.range[1])),
-    );
-    if (nameStart >= 0 && nameEnd <= connectorStart && hasPreNameNote) return ", ";
-  }
-  return sourceCommaBeforeAlt(source, connector, altText) ? ", " : " ";
-}
-
-/**
- * Did the source put a comma right before this alternative's connector
- * (",  or X" vs " or X")? Anchors on "<connector> <altText>" and inspects the
- * preceding non-space char. Defaults to true (keep the comma) when the span
- * can't be located or there's no connector — a distinct note reads with one.
- */
-function sourceCommaBeforeAlt(
-  source: string,
-  connector: string | null,
-  altText: string,
-): boolean {
-  if (!connector) return true;
-  const needle = `${connector} ${altText}`.toLowerCase();
-  const idx = source.toLowerCase().indexOf(needle);
-  if (idx < 0) return true;
-  let i = idx - 1;
-  while (i >= 0 && /\s/.test(source[i])) i -= 1;
-  return source[i] === ",";
+  return assembleRowNote(combined, target.leaves, foldLeaves, target.ctx);
 }
 
 /**
@@ -1183,6 +1122,9 @@ function parseGroupedIngredientLines(
   const threshold = options.autoMatchScoreThreshold ?? MIN_AUTO_MATCH_SCORE;
   const useFirstWins = options.alternativesMode === "first-wins";
   const groups: ParsedSectionGroup[] = [];
+  // Per-row AST note re-render state (keyed by the row object), shared across
+  // all sections — same mechanism as parseIngredientLines.
+  const foldTargets = new WeakMap<ImportedIngredient, FoldTarget>();
 
   for (const input of inputGroups) {
     // Unnamed non-first input groups continue the current section rather
@@ -1205,7 +1147,7 @@ function parseGroupedIngredientLines(
       // rather than into a primary from a previous line. Cleared each new line.
       let lastPrimaryIndex: number | null = null;
       const originalTrimmed = rawLine.trim();
-      let pendingTailNote: string | null = null;
+      let pendingTailLeaves: Leaf[] | null = null;
 
       const lineLeaves = lex(originalTrimmed).map((t) => ({ ...t }));
       for (const seg of segmentLine(originalTrimmed, lineLeaves, {
@@ -1218,7 +1160,7 @@ function parseGroupedIngredientLines(
           lastPrimaryIndex = null;
           continue;
         }
-        if (seg.tailNote) pendingTailNote = seg.tailNote;
+        if (seg.tailNoteLeaves && seg.tailNoteLeaves.length) pendingTailLeaves = seg.tailNoteLeaves;
         {
           const piece = seg.segText;
           // ONE AST parse per segment — same single-pass path as
@@ -1246,7 +1188,16 @@ function parseGroupedIngredientLines(
               const isNoteOnly = astSeg.quantity === null && astSeg.unitName === null;
               const foldEnd = isNoteOnly ? g.ingredients.length - 1 : lastPrimaryIndex;
               for (let ti = lastPrimaryIndex; ti <= foldEnd; ti++) {
-                appendAlternativeToNotes(g.ingredients[ti], seg.connector, piece, originalTrimmed);
+                const target = foldTargets.get(g.ingredients[ti]);
+                if (target) {
+                  const note = foldAlternativeIntoNote(
+                    originalTrimmed,
+                    target,
+                    seg.connectorLeaves ?? [],
+                    seg.leaves,
+                  );
+                  if (note !== null) g.ingredients[ti].notes = note;
+                }
                 if (sourceRange) {
                   (g.ingredients[ti].highlightParts ??= []).push({ range: sourceRange, kind: "note" });
                 }
@@ -1269,11 +1220,14 @@ function parseGroupedIngredientLines(
           if (astSeg.isOptional && seg.isAlternative && lastPrimaryIndex !== null) {
             currentGroup.ingredients[lastPrimaryIndex].isOptional = true;
           }
-          const leadingOr = /^(?:or|oder)\s+(.+)/i.exec(astSeg.name.trim());
+          const leadingOr = /^(?:or|oder)\s+/i.test(astSeg.name.trim());
           if (leadingOr && currentGroup.ingredients.length > 0) {
-            const alt = leadingOr[1];
             const prev = currentGroup.ingredients[currentGroup.ingredients.length - 1];
-            prev.notes = prev.notes ? `${prev.notes}, oder ${alt}` : `oder ${alt}`;
+            const target = foldTargets.get(prev);
+            if (target) {
+              const note = foldAlternativeIntoNote(originalTrimmed, target, [], seg.leaves);
+              if (note !== null) prev.notes = note;
+            }
             if (astSeg.isOptional || seg.forceOptional) prev.isOptional = true;
             continue;
           }
@@ -1293,12 +1247,16 @@ function parseGroupedIngredientLines(
             const isNoteOnly = stripVocabTail(piece).name.trim().length === 0;
             const foldEnd = isNoteOnly ? currentGroup.ingredients.length - 1 : lastPrimaryIndex;
             for (let ti = lastPrimaryIndex; ti <= foldEnd; ti++) {
-              appendAlternativeToNotes(
-                currentGroup.ingredients[ti],
-                seg.connector,
-                piece,
-                originalTrimmed,
-              );
+              const target = foldTargets.get(currentGroup.ingredients[ti]);
+              if (target) {
+                const note = foldAlternativeIntoNote(
+                  originalTrimmed,
+                  target,
+                  seg.connectorLeaves ?? [],
+                  seg.leaves,
+                );
+                if (note !== null) currentGroup.ingredients[ti].notes = note;
+              }
               if (sourceRange) {
                 (currentGroup.ingredients[ti].highlightParts ??= []).push({
                   range: sourceRange,
@@ -1338,21 +1296,31 @@ function parseGroupedIngredientLines(
             candidateMatches: astSeg.candidateMatches,
             newNameProposals: astSeg.newNameProposals,
           });
+          foldTargets.set(currentGroup.ingredients[currentGroup.ingredients.length - 1], {
+            source: originalTrimmed,
+            leaves: seg.syntheticSource ? null : seg.leaves,
+            ctx: astSeg.noteContext,
+            folds: [],
+          });
           if (!seg.isAlternative) {
             lastPrimaryIndex = currentGroup.ingredients.length - 1;
           }
         }
       }
-      if (pendingTailNote && lastPrimaryIndex !== null) {
+      if (pendingTailLeaves && lastPrimaryIndex !== null) {
         const primary = groups[groups.length - 1].ingredients[lastPrimaryIndex];
-        appendAlternativeToNotes(primary, null, pendingTailNote, originalTrimmed);
-        const idx = originalTrimmed.indexOf(pendingTailNote);
-        if (idx >= 0) {
-          (primary.highlightParts ??= []).push({
-            range: [idx, idx + pendingTailNote.length],
-            kind: "note",
-          });
+        const target = foldTargets.get(primary);
+        if (target) {
+          const note = foldAlternativeIntoNote(originalTrimmed, target, [], pendingTailLeaves);
+          if (note !== null) primary.notes = note;
         }
+        (primary.highlightParts ??= []).push({
+          range: [
+            pendingTailLeaves[0].start,
+            pendingTailLeaves[pendingTailLeaves.length - 1].end,
+          ],
+          kind: "note",
+        });
       }
     }
   }

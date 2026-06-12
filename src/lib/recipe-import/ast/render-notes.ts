@@ -106,7 +106,7 @@ export function tidyNote(s: string): string | null {
     // clauses) is untouched. "!"/"?" are kept: meaningful sentence punctuation
     // the user actually wrote ("(doch, wirklich!)").
     .replace(/^[\s,;:."'·\-–—/]+/, "")
-    .replace(/[\s,;:*"'·\-–—]+$/, "")
+    .replace(/[\s,;:"'·\-–—/]+$/, "")
     .trim();
   return t.length > 0 ? t : null;
 }
