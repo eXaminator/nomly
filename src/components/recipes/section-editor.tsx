@@ -34,7 +34,8 @@ import { Label } from "@/components/ui/label";
 import { MarkdownEditor } from "@/components/ui/markdown-editor";
 import { Textarea } from "@/components/ui/textarea";
 import { IngredientRow } from "./ingredient-row";
-import { reparseGroupAt, reparseDeletingAlternative } from "./reparse";
+import { reparseGroupAt, reparseDeletingAlternative, reparsePromotingAlternative } from "./reparse";
+import { FoldedAltChips } from "./folded-alt-chips";
 import {
   emptyIngredient,
   parsedIngredientToDraft,
@@ -136,6 +137,19 @@ export function SectionEditor({
   async function reparseAt(i: number) {
     const next = await reparseGroupAt(section.ingredients, i);
     onChange({ ...section, ingredients: next });
+  }
+
+  /** Promote a folded alternative (a "create alternative" chip) on the primary
+   *  at `primaryIdx` to its own row by re-parsing the line with that range
+   *  emitted. */
+  async function promoteFoldedAlternative(primaryIdx: number, range: [number, number]) {
+    let next: DraftIngredient[] | null = null;
+    try {
+      next = await reparsePromotingAlternative(section.ingredients, primaryIdx, range);
+    } catch {
+      next = null;
+    }
+    if (next) onChange({ ...section, ingredients: next });
   }
 
   function addIngredient() {
@@ -489,6 +503,7 @@ export function SectionEditor({
                   }
                   onPromote={promoteAlternative}
                   onDetach={detachAlternative}
+                  onPromoteFolded={(range) => promoteFoldedAlternative(g.primaryIdx, range)}
                   onSplitAbove={
                     onSplit && g.primaryIdx > 0
                       ? () => onSplit(g.primaryIdx)
@@ -670,6 +685,7 @@ function IngredientGroup({
   onDemote,
   onPromote,
   onDetach,
+  onPromoteFolded,
   onSplitAbove,
   onInsertAbove,
 }: {
@@ -678,6 +694,8 @@ function IngredientGroup({
   onRemove: (flatIdx: number) => void;
   onReparse: (flatIdx: number) => void | Promise<void>;
   onAddAlternative: () => void;
+  /** Promote one of the primary's folded (unmatched) alternatives to a row. */
+  onPromoteFolded: (range: [number, number]) => void;
   /** Make this primary an alternative of the row immediately above it.
    *  Undefined when the primary is the first row of the section or has
    *  its own alternatives (which would be orphaned). */
@@ -764,6 +782,14 @@ function IngredientGroup({
         dragAttributes={attributes}
         dragListeners={listeners}
       />
+      {group.primary.foldedAlternatives?.length ? (
+        <div className="py-1 pl-3">
+          <FoldedAltChips
+            folded={group.primary.foldedAlternatives}
+            onPromote={onPromoteFolded}
+          />
+        </div>
+      ) : null}
       {/* Alternatives form their own nested sortable list so they can be
           reordered among themselves (within this group only). The drag is
           handled by the same DndContext in recipe-form; its onDragEnd routes

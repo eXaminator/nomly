@@ -41,7 +41,8 @@ import {
   moveAlternativeWithinGroup,
   promoteAlternative,
 } from "./alternatives";
-import { reparseDeletingAlternative } from "./reparse";
+import { reparseDeletingAlternative, reparsePromotingAlternative } from "./reparse";
+import { FoldedAltChips } from "./folded-alt-chips";
 import { ingredientToPayload, toNumberOrNull } from "./payload";
 import { buildUnitInflector, type UnitInflector } from "./unit-inflect";
 import type { UnitForm } from "@/lib/recipes/reparse-scan";
@@ -65,12 +66,14 @@ function DraftEditList({
   onChangeRow,
   onRemoveRow,
   onRemoveAlternative,
+  onPromoteFolded,
   onMutate,
 }: {
   rows: DraftIngredient[];
   onChangeRow: (rowIdx: number, next: DraftIngredient) => void;
   onRemoveRow: (rowIdx: number) => void;
   onRemoveAlternative: (rowIdx: number) => void;
+  onPromoteFolded: (primaryRowIdx: number, range: [number, number]) => void;
   onMutate: (fn: (rows: DraftIngredient[]) => DraftIngredient[]) => void;
 }) {
   // Unique per mounted list: several entries can be in edit mode at once, so a
@@ -134,6 +137,10 @@ function DraftEditList({
       {groups.map((g) => (
         <React.Fragment key={rows[g.leaderIdx].uid}>
           {leaderRow(g.leaderIdx)}
+          <FoldedAltChips
+            folded={rows[g.leaderIdx].foldedAlternatives}
+            onPromote={(range) => onPromoteFolded(g.leaderIdx, range)}
+          />
           <SortableContext
             items={g.altIdxs.map((k) => rows[k].uid)}
             strategy={verticalListSortingStrategy}
@@ -600,6 +607,23 @@ export function BulkReparseDialog({
       next.splice(rowIdx, 1);
     }
     setEntryState(entryIdx, { draft: next });
+  }
+  /** Promote a folded alternative (a "create alternative" chip) to its own row
+   *  by re-parsing the primary's line with that range emitted. */
+  async function promoteFoldedAlternative(
+    entryIdx: number,
+    primaryRowIdx: number,
+    range: [number, number],
+  ) {
+    const rows = states[entryIdx]?.draft;
+    if (!rows) return;
+    let next: DraftIngredient[] | null = null;
+    try {
+      next = await reparsePromotingAlternative(rows, primaryRowIdx, range);
+    } catch {
+      next = null;
+    }
+    if (next) setEntryState(entryIdx, { draft: next });
   }
   /** Replace an entry's whole draft array via a pure transform — used by the
    *  alternative-management actions (add / promote / detach / demote). */
@@ -1157,6 +1181,7 @@ export function BulkReparseDialog({
                                       onChangeRow={(k, next) => setDraftRow(i, k, next)}
                                       onRemoveRow={(k) => removeDraftRow(i, k)}
                                       onRemoveAlternative={(k) => removeAlternative(i, k)}
+                                      onPromoteFolded={(k, range) => promoteFoldedAlternative(i, k, range)}
                                       onMutate={(fn) => mutateDraft(i, fn)}
                                     />
                                   </div>
