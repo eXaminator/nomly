@@ -180,12 +180,21 @@ function orSeparators(all: readonly Leaf[], from: number, to: number, depth: num
       cand = { at: i, span: 1, word: norm(l.text) };
     } else if (l.kind === "slash") {
       // A standalone " / " separator has whitespace on a side. A slash glued to
-      // tokens on BOTH sides ("Dose/n", "1/2") is a plural marker / fraction,
-      // not an or-separator.
+      // tokens on BOTH sides is usually a plural marker ("Dose/n") or fraction
+      // ("1/2") — NOT a separator. The exception: two full words glued by a
+      // slash where the right side is CAPITALIZED ("Kurkuma/Gelbwurz") are
+      // alternatives. German plural endings are lowercase (n/en/e/…), so an
+      // uppercase suffix is a separate noun — the same signal the plural-marker
+      // pass uses, keeping the two rules complementary.
       const prev = all[i - 1];
       const next = all[i + 1];
       const gluedBoth = prev && next && prev.end === l.start && l.end === next.start;
-      if (!gluedBoth) cand = { at: i, span: 1, word: "/" };
+      const gluedWords =
+        gluedBoth &&
+        prev.kind === "word" &&
+        next.kind === "word" &&
+        /^\p{Lu}/u.test(next.text);
+      if (!gluedBoth || gluedWords) cand = { at: i, span: 1, word: "/" };
     } else if (l.kind === "word" && norm(l.text) === "o") {
       // "o." short for "oder": word "o" + punct "." — but NOT "o. ä." (similar).
       const dot = all[i + 1];

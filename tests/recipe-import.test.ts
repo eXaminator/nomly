@@ -903,6 +903,18 @@ describe("segmentLine — conjunction splitting", () => {
   it("keeps 'Weizen- und Dinkelmehl' as one ingredient (dash stem)", () => {
     expect(segTexts("Weizen- und Dinkelmehl")).toEqual(["Weizen- und Dinkelmehl"]);
   });
+  it("splits a glued slash between two capitalized words as alternatives ('Kurkuma/Gelbwurz')", () => {
+    expect(segTexts("½ TL Kurkuma/Gelbwurz, gemahlen")).toEqual([
+      "½ TL Kurkuma",
+      "Gelbwurz, gemahlen",
+    ]);
+  });
+  it("keeps a glued slash with a lowercase plural ending as one ingredient ('Dose/n')", () => {
+    expect(segTexts("1 Dose/n Tomaten")).toEqual(["1 Dose/n Tomaten"]);
+  });
+  it("keeps a glued slash between digits as one ingredient (fraction '1/2')", () => {
+    expect(segTexts("1/2 TL Salz")).toEqual(["1/2 TL Salz"]);
+  });
   it("does not split inside parentheses (separator at depth > 0)", () => {
     expect(segTexts("1 medium onion (½ finely chopped & ½ sliced)")).toEqual([
       "1 medium onion (½ finely chopped & ½ sliced)",
