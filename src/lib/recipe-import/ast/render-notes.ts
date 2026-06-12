@@ -17,7 +17,15 @@ export type Role =
 /** A lexeme annotated by the semantic passes. `consumed` marks a token that a
  *  structured field claimed (amount / unit / ingredient / connector / optional
  *  marker) — consumed tokens leave the note and become a comma boundary. */
-export type Leaf = Lexeme & { consumed?: boolean; role?: Role };
+export type Leaf = Lexeme & {
+  consumed?: boolean;
+  role?: Role;
+  /** Set when this leaf begins a folded-in alternative that is NOT source-
+   *  adjacent to the preceding leaf (a row-alternative was skipped between
+   *  them). Tells {@link renderNote} to start a fresh `, ` clause rather than
+   *  slice the intervening source. */
+  breakBefore?: boolean;
+};
 
 /**
  * Render a row's note from its leaves, per the note rule:
@@ -57,7 +65,11 @@ export function renderNote(source: string, leaves: readonly Leaf[]): string | nu
       out = lf.text;
       started = true;
     } else {
-      out += (pendingBreak ? ", " : source.slice(lastEnd, lf.start)) + lf.text;
+      // `breakBefore` marks a leaf whose preceding source is NOT contiguous with
+      // the previous surviving leaf — set by a fold that renders the primary +
+      // a non-adjacent alternative, skipping a row-alternative in between.
+      // Slicing the source there would inject the skipped text, so break.
+      out += (pendingBreak || lf.breakBefore ? ", " : source.slice(lastEnd, lf.start)) + lf.text;
     }
     lastEnd = lf.end;
     pendingBreak = false;
@@ -87,10 +99,13 @@ export function tidyNote(s: string): string | null {
     .replace(/,\s*[-–—]\s+/g, ", ")
     .replace(/\s+[-–—]\s*,/g, ",")
     // Trim stray edge punctuation left by a removed boundary word — a dangling
-    // connector dash, comma, colon etc. Mid-note punctuation (a ";" between
-    // clauses) is untouched. "!"/"?" are kept: they're meaningful sentence
-    // punctuation the user actually wrote ("(doch, wirklich!)").
-    .replace(/^[\s,;:*."'·\-–—]+/, "")
+    // connector ("/", a dash), comma, colon etc. A LEADING "*" is kept: it's a
+    // footnote marker referencing info elsewhere ("* organic if available"), not
+    // a leftover separator. Paired delimiters ("(", "[") are already preserved
+    // (they're never in the strip set). Mid-note punctuation (a ";" between
+    // clauses) is untouched. "!"/"?" are kept: meaningful sentence punctuation
+    // the user actually wrote ("(doch, wirklich!)").
+    .replace(/^[\s,;:."'·\-–—/]+/, "")
     .replace(/[\s,;:*"'·\-–—]+$/, "")
     .trim();
   return t.length > 0 ? t : null;

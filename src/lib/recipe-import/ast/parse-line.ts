@@ -38,6 +38,24 @@ export type ParsedRow = {
   /** Categorised highlight spans for the row's own segment, relative to the
    *  piece source (the caller rebases onto the full line). */
   highlightParts: HighlightPart[];
+  /** Context to re-assemble this row's note when an alternative folds into it
+   *  (prep/range prefixes + the data assembleRowNote needs). */
+  noteContext: NoteContext;
+};
+
+/**
+ * Everything a row's note needs beyond its surviving leaves: the leading
+ * prefixes (prep noun, leading note phrase) and the range expression, all
+ * captured from the segment's own leaf passes. Carried out of {@link parseLeaves}
+ * so a folded alternative can be re-assembled into the primary's note WITHOUT
+ * string-appending — the fold extends the leaf set and re-runs the same
+ * assembly through {@link assembleRowNote}.
+ */
+export type NoteContext = {
+  rangeExpression: string | null;
+  unitName: string | null;
+  prepNote: string | null;
+  leadNote: string | null;
 };
 
 export type SegmentLookups = {
@@ -117,6 +135,35 @@ function rangeNoteSeparator(source: string, leaves: readonly Leaf[]): ", " | " "
   return " ";
 }
 
+/**
+ * Assemble a row's note from its surviving leaves plus any folded-in
+ * alternative leaves. `primaryLeaves` are the row's own (annotated) leaves;
+ * `foldLeaves` are the connector + content leaves of alternatives folded into
+ * this row (consumed cleared so their text survives), in source order. The
+ * range separator is computed from the PRIMARY leaves (the range belongs to the
+ * row), while the note text renders over the union — so a folded alternative
+ * lands after the row's own note, joined by the AST, never by string append.
+ */
+export function assembleRowNote(
+  source: string,
+  primaryLeaves: readonly Leaf[],
+  foldLeaves: readonly Leaf[],
+  ctx: NoteContext,
+): string | null {
+  const union = foldLeaves.length ? [...primaryLeaves, ...foldLeaves] : primaryLeaves;
+  const rendered = renderNote(source, union);
+  const baseNotes = assembleNotes(
+    ctx.rangeExpression,
+    ctx.unitName,
+    rendered,
+    rangeNoteSeparator(source, primaryLeaves),
+  );
+  const prefixes = [ctx.prepNote, ctx.leadNote].filter((s) => s != null && s.length > 0);
+  return prefixes.length
+    ? tidyNote([...prefixes, baseNotes].filter((s) => s != null && s.length > 0).join(", "))
+    : baseNotes;
+}
+
 /** Parse one ingredient segment into a structured row by lexing the source. A
  *  convenience wrapper over {@link parseLeaves} for callers that have only a
  *  string; the segmentation layer lexes the whole line ONCE and calls
@@ -173,20 +220,13 @@ export function parseLeaves(
   // Flatten redundant "double" parens ("((1 1/4 cups))") before the note/
   // highlight renderers so the surviving single layer unwraps normally.
   collapseRedundantParens(leaves);
-  const rendered = renderNote(source, leaves);
-  const baseNotes = assembleNotes(
-    rangeExpression,
-    unitName,
-    rendered,
-    rangeNoteSeparator(source, leaves),
-  );
-  // Note prefixes captured before the amount (prep noun, leading note phrase)
-  // lead the assembled notes, in source order.
-  const prefixes = [prepNote, leadNote].filter((s) => s != null && s.length > 0);
-  const notes = prefixes.length
-    ? tidyNote([...prefixes, baseNotes].filter((s) => s != null && s.length > 0).join(", "))
-    : baseNotes;
+  // The row's note, range/prep prefixes included. Captured as a NoteContext too
+  // so a folded alternative can re-assemble it (its leaves appended) without any
+  // string concatenation — see assembleRowNote.
+  const noteContext: NoteContext = { rangeExpression, unitName, prepNote, leadNote };
+  const notes = assembleRowNote(source, leaves, [], noteContext);
   return {
+    noteContext,
     quantity,
     unitName,
     name: m.name,

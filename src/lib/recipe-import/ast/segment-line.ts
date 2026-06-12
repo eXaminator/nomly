@@ -33,6 +33,11 @@ export type LineSegment =
       forceOptional: boolean;
       isAlternative: boolean;
       connector: string | null;
+      /** The connector token leaves preceding an alternative ("oder", "/",
+       *  "alternativ:") — cloned, depth-normalized. Used when the alternative
+       *  folds into its primary's note so the connector word renders from the
+       *  AST ("oder X"), never string-appended. Null for primaries. */
+      connectorLeaves?: Leaf[];
       localNote: boolean;
       tailNote: string | null;
       /** Compound-elision rows ("Weizen- oder Dinkelmehl" → "Weizenmehl") have
@@ -117,20 +122,34 @@ function makeIngredient(
   // it extends back over the connector ("oder X", "alternativ: X") so the
   // highlighter can mark the connector as dropped — mirrors the legacy
   // findSegmentRange(withConnector) behaviour.
+  const connLeaves = meta.isAlternative ? connectorLeavesBefore(all, from, baseDepth) : [];
   const rangeStart = meta.isAlternative
-    ? connectorStartBefore(all, from) ?? slice[0].start
+    ? connLeaves[0]?.start ?? slice[0].start
     : slice[0].start;
   const range: [number, number] = [rangeStart, slice[slice.length - 1].end];
   const segText = source.slice(slice[0].start, range[1]).trim();
   if (segText.length === 0) return null;
-  return { kind: "ingredient", leaves: slice, range, segText, ...meta };
+  return {
+    kind: "ingredient",
+    leaves: slice,
+    range,
+    segText,
+    ...meta,
+    ...(connLeaves.length ? { connectorLeaves: connLeaves } : {}),
+  };
 }
 
 /** Walk back from `from` over a run of connector tokens (oder/or/o./ "/" /
  *  alternativ/sub + ":") preceding an alternative's content, skipping an
- *  enclosing "(" — returns the start offset of the connector run, or null. */
-function connectorStartBefore(all: readonly Leaf[], from: number): number | null {
-  let start: number | null = null;
+ *  enclosing "(" — returns the connector token LEAVES (cloned, depth-normalized
+ *  to `baseDepth`) in source order, for folding an alternative into its
+ *  primary's note via the AST. Empty when there's no connector. */
+function connectorLeavesBefore(
+  all: readonly Leaf[],
+  from: number,
+  baseDepth: number,
+): Leaf[] {
+  const idxs: number[] = [];
   for (let k = from - 1; k >= 0; k--) {
     const l = all[k];
     if (l.kind === "open") continue; // skip the alt paren's "("
@@ -142,9 +161,11 @@ function connectorStartBefore(all: readonly Leaf[], from: number): number | null
       w === "o" ||
       (l.kind === "punct" && (l.text === ":" || l.text === "."));
     if (!isConnTok) break;
-    start = l.start;
+    idxs.push(k);
   }
-  return start;
+  return idxs
+    .reverse()
+    .map((k) => ({ ...all[k], depth: Math.max(0, all[k].depth - baseDepth) }));
 }
 
 /**
