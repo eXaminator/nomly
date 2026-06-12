@@ -727,48 +727,42 @@ export function parseIngredientLines(
           astSeg.unitName,
           astSeg.quantity,
         );
-        // Fold an unmatched alternative back into its primary's notes instead
-        // of creating an "orphan new-ingredient" row. Most recipe "or"s mean
-        // "or you could use this instead" rather than a parallel shopping
-        // entry — when the catalog doesn't recognise the alternative, the
-        // user's intent is information for the cook, not a second purchase.
+        // A trailing alternative that is PURELY a note phrase ("(oder nach
+        // Geschmack)", "(oder zum Abschmecken)") doesn't belong to one
+        // alternative — it qualifies the whole group, so fold it onto the
+        // primary AND every alternative emitted since. A NAMED unmatched
+        // alternative ("oder Rigatoni") is now PROPOSED as its own row (a new
+        // ingredient) rather than folded — it falls through to emit.
         if (
           seg.isAlternative &&
           !astSeg.matched &&
           !seg.syntheticSource &&
-          lastPrimaryIndex !== null
+          lastPrimaryIndex !== null &&
+          stripVocabTail(piece).name.trim().length === 0
         ) {
-          // A trailing alternative that is PURELY a note phrase ("(oder nach
-          // Geschmack)", "(oder zum Abschmecken)") doesn't belong to one
-          // alternative — it qualifies the whole group (typically the amount),
-          // so fold it onto the primary AND every alternative emitted since.
-          // A rejected INGREDIENT alternative ("(oder schwarze Bohnen)") leaves
-          // a name behind and stays on the primary alone. stripVocabTail is the
-          // same vocabulary gate the no-match path already uses.
-          const isNoteOnly =
-            stripVocabTail(piece).name.trim().length === 0;
-          const foldEnd = isNoteOnly ? out.length - 1 : lastPrimaryIndex;
-          for (let ti = lastPrimaryIndex; ti <= foldEnd; ti++) {
-            const target = foldTargets.get(out[ti]);
-            if (target) {
-              const note = foldAlternativeIntoNote(
-                originalTrimmed,
-                target,
-                seg.connectorLeaves ?? [],
-                seg.leaves,
-              );
-              if (note !== null) out[ti].notes = note;
-            }
-            // The folded text is now part of this row's NOTES output, so show
-            // its source span (incl. connector) as a note on the row's line
-            // rather than muting it.
-            if (sourceRange) {
-              (out[ti].highlightParts ??= []).push({
-                range: sourceRange,
-                kind: "note",
-              });
-            }
-          }
+          foldAlternativeOntoRows(
+            originalTrimmed, out, foldTargets,
+            lastPrimaryIndex, out.length - 1,
+            seg.connectorLeaves ?? [], seg.leaves, sourceRange,
+          );
+          continue;
+        }
+        // A matched alternative resolving to the SAME ingredient as its primary
+        // is a synonym ("Kurkuma/Gelbwurz" once "Gelbwurz" is a Kurkuma alias) —
+        // fold it into the primary's note instead of a duplicate row.
+        if (
+          seg.isAlternative &&
+          astSeg.matched &&
+          !seg.syntheticSource &&
+          lastPrimaryIndex !== null &&
+          out[lastPrimaryIndex].ingredientId != null &&
+          out[lastPrimaryIndex].ingredientId === astSeg.ingredientId
+        ) {
+          foldAlternativeOntoRows(
+            originalTrimmed, out, foldTargets,
+            lastPrimaryIndex, lastPrimaryIndex,
+            seg.connectorLeaves ?? [], seg.leaves, sourceRange,
+          );
           continue;
         }
         const final = pickFinalUnit(initialUnit, astSeg.defaultUnit, astSeg.quantity);
@@ -886,6 +880,31 @@ function foldAlternativeIntoNote(
     unionEnd = g.reduce((m, l) => Math.max(m, l.end), unionEnd);
   }
   return assembleRowNote(combined, target.leaves, foldLeaves, target.ctx);
+}
+
+/** Fold an alternative's leaves into the notes of rows[from..to] (inclusive),
+ *  re-rendering each through the AST and marking the alternative's source span
+ *  as a note highlight. Shared by both parse entry points. */
+function foldAlternativeOntoRows(
+  source: string,
+  rows: ImportedIngredient[],
+  foldTargets: WeakMap<ImportedIngredient, FoldTarget>,
+  from: number,
+  to: number,
+  connectorLeaves: readonly Leaf[],
+  contentLeaves: readonly Leaf[],
+  sourceRange: [number, number] | null,
+): void {
+  for (let ti = from; ti <= to; ti++) {
+    const target = foldTargets.get(rows[ti]);
+    if (target) {
+      const note = foldAlternativeIntoNote(source, target, connectorLeaves, contentLeaves);
+      if (note !== null) rows[ti].notes = note;
+    }
+    if (sourceRange) {
+      (rows[ti].highlightParts ??= []).push({ range: sourceRange, kind: "note" });
+    }
+  }
 }
 
 /**
@@ -1236,34 +1255,36 @@ function parseGroupedIngredientLines(
             astSeg.unitName,
             astSeg.quantity,
           );
-          // See parseIngredientLines: unmatched alternatives fold back into
-          // the primary's notes instead of becoming orphan new-ingredient rows.
+          // See parseIngredientLines: a NOTE-ONLY unmatched alternative folds
+          // into the group's notes; a NAMED unmatched alternative is proposed as
+          // its own row; a synonym of the primary (same ingredientId) folds.
           if (
             seg.isAlternative &&
             !astSeg.matched &&
             !seg.syntheticSource &&
-            lastPrimaryIndex !== null
+            lastPrimaryIndex !== null &&
+            stripVocabTail(piece).name.trim().length === 0
           ) {
-            const isNoteOnly = stripVocabTail(piece).name.trim().length === 0;
-            const foldEnd = isNoteOnly ? currentGroup.ingredients.length - 1 : lastPrimaryIndex;
-            for (let ti = lastPrimaryIndex; ti <= foldEnd; ti++) {
-              const target = foldTargets.get(currentGroup.ingredients[ti]);
-              if (target) {
-                const note = foldAlternativeIntoNote(
-                  originalTrimmed,
-                  target,
-                  seg.connectorLeaves ?? [],
-                  seg.leaves,
-                );
-                if (note !== null) currentGroup.ingredients[ti].notes = note;
-              }
-              if (sourceRange) {
-                (currentGroup.ingredients[ti].highlightParts ??= []).push({
-                  range: sourceRange,
-                  kind: "note",
-                });
-              }
-            }
+            foldAlternativeOntoRows(
+              originalTrimmed, currentGroup.ingredients, foldTargets,
+              lastPrimaryIndex, currentGroup.ingredients.length - 1,
+              seg.connectorLeaves ?? [], seg.leaves, sourceRange,
+            );
+            continue;
+          }
+          if (
+            seg.isAlternative &&
+            astSeg.matched &&
+            !seg.syntheticSource &&
+            lastPrimaryIndex !== null &&
+            currentGroup.ingredients[lastPrimaryIndex].ingredientId != null &&
+            currentGroup.ingredients[lastPrimaryIndex].ingredientId === astSeg.ingredientId
+          ) {
+            foldAlternativeOntoRows(
+              originalTrimmed, currentGroup.ingredients, foldTargets,
+              lastPrimaryIndex, lastPrimaryIndex,
+              seg.connectorLeaves ?? [], seg.leaves, sourceRange,
+            );
             continue;
           }
           const final = pickFinalUnit(initialUnit, astSeg.defaultUnit, astSeg.quantity);
