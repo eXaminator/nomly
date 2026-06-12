@@ -19,6 +19,14 @@ export type Role =
  *  marker) — consumed tokens leave the note and become a comma boundary. */
 export type Leaf = Lexeme & { consumed?: boolean; role?: Role };
 
+/** True when a dash is flanked by digits (ignoring surrounding whitespace) —
+ *  a numeric range ("150 - 200 g") that must survive, not a clause separator. */
+function isRangeDash(source: string, lf: Leaf): boolean {
+  const before = source.slice(0, lf.start).replace(/\s+$/u, "").slice(-1);
+  const after = source.slice(lf.end).replace(/^\s+/u, "").slice(0, 1);
+  return /\d/.test(before) && /\d/.test(after);
+}
+
 /**
  * Render a row's note from its leaves, per the note rule:
  *  - consumed tokens are removed; a removed run between survivors → a single `, `;
@@ -40,11 +48,13 @@ export function renderNote(source: string, leaves: readonly Leaf[]): string | nu
     // A dash with whitespace on BOTH sides is a SEPARATOR the user wrote
     // ("Kohl - in Streifen") → it becomes a comma boundary. A dash glued to a
     // token on one side ("1-inch", "whole-wheat", "15- ounce") is part of that
-    // token and stays verbatim.
+    // token and stays verbatim. A dash flanked by NUMBERS ("150 - 200 g") is a
+    // numeric range and survives, even when spaced.
     const isSpacedDash =
       lf.kind === "dash" &&
       (lf.start === 0 || /\s/.test(source[lf.start - 1])) &&
-      (lf.end >= source.length || /\s/.test(source[lf.end]));
+      (lf.end >= source.length || /\s/.test(source[lf.end])) &&
+      !isRangeDash(source, lf);
     // A pluralization marker ("(er)", "/n") is fully transparent: dropped from
     // the note like a paren, but it never introduces a comma boundary.
     const isPluralMarker = lf.role === "plural-marker";

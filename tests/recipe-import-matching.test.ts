@@ -1031,6 +1031,15 @@ describe("colon-in-name treated as section + listed items", () => {
     });
   });
 
+  it("keeps a spaced numeric range dash in a note ('(ca. 150 - 200 g)')", () => {
+    const catalog: IngredientCatalog = [
+      { ingredientId: 1, canonicalName: "Paprika", aliasName: "Paprika", tokens: ["paprika"] },
+    ];
+    const out = parseIngredientLines(["1 Paprika (ca. 150 - 200 g)"], makeLookups(catalog));
+    // The dash is a numeric range (150-200), not a clause separator — it survives.
+    expect(out[0].notes).toBe("ca. 150 - 200 g");
+  });
+
   it("a capitalized '/word' is an alternative, not a plural marker ('Dose/Glas' stays in the note)", () => {
     const catalog: IngredientCatalog = [
       { ingredientId: 1, canonicalName: "Kichererbsen", aliasName: "Kichererbsen", tokens: ["kichererbsen"] },
