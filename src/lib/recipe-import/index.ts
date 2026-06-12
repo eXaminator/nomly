@@ -21,9 +21,10 @@ import {
   extractIngredientGroupsFromHtml,
 } from "./html-groups.ts";
 import { parseIsoDurationToMinutes } from "./duration.ts";
-import { parseSegment, parseLeaves } from "./ast/parse-line.ts";
+import { parseSegment, parseLeaves, assembleRowNote, type NoteContext } from "./ast/parse-line.ts";
 import { lex } from "./ast/lexer.ts";
 import { segmentLine } from "./ast/segment-line.ts";
+import type { Leaf } from "./ast/render-notes.ts";
 import {
   amountPrefixRange,
   trailingNoteRange,
@@ -601,6 +602,9 @@ export function parseIngredientLines(
   const threshold = options.autoMatchScoreThreshold ?? MIN_AUTO_MATCH_SCORE;
   const useFirstWins = options.alternativesMode === "first-wins";
   const out: ImportedIngredient[] = [];
+  // Per emitted-row state for AST note re-rendering when an alternative folds
+  // into a row (keyed by index into `out`).
+  const foldTargets = new Map<number, FoldTarget>();
   for (const rawLine of lines) {
     // Section headers (e.g. "Für den Teig:", "FÜR DIE FÜLLUNG") aren't
     // ingredients — section-aware callers use parseIngredientLinesIntoSections.
@@ -671,12 +675,16 @@ export function parseIngredientLines(
             const isNoteOnly = astSeg.quantity === null && astSeg.unitName === null;
             const foldEnd = isNoteOnly ? out.length - 1 : lastPrimaryIndex;
             for (let ti = lastPrimaryIndex; ti <= foldEnd; ti++) {
-              appendAlternativeToNotes(
-                out[ti],
-                seg.connector,
-                piece,
-                originalTrimmed,
-              );
+              const target = foldTargets.get(ti);
+              if (target) {
+                const note = foldAlternativeIntoNote(
+                  originalTrimmed,
+                  target,
+                  seg.connectorLeaves ?? [],
+                  seg.leaves,
+                );
+                if (note !== null) out[ti].notes = note;
+              }
               if (sourceRange) {
                 (out[ti].highlightParts ??= []).push({
                   range: sourceRange,
@@ -736,12 +744,16 @@ export function parseIngredientLines(
             stripVocabTail(piece).name.trim().length === 0;
           const foldEnd = isNoteOnly ? out.length - 1 : lastPrimaryIndex;
           for (let ti = lastPrimaryIndex; ti <= foldEnd; ti++) {
-            appendAlternativeToNotes(
-              out[ti],
-              seg.connector,
-              piece,
-              originalTrimmed,
-            );
+            const target = foldTargets.get(ti);
+            if (target) {
+              const note = foldAlternativeIntoNote(
+                originalTrimmed,
+                target,
+                seg.connectorLeaves ?? [],
+                seg.leaves,
+              );
+              if (note !== null) out[ti].notes = note;
+            }
             // The folded text is now part of this row's NOTES output, so show
             // its source span (incl. connector) as a note on the row's line
             // rather than muting it.
@@ -788,6 +800,13 @@ export function parseIngredientLines(
           candidateMatches: astSeg.candidateMatches,
           newNameProposals: astSeg.newNameProposals,
         });
+        // Remember enough to re-render this row's note if a later alternative
+        // folds into it (synthetic rows have no source-faithful leaves).
+        foldTargets.set(out.length - 1, {
+          leaves: seg.syntheticSource ? null : seg.leaves,
+          ctx: astSeg.noteContext,
+          folds: [],
+        });
         if (!seg.isAlternative) lastPrimaryIndex = out.length - 1;
       }
     }
@@ -809,6 +828,46 @@ export function parseIngredientLines(
   }
   applyAlternativeInheritance(out);
   return out;
+}
+
+/**
+ * What an emitted row needs to re-render its note when an alternative folds
+ * into it: its own (annotated) leaves, the note context (prep/range prefixes),
+ * and the accumulated fold groups (each = connector leaves + the folded
+ * alternative's content leaves, consumed cleared so the text survives). Null
+ * `leaves` marks a synthetic row that can't be re-rendered from source leaves.
+ */
+type FoldTarget = {
+  leaves: Leaf[] | null;
+  ctx: NoteContext;
+  folds: Leaf[][];
+};
+
+/** Append an alternative segment's leaves as a fold group onto `target` and
+ *  return the re-rendered note. The fold's text survives (consumed cleared);
+ *  the AST — not a string concat — joins it after the row's own note. */
+function foldAlternativeIntoNote(
+  source: string,
+  target: FoldTarget,
+  connectorLeaves: readonly Leaf[],
+  contentLeaves: readonly Leaf[],
+): string | null {
+  if (!target.leaves) return null;
+  const content = contentLeaves.map((l) => ({ ...l, consumed: false }));
+  target.folds.push([...connectorLeaves.map((l) => ({ ...l })), ...content]);
+  let unionEnd = target.leaves.reduce((m, l) => Math.max(m, l.end), 0);
+  const foldLeaves: Leaf[] = [];
+  for (const group of target.folds) {
+    if (group.length === 0) continue;
+    const g = group.map((l) => ({ ...l }));
+    // A fold group whose connector is NOT source-adjacent to the running union
+    // end (a row-alternative was skipped, or it sat inside an alt paren) starts
+    // a fresh ", " clause instead of slicing the intervening source.
+    if (/\S/.test(source.slice(unionEnd, g[0].start))) g[0].breakBefore = true;
+    foldLeaves.push(...g);
+    unionEnd = g.reduce((m, l) => Math.max(m, l.end), unionEnd);
+  }
+  return assembleRowNote(source, target.leaves, foldLeaves, target.ctx);
 }
 
 function appendAlternativeToNotes(
