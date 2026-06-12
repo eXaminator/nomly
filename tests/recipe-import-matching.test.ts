@@ -1213,8 +1213,8 @@ it("'<qty> <unit> each: A, B, C' fans out into one row per item sharing qty + un
   });
 });
 
-describe("parseIngredientLines — unmatched alternative → proposed row", () => {
-  it("emits an unmatched 'oder' alternative as its own (new-ingredient) row", () => {
+describe("parseIngredientLines — unmatched alternative folds + offers a chip", () => {
+  it("folds an unmatched 'oder' alternative into the note and records a chip", () => {
     const catalog: IngredientCatalog = [
       { ingredientId: 1, canonicalName: "Mehl", aliasName: "Mehl", tokens: ["mehl"] },
     ];
@@ -1222,13 +1222,12 @@ describe("parseIngredientLines — unmatched alternative → proposed row", () =
       ["200 g Mehl oder Stärke"],
       makeLookups(catalog),
     );
-    // A NAMED unmatched alternative is now proposed (the user can create it,
-    // alias it, or delete it → fold), not silently folded into the note.
-    expect(out).toHaveLength(2);
+    // A NAMED unmatched alternative is speculative — folded into the note by
+    // default, and surfaced as a "create alternative" chip on the primary.
+    expect(out).toHaveLength(1);
     expect(out[0].ingredientId).toBe(1);
-    expect(out[1].name).toBe("Stärke");
-    expect(out[1].isAlternative).toBe(true);
-    expect(out[1].ingredientMatch).toBe("new");
+    expect(out[0].notes).toMatch(/oder Stärke/);
+    expect(out[0].foldedAlternatives?.map((f) => f.label)).toEqual(["Stärke"]);
   });
 
   it("keeps a matched 'oder' alternative as its own row", () => {
@@ -1246,7 +1245,7 @@ describe("parseIngredientLines — unmatched alternative → proposed row", () =
     expect(out[1].isAlternative).toBe(true);
   });
 
-  it("emits an unmatched English 'or' alternative as its own row", () => {
+  it("folds an unmatched English 'or' alternative (chip preserves 'or')", () => {
     const catalog: IngredientCatalog = [
       { ingredientId: 1, canonicalName: "Butter", aliasName: "Butter", tokens: ["butter"] },
     ];
@@ -1254,13 +1253,12 @@ describe("parseIngredientLines — unmatched alternative → proposed row", () =
       ["100 g Butter or Margarine"],
       makeLookups(catalog),
     );
-    expect(out).toHaveLength(2);
-    expect(out[1].name).toBe("Margarine");
-    expect(out[1].isAlternative).toBe(true);
-    expect(out[1].ingredientMatch).toBe("new");
+    expect(out).toHaveLength(1);
+    expect(out[0].notes).toMatch(/or Margarine/);
+    expect(out[0].foldedAlternatives?.map((f) => f.label)).toEqual(["Margarine"]);
   });
 
-  it("keeps the alternative's own quantity on its row", () => {
+  it("keeps the folded alternative's own quantity in the note", () => {
     const catalog: IngredientCatalog = [
       { ingredientId: 1, canonicalName: "Mehl", aliasName: "Mehl", tokens: ["mehl"] },
     ];
@@ -1268,10 +1266,28 @@ describe("parseIngredientLines — unmatched alternative → proposed row", () =
       ["200 g Mehl oder 100 g Stärke"],
       makeLookups(catalog),
     );
-    expect(out).toHaveLength(2);
-    expect(out[1].name).toBe("Stärke");
-    expect(out[1].quantity).toBe(100);
-    expect(out[1].isAlternative).toBe(true);
+    expect(out).toHaveLength(1);
+    expect(out[0].notes).toMatch(/oder.*100\s*g\s*Stärke/);
+    expect(out[0].foldedAlternatives?.map((f) => f.label)).toEqual(["Stärke"]);
+  });
+
+  it("force-EMITS a folded alternative as its own row (the 'create alternative' chip)", () => {
+    const catalog: IngredientCatalog = [
+      { ingredientId: 1, canonicalName: "Mehl", aliasName: "Mehl", tokens: ["mehl"] },
+    ];
+    const line = "200 g Mehl oder Stärke";
+    // Default: Stärke is folded with a chip carrying its range.
+    const folded = parseIngredientLines([line], makeLookups(catalog));
+    const chipRange = folded[0].foldedAlternatives![0].range;
+    // Clicking the chip re-parses with that range force-emitted → a real row.
+    const emitted = parseIngredientLines([line], makeLookups(catalog), {
+      forceEmitRanges: [chipRange],
+    });
+    expect(emitted).toHaveLength(2);
+    expect(emitted[0].ingredientId).toBe(1);
+    expect(emitted[1].name).toBe("Stärke");
+    expect(emitted[1].isAlternative).toBe(true);
+    expect(emitted[1].ingredientMatch).toBe("new");
   });
 
   it("attaches a footnote '*' directly to the preceding note ('(gemahlen)*' → 'gemahlen*')", () => {
@@ -1303,12 +1319,13 @@ describe("parseIngredientLines — unmatched alternative → proposed row", () =
     expect(out[1].isAlternative).toBe(true);
   });
 
-  it("force-folds a specified alternative range into the primary's note (delete-on-reparse)", () => {
+  it("force-folds a matched alternative range into the primary's note (delete-on-reparse)", () => {
     const catalog: IngredientCatalog = [
       { ingredientId: 1, canonicalName: "Mehl", aliasName: "Mehl", tokens: ["mehl"] },
+      { ingredientId: 2, canonicalName: "Stärke", aliasName: "Stärke", tokens: ["starke"] },
     ];
     const line = "200 g Mehl oder Stärke";
-    // First parse normally — Stärke is its own alternative row.
+    // Matched alternative → its own row by default.
     const normal = parseIngredientLines([line], makeLookups(catalog));
     expect(normal).toHaveLength(2);
     const altRange = normal[1].sourceRange!;
@@ -1321,16 +1338,16 @@ describe("parseIngredientLines — unmatched alternative → proposed row", () =
     expect(folded[0].notes).toMatch(/oder Stärke/);
   });
 
-  it("force-folds MULTIPLE alternative ranges at once (deleting a 2nd alt keeps the 1st folded)", () => {
+  it("force-folds MULTIPLE matched alternative ranges (deleting a 2nd alt keeps the 1st folded)", () => {
     const catalog: IngredientCatalog = [
       { ingredientId: 1, canonicalName: "Mehl", aliasName: "Mehl", tokens: ["mehl"] },
+      { ingredientId: 2, canonicalName: "Stärke", aliasName: "Stärke", tokens: ["starke"] },
+      { ingredientId: 3, canonicalName: "Speisestärke", aliasName: "Speisestärke", tokens: ["speisestarke"] },
     ];
     const line = "200 g Mehl oder Stärke oder Speisestärke";
     const normal = parseIngredientLines([line], makeLookups(catalog));
     expect(normal).toHaveLength(3);
     const altRanges = normal.filter((r) => r.isAlternative).map((r) => r.sourceRange!);
-    // Folding BOTH alternative ranges (what delete-on-reparse does after the
-    // second delete) collapses to one row with both folded into the note.
     const folded = parseIngredientLines([line], makeLookups(catalog), {
       forceFoldRanges: altRanges,
     });
@@ -1349,7 +1366,7 @@ describe("parseIngredientLines — unmatched alternative → proposed row", () =
     expect(out[0].name).toMatch(/Stärke/);
   });
 
-  it("emits an unmatched 'alternativ:' tail as its own row", () => {
+  it("folds an unmatched 'alternativ:' tail into the note + chip", () => {
     const catalog: IngredientCatalog = [
       { ingredientId: 1, canonicalName: "Tahin", aliasName: "Tahin", tokens: ["tahin"] },
     ];
@@ -1357,13 +1374,13 @@ describe("parseIngredientLines — unmatched alternative → proposed row", () =
       ["1 EL Tahin alternativ: 1 EL Mandelmus"],
       makeLookups(catalog, ["el"]),
     );
-    expect(out).toHaveLength(2);
+    expect(out).toHaveLength(1);
     expect(out[0].ingredientId).toBe(1);
-    expect(out[1].name).toBe("Mandelmus");
-    expect(out[1].isAlternative).toBe(true);
+    expect(out[0].notes).toMatch(/Mandelmus/);
+    expect(out[0].foldedAlternatives?.map((f) => f.label)).toEqual(["Mandelmus"]);
   });
 
-  it("emits an unmatched '(Alternativ: …)' tail as its own row", () => {
+  it("folds an unmatched '(Alternativ: …)' tail into the note + chip", () => {
     const catalog: IngredientCatalog = [
       { ingredientId: 1, canonicalName: "Mehl", aliasName: "Mehl", tokens: ["mehl"] },
     ];
@@ -1371,13 +1388,13 @@ describe("parseIngredientLines — unmatched alternative → proposed row", () =
       ["200 g Mehl (Alternativ: Stärke)"],
       makeLookups(catalog),
     );
-    expect(out).toHaveLength(2);
+    expect(out).toHaveLength(1);
     expect(out[0].ingredientId).toBe(1);
-    expect(out[1].name).toBe("Stärke");
-    expect(out[1].isAlternative).toBe(true);
+    expect(out[0].notes).toMatch(/Stärke/);
+    expect(out[0].foldedAlternatives?.map((f) => f.label)).toEqual(["Stärke"]);
   });
 
-  it("scopes the alternative to the current input line (no leak across lines)", () => {
+  it("scopes the fold to the current input line (no leak across lines)", () => {
     const catalog: IngredientCatalog = [
       { ingredientId: 1, canonicalName: "Mehl", aliasName: "Mehl", tokens: ["mehl"] },
       { ingredientId: 2, canonicalName: "Butter", aliasName: "Butter", tokens: ["butter"] },
@@ -1389,16 +1406,15 @@ describe("parseIngredientLines — unmatched alternative → proposed row", () =
       ],
       makeLookups(catalog),
     );
-    expect(out).toHaveLength(3);
+    expect(out).toHaveLength(2);
     expect(out[0].ingredientId).toBe(1);
     expect(out[0].notes).toBeNull();
     expect(out[1].ingredientId).toBe(2);
-    expect(out[1].isAlternative).toBe(false);
-    expect(out[2].name).toBe("Margarine");
-    expect(out[2].isAlternative).toBe(true);
+    expect(out[1].notes).toMatch(/oder Margarine/);
+    expect(out[1].foldedAlternatives?.map((f) => f.label)).toEqual(["Margarine"]);
   });
 
-  it("section variant: emits an unmatched alternative as a row within its section", () => {
+  it("section variant: folds an unmatched alternative within its section + chip", () => {
     const catalog: IngredientCatalog = [
       { ingredientId: 1, canonicalName: "Mehl", aliasName: "Mehl", tokens: ["mehl"] },
     ];
@@ -1407,10 +1423,9 @@ describe("parseIngredientLines — unmatched alternative → proposed row", () =
       makeLookups(catalog),
     );
     expect(groups).toHaveLength(1);
-    expect(groups[0].ingredients).toHaveLength(2);
+    expect(groups[0].ingredients).toHaveLength(1);
     expect(groups[0].ingredients[0].ingredientId).toBe(1);
-    expect(groups[0].ingredients[1].name).toBe("Stärke");
-    expect(groups[0].ingredients[1].isAlternative).toBe(true);
+    expect(groups[0].ingredients[0].foldedAlternatives?.map((f) => f.label)).toEqual(["Stärke"]);
   });
 });
 
@@ -1573,30 +1588,30 @@ describe("alternative amount/unit/notes inheritance", () => {
     expect(noteSlices.some((s) => /1\/2 large head, shredded/i.test(s))).toBe(true);
   });
 
-  it("emits unmatched named alternatives as their own rows", () => {
+  it("folds unmatched named alternatives into the note + chips", () => {
     const out = rows("50 g gesalzene Erdnüsse (oder ungesalzen, oder andere Nüsse)", [
       { ingredientId: 1, canonicalName: "Erdnüsse", aliasName: "Erdnüsse", tokens: ["erdnüsse"] },
       { ingredientId: 2, canonicalName: "Nüsse", aliasName: "Nüsse", tokens: ["nüsse"] },
     ]);
-    // Each unmatched alternative is now a proposed row (the user folds the noise
-    // by deleting it). "ungesalzen" and "andere Nüsse" become alternative rows.
-    const altNames = out.filter((r) => r.isAlternative).map((r) => r.name);
-    expect(altNames).toEqual(["ungesalzen", "andere Nüsse"]);
+    // Unmatched alternatives fold by default, each offered as a chip on the
+    // primary. (The user clicks to promote the ones they want as rows.)
+    expect(out.filter((r) => r.isAlternative)).toHaveLength(0);
+    expect(out[0].foldedAlternatives?.map((f) => f.label)).toEqual(["ungesalzen", "andere Nüsse"]);
   });
 
-  it("splits a multi-option parenthetical alternative into proposed rows", () => {
+  it("folds a multi-option parenthetical alternative, each option a chip", () => {
     const out = rows(
       "2 EL Honig (oder anderes Süßungsmittel, etwa Zucker, Reis oder Rübensirup)",
       [{ ingredientId: 1, canonicalName: "Honig", aliasName: "Honig", tokens: ["honig"] }],
       ["el"],
     );
+    expect(out).toHaveLength(1);
     expect(out[0].name).toBe("Honig");
-    expect(out[0].isAlternative).toBe(false);
-    // The "oder" chain splits into alternative rows; "etwa Zucker, Reis" rides
-    // along as the first alternative's note. No comma invented before "oder".
-    const alts = out.filter((r) => r.isAlternative);
-    expect(alts.map((r) => r.name)).toEqual(["anderes Süßungsmittel", "Rübensirup"]);
-    expect(alts[0].notes).toBe("etwa Zucker, Reis");
+    // The "oder" chain's options are folded as chips on the primary.
+    expect(out[0].foldedAlternatives?.map((f) => f.label)).toEqual([
+      "anderes Süßungsmittel",
+      "Rübensirup",
+    ]);
   });
 
   it("keeps a non-fraction slash in the notes on the matched path", () => {
@@ -2108,11 +2123,11 @@ describe("raw-remainder notes — matched lines keep the source verbatim", () =>
     expect(out[0].quantity).toBe(1);
     // No unit stolen from "pieces" (interior numeric guard).
     expect(out[0].unit).toBeNull();
-    // The prep phrase stays on the primary; "or small florets" is now a
-    // proposed alternative row (the user deletes it to fold if undesired).
-    expect(out[0].notes).toBe("small head, sliced into 1-inch pieces");
-    expect(out[1].name).toBe("florets");
-    expect(out[1].isAlternative).toBe(true);
+    // The prep phrase + the folded "or small florets" both live on the primary;
+    // "florets" is offered as a chip (the user promotes it if wanted).
+    expect(out).toHaveLength(1);
+    expect(out[0].notes).toBe("small head, sliced into 1-inch pieces, or small florets");
+    expect(out[0].foldedAlternatives?.map((f) => f.label)).toEqual(["florets"]);
   });
 
   it("a fragment ENTIRELY bound by parens is unwrapped", () => {
@@ -2456,20 +2471,17 @@ describe("a trailing note-only alternative is shared across the whole group", ()
     expect(out[1].notes).toBe("oder nach Geschmack");
   });
 
-  it("an unmatched INGREDIENT alternative is proposed as its own row", () => {
+  it("folds an unmatched INGREDIENT alternative into the note + chip; keeps the matched one a row", () => {
     const out = parseIngredientLines(
       ["100 g Kidneybohnen oder Kichererbsen (oder schwarze Bohnen)"],
       makeLookups(catalog),
     );
-    // "schwarze Bohnen" is a real (just unmatched) ingredient — it is now
-    // proposed as its own alternative row rather than folded into the note.
-    expect(out).toHaveLength(3);
+    // Kichererbsen is a known ingredient → its own row. "schwarze Bohnen" is
+    // unmatched → folded onto the primary with a chip to promote it.
+    expect(out).toHaveLength(2);
     expect(out[0].name).toBe("Kidneybohnen");
-    expect(out[0].notes).toBeNull();
     expect(out[1].name).toBe("Kichererbsen");
     expect(out[1].isAlternative).toBe(true);
-    expect(out[2].name).toBe("schwarze Bohnen");
-    expect(out[2].isAlternative).toBe(true);
-    expect(out[2].ingredientMatch).toBe("new");
+    expect(out[0].foldedAlternatives?.map((f) => f.label)).toEqual(["schwarze Bohnen"]);
   });
 });

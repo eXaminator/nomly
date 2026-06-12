@@ -89,6 +89,11 @@ export type ImportedIngredient = {
    *  `recipe_ingredient.alternative_for_id` linking back to the most
    *  recent primary in the same section. */
   isAlternative: boolean;
+  /** Alternatives that were folded into THIS row's note because they didn't
+   *  match the catalog (unmatched alternatives are quiet by default). Each
+   *  carries its source `range` (for a force-emit re-parse) and a `label` for
+   *  the UI's "create alternative" chip. Transient, not persisted. */
+  foldedAlternatives?: { range: SourceRange; label: string }[];
   /** Transient hint (consumed by {@link applyAlternativeInheritance}): this
    *  alternative's note is its own and must not propagate to siblings — set
    *  for notes inside a parenthetical alternative. Not persisted. */
@@ -597,15 +602,22 @@ export type ParseIngredientsOptions = {
    * is meant for a single-line re-parse (the delete-on-reparse flow).
    */
   forceFoldRanges?: ReadonlyArray<readonly [number, number]>;
+  /**
+   * Mirror of `forceFoldRanges`: alternative source-ranges to EMIT as their own
+   * row even though they'd otherwise fold (an UNMATCHED alternative is folded by
+   * default). Set when the user clicks the "create alternative" chip. Line-local
+   * — for a single-line re-parse.
+   */
+  forceEmitRanges?: ReadonlyArray<readonly [number, number]>;
 };
 
-/** Whether `range` is one of the caller's force-fold directives. */
-function isForceFolded(
+/** Whether `range` matches one of the given directive ranges. */
+function rangeIn(
   range: readonly [number, number] | null | undefined,
-  forceFold: ReadonlyArray<readonly [number, number]> | undefined,
+  ranges: ReadonlyArray<readonly [number, number]> | undefined,
 ): boolean {
-  if (!range || !forceFold) return false;
-  return forceFold.some(([s, e]) => s === range[0] && e === range[1]);
+  if (!range || !ranges) return false;
+  return ranges.some(([s, e]) => s === range[0] && e === range[1]);
 }
 
 export function parseIngredientLines(
@@ -682,7 +694,7 @@ export function parseIngredientLines(
           seg.isAlternative &&
           !seg.syntheticSource &&
           lastPrimaryIndex !== null &&
-          isForceFolded(seg.range, options.forceFoldRanges)
+          rangeIn(seg.range, options.forceFoldRanges)
         ) {
           foldAlternativeOntoRows(
             originalTrimmed, out, foldTargets,
@@ -764,9 +776,8 @@ export function parseIngredientLines(
         // A trailing alternative that is PURELY a note phrase ("(oder nach
         // Geschmack)", "(oder zum Abschmecken)") doesn't belong to one
         // alternative — it qualifies the whole group, so fold it onto the
-        // primary AND every alternative emitted since. A NAMED unmatched
-        // alternative ("oder Rigatoni") is now PROPOSED as its own row (a new
-        // ingredient) rather than folded — it falls through to emit.
+        // primary AND every alternative emitted since (no chip — it's not an
+        // ingredient).
         if (
           seg.isAlternative &&
           !astSeg.matched &&
@@ -781,9 +792,33 @@ export function parseIngredientLines(
           );
           continue;
         }
-        // A matched alternative becomes its own alternative row — even when it
-        // resolves to the SAME ingredient as its primary ("Kurkuma/Gelbwurz").
-        // The user wants the alternative surfaced, not folded as a synonym.
+        // A NAMED but UNMATCHED alternative ("oder Rigatoni") is speculative —
+        // fold it into the primary's note by DEFAULT and record it as a foldable
+        // alternative so the UI can offer a "create alternative" chip. The chip
+        // click re-parses with this range force-emitted (rangeIn forceEmit).
+        if (
+          seg.isAlternative &&
+          !astSeg.matched &&
+          !seg.syntheticSource &&
+          lastPrimaryIndex !== null &&
+          !rangeIn(seg.range, options.forceEmitRanges)
+        ) {
+          foldAlternativeOntoRows(
+            originalTrimmed, out, foldTargets,
+            lastPrimaryIndex, lastPrimaryIndex,
+            seg.connectorLeaves ?? [], seg.leaves, sourceRange,
+          );
+          if (seg.range) {
+            (out[lastPrimaryIndex].foldedAlternatives ??= []).push({
+              range: seg.range,
+              label: astSeg.name,
+            });
+          }
+          continue;
+        }
+        // A matched alternative (or a force-emitted unmatched one) becomes its
+        // own alternative row — even when it resolves to the SAME ingredient as
+        // its primary ("Kurkuma/Gelbwurz").
         const final = pickFinalUnit(initialUnit, astSeg.defaultUnit, astSeg.quantity);
         out.push({
           quantity: astSeg.quantity,
@@ -1291,8 +1326,30 @@ function parseGroupedIngredientLines(
             );
             continue;
           }
-          // A matched alternative is its own row even when it resolves to the
-          // SAME ingredient as its primary — the user wants it surfaced.
+          // A NAMED unmatched alternative folds by default + records a chip;
+          // forceEmitRanges (the chip click) emits it as a row instead.
+          if (
+            seg.isAlternative &&
+            !astSeg.matched &&
+            !seg.syntheticSource &&
+            lastPrimaryIndex !== null &&
+            !rangeIn(seg.range, options.forceEmitRanges)
+          ) {
+            foldAlternativeOntoRows(
+              originalTrimmed, currentGroup.ingredients, foldTargets,
+              lastPrimaryIndex, lastPrimaryIndex,
+              seg.connectorLeaves ?? [], seg.leaves, sourceRange,
+            );
+            if (seg.range) {
+              (currentGroup.ingredients[lastPrimaryIndex].foldedAlternatives ??= []).push({
+                range: seg.range,
+                label: astSeg.name,
+              });
+            }
+            continue;
+          }
+          // A matched alternative (or force-emitted unmatched one) is its own
+          // row — even when it resolves to the SAME ingredient as its primary.
           const final = pickFinalUnit(initialUnit, astSeg.defaultUnit, astSeg.quantity);
           currentGroup.ingredients.push({
             quantity: astSeg.quantity,

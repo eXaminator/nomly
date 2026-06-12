@@ -98,6 +98,10 @@ export type DraftIngredient = {
    *  fold the alternative back into the primary's notes on removal. Parse-
    *  session only — absent for rows loaded from a saved recipe. */
   sourceRange?: [number, number];
+  /** Unmatched alternatives folded into THIS row's note (quiet by default).
+   *  Each renders as a "create alternative" chip under the primary; clicking
+   *  re-parses the line with that range emitted. Parse-session only. */
+  foldedAlternatives?: { range: [number, number]; label: string }[];
   /** Categorised highlight spans into `rawText` (own amount/name/note +
    *  inherited amount/note) — coloured by kind in the "Original:" line so the
    *  parse decisions are legible. Parse-session only. */
@@ -222,6 +226,9 @@ export type ParsedIngredientResponse = {
    *  (the original line). For an alternative it includes the connector.
    *  Drives fold-back-on-removal. */
   sourceRange?: [number, number];
+  /** Unmatched alternatives folded into this row's note — surfaced as
+   *  "create alternative" chips. */
+  foldedAlternatives?: { range: [number, number]; label: string }[];
   /** Categorised highlight spans into `rawText` (own amount/name/note +
    *  inherited amount/note) — coloured by kind in the source-line view. */
   highlightParts?: { range: [number, number]; kind: "amount" | "name" | "note" | "dropped" }[];
@@ -290,6 +297,7 @@ export function parsedIngredientToDraft(
     isOptional: i.isOptional ?? false,
     fixedAmount: i.fixedAmount ?? false,
     isAlternative: i.isAlternative ?? false,
+    foldedAlternatives: i.foldedAlternatives,
     rawText: i.rawText,
     sourceRange: i.sourceRange,
     highlightParts: i.highlightParts,
