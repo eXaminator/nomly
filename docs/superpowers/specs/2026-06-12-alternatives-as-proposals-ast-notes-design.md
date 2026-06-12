@@ -31,13 +31,12 @@ In `parseIngredientLines` / `parseGroupedIngredientLines` (`src/lib/recipe-impor
 
 | Case | Why it folds |
 |---|---|
-| **Alias-of-primary** | The alternative matches the **same `ingredientId`** as its primary (a true synonym, e.g. `Kurkuma/Gelbwurz` once "Gelbwurz" is an alias of "Kurkuma"). A second row for the same ingredient is meaningless. |
 | **Nameless alternative** | `"½ large head"` — same article as the primary, just a different amount; no article of its own. |
 | **Note-only alternative** | `"(oder nach Geschmack)"` — qualifies the whole group; folds onto the primary *and* every alternative emitted since. |
 | **Tail note** | `"(or 1 large clove), peeled"` — the trailing `, peeled`. |
 | **Leading-or fragment** | a split fragment that is just `"or X"` / `"oder X"`. |
 
-The **alias-of-primary** rule is the mechanism behind "aliases of the main ingredient don't get proposed as alternatives," and it self-heals: once the user aliases "Gelbwurz" onto "Kurkuma", every future parse of that line folds it automatically.
+> **Revised 2026-06-12:** there is intentionally **no** alias-of-primary fold. A matched alternative that resolves to the SAME `ingredientId` as its primary (`Kurkuma/Gelbwurz`) is still surfaced as its own alternative row — the user wants the alternative shown, not collapsed into a synonym note. (The DB allows a self-referencing `alternativeForId` to the same ingredient; the shopping list skips alternatives, so amounts stay correct.)
 
 ### Part B — Notes: AST-only rendering via leaf-union
 

@@ -781,24 +781,9 @@ export function parseIngredientLines(
           );
           continue;
         }
-        // A matched alternative resolving to the SAME ingredient as its primary
-        // is a synonym ("Kurkuma/Gelbwurz" once "Gelbwurz" is a Kurkuma alias) —
-        // fold it into the primary's note instead of a duplicate row.
-        if (
-          seg.isAlternative &&
-          astSeg.matched &&
-          !seg.syntheticSource &&
-          lastPrimaryIndex !== null &&
-          out[lastPrimaryIndex].ingredientId != null &&
-          out[lastPrimaryIndex].ingredientId === astSeg.ingredientId
-        ) {
-          foldAlternativeOntoRows(
-            originalTrimmed, out, foldTargets,
-            lastPrimaryIndex, lastPrimaryIndex,
-            seg.connectorLeaves ?? [], seg.leaves, sourceRange,
-          );
-          continue;
-        }
+        // A matched alternative becomes its own alternative row — even when it
+        // resolves to the SAME ingredient as its primary ("Kurkuma/Gelbwurz").
+        // The user wants the alternative surfaced, not folded as a synonym.
         const final = pickFinalUnit(initialUnit, astSeg.defaultUnit, astSeg.quantity);
         out.push({
           quantity: astSeg.quantity,
@@ -1306,21 +1291,8 @@ function parseGroupedIngredientLines(
             );
             continue;
           }
-          if (
-            seg.isAlternative &&
-            astSeg.matched &&
-            !seg.syntheticSource &&
-            lastPrimaryIndex !== null &&
-            currentGroup.ingredients[lastPrimaryIndex].ingredientId != null &&
-            currentGroup.ingredients[lastPrimaryIndex].ingredientId === astSeg.ingredientId
-          ) {
-            foldAlternativeOntoRows(
-              originalTrimmed, currentGroup.ingredients, foldTargets,
-              lastPrimaryIndex, lastPrimaryIndex,
-              seg.connectorLeaves ?? [], seg.leaves, sourceRange,
-            );
-            continue;
-          }
+          // A matched alternative is its own row even when it resolves to the
+          // SAME ingredient as its primary — the user wants it surfaced.
           const final = pickFinalUnit(initialUnit, astSeg.defaultUnit, astSeg.quantity);
           currentGroup.ingredients.push({
             quantity: astSeg.quantity,
