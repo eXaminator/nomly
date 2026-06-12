@@ -16,15 +16,20 @@ import {
  *  parallel to the input (a line may expand into a primary + alternatives).
  *  `forceFoldRanges` (parallel to `lines`) folds the given alternative ranges
  *  into their primary's note instead of emitting rows. */
+type Range = readonly [number, number];
+
 async function reparseLines(
   lines: string[],
-  forceFoldRanges?: ReadonlyArray<ReadonlyArray<readonly [number, number]>>,
+  directives?: {
+    forceFoldRanges?: ReadonlyArray<ReadonlyArray<Range>>;
+    forceEmitRanges?: ReadonlyArray<ReadonlyArray<Range>>;
+  },
 ): Promise<ParsedIngredientResponse[][]> {
   if (lines.length === 0) return [];
   const r = await fetch("/api/v1/ingredients/reparse", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify(forceFoldRanges ? { lines, forceFoldRanges } : { lines }),
+    body: JSON.stringify({ lines, ...directives }),
   });
   if (!r.ok) throw new Error("re-parse request failed");
   const data = (await r.json()) as { results: ParsedIngredientResponse[][] };
@@ -39,54 +44,95 @@ async function reparseLines(
  * no source line/range to fold (e.g. a manually-added alternative); the caller
  * should fall back to a plain remove.
  */
-const rangeKey = (r: readonly [number, number]): string => `${r[0]},${r[1]}`;
+const rangeKey = (r: Range): string => `${r[0]},${r[1]}`;
 
+/** Bounds [start,end] of the contiguous run of rows sharing `rawText`. */
+function groupBounds(
+  ingredients: readonly DraftIngredient[],
+  index: number,
+  rawText: string,
+): [number, number] {
+  let start = index;
+  let end = index;
+  while (start - 1 >= 0 && ingredients[start - 1].rawText?.trim() === rawText) start -= 1;
+  while (end + 1 < ingredients.length && ingredients[end + 1].rawText?.trim() === rawText) end += 1;
+  return [start, end];
+}
+
+/**
+ * Re-parse the source line behind a row's group, with the set of alternatives
+ * the user wants AS ROWS adjusted by `change` (emit a folded range, or remove a
+ * row), then replace the group. The note is regenerated entirely by the parser.
+ *
+ * Default disposition per alternative: a MATCHED one is a row, an UNMATCHED one
+ * folds. We recover that from a clean parse, then express the user's deviations
+ * as forceEmit (unmatched ranges they kept as rows) and forceFold (matched
+ * ranges they removed) — so chips and deletes compose without clobbering.
+ */
+async function reparseGroupWithChange(
+  ingredients: readonly DraftIngredient[],
+  anchorIndex: number,
+  change: { emit?: Range; removeRange?: Range },
+): Promise<DraftIngredient[] | null> {
+  const rawText = ingredients[anchorIndex]?.rawText?.trim();
+  if (!rawText) return null;
+  const [start, end] = groupBounds(ingredients, anchorIndex, rawText);
+  // Alternative ranges currently shown AS ROWS in the group.
+  const emitted = new Set<string>();
+  for (let i = start; i <= end; i++) {
+    const r = ingredients[i].sourceRange;
+    if (ingredients[i].isAlternative && r) emitted.add(rangeKey(r));
+  }
+  if (change.emit) emitted.add(rangeKey(change.emit));
+  if (change.removeRange) emitted.delete(rangeKey(change.removeRange));
+  // Clean-parse to learn the default disposition of every alternative.
+  const [clean] = await reparseLines([rawText]);
+  const emittedByDefault = (clean ?? [])
+    .filter((p) => p.isAlternative && p.sourceRange)
+    .map((p) => p.sourceRange as Range);
+  const foldedByDefault = (clean ?? []).flatMap((p) => p.foldedAlternatives ?? []).map((f) => f.range);
+  // forceEmit: unmatched (default-fold) ranges the user wants as rows.
+  const forceEmit = foldedByDefault.filter((r) => emitted.has(rangeKey(r)));
+  // forceFold: matched (default-emit) ranges the user removed.
+  const forceFold = emittedByDefault.filter((r) => !emitted.has(rangeKey(r)));
+  const [parsed] = await reparseLines([rawText], {
+    forceEmitRanges: [forceEmit],
+    forceFoldRanges: [forceFold],
+  });
+  const drafts = (parsed ?? []).map(parsedIngredientToDraft);
+  if (drafts.length === 0) return null;
+  const out = ingredients.slice();
+  out.splice(start, end - start + 1, ...drafts);
+  return out;
+}
+
+/** Delete an alternative row: re-parse the line with it folded (and any prior
+ *  folds preserved). Returns null when the row has no source line to re-parse. */
 export async function reparseDeletingAlternative(
   ingredients: readonly DraftIngredient[],
   index: number,
 ): Promise<DraftIngredient[] | null> {
   const row = ingredients[index];
-  const rawText = row?.rawText?.trim();
-  const delRange = row?.sourceRange;
-  if (!rawText || !delRange) return null;
-  let start = index;
-  let end = index;
-  while (start - 1 >= 0 && ingredients[start - 1].rawText?.trim() === rawText) {
-    start -= 1;
-  }
-  while (
-    end + 1 < ingredients.length &&
-    ingredients[end + 1].rawText?.trim() === rawText
-  ) {
-    end += 1;
-  }
-  // Alternatives the user is KEEPING in this group (present rows minus the one
-  // being deleted), by source-range. Everything else from the line folds —
-  // including alternatives folded by a PREVIOUS delete (which are no longer
-  // rows here), so they don't reappear.
-  const kept = new Set<string>();
-  for (let i = start; i <= end; i++) {
-    const r = ingredients[i].sourceRange;
-    if (i !== index && ingredients[i].isAlternative && r) kept.add(rangeKey(r));
-  }
-  // Clean-parse the line to recover the full set of alternative ranges, then
-  // fold every one the user isn't keeping.
-  const [clean] = await reparseLines([rawText]);
-  const foldRanges = (clean ?? [])
-    .filter((p) => p.isAlternative && p.sourceRange)
-    .map((p) => p.sourceRange as [number, number])
-    .filter((r) => !kept.has(rangeKey(r)));
-  const [parsed] = await reparseLines([rawText], [foldRanges]);
-  const drafts = (parsed ?? []).map(parsedIngredientToDraft);
+  if (!row?.rawText?.trim() || !row.sourceRange) return null;
+  const next = await reparseGroupWithChange(ingredients, index, {
+    removeRange: row.sourceRange,
+  });
+  if (next) return next;
+  // Parser yielded nothing — fall back to a plain remove.
   const out = ingredients.slice();
-  // Parser yielded nothing (shouldn't happen with a folded alt, but be safe):
-  // just drop the deleted row rather than wiping the group.
-  if (drafts.length === 0) {
-    out.splice(index, 1);
-    return out;
-  }
-  out.splice(start, end - start + 1, ...drafts);
+  out.splice(index, 1);
   return out;
+}
+
+/** Promote a folded alternative (a "create alternative" chip) to its own row:
+ *  re-parse the primary's line with that range force-emitted. */
+export async function reparsePromotingAlternative(
+  ingredients: readonly DraftIngredient[],
+  primaryIndex: number,
+  range: Range,
+): Promise<DraftIngredient[] | null> {
+  if (!ingredients[primaryIndex]?.rawText?.trim()) return null;
+  return reparseGroupWithChange(ingredients, primaryIndex, { emit: range });
 }
 
 /** True when at least one row has an original source line to re-parse. */

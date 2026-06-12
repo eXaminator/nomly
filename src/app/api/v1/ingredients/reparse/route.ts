@@ -14,6 +14,11 @@ const schema = z.object({
   forceFoldRanges: z
     .array(z.array(z.tuple([z.number(), z.number()])))
     .optional(),
+  /** Optional, parallel to `lines`: alternative source-ranges to EMIT as their
+   *  own row even though they'd otherwise fold (the "create alternative" chip). */
+  forceEmitRanges: z
+    .array(z.array(z.tuple([z.number(), z.number()])))
+    .optional(),
 });
 
 /**
@@ -41,6 +46,7 @@ export async function POST(request: Request) {
   const results = parsed.data.lines.map((line, i) =>
     parseIngredientLines([line], lookups, {
       forceFoldRanges: parsed.data.forceFoldRanges?.[i],
+      forceEmitRanges: parsed.data.forceEmitRanges?.[i],
     }),
   );
   return NextResponse.json({ results });
