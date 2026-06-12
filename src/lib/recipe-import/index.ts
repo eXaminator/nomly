@@ -588,7 +588,25 @@ export type ParseIngredientsOptions = {
    * the source might mention.
    */
   autoMatchScoreThreshold?: number;
+  /**
+   * Alternative source-ranges (`[start, end)` into the line) to FORCE-fold into
+   * their primary's note instead of emitting as a row — set when the user
+   * deletes an alternative in the edit form and that single line is re-parsed.
+   * A segment whose `range` matches is routed through the AST fold path
+   * regardless of whether it matched the catalog. Ranges are line-local, so this
+   * is meant for a single-line re-parse (the delete-on-reparse flow).
+   */
+  forceFoldRanges?: ReadonlyArray<readonly [number, number]>;
 };
+
+/** Whether `range` is one of the caller's force-fold directives. */
+function isForceFolded(
+  range: readonly [number, number] | null | undefined,
+  forceFold: ReadonlyArray<readonly [number, number]> | undefined,
+): boolean {
+  if (!range || !forceFold) return false;
+  return forceFold.some(([s, e]) => s === range[0] && e === range[1]);
+}
 
 export function parseIngredientLines(
   lines: readonly string[],
@@ -656,6 +674,22 @@ export function parseIngredientLines(
         // alternative ("… (oder X, optional)"), flag the primary too.
         if (astSeg.isOptional && seg.isAlternative && lastPrimaryIndex !== null) {
           out[lastPrimaryIndex].isOptional = true;
+        }
+        // Force-fold: the caller (delete-on-reparse) asked this alternative to
+        // fold into its primary's note instead of becoming a row — honour it
+        // regardless of catalog match.
+        if (
+          seg.isAlternative &&
+          !seg.syntheticSource &&
+          lastPrimaryIndex !== null &&
+          isForceFolded(seg.range, options.forceFoldRanges)
+        ) {
+          foldAlternativeOntoRows(
+            originalTrimmed, out, foldTargets,
+            lastPrimaryIndex, lastPrimaryIndex,
+            seg.connectorLeaves ?? [], seg.leaves, sourceRange,
+          );
+          continue;
         }
         // Skip the row when the parser couldn't pull a real ingredient name
         // out of the line. Familywall data legitimately has entries like

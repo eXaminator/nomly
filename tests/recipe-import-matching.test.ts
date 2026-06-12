@@ -1274,6 +1274,24 @@ describe("parseIngredientLines — unmatched alternative → proposed row", () =
     expect(out[1].isAlternative).toBe(true);
   });
 
+  it("force-folds a specified alternative range into the primary's note (delete-on-reparse)", () => {
+    const catalog: IngredientCatalog = [
+      { ingredientId: 1, canonicalName: "Mehl", aliasName: "Mehl", tokens: ["mehl"] },
+    ];
+    const line = "200 g Mehl oder Stärke";
+    // First parse normally — Stärke is its own alternative row.
+    const normal = parseIngredientLines([line], makeLookups(catalog));
+    expect(normal).toHaveLength(2);
+    const altRange = normal[1].sourceRange!;
+    // Re-parse asking that range to fold (the user deleted the alternative).
+    const folded = parseIngredientLines([line], makeLookups(catalog), {
+      forceFoldRanges: [altRange],
+    });
+    expect(folded).toHaveLength(1);
+    expect(folded[0].ingredientId).toBe(1);
+    expect(folded[0].notes).toMatch(/oder Stärke/);
+  });
+
   it("emits the unmatched alternative as its own row when there is no primary to fold into", () => {
     const out = parseIngredientLines(
       ["(Alternativ: Stärke)"],
