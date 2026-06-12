@@ -39,14 +39,16 @@ async function reparseLines(
  * no source line/range to fold (e.g. a manually-added alternative); the caller
  * should fall back to a plain remove.
  */
+const rangeKey = (r: readonly [number, number]): string => `${r[0]},${r[1]}`;
+
 export async function reparseDeletingAlternative(
   ingredients: readonly DraftIngredient[],
   index: number,
 ): Promise<DraftIngredient[] | null> {
   const row = ingredients[index];
   const rawText = row?.rawText?.trim();
-  const foldRange = row?.sourceRange;
-  if (!rawText || !foldRange) return null;
+  const delRange = row?.sourceRange;
+  if (!rawText || !delRange) return null;
   let start = index;
   let end = index;
   while (start - 1 >= 0 && ingredients[start - 1].rawText?.trim() === rawText) {
@@ -58,7 +60,23 @@ export async function reparseDeletingAlternative(
   ) {
     end += 1;
   }
-  const [parsed] = await reparseLines([rawText], [[foldRange]]);
+  // Alternatives the user is KEEPING in this group (present rows minus the one
+  // being deleted), by source-range. Everything else from the line folds —
+  // including alternatives folded by a PREVIOUS delete (which are no longer
+  // rows here), so they don't reappear.
+  const kept = new Set<string>();
+  for (let i = start; i <= end; i++) {
+    const r = ingredients[i].sourceRange;
+    if (i !== index && ingredients[i].isAlternative && r) kept.add(rangeKey(r));
+  }
+  // Clean-parse the line to recover the full set of alternative ranges, then
+  // fold every one the user isn't keeping.
+  const [clean] = await reparseLines([rawText]);
+  const foldRanges = (clean ?? [])
+    .filter((p) => p.isAlternative && p.sourceRange)
+    .map((p) => p.sourceRange as [number, number])
+    .filter((r) => !kept.has(rangeKey(r)));
+  const [parsed] = await reparseLines([rawText], [foldRanges]);
   const drafts = (parsed ?? []).map(parsedIngredientToDraft);
   const out = ingredients.slice();
   // Parser yielded nothing (shouldn't happen with a folded alt, but be safe):

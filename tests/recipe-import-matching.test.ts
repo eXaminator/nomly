@@ -1321,6 +1321,23 @@ describe("parseIngredientLines — unmatched alternative → proposed row", () =
     expect(folded[0].notes).toMatch(/oder Stärke/);
   });
 
+  it("force-folds MULTIPLE alternative ranges at once (deleting a 2nd alt keeps the 1st folded)", () => {
+    const catalog: IngredientCatalog = [
+      { ingredientId: 1, canonicalName: "Mehl", aliasName: "Mehl", tokens: ["mehl"] },
+    ];
+    const line = "200 g Mehl oder Stärke oder Speisestärke";
+    const normal = parseIngredientLines([line], makeLookups(catalog));
+    expect(normal).toHaveLength(3);
+    const altRanges = normal.filter((r) => r.isAlternative).map((r) => r.sourceRange!);
+    // Folding BOTH alternative ranges (what delete-on-reparse does after the
+    // second delete) collapses to one row with both folded into the note.
+    const folded = parseIngredientLines([line], makeLookups(catalog), {
+      forceFoldRanges: altRanges,
+    });
+    expect(folded).toHaveLength(1);
+    expect(folded[0].notes).toBe("oder Stärke oder Speisestärke");
+  });
+
   it("emits the unmatched alternative as its own row when there is no primary to fold into", () => {
     const out = parseIngredientLines(
       ["(Alternativ: Stärke)"],
