@@ -34,7 +34,7 @@ import { Label } from "@/components/ui/label";
 import { MarkdownEditor } from "@/components/ui/markdown-editor";
 import { Textarea } from "@/components/ui/textarea";
 import { IngredientRow } from "./ingredient-row";
-import { reparseGroupAt } from "./reparse";
+import { reparseGroupAt, reparseDeletingAlternative } from "./reparse";
 import {
   emptyIngredient,
   parsedIngredientToDraft,
@@ -47,7 +47,6 @@ import {
   promoteAlternative as applyPromoteAlternative,
   detachAlternative as applyDetachAlternative,
   demoteToAlternative as applyDemoteToAlternative,
-  removeAlternativeFoldingNote,
 } from "./alternatives";
 
 /**
@@ -253,15 +252,24 @@ export function SectionEditor({
     number | null
   >(null);
 
-  function requestRemove(i: number) {
+  async function requestRemove(i: number) {
     const row = section.ingredients[i];
     if (row.isAlternative) {
-      // Alternative: fold it back into its primary's notes (as if it had never
-      // been split out) rather than discarding it.
-      onChange({
-        ...section,
-        ingredients: removeAlternativeFoldingNote(section.ingredients, i),
-      });
+      // Alternative: delete it by RE-PARSING its source line with the
+      // alternative folded into the primary's note — the note is regenerated
+      // by the AST, never string-concatenated. Falls back to a plain remove
+      // when there's no source line/range (a manually-added alternative).
+      let next: DraftIngredient[] | null = null;
+      try {
+        next = await reparseDeletingAlternative(section.ingredients, i);
+      } catch {
+        next = null;
+      }
+      if (!next) {
+        next = section.ingredients.slice();
+        next.splice(i, 1);
+      }
+      onChange({ ...section, ingredients: next });
       return;
     }
     // Primary: cascade-aware.

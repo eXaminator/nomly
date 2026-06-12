@@ -40,8 +40,8 @@ import {
   detachAlternative,
   moveAlternativeWithinGroup,
   promoteAlternative,
-  removeAlternativeFoldingNote,
 } from "./alternatives";
+import { reparseDeletingAlternative } from "./reparse";
 import { ingredientToPayload, toNumberOrNull } from "./payload";
 import { buildUnitInflector, type UnitInflector } from "./unit-inflect";
 import type { UnitForm } from "@/lib/recipes/reparse-scan";
@@ -64,11 +64,13 @@ function DraftEditList({
   rows,
   onChangeRow,
   onRemoveRow,
+  onRemoveAlternative,
   onMutate,
 }: {
   rows: DraftIngredient[];
   onChangeRow: (rowIdx: number, next: DraftIngredient) => void;
   onRemoveRow: (rowIdx: number) => void;
+  onRemoveAlternative: (rowIdx: number) => void;
   onMutate: (fn: (rows: DraftIngredient[]) => DraftIngredient[]) => void;
 }) {
   // Unique per mounted list: several entries can be in edit mode at once, so a
@@ -141,9 +143,9 @@ function DraftEditList({
                 key={rows[k].uid}
                 alt={rows[k]}
                 onChange={(next) => onChangeRow(k, next)}
-                // Removing an alternative folds it back into the primary's
-                // notes (as if it had never been split out).
-                onRemove={() => onMutate((rs) => removeAlternativeFoldingNote(rs, k))}
+                // Removing an alternative re-parses its source line with the
+                // alternative folded into the primary's note (AST-generated).
+                onRemove={() => onRemoveAlternative(k)}
                 onPromote={() => onMutate((rs) => promoteAlternative(rs, k))}
                 onDetach={() => onMutate((rs) => detachAlternative(rs, k))}
               />
@@ -580,6 +582,24 @@ export function BulkReparseDialog({
           : s,
       ),
     );
+  }
+  /** Delete an alternative by RE-PARSING its source line with the alternative
+   *  folded into the primary's note (the AST regenerates the note). Falls back
+   *  to a plain remove when there's no source line/range. */
+  async function removeAlternative(entryIdx: number, rowIdx: number) {
+    const rows = states[entryIdx]?.draft;
+    if (!rows) return;
+    let next: DraftIngredient[] | null = null;
+    try {
+      next = await reparseDeletingAlternative(rows, rowIdx);
+    } catch {
+      next = null;
+    }
+    if (!next) {
+      next = rows.slice();
+      next.splice(rowIdx, 1);
+    }
+    setEntryState(entryIdx, { draft: next });
   }
   /** Replace an entry's whole draft array via a pure transform — used by the
    *  alternative-management actions (add / promote / detach / demote). */
@@ -1136,6 +1156,7 @@ export function BulkReparseDialog({
                                       rows={st.draft}
                                       onChangeRow={(k, next) => setDraftRow(i, k, next)}
                                       onRemoveRow={(k) => removeDraftRow(i, k)}
+                                      onRemoveAlternative={(k) => removeAlternative(i, k)}
                                       onMutate={(fn) => mutateDraft(i, fn)}
                                     />
                                   </div>

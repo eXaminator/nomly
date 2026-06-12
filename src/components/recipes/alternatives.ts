@@ -122,61 +122,6 @@ export function moveAlternativeWithinGroup(
 }
 
 /**
- * The text an alternative folds back into its primary's notes — the verbatim
- * source fragment it was split from ("oder Ahornsirup", "or to taste") when the
- * parser captured it, else a best-effort reconstruction from current fields
- * ("oder <own amount?> <name>[, <notes>]"). Empty when there's nothing to fold
- * (a blank freshly-added alternative).
- */
-function alternativeFoldText(row: DraftIngredient): string {
-  if (row.sourceRange && row.rawText) {
-    const span = row.rawText.slice(row.sourceRange[0], row.sourceRange[1]).trim();
-    if (span.length > 0) return span;
-  }
-  const amount = row.quantity.trim()
-    ? `${row.quantity.trim()} ${row.unit?.name ?? ""}`.trim()
-    : "";
-  const body = [amount, row.name.trim()].filter((s) => s.length > 0).join(" ");
-  if (body.length === 0) return "";
-  const withNotes = row.notes.trim() ? `${body}, ${row.notes.trim()}` : body;
-  return `oder ${withNotes}`;
-}
-
-/**
- * Remove an alternative and fold its source fragment back into its primary's
- * notes — "as if it had never been split out". No-op fold for a blank row.
- * A non-alternative row is simply removed (defensive). Returns a NEW array.
- */
-export function removeAlternativeFoldingNote(
-  rows: readonly DraftIngredient[],
-  idx: number,
-): DraftIngredient[] {
-  const next = rows.slice();
-  const row = next[idx];
-  if (!row?.isAlternative) {
-    next.splice(idx, 1);
-    return next;
-  }
-  const primaryIdx = findPrimaryIndex(next, idx);
-  if (primaryIdx === idx) {
-    // Orphan alternative with no primary above — nothing to fold into.
-    next.splice(idx, 1);
-    return next;
-  }
-  const fragment = alternativeFoldText(row);
-  next.splice(idx, 1);
-  if (fragment.length > 0 && primaryIdx < next.length) {
-    const primary = next[primaryIdx];
-    const cur = primary.notes.trim();
-    next[primaryIdx] = {
-      ...primary,
-      notes: cur.length > 0 ? `${cur}, ${fragment}` : fragment,
-    };
-  }
-  return next;
-}
-
-/**
  * Demote a primary into an alternative of the row immediately above it. No-op
  * when it's the first row, already an alternative, or has its own alternatives
  * (which {@link canDemote} guards against to keep the depth-1 invariant).

@@ -13,19 +13,62 @@ import {
  */
 
 /** POST the lines to the re-parse endpoint. Returns parsed rows per line,
- *  parallel to the input (a line may expand into a primary + alternatives). */
+ *  parallel to the input (a line may expand into a primary + alternatives).
+ *  `forceFoldRanges` (parallel to `lines`) folds the given alternative ranges
+ *  into their primary's note instead of emitting rows. */
 async function reparseLines(
   lines: string[],
+  forceFoldRanges?: ReadonlyArray<ReadonlyArray<readonly [number, number]>>,
 ): Promise<ParsedIngredientResponse[][]> {
   if (lines.length === 0) return [];
   const r = await fetch("/api/v1/ingredients/reparse", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ lines }),
+    body: JSON.stringify(forceFoldRanges ? { lines, forceFoldRanges } : { lines }),
   });
   if (!r.ok) throw new Error("re-parse request failed");
   const data = (await r.json()) as { results: ParsedIngredientResponse[][] };
   return data.results;
+}
+
+/**
+ * Delete an alternative row by RE-PARSING its source line with that
+ * alternative folded into the primary's note — the note is regenerated purely
+ * by the parser (no client-side string folding). Replaces the whole group of
+ * rows that share the deleted row's `rawText`. Returns `null` when the row has
+ * no source line/range to fold (e.g. a manually-added alternative); the caller
+ * should fall back to a plain remove.
+ */
+export async function reparseDeletingAlternative(
+  ingredients: readonly DraftIngredient[],
+  index: number,
+): Promise<DraftIngredient[] | null> {
+  const row = ingredients[index];
+  const rawText = row?.rawText?.trim();
+  const foldRange = row?.sourceRange;
+  if (!rawText || !foldRange) return null;
+  let start = index;
+  let end = index;
+  while (start - 1 >= 0 && ingredients[start - 1].rawText?.trim() === rawText) {
+    start -= 1;
+  }
+  while (
+    end + 1 < ingredients.length &&
+    ingredients[end + 1].rawText?.trim() === rawText
+  ) {
+    end += 1;
+  }
+  const [parsed] = await reparseLines([rawText], [[foldRange]]);
+  const drafts = (parsed ?? []).map(parsedIngredientToDraft);
+  const out = ingredients.slice();
+  // Parser yielded nothing (shouldn't happen with a folded alt, but be safe):
+  // just drop the deleted row rather than wiping the group.
+  if (drafts.length === 0) {
+    out.splice(index, 1);
+    return out;
+  }
+  out.splice(start, end - start + 1, ...drafts);
+  return out;
 }
 
 /** True when at least one row has an original source line to re-parse. */

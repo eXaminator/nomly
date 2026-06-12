@@ -9,6 +9,11 @@ import {
 
 const schema = z.object({
   lines: z.array(z.string().min(1).max(500)).min(1).max(200),
+  /** Optional, parallel to `lines`: alternative source-ranges to fold into
+   *  their primary's note instead of emitting as rows (delete-on-reparse). */
+  forceFoldRanges: z
+    .array(z.array(z.tuple([z.number(), z.number()])))
+    .optional(),
 });
 
 /**
@@ -33,8 +38,10 @@ export async function POST(request: Request) {
     ingredients: buildIngredientLookup(),
     ingredientCatalog: buildIngredientCatalog(),
   };
-  const results = parsed.data.lines.map((line) =>
-    parseIngredientLines([line], lookups),
+  const results = parsed.data.lines.map((line, i) =>
+    parseIngredientLines([line], lookups, {
+      forceFoldRanges: parsed.data.forceFoldRanges?.[i],
+    }),
   );
   return NextResponse.json({ results });
 }
