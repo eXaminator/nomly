@@ -294,6 +294,13 @@ export const recipeIngredient = sqliteTable(
      */
     displayName: text("display_name"),
     quantity: real("quantity"),
+    /**
+     * Low bound of an amount range ("2–3 EL" → quantity=3, quantityLow=2).
+     * NULL = single amount. The high bound stays in `quantity`; shopping and
+     * servings scaling use only `quantity`, so the high bound is always the
+     * required one and the low bound is optional.
+     */
+    quantityLow: real("quantity_low"),
     unitId: integer("unit_id").references(() => unit.id, { onDelete: "set null" }),
     /**
      * Mirror of `display_name` for units: when the source said "Tasse" but
