@@ -689,7 +689,8 @@ export function parseIngredientLines(
         }
         // Force-fold: the caller (delete-on-reparse) asked this alternative to
         // fold into its primary's note instead of becoming a row — honour it
-        // regardless of catalog match.
+        // regardless of catalog match. Record it as a chip too, so the user can
+        // bring the just-deleted alternative back.
         if (
           seg.isAlternative &&
           !seg.syntheticSource &&
@@ -701,6 +702,12 @@ export function parseIngredientLines(
             lastPrimaryIndex, lastPrimaryIndex,
             seg.connectorLeaves ?? [], seg.leaves, sourceRange,
           );
+          if (seg.range && astSeg.name.trim().length > 0) {
+            (out[lastPrimaryIndex].foldedAlternatives ??= []).push({
+              range: seg.range,
+              label: astSeg.name,
+            });
+          }
           continue;
         }
         // Skip the row when the parser couldn't pull a real ingredient name

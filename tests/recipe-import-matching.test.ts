@@ -1336,6 +1336,8 @@ describe("parseIngredientLines — unmatched alternative folds + offers a chip",
     expect(folded).toHaveLength(1);
     expect(folded[0].ingredientId).toBe(1);
     expect(folded[0].notes).toMatch(/oder Stärke/);
+    // A deleted alternative comes back as a chip so the user can re-add it.
+    expect(folded[0].foldedAlternatives?.map((f) => f.label)).toEqual(["Stärke"]);
   });
 
   it("force-folds MULTIPLE matched alternative ranges (deleting a 2nd alt keeps the 1st folded)", () => {
@@ -1353,6 +1355,11 @@ describe("parseIngredientLines — unmatched alternative folds + offers a chip",
     });
     expect(folded).toHaveLength(1);
     expect(folded[0].notes).toBe("oder Stärke oder Speisestärke");
+    // Both deleted alternatives come back as chips.
+    expect(folded[0].foldedAlternatives?.map((f) => f.label)).toEqual([
+      "Stärke",
+      "Speisestärke",
+    ]);
   });
 
   it("emits the unmatched alternative as its own row when there is no primary to fold into", () => {
