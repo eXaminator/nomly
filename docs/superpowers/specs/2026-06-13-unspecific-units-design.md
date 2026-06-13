@@ -171,7 +171,6 @@ Form / API:
 ## Out of scope
 
 - Seeding specific unspecific units (etwas, a sprinkle, …) — the user adds them
-  via the unit management UI. We may seed "etwas" as a convenience, decided in
-  planning.
+  manually via the unit management UI. No units are seeded by this change.
 - Any richer "unspecified amount" amount model beyond the existing null-quantity
   path (tracked separately in the backlog).
