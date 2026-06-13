@@ -2688,3 +2688,28 @@ describe("a trailing note-only alternative is shared across the whole group", ()
     expect(out[0].foldedAlternatives?.map((f) => f.label)).toEqual(["schwarze Bohnen"]);
   });
 });
+
+describe("coordinated und-lists → mains", () => {
+  const HERBS: IngredientCatalog = ["Oregano", "Majoran", "Basilikum"].map(
+    (n, i) => ({
+      ingredientId: i + 1,
+      canonicalName: n,
+      aliasName: n,
+      tokens: [n.toLowerCase()],
+    }),
+  );
+
+  it("splits 'Oregano, Majoran und Basilikum nach Belieben' into 3 mains sharing the note", () => {
+    const out = parseIngredientLines(
+      ["Oregano, Majoran und Basilikum nach Belieben"],
+      makeLookups(HERBS),
+    );
+    expect(out.map((r) => r.name)).toEqual(["Oregano", "Majoran", "Basilikum"]);
+    expect(out.every((r) => r.isAlternative !== true)).toBe(true);
+    expect(out.map((r) => r.notes)).toEqual([
+      "nach Belieben",
+      "nach Belieben",
+      "nach Belieben",
+    ]);
+  });
+});

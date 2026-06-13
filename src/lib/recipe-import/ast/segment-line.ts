@@ -40,6 +40,13 @@ export type LineSegment =
       connectorLeaves?: Leaf[];
       localNote: boolean;
       tailNote: string | null;
+      /** True for members produced by the coordinated comma-list split ("A, B
+       *  und C"). Distinguishes a list MEMBER (an unmatched one folds into a
+       *  sibling's note and surfaces as a "+ add ingredient" pill) from a plain
+       *  conjunction main like "Salz und Pfeffer" (an unmatched one still emits
+       *  as a "new" main). Only set on `und`-list members; `oder`-list members
+       *  are alternatives and fold via the existing alternative path. */
+      fromCoordinatedList?: boolean;
       /** Leaves of a tail note after a parenthetical alternative ("(or X),
        *  peeled" → ", peeled") — cloned, depth-normalized. Folded onto the
        *  primary via the AST at end of line. */
@@ -459,6 +466,36 @@ function segmentRange(
     if (elided) return elided;
   }
 
+  // ── Coordinated comma-list: "A, B und C [note]" / "A, B oder C [note]" ─────
+  //    A comma-separated list of BARE-NAME items whose final boundary is an
+  //    explicit und/oder. The terminal connector decides the member role: "und"
+  //    → main rows (the matched ones; unmatched fold as "+ ingredient" pills),
+  //    "oder" → primary + alternatives (matched rows; unmatched fold as chips).
+  //    The last member keeps any trailing note ("nach Belieben"), which the
+  //    per-segment parser extracts and note-propagation shares to the siblings.
+  {
+    const list = coordinatedList(
+      all, from, to, baseDepth, opts.unitTokens, opts.knownIngredients,
+    );
+    if (list) {
+      const out: LineSegment[] = [];
+      list.items.forEach(([a, b], idx) => {
+        const isAlt = list.connector === "oder" && idx > 0;
+        const seg = makeIngredient(source, all, a, b, baseDepth, {
+          rawText: source.trim(),
+          forceOptional: isAlt ? true : optional,
+          isAlternative: isAlt,
+          connector: isAlt ? "oder" : null,
+          localNote: false,
+          tailNote: null,
+          ...(list.connector === "und" ? { fromCoordinatedList: true } : {}),
+        });
+        if (seg) out.push(seg);
+      });
+      if (out.length >= 2) return out;
+    }
+  }
+
   // ── "oder"/"or"/"/"/"o." chain ────────────────────────────────────────────
   {
     const seps = orSeparators(all, from, to, baseDepth);
@@ -597,6 +634,99 @@ function splitListItems(
   }
   if (to > start) items.push([start, to]);
   return items.filter(([a, b]) => b > a);
+}
+
+type CoordinatedList = {
+  items: Array<[number, number]>;
+  connector: "und" | "oder";
+};
+
+/**
+ * Detect a coordinated comma-list "A, B und C" / "A, B oder C [note]": at least
+ * one top-level comma, a TERMINAL und/oder connector joining the last two items,
+ * and bare-name items (no item past the first carries its own number — a shared
+ * leading amount on item 0 is allowed; a trailing note on the last item is left
+ * in place for the per-segment parser). Returns the item ranges + the terminal
+ * connector kind, or null when the run is not such a list (e.g. no comma, or no
+ * und/oder, or a non-name item).
+ */
+function coordinatedList(
+  all: readonly Leaf[],
+  from: number,
+  to: number,
+  depth: number,
+  unitTokens: ReadonlySet<string>,
+  known: ReadonlySet<string>,
+): CoordinatedList | null {
+  if (firstTopComma(all, from, to, depth) < 0) return null;
+  const seps: Array<Sep & { isOr: boolean }> = [
+    ...orSeparators(all, from, to, depth).map((s) => ({ ...s, isOr: true })),
+    ...conjSeparators(all, from, to, depth, unitTokens).map((s) => ({ ...s, isOr: false })),
+  ];
+  if (seps.length === 0) return null;
+  // Terminal connector = the last und/oder/slash separator in the run.
+  let terminal = seps[0];
+  for (const s of seps) if (s.at > terminal.at) terminal = s;
+  const connector: "und" | "oder" = terminal.isOr ? "oder" : "und";
+  // Item boundaries: top-level commas BEFORE the terminal connector + the
+  // terminal connector itself. Require at least one comma boundary so a plain
+  // "A und B" / "A oder B" (no comma) is left to the existing branches.
+  const boundaries: Array<{ at: number; span: number }> = [];
+  for (let i = from; i < terminal.at; i++) {
+    const l = all[i];
+    if (l.depth !== depth || l.kind !== "comma") continue;
+    const prev = all[i - 1];
+    const next = all[i + 1];
+    const decimal =
+      prev?.kind === "number" && next?.kind === "number" &&
+      prev.end === l.start && l.end === next.start;
+    if (!decimal) boundaries.push({ at: i, span: 1 });
+  }
+  if (boundaries.length === 0) return null;
+  boundaries.push({ at: terminal.at, span: terminal.span });
+  const items: Array<[number, number]> = [];
+  let start = from;
+  for (const b of boundaries) {
+    if (b.at > start) items.push([start, b.at]);
+    start = b.at + b.span;
+  }
+  if (to > start) items.push([start, to]); // last item keeps any trailing note
+  if (items.length < 2) return null;
+  // Bare-name guard: no item past the first may carry its own number leaf.
+  for (let k = 1; k < items.length; k++) {
+    for (let i = items[k][0]; i < items[k][1]; i++) {
+      if (all[i].depth === depth && all[i].kind === "number") return null;
+    }
+  }
+  // Existence gate: a genuine ingredient list has at least TWO members that
+  // match the catalog. This separates "Oregano, Majoran und Basilikum" (≥2
+  // known) from a prep note that happens to use a comma + "and" ("carrot,
+  // peeled and sliced" — only the head matches). Unmatched members of a real
+  // list still surface as "+" pills; they just don't make a non-list a list.
+  const knownCount = items.filter(([a, b]) => itemMatchesCatalog(all, a, b, known)).length;
+  if (knownCount < 2) return null;
+  return { items, connector };
+}
+
+/** Whether the item span [a,b) names a catalog ingredient: a content word (or an
+ *  adjacent word phrase) whose normalised form is a known alias key. */
+function itemMatchesCatalog(
+  all: readonly Leaf[],
+  a: number,
+  b: number,
+  known: ReadonlySet<string>,
+): boolean {
+  if (known.size === 0) return false;
+  const words: string[] = [];
+  for (let i = a; i < b; i++) if (all[i].kind === "word") words.push(norm(all[i].text));
+  if (words.some((w) => known.has(w))) return true;
+  // Multi-word aliases ("schwarze bohnen"): test contiguous word phrases.
+  for (let i = 0; i < words.length; i++) {
+    for (let j = i + 2; j <= words.length; j++) {
+      if (known.has(words.slice(i, j).join(" "))) return true;
+    }
+  }
+  return false;
 }
 
 /** Split an or-chain region into segments at the given separators. */
