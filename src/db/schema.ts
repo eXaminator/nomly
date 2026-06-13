@@ -367,6 +367,37 @@ export const recipeTag = sqliteTable(
   (t) => [primaryKey({ columns: [t.recipeId, t.tagId] })],
 );
 
+/** A household member, created automatically from their OIDC login. */
+export const user = sqliteTable("user", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  /** OIDC subject claim — the stable per-user identity. */
+  sub: text("sub").notNull().unique(),
+  /** Latest display name from the OIDC claims. */
+  name: text("name").notNull(),
+  lastLoginAt: integer("last_login_at").notNull().default(now),
+  /**
+   * Set once the tag→favorite backfill has run for this user (null = pending).
+   * Guards re-seeding favorites the user later removed. A removed-and-returning
+   * user gets a fresh row (null) and is re-seeded.
+   */
+  favoritesSeededAt: integer("favorites_seeded_at"),
+});
+
+/** Per-user favorite recipes. Removing a user (or a recipe) cascades here. */
+export const recipeFavorite = sqliteTable(
+  "recipe_favorite",
+  {
+    userId: integer("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    recipeId: integer("recipe_id")
+      .notNull()
+      .references(() => recipe.id, { onDelete: "cascade" }),
+    createdAt: integer("created_at").notNull().default(now),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.recipeId] })],
+);
+
 export const mealPlan = sqliteTable(
   "meal_plan",
   {
