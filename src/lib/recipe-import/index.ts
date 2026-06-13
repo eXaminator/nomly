@@ -725,6 +725,8 @@ export function parseIngredientLines(
         const piece = seg.segText;
         const segLookups = {
           knownUnitTokens,
+          unspecificUnitTokens: lookups.units.unspecificTokens,
+          maxUnitTokens: lookups.units.maxUnitTokens,
           containerTokens: lookups.units.containerTokens,
           catalog: lookups.ingredientCatalog ?? [],
           catalogIndex: lookups.ingredientCatalogIndex,
@@ -1466,6 +1468,8 @@ function parseGroupedIngredientLines(
           // parseIngredientLines (quantity/unit/notes/name/match/candidates).
           const segLookups = {
             knownUnitTokens,
+            unspecificUnitTokens: lookups.units.unspecificTokens,
+            maxUnitTokens: lookups.units.maxUnitTokens,
             containerTokens: lookups.units.containerTokens,
             catalog: lookups.ingredientCatalog ?? [],
             catalogIndex: lookups.ingredientCatalogIndex,

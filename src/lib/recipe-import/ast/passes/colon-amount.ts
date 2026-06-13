@@ -1,5 +1,5 @@
 import type { Leaf } from "../render-notes";
-import { applyAmountUnit, type AmountUnit } from "./amount-unit";
+import { applyAmountUnit, type AmountUnit, type UnspecificOpts } from "./amount-unit";
 
 /**
  * Handle the inverted "Name: qty unit" colon-amount form ("Mehl: 500 g")
@@ -14,6 +14,7 @@ export function applyColonAmount(
   source: string,
   leaves: Leaf[],
   knownUnitTokens: ReadonlySet<string>,
+  opts: UnspecificOpts = {},
 ): AmountUnit | null {
   const colonIdx = leaves.findIndex(
     (l) => l.depth === 0 && l.kind === "punct" && l.text === ":",
@@ -29,7 +30,7 @@ export function applyColonAmount(
     .filter((l) => l.depth === 0 && (l.kind === "word" || l.kind === "number"));
   if (before.length === 0) return null;
 
-  const res = applyAmountUnit(source, leaves.slice(colonIdx + 1), knownUnitTokens);
+  const res = applyAmountUnit(source, leaves.slice(colonIdx + 1), knownUnitTokens, opts);
   if (res.quantity === null && res.unitName === null) return null;
 
   leaves[colonIdx].consumed = true;

@@ -47,6 +47,13 @@ export type AmountUnit = {
   rangeExpression: string | null;
 };
 
+export type UnspecificOpts = {
+  /** Lowercased tokens of units that take no amount ("etwas", "a sprinkle"). */
+  unspecificTokens?: ReadonlySet<string>;
+  /** Max unit-name token width to probe (default 1 = single-token only). */
+  maxUnitTokens?: number;
+};
+
 const wordKey = (g: Group): string => g.text.toLowerCase().replace(/[.,]$/, "");
 
 /**
@@ -59,7 +66,10 @@ export function applyAmountUnit(
   source: string,
   leaves: Leaf[],
   knownUnitTokens: ReadonlySet<string>,
+  opts: UnspecificOpts = {},
 ): AmountUnit {
+  const unspecificTokens = opts.unspecificTokens ?? new Set<string>();
+  const maxUnitTokens = Math.max(1, opts.maxUnitTokens ?? 1);
   const rawGroups = groupByWhitespace(source, leaves);
   // Merge a spaced German decimal across the gap ("0," + "5" → "0,5") in place —
   // no source rewrite, the merged group keeps both groups' leaves and offsets.
@@ -116,6 +126,50 @@ export function applyAmountUnit(
   // hunting for the unit so "(28 oz.) can" still finds "can".
   const isParenGroup = (g: Group): boolean =>
     g.leaves.some((l) => l.depth > 0 || l.kind === "open" || l.kind === "close");
+
+  const isUnspecificName = (name: string): boolean => {
+    const l = name.toLowerCase();
+    return unspecificTokens.has(l) || unspecificTokens.has(norm(l));
+  };
+  // Longest contiguous unit window at index i: join group texts with single
+  // spaces and probe the known-unit set from maxUnitTokens down to 1. STRICT —
+  // exact joined-token equality only (no fuzzy/prefix/gaps). Skips windows that
+  // include an already-consumed group. Returns the matched length + display
+  // name, or null. With maxUnitTokens === 1 this reduces to the single-token
+  // `isUnit` check.
+  const matchUnitAt = (i: number): { len: number; name: string } | null => {
+    const maxLen = Math.min(maxUnitTokens, groups.length - i);
+    for (let len = maxLen; len >= 1; len--) {
+      const win = groups.slice(i, i + len);
+      if (win.some((g) => g.leaves.every((l) => l.consumed))) continue;
+      const raw = win.map((g) => g.text).join(" ");
+      const lower = raw.toLowerCase();
+      if (knownUnitTokens.has(lower) || knownUnitTokens.has(norm(lower))) {
+        return { len, name: raw.replace(/\.$/, "") };
+      }
+    }
+    return null;
+  };
+  const consumeUnitWindow = (i: number, len: number) => {
+    for (let k = 0; k < len; k++) consumeGroup(groups[i + k], "unit");
+  };
+
+  // Unspecific units ("etwas", "a sprinkle", "ein Schuss") take NO amount. If
+  // the segment leads with one — including a multi-word alias whose first word
+  // is an article ("a sprinkle") — claim it as the unit with a null quantity
+  // and stop. The "2 etwas" shape (number first) is handled by the main probe.
+  {
+    const m = matchUnitAt(cur);
+    if (m && isUnspecificName(m.name)) {
+      consumeUnitWindow(cur, m.len);
+      cur += m.len;
+      if (cur < groups.length && POST_UNIT_CONNECTORS.has(norm(groups[cur].text))) {
+        consumeGroup(groups[cur], "unit");
+        cur += 1;
+      }
+      return { quantity: null, unitName: m.name, rangeExpression: null };
+    }
+  }
 
   // A range that repeats its unit on both sides ("25 g – 50 g", "1 cup - 2
   // cups", "¼ tsp to ½ tsp"): number unit <connector> number [unit]. The
@@ -245,18 +299,24 @@ export function applyAmountUnit(
   let probe = cur;
   while (
     probe < groups.length &&
-    !isUnit(groups[probe]) &&
+    !matchUnitAt(probe) &&
     (SIZE_MODIFIERS.has(norm(groups[probe].text)) ||
       isSizeCompound(groups[probe]) ||
       isParenGroup(groups[probe]))
   ) {
     probe += 1;
   }
-  if (probe < groups.length && isUnit(groups[probe])) {
-    consumeGroup(groups[probe], "unit");
-    unitName = groups[probe].text.replace(/\.$/, "");
-    if (quantity === null) quantity = 1;
-    cur = probe + 1;
+  const probed = probe < groups.length ? matchUnitAt(probe) : null;
+  if (probed) {
+    consumeUnitWindow(probe, probed.len);
+    unitName = probed.name;
+    if (isUnspecificName(probed.name)) {
+      // Unspecific unit: drop any number parsed in front ("2 etwas" → null).
+      quantity = null;
+    } else if (quantity === null) {
+      quantity = 1;
+    }
+    cur = probe + probed.len;
     // A connector right after the unit ("Pinch OF …", "1 can OF …") links the
     // unit to the ingredient and is meaningless on its own — attach it to the
     // unit (highlighted with it, kept out of the notes), regardless of what
@@ -281,7 +341,8 @@ export function applyAmountUnit(
     if (!hasNumber && region.length >= 2 && last && isUnit(last)) {
       consumeGroup(last, "unit");
       unitName = last.text.replace(/\.$/, "");
-      if (quantity === null) quantity = 1;
+      if (isUnspecificName(unitName)) quantity = null;
+      else if (quantity === null) quantity = 1;
     }
   }
 
