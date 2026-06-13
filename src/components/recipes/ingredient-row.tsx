@@ -310,12 +310,11 @@ export function IngredientRow({
     });
   }
 
-  /** Click on a candidate pill: replace the row's name + notes with the
-   *  candidate's finished values (computed server-side from the matched
-   *  span) and link the ingredient. Pure replace — idempotent, so
-   *  re-clicking or switching pills never accumulates leftover notes
-   *  ("Paprikaschote rote" + pick Paprikaschoten → name "Paprikaschote",
-   *  note "rote"). `ingredient_id` links to the picked canonical.
+  /** Click on a candidate pill: switch the row's name + ingredient link to the
+   *  picked candidate. The row KEEPS its current note — clicking a pill only
+   *  changes which ingredient is linked, never throws away a note the user has
+   *  (or the parse produced); the candidate's own derived note is only used to
+   *  FILL an empty note. `ingredient_id` links to the picked canonical.
    *
    *  Equipment-flagged ingredients (Backpapier, Backform, …) default the
    *  row to isOptional=true on first resolution, mirroring the import-time
@@ -325,7 +324,7 @@ export function IngredientRow({
     onChange({
       ...value,
       name: c.name,
-      notes: c.notes ?? "",
+      notes: value.notes.trim().length > 0 ? value.notes : c.notes ?? "",
       selectedIngredientId: c.ingredientId,
       canonicalName:
         c.name.toLowerCase() === c.canonicalName.toLowerCase()
