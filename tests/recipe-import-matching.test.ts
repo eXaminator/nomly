@@ -2195,6 +2195,34 @@ describe("conjunction members share the full line (highlights align)", () => {
     }
   });
 
+  it("splits on '+' into separate mains, sharing a leading group note", () => {
+    const cat2: IngredientCatalog = [
+      { ingredientId: 1, canonicalName: "Eigelb", aliasName: "Eigelb", tokens: ["eigelb"] },
+      { ingredientId: 2, canonicalName: "Milch", aliasName: "Milch", tokens: ["milch"] },
+    ];
+    const out = parseIngredientLines(
+      ["Nach Belieben 1 Eigelb + 1 EL Milch"],
+      makeLookups(cat2, ["el"]),
+    );
+    expect(out).toHaveLength(2);
+    expect(out[0].name).toBe("Eigelb");
+    expect(out[0].isAlternative).toBe(false);
+    expect(out[1].name).toBe("Milch");
+    expect(out[1].isAlternative).toBe(false);
+    // The leading "Nach Belieben" qualifies the whole line → on BOTH members.
+    expect(out[0].notes).toMatch(/Nach Belieben/i);
+    expect(out[1].notes).toMatch(/Nach Belieben/i);
+  });
+
+  it("treats '+' between two NUMBERS as arithmetic, not a split ('2 + 1/4 cups')", () => {
+    const cat2: IngredientCatalog = [
+      { ingredientId: 1, canonicalName: "flour", aliasName: "flour", tokens: ["flour"] },
+    ];
+    const out = parseIngredientLines(["2 + 1/4 cups flour"], makeLookups(cat2, ["cups"]));
+    expect(out).toHaveLength(1);
+    expect(out[0].quantity).toBeCloseTo(2.25, 2);
+  });
+
   it("force-folds a conjunction member into the first sibling's note + chip (delete)", () => {
     const line = "Salz und Pfeffer";
     const normal = parseIngredientLines([line], makeLookups(cat));

@@ -240,7 +240,7 @@ function orSeparators(all: readonly Leaf[], from: number, to: number, depth: num
   return seps;
 }
 
-/** Top-level conjunction separators: "und" / "and" / "&". */
+/** Top-level conjunction separators: "und" / "and" / "&" / "+". */
 function conjSeparators(all: readonly Leaf[], from: number, to: number, depth: number): Sep[] {
   const seps: Sep[] = [];
   for (let i = from; i < to; i++) {
@@ -249,6 +249,14 @@ function conjSeparators(all: readonly Leaf[], from: number, to: number, depth: n
     let cand: Sep | null = null;
     if (isWordIn(l, CONJ_WORDS)) cand = { at: i, span: 1, word: norm(l.text) };
     else if (l.kind === "punct" && l.text === "&") cand = { at: i, span: 1, word: "&" };
+    else if (l.kind === "punct" && l.text === "+") {
+      // "+" joins ingredients ("1 Eigelb + 1 EL Milch") — but between two
+      // NUMBERS it's arithmetic ("2 + 1/4 cups" = 2¼), not a separator.
+      const before = prevContentWord(all, i, from);
+      const after = nextContentWord(all, i + 1, to);
+      const arithmetic = before?.kind === "number" && after?.kind === "number";
+      if (!arithmetic) cand = { at: i, span: 1, word: "+" };
+    }
     if (cand && hasContentAround(all, cand.at, cand.span, from, to)) seps.push(cand);
   }
   return seps;

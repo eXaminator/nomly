@@ -98,6 +98,10 @@ export type ImportedIngredient = {
    *  alternative's note is its own and must not propagate to siblings — set
    *  for notes inside a parenthetical alternative. Not persisted. */
   localNote?: boolean;
+  /** A leading note phrase the row carried before its amount ("Nach Belieben 1
+   *  Eigelb"). It qualifies the whole line, so for a conjunction group it
+   *  propagates to every member. Transient. */
+  leadNote?: string;
   /** Char range `[start, end)` of this row's OWN segment in its original line
    *  (`rawText`). For an alternative it includes the connector. Drives
    *  fold-back-on-removal. Transient. */
@@ -891,6 +895,7 @@ export function parseIngredientLines(
           isOptional: astSeg.isOptional || astSeg.isEquipment || seg.forceOptional,
           isAlternative: seg.isAlternative,
           localNote: seg.localNote,
+          leadNote: astSeg.noteContext.leadNote ?? undefined,
           // No parsed quantity → treat the amount as constant. Catches
           // "Salz nach Geschmack" / "etwas Olivenöl" so changing the meal's
           // portion size doesn't multiply a non-existent number.
@@ -1062,12 +1067,13 @@ function applyAlternativeInheritance(rows: ImportedIngredient[]): void {
 }
 
 /**
- * Propagate a conjunction group's trailing note to its members. For
- * "Salz & Pfeffer (nach Geschmack)" the "(nach Geschmack)" trails the last
- * member but applies to the whole group — copy it to every co-equal main in the
- * same source-line group that brought no note of its own. Notes ONLY (unlike
- * alternatives, conjunction members don't share an amount). A "conjunction
+ * Propagate a conjunction group's shared note to its members. A "conjunction
  * group" is a contiguous run of >1 main rows sharing the same `rawText`.
+ *  - a TRAILING note on the last member ("Salz & Pfeffer (nach Geschmack)")
+ *    copies to every member that brought no note of its own;
+ *  - a LEADING note phrase on the first member ("Nach Belieben 1 Eigelb + 1 EL
+ *    Milch") qualifies the whole line, so it's prepended to every member.
+ * Notes ONLY (unlike alternatives, conjunction members don't share an amount).
  */
 function applyConjunctionNotePropagation(rows: ImportedIngredient[]): void {
   let i = 0;
@@ -1096,6 +1102,25 @@ function applyConjunctionNotePropagation(rows: ImportedIngredient[]): void {
           rows[k].candidateMatches = rows[k].candidateMatches.map((c) =>
             mergeSharedNote(c, sharedNote),
           );
+        }
+      }
+      // A LEADING note phrase on the first member qualifies the whole line →
+      // ensure every member carries it (prepended, ahead of its own note).
+      const lead = rows[i].leadNote?.trim();
+      if (lead && lead.length > 0) {
+        const leadStart = (raw ?? "").indexOf(lead);
+        for (let k = i; k <= hi; k++) {
+          const cur = rows[k].notes?.trim() ?? "";
+          const hasLead =
+            cur === lead || cur.startsWith(`${lead},`) || cur.startsWith(`${lead} `);
+          if (hasLead) continue;
+          rows[k].notes = cur.length > 0 ? `${lead}, ${cur}` : lead;
+          if (k !== i && leadStart >= 0) {
+            (rows[k].highlightParts ??= []).push({
+              range: [leadStart, leadStart + lead.length],
+              kind: "note",
+            });
+          }
         }
       }
     }
@@ -1486,6 +1511,7 @@ function parseGroupedIngredientLines(
             isOptional: astSeg.isOptional || astSeg.isEquipment || seg.forceOptional,
             isAlternative: seg.isAlternative,
             localNote: seg.localNote,
+          leadNote: astSeg.noteContext.leadNote ?? undefined,
             fixedAmount: astSeg.quantity === null,
             // The segmenter supplies rawText (whole line for expanded rows, the
             // sub-piece for plain conjunction splits).
