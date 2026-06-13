@@ -218,6 +218,12 @@ export type UnitLookup = {
    * and prep-word stripping when a container is present.
    */
   containerTokens: Set<string>;
+  /** Lowercased names/aliases/plurals of units flagged `unspecific` — these
+   *  take no amount; the parser forces their quantity to null. */
+  unspecificTokens: Set<string>;
+  /** Largest token-count across all unit names/aliases (split on whitespace).
+   *  The amount pass probes unit windows from this width down to 1. */
+  maxUnitTokens: number;
   /** The configured global default unit id (or null) — the terminal fallback
    *  for a quantity-bearing line with no explicit unit. */
   globalDefaultUnitId: number | null;
@@ -228,12 +234,14 @@ export function buildUnitLookup(): UnitLookup {
   const byCanonicalName = new Map<string, UnitLookupEntry>();
   const byId = new Map<number, UnitLookupEntry>();
   const containerTokens = new Set<string>();
+  const unspecificTokens = new Set<string>();
   const canonical = db
     .select({
       id: unit.id,
       name: unit.name,
       plural: unit.plural,
       isContainer: unit.isContainer,
+      unspecific: unit.unspecific,
     })
     .from(unit)
     .all();
@@ -248,12 +256,14 @@ export function buildUnitLookup(): UnitLookup {
     byCanonicalName.set(lower, entry);
     byId.set(u.id, entry);
     if (u.isContainer) containerTokens.add(lower);
+    if (u.unspecific) unspecificTokens.add(lower);
     // A configured plural ("Dose" → "Dosen") is matchable too, but never
     // overwrites a singular already claimed by another unit/alias.
     if (u.plural) {
       const pl = u.plural.toLowerCase();
       if (!byNameOrAlias.has(pl)) byNameOrAlias.set(pl, entry);
       if (u.isContainer) containerTokens.add(pl);
+      if (u.unspecific) unspecificTokens.add(pl);
     }
   }
   const aliases = db
@@ -261,6 +271,7 @@ export function buildUnitLookup(): UnitLookup {
       id: unit.id,
       canonicalName: unit.name,
       isContainer: unit.isContainer,
+      isUnspecific: unit.unspecific,
       aliasName: unitAlias.name,
       aliasPlural: unitAlias.plural,
     })
@@ -278,13 +289,24 @@ export function buildUnitLookup(): UnitLookup {
       const key = token.toLowerCase();
       if (!byNameOrAlias.has(key)) byNameOrAlias.set(key, entry);
       if (a.isContainer) containerTokens.add(key);
+      if (a.isUnspecific) unspecificTokens.add(key);
     }
+  }
+  // The amount pass probes unit windows from the widest registered unit name
+  // (in tokens) down to 1 — so a single-word catalog never multi-token probes,
+  // and adding "a sprinkle" (2 tokens) raises the window to 2 automatically.
+  let maxUnitTokens = 1;
+  for (const key of byNameOrAlias.keys()) {
+    const n = key.trim().split(/\s+/).length;
+    if (n > maxUnitTokens) maxUnitTokens = n;
   }
   return {
     byNameOrAlias,
     byCanonicalName,
     byId,
     containerTokens,
+    unspecificTokens,
+    maxUnitTokens,
     globalDefaultUnitId: getGlobalDefaultUnitId(),
   };
 }
@@ -703,6 +725,8 @@ export function parseIngredientLines(
         const piece = seg.segText;
         const segLookups = {
           knownUnitTokens,
+          unspecificUnitTokens: lookups.units.unspecificTokens,
+          maxUnitTokens: lookups.units.maxUnitTokens,
           containerTokens: lookups.units.containerTokens,
           catalog: lookups.ingredientCatalog ?? [],
           catalogIndex: lookups.ingredientCatalogIndex,
@@ -1444,6 +1468,8 @@ function parseGroupedIngredientLines(
           // parseIngredientLines (quantity/unit/notes/name/match/candidates).
           const segLookups = {
             knownUnitTokens,
+            unspecificUnitTokens: lookups.units.unspecificTokens,
+            maxUnitTokens: lookups.units.maxUnitTokens,
             containerTokens: lookups.units.containerTokens,
             catalog: lookups.ingredientCatalog ?? [],
             catalogIndex: lookups.ingredientCatalogIndex,

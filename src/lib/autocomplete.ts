@@ -176,6 +176,8 @@ export type UnitPickerHit = {
   name: string;
   detail?: string;
   unitId: number;
+  /** True when the resolved unit takes no amount (etwas, a sprinkle). */
+  unspecific?: boolean;
 };
 
 /** Alias-aware unit search: canonical names + every alias as a distinct,
@@ -185,7 +187,7 @@ export function searchUnitsWithAliases(query: string): UnitPickerHit[] {
   if (q.length === 0) return [];
   const pattern = buildLikePattern(unaccent(q));
   const canonical = db
-    .select({ id: unit.id, name: unit.name })
+    .select({ id: unit.id, name: unit.name, unspecific: unit.unspecific })
     .from(unit)
     // Match the plural too, so a recipe's "cups" surfaces the "Cup" unit
     // (whose plural is "Cups") instead of stranding the user on "create".
@@ -195,13 +197,14 @@ export function searchUnitsWithAliases(query: string): UnitPickerHit[] {
     .orderBy(asc(unit.name))
     .limit(LIMIT)
     .all()
-    .map((u) => ({ id: u.id, name: u.name, unitId: u.id }));
+    .map((u) => ({ id: u.id, name: u.name, unitId: u.id, unspecific: u.unspecific }));
   const aliasRows = db
     .select({
       aliasId: unitAlias.id,
       aliasName: unitAlias.name,
       unitId: unit.id,
       canonicalName: unit.name,
+      unspecific: unit.unspecific,
     })
     .from(unitAlias)
     .innerJoin(unit, eq(unit.id, unitAlias.unitId))
@@ -216,6 +219,7 @@ export function searchUnitsWithAliases(query: string): UnitPickerHit[] {
       name: a.aliasName,
       detail: a.canonicalName,
       unitId: a.unitId,
+      unspecific: a.unspecific,
     }));
   return [...canonical, ...aliasRows];
 }
@@ -223,10 +227,21 @@ export function searchUnitsWithAliases(query: string): UnitPickerHit[] {
 /** Empty-query listing for the alias-aware picker: most-used canonical units
  *  first, then every alias (alphabetical). */
 export function listUnitsWithAliases(): UnitPickerHit[] {
+  // The usage-ranked canonical list doesn't carry the unspecific flag, so look
+  // it up once and tag the hits (keeps listUnitsByUsage's shared type intact).
+  const unspecificIds = new Set(
+    db
+      .select({ id: unit.id })
+      .from(unit)
+      .where(eq(unit.unspecific, true))
+      .all()
+      .map((r) => r.id),
+  );
   const canonical = listUnitsByUsage().map((u) => ({
     id: u.id,
     name: u.name,
     unitId: u.id,
+    unspecific: unspecificIds.has(u.id),
   }));
   const aliasRows = db
     .select({
@@ -234,6 +249,7 @@ export function listUnitsWithAliases(): UnitPickerHit[] {
       aliasName: unitAlias.name,
       unitId: unit.id,
       canonicalName: unit.name,
+      unspecific: unit.unspecific,
     })
     .from(unitAlias)
     .innerJoin(unit, eq(unit.id, unitAlias.unitId))
@@ -244,6 +260,7 @@ export function listUnitsWithAliases(): UnitPickerHit[] {
       name: a.aliasName,
       detail: a.canonicalName,
       unitId: a.unitId,
+      unspecific: a.unspecific,
     }));
   return [...canonical, ...aliasRows];
 }

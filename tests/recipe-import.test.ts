@@ -117,6 +117,8 @@ const TEST_LOOKUPS: ParseLookups = {
     byCanonicalName: new Map(UNIT_ENTRIES),
     byId: new Map(UNIT_ENTRIES.map(([, e]) => [e.id, e] as const)),
     containerTokens: CONTAINER_TOKENS,
+    unspecificTokens: new Set(),
+    maxUnitTokens: 1,
     globalDefaultUnitId: null,
   },
   ingredients: new Map(),

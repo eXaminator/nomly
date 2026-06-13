@@ -10,6 +10,8 @@ export type SelectSearchItem = {
   id: number;
   name: string;
   detail?: string;
+  /** True when the item is a unit that takes no amount (etwas, a sprinkle). */
+  unspecific?: boolean;
 };
 
 export type SelectSearchProps = {

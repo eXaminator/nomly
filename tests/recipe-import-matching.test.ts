@@ -29,6 +29,8 @@ function makeLookups(
     byCanonicalName: new Map(unitEntries),
     byId: new Map(unitEntries.map(([, e]) => [e.id, e] as const)),
     containerTokens: new Set(),
+    unspecificTokens: new Set(),
+    maxUnitTokens: 1,
     globalDefaultUnitId: null,
   };
   const ingredients: IngredientLookup = new Map();

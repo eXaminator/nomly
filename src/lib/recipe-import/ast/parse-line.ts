@@ -60,6 +60,10 @@ export type NoteContext = {
 
 export type SegmentLookups = {
   knownUnitTokens: ReadonlySet<string>;
+  /** Lowercased tokens of units flagged unspecific — they take no amount. */
+  unspecificUnitTokens?: ReadonlySet<string>;
+  /** Max unit-name token width to probe for multi-word units ("a sprinkle"). */
+  maxUnitTokens?: number;
   /** Container units (Dose/can/package…). When the segment carries one, the
    *  matcher keeps a leading prep adjective in the name ("crushed tomatoes")
    *  rather than peeling it to the notes — the adjective is part of the canned
@@ -198,9 +202,13 @@ export function parseLeaves(
   const leadNote = applyLeadingNotePhrase(leaves);
   // The inverted "Name: qty unit" form extracts its amount from after the colon
   // in place; otherwise the normal leading-amount pass runs.
+  const unspecificOpts = {
+    unspecificTokens: lookups.unspecificUnitTokens,
+    maxUnitTokens: lookups.maxUnitTokens,
+  };
   const { quantity, unitName, rangeExpression } =
-    applyColonAmount(source, leaves, lookups.knownUnitTokens) ??
-    applyAmountUnit(source, leaves, lookups.knownUnitTokens);
+    applyColonAmount(source, leaves, lookups.knownUnitTokens, unspecificOpts) ??
+    applyAmountUnit(source, leaves, lookups.knownUnitTokens, unspecificOpts);
   // Does the segment carry a container unit? Scans THIS segment's word leaves
   // (not the whole line) so a container in a sibling segment doesn't leak in.
   const hasContainer =
