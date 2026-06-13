@@ -10,7 +10,11 @@ import type { Leaf } from "../render-notes";
  * A wrapper with any OTHER content is kept: `(chopped (⅔ cup))` is NOT
  * collapsed because the outer paren also holds the word "chopped". After this
  * pass, the note renderer's normal root-level unwrap removes the surviving
- * single layer. Mutates `leaves` in place (offsets are untouched).
+ * single layer.
+ *
+ * Also drops a paren whose entire content was CONSUMED, leaving it empty —
+ * `(optional)` once "optional" is taken as the optional marker — so the note
+ * doesn't render a stray "( )". Mutates `leaves` in place (offsets untouched).
  */
 export function collapseRedundantParens(leaves: Leaf[]): void {
   let changed = true;
@@ -39,7 +43,17 @@ export function collapseRedundantParens(leaves: Leaf[]): void {
         if (first < 0) first = i;
         last = i;
       }
-      if (first < 0) continue; // empty parens — leave for the renderer
+      if (first < 0) {
+        // All content was consumed (e.g. "(optional)" once "optional" is taken
+        // as the optional marker) — the now-empty parens carry nothing, so drop
+        // them too instead of rendering a stray "( )".
+        leaves[o].consumed = true;
+        leaves[o].role = "connector";
+        leaves[c].consumed = true;
+        leaves[c].role = "connector";
+        changed = true;
+        continue;
+      }
       // Redundant only when the sole content is one paren group: the first live
       // leaf is an open whose matching close is the last live leaf.
       if (

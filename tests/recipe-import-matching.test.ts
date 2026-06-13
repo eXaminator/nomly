@@ -1290,6 +1290,20 @@ describe("parseIngredientLines — unmatched alternative folds + offers a chip",
     expect(emitted[1].ingredientMatch).toBe("new");
   });
 
+  it("drops a parenthesis whose content was fully consumed (no stray '( )')", () => {
+    const catalog: IngredientCatalog = [
+      { ingredientId: 1, canonicalName: "Gewürzgurken", aliasName: "Gewürzgurken", tokens: ["gewürzgurken"] },
+    ];
+    const out = parseIngredientLines(
+      ["5 Gewürzgurken (+ 2-3 EL Gurkenflüssigkeit (optional))"],
+      makeLookups(catalog, ["el"]),
+    );
+    // The inner "(optional)" is consumed as the optional marker → its now-empty
+    // parens drop, leaving no "( )" / dangling separators in the note.
+    expect(out[0].notes).toBe("+ 2-3 EL Gurkenflüssigkeit");
+    expect(out[0].isOptional).toBe(true);
+  });
+
   it("attaches a footnote '*' directly to the preceding note ('(gemahlen)*' → 'gemahlen*')", () => {
     const catalog: IngredientCatalog = [
       { ingredientId: 1, canonicalName: "Kreuzkümmel", aliasName: "Kreuzkümmel", tokens: ["kreuzkümmel"] },
