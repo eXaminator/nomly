@@ -514,7 +514,7 @@ export function IngredientRow({
         >
           <Trash2 className="size-4" />
         </Button>
-        <div className="col-start-1 col-span-3 row-start-4 md:col-start-3 md:col-span-2 md:row-start-2">
+        <div className="col-start-1 col-span-3 row-start-4 md:col-start-1 md:col-span-5 md:row-start-2">
           <CandidatePills
             name={value.name}
             candidates={serverMatches}
@@ -711,9 +711,9 @@ export function IngredientRow({
               aria-label="Notiz"
               className="col-span-2 md:col-span-1 md:col-start-4 md:row-start-1"
             />
-            {/* CandidatePills span the Name + Notes columns on desktop and the
-                full mobile width. */}
-            <div className="col-span-8 md:col-span-2 md:col-start-3 md:row-start-2">
+            {/* CandidatePills use the FULL row width on both mobile and
+                desktop, starting at the amount column (col 1). */}
+            <div className="col-span-8 md:col-span-10 md:col-start-1 md:row-start-2">
               <CandidatePills
                 name={value.name}
                 candidates={serverMatches}
