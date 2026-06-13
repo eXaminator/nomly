@@ -782,14 +782,6 @@ function IngredientGroup({
         dragAttributes={attributes}
         dragListeners={listeners}
       />
-      {group.primary.foldedAlternatives?.length ? (
-        <div className="py-1 pl-3">
-          <FoldedAltChips
-            folded={group.primary.foldedAlternatives}
-            onPromote={onPromoteFolded}
-          />
-        </div>
-      ) : null}
       {/* Alternatives form their own nested sortable list so they can be
           reordered among themselves (within this group only). The drag is
           handled by the same DndContext in recipe-form; its onDragEnd routes
@@ -813,6 +805,14 @@ function IngredientGroup({
           );
         })}
       </SortableContext>
+      {group.primary.foldedAlternatives?.length ? (
+        <div className="py-1 pl-3">
+          <FoldedAltChips
+            folded={group.primary.foldedAlternatives}
+            onPromote={onPromoteFolded}
+          />
+        </div>
+      ) : null}
     </div>
   );
 }

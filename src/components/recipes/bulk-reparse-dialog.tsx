@@ -137,10 +137,6 @@ function DraftEditList({
       {groups.map((g) => (
         <React.Fragment key={rows[g.leaderIdx].uid}>
           {leaderRow(g.leaderIdx)}
-          <FoldedAltChips
-            folded={rows[g.leaderIdx].foldedAlternatives}
-            onPromote={(range) => onPromoteFolded(g.leaderIdx, range)}
-          />
           <SortableContext
             items={g.altIdxs.map((k) => rows[k].uid)}
             strategy={verticalListSortingStrategy}
@@ -158,6 +154,10 @@ function DraftEditList({
               />
             ))}
           </SortableContext>
+          <FoldedAltChips
+            folded={rows[g.leaderIdx].foldedAlternatives}
+            onPromote={(range) => onPromoteFolded(g.leaderIdx, range)}
+          />
         </React.Fragment>
       ))}
     </DndContext>
