@@ -5,6 +5,7 @@ import { Clock, Pencil, Users, Wrench } from "lucide-react";
 import type { RecipeListItem } from "@/lib/recipes/types";
 import { cn } from "@/lib/cn";
 import { DietBadge } from "./diet-badge";
+import { FavoriteHeart } from "./favorite-heart";
 
 type Props = { recipe: RecipeListItem };
 
@@ -20,6 +21,11 @@ export function RecipeCard({ recipe }: Props) {
       >
         <Pencil className="size-4" />
       </Link>
+      <FavoriteHeart
+        recipeId={recipe.id}
+        initial={recipe.isFavorite}
+        className="absolute right-12 top-2"
+      />
       <Link
         href={`/rezepte/${recipe.id}`}
         className="flex h-full flex-col"

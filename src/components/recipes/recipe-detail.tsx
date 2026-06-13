@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { DietBadge } from "@/components/recipes/diet-badge";
 import { DietMarker } from "@/components/recipes/diet-marker";
 import { NeedsUpdateToggle } from "@/components/recipes/needs-update-toggle";
+import { FavoriteToggle } from "@/components/recipes/favorite-toggle";
 import { IngredientLine } from "@/components/recipes/ingredient-line";
 import {
   InstructionBody,
@@ -125,6 +126,7 @@ export function RecipeDetail({
               embed/iframe view, whose allow-list permits exactly this one
               write. Only the edit link is gated by `showEdit`. */}
           <div className="flex shrink-0 flex-wrap gap-2">
+            <FavoriteToggle recipeId={recipe.id} initial={recipe.isFavorite} />
             <NeedsUpdateToggle
               recipeId={recipe.id}
               initial={recipe.needsUpdate}
