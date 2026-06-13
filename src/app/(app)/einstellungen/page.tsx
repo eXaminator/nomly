@@ -71,6 +71,12 @@ const STAMMDATEN_LINKS: Array<{
     description:
       "Bearer-Tokens für Maschinen-Zugriff auf die API — Home Assistant, Familywall-Import.",
   },
+  {
+    href: "/einstellungen/benutzer",
+    title: "Benutzer",
+    description:
+      "Per Login automatisch angelegte Benutzer mit letztem Login. Entfernen löscht ihre Favoriten, bis sie sich erneut anmelden.",
+  },
 ];
 
 export const metadata = { title: "Einstellungen" };
