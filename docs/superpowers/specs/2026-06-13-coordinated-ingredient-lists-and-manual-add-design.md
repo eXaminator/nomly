@@ -63,10 +63,19 @@ members go through:
   logic.
 
 So a comma-list's terminal connector decides everything: `A, B und C` → three
-mains; `A, B oder C` → `A` primary with `B`/`C` as alternatives. `Paprika, rot
-oder gelb` is therefore handled by the alternative path (rot/gelb become
-alternatives, not mains, and — being absent from the catalog — fold into
-alternative chips), and needs no capitalization heuristic.
+mains; `A, B oder C` → `A` primary with `B`/`C` as alternatives.
+
+**The existence gate is a precondition for BOTH connectors** (see "the existence
+rule" below): a comma-list is only treated as coordinated when **at least two of
+its items match the catalog**. This is what separates a real list from a comma +
+connector that is actually prep (`carrot, peeled and sliced`; `onion, chopped or
+diced`) — those have only the head in the catalog, so they stay one row + note.
+A consequence: `Paprika, rot oder gelb` (only `Paprika` in the catalog) is **not**
+a coordinated list and stays a single `Paprika` row with `rot oder gelb` in its
+note — unchanged from today. The user's `1 Gurke oder Paprika` / `1 Gurke oder
+Schmackofatz` cases are **bare `oder` (no comma)**, already handled by the
+existing alternative path; the comma-list rule only adds the multi-item case
+(`Dill, Petersilie oder Schnittlauch`). No capitalization heuristic is needed.
 
 **The existence rule (governs auto-generation everywhere):** a coordinated-list
 member is **auto-generated as a line if and only if it matches the catalog**.
@@ -314,14 +323,15 @@ Parser (vitest, `tests/recipe-import*.test.ts`):
   (`Majoran`, `Basilikum`) with correct ranges/labels.
 - Mixed (`Oregano, Schabziger und Basilikum`, Schabziger absent) → `Oregano` +
   `Basilikum` mains, `+ Schabziger` folded.
-- `Paprika, rot oder gelb` (terminal `oder`) → **alternative** path, not mains:
-  single `Paprika` primary with `rot`/`gelb` as alternatives (folded as
-  alternative chips since absent from the catalog). Confirms `oder` never produces
-  mains. NOTE: today this line stays a single `Paprika` + note `rot oder gelb`;
-  the comma-list expansion making `rot`/`gelb` alternatives is **new**.
+- `Paprika, rot oder gelb` (only `Paprika` in catalog → fails the ≥2 existence
+  gate) → **unchanged**: a single `Paprika` row with `rot oder gelb` in its note.
+  The gate keeps prep-like comma+oder runs from splitting.
 - `Dill, Petersilie oder Schnittlauch` (terminal `oder`, all catalog) →
   `Dill` primary + `Petersilie`/`Schnittlauch` as **alternatives** (not mains) —
-  the connector, not catalog membership, decides the role.
+  the terminal connector decides main-vs-alternative once the list is recognized.
+- `Dill, Petersilie oder Schmackofatz` (Dill+Petersilie catalog, ≥2 → a list) →
+  `Dill` primary + `Petersilie` alternative + `Schmackofatz` folded as an
+  alternative **chip** (unmatched member of an `oder` list).
 - `Zwiebel, gewürfelt` → unchanged: 1 main, `gewürfelt` stays in the note (no
   terminal und/oder → not a coordinated list).
 - `Salz und Pfeffer nach Geschmack` → unchanged baseline (2 mains, shared note).

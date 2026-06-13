@@ -2750,3 +2750,48 @@ describe("coordinated lists — non-regression", () => {
     expect(out.map((r) => r.notes)).toEqual(["nach Geschmack", "nach Geschmack"]);
   });
 });
+
+describe("coordinated oder-lists → alternatives", () => {
+  const HERBS3: IngredientCatalog = ["Dill", "Petersilie", "Schnittlauch"].map(
+    (n, i) => ({
+      ingredientId: i + 1, canonicalName: n, aliasName: n, tokens: [n.toLowerCase()],
+    }),
+  );
+
+  it("routes 'Dill, Petersilie oder Schnittlauch' to primary + alternatives", () => {
+    const out = parseIngredientLines(["Dill, Petersilie oder Schnittlauch"], makeLookups(HERBS3));
+    expect(out.map((r) => r.name)).toEqual(["Dill", "Petersilie", "Schnittlauch"]);
+    expect(out.map((r) => r.isAlternative ?? false)).toEqual([false, true, true]);
+  });
+
+  it("folds an unmatched member of a comma+oder list as an alternative chip", () => {
+    const cat: IngredientCatalog = [
+      { ingredientId: 1, canonicalName: "Dill", aliasName: "Dill", tokens: ["dill"] },
+      { ingredientId: 2, canonicalName: "Petersilie", aliasName: "Petersilie", tokens: ["petersilie"] },
+    ];
+    const out = parseIngredientLines(["Dill, Petersilie oder Schmackofatz"], makeLookups(cat));
+    expect(out.map((r) => r.name)).toEqual(["Dill", "Petersilie"]);
+    expect(out.map((r) => r.isAlternative ?? false)).toEqual([false, true]);
+    expect((out[0].foldedAlternatives ?? []).map((f) => f.label)).toContain("Schmackofatz");
+  });
+});
+
+describe("coordinated lists — oder non-regression", () => {
+  it("leaves bare 'Dill oder Petersilie' (no comma) as primary + alternative", () => {
+    const cat: IngredientCatalog = ["Dill", "Petersilie"].map((n, i) => ({
+      ingredientId: i + 1, canonicalName: n, aliasName: n, tokens: [n.toLowerCase()],
+    }));
+    const out = parseIngredientLines(["Dill oder Petersilie"], makeLookups(cat));
+    expect(out.map((r) => r.name)).toEqual(["Dill", "Petersilie"]);
+    expect(out.map((r) => r.isAlternative ?? false)).toEqual([false, true]);
+  });
+
+  it("leaves 'Paprika, rot oder gelb' unchanged (only 1 catalog member → not a list)", () => {
+    const cat: IngredientCatalog = [
+      { ingredientId: 1, canonicalName: "Paprika", aliasName: "Paprika", tokens: ["paprika"] },
+    ];
+    const out = parseIngredientLines(["Paprika, rot oder gelb"], makeLookups(cat));
+    expect(out).toHaveLength(1);
+    expect(out[0].name).toBe("Paprika");
+  });
+});
