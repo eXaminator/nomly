@@ -21,19 +21,33 @@ export function parseDiet(
   return undefined;
 }
 
-export function toListOptions(params: {
-  q?: string | null;
-  must?: string | null;
-  not?: string | null;
-  diet?: string | null;
-  update?: string | null;
-}): ListRecipesOptions {
+function parseUserId(raw: string | null | undefined): number | undefined {
+  if (!raw) return undefined;
+  const n = Number(raw);
+  return Number.isInteger(n) && n > 0 ? n : undefined;
+}
+
+export function toListOptions(
+  params: {
+    q?: string | null;
+    must?: string | null;
+    not?: string | null;
+    diet?: string | null;
+    update?: string | null;
+    /** Filter to recipes favorited by this user id (the `fav` query param). */
+    fav?: string | null;
+  },
+  /** The viewer's user id — populates each item's `isFavorite`. */
+  currentUserId?: number,
+): ListRecipesOptions {
   return {
     query: params.q ?? undefined,
     mustTags: parseTagList(params.must),
     notTags: parseTagList(params.not),
     diet: parseDiet(params.diet),
     needsUpdate: params.update === "1" ? true : undefined,
+    favoriteOfUserId: parseUserId(params.fav),
+    currentUserId,
   };
 }
 
@@ -45,6 +59,7 @@ export function filtersActive(opts: ListRecipesOptions): boolean {
       opts.mustTags?.length ||
       opts.notTags?.length ||
       opts.diet ||
-      opts.needsUpdate,
+      opts.needsUpdate ||
+      opts.favoriteOfUserId != null,
   );
 }

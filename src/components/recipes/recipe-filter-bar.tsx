@@ -1,6 +1,7 @@
 "use client";
 
 import { DietFilter, type DietChoice } from "./diet-filter";
+import { FavoritesFilter, type FavoriteUserOption } from "./favorites-filter";
 import { NeedsUpdateFilter } from "./needs-update-filter";
 import { RandomizeButton } from "./randomize-button";
 import { RecipeSearch } from "./recipe-search";
@@ -47,6 +48,12 @@ type Props = {
    *  filter here adds it to every list. */
   value?: RecipeFilterValue;
   onChange?: (next: RecipeFilterValue) => void;
+  /** Household users for the favorites filter. When provided (the `/rezepte`
+   *  list), a URL-backed "★ Favoriten" control renders; omitted elsewhere (the
+   *  planner) so the favorites filter stays out of those surfaces. */
+  users?: FavoriteUserOption[];
+  /** The viewer's user id — labels their dropdown entry "Meine". */
+  currentUserId?: number | null;
 };
 
 /**
@@ -55,7 +62,13 @@ type Props = {
  * "needs update", randomize and tag filters. Must be rendered inside a
  * {@link RandomizeProvider} so the randomize control has its context.
  */
-export function RecipeFilterBar({ allTags, value, onChange }: Props) {
+export function RecipeFilterBar({
+  allTags,
+  value,
+  onChange,
+  users,
+  currentUserId,
+}: Props) {
   // Both-or-neither: a single patch helper proves controlled mode and feeds
   // every sub-control. When absent the controls fall back to URL-backed mode.
   const patch =
@@ -78,6 +91,9 @@ export function RecipeFilterBar({ allTags, value, onChange }: Props) {
           value={value?.needsUpdate}
           onChange={patch ? (needsUpdate) => patch({ needsUpdate }) : undefined}
         />
+        {users ? (
+          <FavoritesFilter users={users} currentUserId={currentUserId ?? null} />
+        ) : null}
         <RandomizeButton />
       </div>
       {allTags.length > 0 ? (

@@ -5,6 +5,7 @@ import { Clock, Pencil, Users, Wrench } from "lucide-react";
 import type { RecipeListItem } from "@/lib/recipes/types";
 import { cn } from "@/lib/cn";
 import { DietBadge } from "./diet-badge";
+import { FavoriteHeart } from "./favorite-heart";
 
 type Props = { recipe: RecipeListItem };
 
@@ -16,10 +17,15 @@ export function RecipeCard({ recipe }: Props) {
         onClick={(e) => e.stopPropagation()}
         aria-label={`„${recipe.title}" bearbeiten`}
         title="Direkt bearbeiten"
-        className="absolute right-2 top-2 z-10 inline-flex size-8 items-center justify-center rounded-full border border-[var(--color-border)] bg-[var(--color-card)]/85 text-[var(--color-fg)] opacity-0 backdrop-blur-sm transition-opacity hover:bg-[var(--color-card)] focus-visible:opacity-100 group-hover:opacity-100"
+        className="absolute right-12 top-2 z-10 inline-flex size-8 items-center justify-center rounded-full border border-[var(--color-border)] bg-[var(--color-card)]/85 text-[var(--color-fg)] opacity-0 backdrop-blur-sm transition-opacity hover:bg-[var(--color-card)] focus-visible:opacity-100 group-hover:opacity-100"
       >
         <Pencil className="size-4" />
       </Link>
+      <FavoriteHeart
+        recipeId={recipe.id}
+        initial={recipe.isFavorite}
+        className="absolute right-2 top-2"
+      />
       <Link
         href={`/rezepte/${recipe.id}`}
         className="flex h-full flex-col"

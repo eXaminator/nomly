@@ -281,6 +281,13 @@
       "when": 1781378667303,
       "tag": "0039_confused_obadiah_stane",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "6",
+      "when": 1781383981794,
+      "tag": "0040_sour_blob",
+      "breakpoints": true
     }
   ]
 }

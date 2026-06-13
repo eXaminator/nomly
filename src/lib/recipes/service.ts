@@ -2,6 +2,7 @@ import { and, count, eq, inArray, isNull, sql } from "drizzle-orm";
 import { db } from "../../db/index.ts";
 import {
   recipe,
+  recipeFavorite,
   recipeIngredient,
   recipeSection,
   recipeTag,
@@ -26,6 +27,7 @@ import type {
 import { deriveDiet, type IngredientDietaryClass } from "./diet.ts";
 import { isOptionalIngredient } from "./optional.ts";
 import { fold, matchRecipe, parseQuery } from "./search.ts";
+import { favoriteRecipeIdsForUser } from "./favorites.ts";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -433,9 +435,25 @@ export function deleteRecipe(id: number): boolean {
   return result.changes > 0;
 }
 
-export function getRecipe(id: number): RecipeView | null {
+export function getRecipe(
+  id: number,
+  currentUserId?: number | null,
+): RecipeView | null {
   const head = db.select().from(recipe).where(eq(recipe.id, id)).get();
   if (!head) return null;
+  const isFavorite =
+    currentUserId != null
+      ? db
+          .select({ recipeId: recipeFavorite.recipeId })
+          .from(recipeFavorite)
+          .where(
+            and(
+              eq(recipeFavorite.userId, currentUserId),
+              eq(recipeFavorite.recipeId, id),
+            ),
+          )
+          .get() != null
+      : false;
 
   const sections = db
     .select()
@@ -615,6 +633,7 @@ export function getRecipe(id: number): RecipeView | null {
     isVegetarian: diet.isVegetarian,
     dietConfidence: diet.confidence,
     needsUpdate: head.needsUpdate,
+    isFavorite,
     sections: sections.map((s) => ({
       id: s.id,
       title: s.title,
@@ -675,6 +694,11 @@ export type ListRecipesOptions = {
   diet?: "vegetarian" | "vegan";
   /** When true, keep only recipes flagged `needs_update`. */
   needsUpdate?: boolean;
+  /** When set, keep only recipes this user has favorited. */
+  favoriteOfUserId?: number;
+  /** When set, each returned item's `isFavorite` reflects this user's
+   *  favorites. */
+  currentUserId?: number;
 };
 
 /**
@@ -724,11 +748,22 @@ function loadIngredientIndex(recipeIds: number[]): Map<number, string> {
 
 export function listRecipes(opts: ListRecipesOptions = {}): RecipeListItem[] {
   const { query, mustTags = [], notTags = [], diet, needsUpdate } = opts;
+  const { favoriteOfUserId, currentUserId } = opts;
 
   const rows = db.select().from(recipe).all();
   if (rows.length === 0) return [];
 
   const ids = rows.map((r) => r.id);
+  // Favorites of the viewer (for `isFavorite`) and, when filtering, of the
+  // target user. The same set is reused when both are the same user.
+  const myFavorites =
+    currentUserId != null ? favoriteRecipeIdsForUser(currentUserId) : null;
+  const filterFavorites =
+    favoriteOfUserId != null
+      ? favoriteOfUserId === currentUserId && myFavorites
+        ? myFavorites
+        : favoriteRecipeIdsForUser(favoriteOfUserId)
+      : null;
   const dietByRecipe = computeDietForRecipes(ids);
   const tagsByRecipe = new Map<number, string[]>();
   const tagRows = db
@@ -757,6 +792,7 @@ export function listRecipes(opts: ListRecipesOptions = {}): RecipeListItem[] {
 
   for (const r of rows) {
     if (needsUpdate === true && !r.needsUpdate) continue;
+    if (filterFavorites && !filterFavorites.has(r.id)) continue;
     const recipeTags = (tagsByRecipe.get(r.id) ?? []).map((t) => t.toLowerCase());
     if (mustLower.length > 0 || notLower.length > 0) {
       const have = new Set(recipeTags);
@@ -818,6 +854,7 @@ export function listRecipes(opts: ListRecipesOptions = {}): RecipeListItem[] {
       isVegetarian: dietRow.isVegetarian,
       dietConfidence: dietRow.confidence,
       needsUpdate: r.needsUpdate,
+      isFavorite: myFavorites?.has(r.id) ?? false,
     };
   });
 }

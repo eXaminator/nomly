@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createRecipe, listRecipes } from "@/lib/recipes/service";
 import { toListOptions } from "@/lib/recipes/list-query";
+import { getCurrentUser } from "@/lib/users/current";
 import type { PlannerRecipe } from "@/lib/recipes/types";
 import { recipeInputSchema } from "@/lib/recipes/validate";
 import {
@@ -10,14 +11,19 @@ import {
 
 export async function GET(request: Request) {
   const sp = new URL(request.url).searchParams;
+  const me = await getCurrentUser();
   const recipes = listRecipes(
-    toListOptions({
-      q: sp.get("q"),
-      must: sp.get("must"),
-      not: sp.get("not"),
-      diet: sp.get("diet"),
-      update: sp.get("update"),
-    }),
+    toListOptions(
+      {
+        q: sp.get("q"),
+        must: sp.get("must"),
+        not: sp.get("not"),
+        diet: sp.get("diet"),
+        update: sp.get("update"),
+        fav: sp.get("fav"),
+      },
+      me?.id,
+    ),
   );
   // `fields=light` returns the PlannerRecipe subset — the meal planner only
   // renders title/photo/tags/diet and seeds portions from `servings`, so it

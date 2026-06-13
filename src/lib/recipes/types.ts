@@ -146,6 +146,8 @@ export type RecipeListItem = {
   /** User flag: this recipe is marked for a later edit. Drives the card
    *  badge and the "Update nötig" list filter. */
   needsUpdate: boolean;
+  /** Whether the CURRENT viewer has favorited this recipe. */
+  isFavorite: boolean;
 };
 
 /** Subset of {@link RecipeListItem} the meal planner ships to the browser.
@@ -250,6 +252,8 @@ export type RecipeView = {
   dietConfidence: DietConfidence;
   /** User flag: this recipe is marked for a later edit. */
   needsUpdate: boolean;
+  /** Whether the CURRENT viewer has favorited this recipe. */
+  isFavorite: boolean;
   createdAt: number;
   updatedAt: number;
 };

@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { getSession } from "@/lib/server-session";
+import { ensureUserFromSession } from "@/lib/users/current";
 import { TopNav } from "./top-nav";
 import { BottomNav } from "./bottom-nav";
 import { UserMenu, UserMenuFallback } from "./user-menu";
@@ -9,6 +10,10 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
   const session = await getSession();
   const name = session.name ?? "";
   const email = session.email;
+  // Ensure a local user row exists for any authenticated visit — not only at
+  // login — so already-logged-in users (and removed-then-returning ones) get a
+  // row (and seeded favorites) on their next page view.
+  ensureUserFromSession(session);
 
   return (
     <div className="min-h-screen flex flex-col">
