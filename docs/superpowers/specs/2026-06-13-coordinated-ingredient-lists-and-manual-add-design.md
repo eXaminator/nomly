@@ -41,7 +41,7 @@ else.
 
 ## Scope
 
-Three layers. Each is independently testable.
+Four layers. Each is independently testable.
 
 ### Layer 1 — Parser: coordinated comma-lists
 
@@ -67,6 +67,13 @@ mains; `A, B oder C` → `A` primary with `B`/`C` as alternatives. `Paprika, rot
 oder gelb` is therefore handled by the alternative path (rot/gelb become
 alternatives, not mains, and — being absent from the catalog — fold into
 alternative chips), and needs no capitalization heuristic.
+
+**The existence rule (governs auto-generation everywhere):** a coordinated-list
+member is **auto-generated as a line if and only if it matches the catalog**.
+Matches are *always* auto-generated (a `und`-member → main row, an `oder`-member
+→ alternative row). Non-matches are *never* auto-generated — they are only
+offered as pills/chips the user can opt into. This is the single rule behind both
+the parser split and pill visibility (Layer 2).
 
 **Definition of a coordinated `und`-list (the new main-split trigger):**
 A segment run splits into mains when **all** hold:
@@ -137,9 +144,21 @@ line, but visually distinct:
   (`reparseGroupWithChange` with `{ removeIndex }`), since the member is a
   default-fold range.
 
-Pills are **always shown** for every unmatched coordinated-list member,
-regardless of whether sibling members auto-split. (Maximum discoverability:
-e.g. `+ Schabziger` shows even though `Oregano`/`Basilikum` already split.)
+**Pill visibility — a pill is shown for every potential member that currently has
+no line of its own.** This is symmetric with the existence rule:
+
+- An **unmatched** member starts with no line → its pill shows (`+ Schabziger`).
+- A **matched** member starts as a line → its pill is hidden.
+- **Removing a line re-shows its pill** — even one that was auto-matched.
+  Deleting the `Basilikum` main folds it back and `+ Basilikum` reappears, exactly
+  as deleting a matched alternative re-shows its alternative chip today
+  (force-fold → the parser emits the range as a `foldedAlternatives`/
+  `foldedIngredients` chip; verified at `index.ts:719→728`).
+- **Adding a line hides its pill** — promoting `+ Schabziger`, or typing a
+  matching name into a manual row, removes the pill (its member now has a line).
+
+So pills and lines are two views of the same member set: every potential member is
+*either* a line *or* a pill, never both, never neither.
 
 **Component:** either a new `FoldedIngredientChips` component or a `variant`
 prop on the existing `FoldedAltChips` (`folded-alt-chips.tsx`). Prefer a shared
@@ -148,10 +167,56 @@ handler, to avoid duplicating the chip layout. A new prop
 `onPromoteFoldedIngredient(range)` threads from the section editor / bulk dialog
 parallel to the existing `onPromoteFolded`.
 
-### Layer 3 — Manual "Add ingredient" button (free text)
+### Layer 3 — Reparse reconciliation by member identity
 
-A control alongside the existing "Add alternative" affordance, present in **both**
-the bulk reparse dialog and the recipe section editor (they share group
+Today, `reparseGroupWithChange` reconciles a group by **source range**: it
+clean-parses the line, collects the emitted/folded ranges, and expresses the
+user's deviations as `forceEmit`/`forceFold` range sets. This breaks for **saved**
+recipes, because `sourceRange` is parse-session-only — a reloaded `Schmackofatz`
+line carries the group `rawText` but no range, so a range-keyed diff would treat
+it as "not a parser member" and propose **removing** it.
+
+**New rule:** reconcile current rows to the parser's potential members by
+**identity (normalized member label)**, not by range. The parser, for a given
+line, yields a set of **member slots** — each matched member (emitted by default)
+and each unmatched member (folded by default), with a normalized label and a
+default disposition. Reconciliation:
+
+1. **Match each current row in the group to a slot** by normalized label
+   (`normalizeForMatch` on the row's name vs the slot's label). A row that claims
+   a slot is that member's **line**.
+2. **A claimed slot is never a removal**, even if its default disposition is
+   "fold" (e.g. the unmatched `Schmackofatz`). Instead, diff the row's attributes
+   (amount, unit, note, optional flag) against the parser's rendering of that slot
+   and surface only those differences. So a re-parse of a saved recipe with a
+   pill-added `Schmackofatz` line shows **no change** unless an attribute differs.
+3. **Unclaimed slots** follow their default disposition: matched → proposed as a
+   line; unmatched → a pill. (A matched member the user deleted in an earlier
+   session leaves no line and is therefore an unclaimed matched slot — so a *fresh*
+   reparse re-proposes it. This is intentional and consistent with the existence
+   rule; the user dismisses it via the diff. In-session, the deletion is held as a
+   `forceFold` so it is not re-proposed within the same edit.)
+4. **A current row matching no slot** (a manual free-text main whose name isn't in
+   the line at all — Layer 4) is handled per Layer 4, not removed by this step.
+
+This makes `forceEmit`/`forceFold` derivable from slot claims (a claimed
+fold-default slot → `forceEmit`; an unclaimed emit-default slot → `forceFold`),
+so the existing parser directives still drive the actual re-parse — only the
+**reconciliation key** changes from range to label, with range as a tie-breaker
+when two slots share a label.
+
+**Where it applies:** the bulk dialog's current-vs-proposed diff and
+`reparseGroupWithChange`/`reparseDeletingAlternative`/`reparsePromoting*` in
+`reparse.ts`. The plain `reparseAll`/`reparseGroupAt` (recipe editor) gain the
+same label-based group rebuild so a pill-added member survives a "reparse all".
+
+### Layer 4 — Manual "Add ingredient" button (free text)
+
+This is the catch-all for adding an ingredient whose name is **not** a member of
+the source line (so no pill exists for it). Adding a member that *is* in the line
+is done via its pill (Layer 2), which produces a real group row reconciled by
+Layer 3. A control alongside the existing "Add alternative" affordance, present in
+**both** the bulk reparse dialog and the recipe section editor (they share group
 components):
 
 - **Action:** insert a new **main** row (`isAlternative: false`) immediately
@@ -199,6 +264,12 @@ parsed row ──▶ ImportedIngredient.foldedIngredients ──┤
 
 manual "Add ingredient" ──▶ emptyIngredient (rawText: undefined) appended to group
                          ──▶ best-effort highlight vs adjacent rawText (display only)
+
+reparse (group) ──▶ parser yields member SLOTS (label + default disposition)
+                ──▶ match current rows to slots by normalized label
+                ├─▶ claimed slot   ──▶ keep row; diff attributes only (never remove)
+                ├─▶ unclaimed slot ──▶ matched→propose line / unmatched→pill
+                └─▶ row w/o slot   ──▶ manual row (Layer 4); kept, not removed
 ```
 
 ## Files (anticipated)
@@ -217,7 +288,9 @@ manual "Add ingredient" ──▶ emptyIngredient (rawText: undefined) appended 
   `parsedIngredientToDraft` copies it; a `emptyMainForGroup()`-style helper if
   warranted.
 - `src/components/recipes/reparse.ts` — promote-folded-ingredient path
-  (`reparsePromotingIngredient` or a `kind` arg on the existing promote helper).
+  (`reparsePromotingIngredient` or a `kind` arg on the existing promote helper);
+  **switch group reconciliation from range-keyed to label-keyed (Layer 3)** so
+  claimed slots are never removed and unclaimed manual rows are preserved.
 - `src/components/recipes/alternatives.ts` — `addMainAfter(rows, idx)` inserting
   a sibling main at the end of the group.
 - `src/components/recipes/folded-alt-chips.tsx` — `kind` prop (alternative vs
@@ -255,13 +328,35 @@ Parser (vitest, `tests/recipe-import*.test.ts`):
 - `Dill oder Petersilie` (bare `oder`, no comma) → unchanged alternative
   behaviour; not affected by the comma-list rule.
 
-Reparse (vitest):
+Worked examples (from the request):
+
+- `1 Gurke oder Paprika` (both catalog, terminal `oder`) → two rows for `Gurke`
+  and `Paprika` (one primary, one alternative — both auto-generated per the
+  existence rule). Deleting the `Gurke` row folds it into the surviving sibling
+  (`Paprika`)'s note **and** re-shows the `Gurke` pill. (The parser re-derives
+  which surviving slot is primary, so deleting either member behaves the same.)
+- `1 Gurke oder Schmackofatz` (Gurke catalog, Schmackofatz absent) → one row
+  `1 Gurke` with note `oder Schmackofatz` + a `Schmackofatz` pill. Promote the
+  pill → a `Schmackofatz` line. **Save, then reparse**: the saved `Schmackofatz`
+  line matches the parser's `Schmackofatz` slot → reconciled as **unchanged**
+  (no proposed removal), and its pill stays hidden. Editing its note/amount before
+  reparse → only that attribute shows as a diff.
+
+Reparse / reconciliation (vitest):
 
 - Promote a folded ingredient → it becomes a **main** (not alternative); deleting
   it folds it back to a pill.
+- Label-keyed reconciliation: a current row whose `sourceRange` is **absent**
+  (simulating a saved recipe) but whose name matches a folded slot is kept (not
+  removed); only attribute diffs surface.
+- A current row matching **no** slot (manual free-text main) is preserved across a
+  group reparse, not removed.
+- Deleting an auto-matched member re-emits it as a chip/pill (force-fold →
+  `foldedAlternatives`/`foldedIngredients`).
 
 Component (existing patterns): `FoldedIngredientChips` renders `+` icon and
-fires the ingredient-promote handler; "Add ingredient" inserts a sibling main;
+fires the ingredient-promote handler; a pill is hidden once its member has a line
+and re-shown when that line is removed; "Add ingredient" inserts a sibling main;
 manual main highlight aligns to the adjacent line when the name matches.
 
 End-to-end: `npm run build` (RSC boundary) before committing UI changes.
