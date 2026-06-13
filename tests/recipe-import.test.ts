@@ -19,6 +19,7 @@ function segs(
   return segmentLine(trimmed, lex(trimmed).map((t) => ({ ...t })), {
     containerTokens: new Set(),
     knownIngredients: new Set(),
+    unitTokens: new Set(),
     useFirstWins: opts.useFirstWins ?? false,
   }).filter((s): s is Extract<LineSegment, { kind: "ingredient" }> => s.kind === "ingredient");
 }

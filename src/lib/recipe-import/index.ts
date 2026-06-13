@@ -680,6 +680,7 @@ export function parseIngredientLines(
     for (const seg of segmentLine(originalTrimmed, lineLeaves, {
       containerTokens: lookups.units.containerTokens,
       knownIngredients: knownIngredientKeys,
+      unitTokens: knownUnitTokens,
       useFirstWins,
     })) {
       if (seg.kind === "header") continue;
@@ -1364,6 +1365,7 @@ function parseGroupedIngredientLines(
       for (const seg of segmentLine(originalTrimmed, lineLeaves, {
         containerTokens: lookups.units.containerTokens,
         knownIngredients: knownIngredientKeys,
+        unitTokens: knownUnitTokens,
         useFirstWins,
       })) {
         if (seg.kind === "header") {

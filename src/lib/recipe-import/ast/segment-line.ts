@@ -58,6 +58,10 @@ export type LineSegment =
 export type SegmentOptions = {
   containerTokens: ReadonlySet<string>;
   knownIngredients: ReadonlySet<string>;
+  /** All known unit tokens — lets the "+" split tell an amount-joining "+"
+   *  ("1 cup + 1/2 tbsp olive oil") from an ingredient-joining one
+   *  ("1 Eigelb + 1 EL Milch"). */
+  unitTokens: ReadonlySet<string>;
   useFirstWins: boolean;
 };
 
@@ -241,7 +245,13 @@ function orSeparators(all: readonly Leaf[], from: number, to: number, depth: num
 }
 
 /** Top-level conjunction separators: "und" / "and" / "&" / "+". */
-function conjSeparators(all: readonly Leaf[], from: number, to: number, depth: number): Sep[] {
+function conjSeparators(
+  all: readonly Leaf[],
+  from: number,
+  to: number,
+  depth: number,
+  unitTokens: ReadonlySet<string>,
+): Sep[] {
   const seps: Sep[] = [];
   for (let i = from; i < to; i++) {
     const l = all[i];
@@ -250,12 +260,16 @@ function conjSeparators(all: readonly Leaf[], from: number, to: number, depth: n
     if (isWordIn(l, CONJ_WORDS)) cand = { at: i, span: 1, word: norm(l.text) };
     else if (l.kind === "punct" && l.text === "&") cand = { at: i, span: 1, word: "&" };
     else if (l.kind === "punct" && l.text === "+") {
-      // "+" joins ingredients ("1 Eigelb + 1 EL Milch") — but between two
-      // NUMBERS it's arithmetic ("2 + 1/4 cups" = 2¼), not a separator.
+      // "+" joins ingredients ("1 Eigelb + 1 EL Milch"). It does NOT split when
+      // the token before it is part of an AMOUNT — a number ("2 + 1/4 cups" =
+      // 2¼) or a unit ("1 cup + 1/2 tbsp olive oil") — there the "+" adds two
+      // amounts of ONE ingredient, not two ingredients.
       const before = prevContentWord(all, i, from);
-      const after = nextContentWord(all, i + 1, to);
-      const arithmetic = before?.kind === "number" && after?.kind === "number";
-      if (!arithmetic) cand = { at: i, span: 1, word: "+" };
+      const beforeIsAmount =
+        before == null ||
+        before.kind === "number" ||
+        (before.kind === "word" && unitTokens.has(norm(before.text)));
+      if (!beforeIsAmount) cand = { at: i, span: 1, word: "+" };
     }
     if (cand && hasContentAround(all, cand.at, cand.span, from, to)) seps.push(cand);
   }
@@ -980,7 +994,7 @@ function conjunctionSplit(
   }
 
   const commaIdx = firstTopComma(all, from, to, depth);
-  const seps = conjSeparators(all, from, to, depth).filter((sep) => {
+  const seps = conjSeparators(all, from, to, depth, opts.unitTokens).filter((sep) => {
     // Comma guard: a conjunction after the first top-level comma connects prep.
     if (commaIdx >= 0 && sep.at > commaIdx) return false;
     // Dash-compound: "Weizen- und …" (the leaf before the separator is a dash,

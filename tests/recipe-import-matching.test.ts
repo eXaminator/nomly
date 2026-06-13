@@ -2223,6 +2223,22 @@ describe("conjunction members share the full line (highlights align)", () => {
     expect(out[0].quantity).toBeCloseTo(2.25, 2);
   });
 
+  it("treats '+' after a UNIT as an additive amount, not a split ('1 cup + 1/2 tbsp X')", () => {
+    const cat2: IngredientCatalog = [
+      { ingredientId: 1, canonicalName: "olive oil", aliasName: "olive oil", tokens: ["olive", "oil"] },
+    ];
+    const out = parseIngredientLines(
+      ["1 cup + 1/2 tbsp olive oil"],
+      makeLookups(cat2, ["cup", "tbsp"]),
+    );
+    // ONE ingredient — the '+' adds amounts; the primary amount isn't lost.
+    expect(out).toHaveLength(1);
+    expect(out[0].ingredientId).toBe(1);
+    expect(out[0].quantity).toBe(1);
+    expect(out[0].unit?.name).toBe("cup");
+    expect(out[0].notes).toMatch(/1\/2 tbsp/);
+  });
+
   it("force-folds a conjunction member into the first sibling's note + chip (delete)", () => {
     const line = "Salz und Pfeffer";
     const normal = parseIngredientLines([line], makeLookups(cat));
