@@ -10,6 +10,7 @@ const ingredientSchema = z
     /** "Nicht zugeordnet": free-text line not linked to any article. */
     unassigned: z.boolean().default(false),
     quantity: z.number().nullable(),
+    quantityLow: z.number().nullable().default(null),
     unitId: z.number().int().positive().nullable(),
     displayUnit: z.string().nullable().default(null),
     notes: z.string().nullable(),

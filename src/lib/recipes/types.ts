@@ -22,6 +22,9 @@ export type RecipeIngredientInput = {
    *  Defaults to false. */
   unassigned?: boolean;
   quantity: number | null;
+  /** Low bound of a structured amount range, else null. Optional/back-compat:
+   *  omitted = no range (single amount). */
+  quantityLow?: number | null;
   unitId: number | null;
   /** Display override for the unit — used when the user picked / typed an
    *  alias ("Tasse") for a canonical unit ("Cup"). NULL = render the
@@ -176,6 +179,9 @@ export type RecipeIngredientView = {
    *  unassigned lines (no canonical article). */
   canonicalIngredientName: string | null;
   quantity: number | null;
+  /** Low bound of a structured amount range, else null. High bound is in
+   *  {@link quantity}. */
+  quantityLow: number | null;
   unitId: number | null;
   /** display_unit OR unit.name fallback (coalesced server-side, in that order
    *  of preference). This is the *raw* matched label as stored — the recipe

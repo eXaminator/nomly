@@ -324,6 +324,9 @@ function writeSections(
           // Unassigned lines are pure text: drop any amount/unit the draft
           // still carries from before the unlink so it can't resurface.
           quantity: ing.unassigned ? null : ing.quantity,
+          // A range's low bound rides along with the (high) quantity; unassigned
+          // lines carry no amount.
+          quantityLow: ing.unassigned ? null : ing.quantityLow ?? null,
           unitId: ing.unassigned ? null : ing.unitId,
           // Same alias-preservation as displayName, but for units. Stored
           // only when it differs from the canonical unit name — keeps a
@@ -450,6 +453,7 @@ export function getRecipe(id: number): RecipeView | null {
     ingredientName: string;
     canonicalIngredientName: string | null;
     quantity: number | null;
+    quantityLow: number | null;
     unitId: number | null;
     unitName: string | null;
     canonicalUnitName: string | null;
@@ -481,6 +485,7 @@ export function getRecipe(id: number): RecipeView | null {
             ingredientName: sql<string>`coalesce(${recipeIngredient.displayName}, ${ingredientTable.name})`,
             canonicalIngredientName: ingredientTable.name,
             quantity: recipeIngredient.quantity,
+            quantityLow: recipeIngredient.quantityLow,
             unitId: recipeIngredient.unitId,
             // Render order: display_unit override → canonical unit name.
             unitName: sql<
@@ -627,6 +632,7 @@ export function getRecipe(id: number): RecipeView | null {
           // on unlink nowadays, but rows persisted before that fix may still
           // carry stale values — mask them here so no consumer shows them.
           quantity: i.ingredientId == null ? null : i.quantity,
+          quantityLow: i.ingredientId == null ? null : i.quantityLow,
           unitId: i.ingredientId == null ? null : i.unitId,
           unitName: i.ingredientId == null ? null : i.unitName,
           unitLabel: i.ingredientId == null ? null : unitLabelFor(i),

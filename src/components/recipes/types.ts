@@ -82,6 +82,11 @@ export type DraftIngredient = {
    *  never reaches a shopping list. */
   unassigned: boolean;
   quantity: string;
+  /** Low bound (German-formatted) when `isRange`; ignored otherwise. */
+  quantityLow: string;
+  /** Range mode toggle: when true the editor shows the low input and the row is
+   *  invalid unless quantityLow parses and is < quantity. */
+  isRange: boolean;
   unit: ComboboxItem | null;
   notes: string;
   /** When true, the row renders dimmed/italic in the read view and is skipped
@@ -198,6 +203,8 @@ export type DraftRecipe = {
  */
 export type ParsedIngredientResponse = {
   quantity: number | null;
+  /** Low bound of a structured range, else null. */
+  quantityLow: number | null;
   unit: { id: number; name: string } | null;
   unitMatch: "matched" | "defaulted" | "unresolved" | "empty";
   rawUnit: string | null;
@@ -307,6 +314,8 @@ export function parsedIngredientToDraft(
     // Import never auto-produces unassigned rows — it always tries to match.
     unassigned: false,
     quantity: quantityToInputString(i.quantity),
+    quantityLow: quantityToInputString(i.quantityLow ?? null),
+    isRange: i.quantityLow != null,
     unit:
       i.unit && unitDisplayName !== null
         ? { id: i.unit.id, name: unitDisplayName }
@@ -353,6 +362,8 @@ export function emptyIngredient(): DraftIngredient {
     addAsAlias: false,
     unassigned: false,
     quantity: "",
+    quantityLow: "",
+    isRange: false,
     unit: null,
     notes: "",
     isOptional: false,
@@ -428,6 +439,8 @@ export function recipeToDraft(recipe: RecipeView): DraftRecipe {
         addAsAlias: false,
         unassigned: i.ingredientId == null,
         quantity: quantityToInputString(i.quantity),
+        quantityLow: quantityToInputString(i.quantityLow ?? null),
+        isRange: i.quantityLow != null,
         unit:
           i.unitId !== null && i.unitName
             ? { id: i.unitId, name: i.unitName }
@@ -470,6 +483,8 @@ export function emptyRecipe(): DraftRecipe {
             addAsAlias: false,
             unassigned: false,
             quantity: "",
+            quantityLow: "",
+            isRange: false,
             unit: null,
             notes: "",
             isOptional: false,

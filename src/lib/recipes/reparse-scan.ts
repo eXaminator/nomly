@@ -211,6 +211,7 @@ function carriedAlternativeToProposed(g: {
   name: string | null;
   canonicalName: string | null;
   quantity: number | null;
+  quantityLow: number | null;
   unitId: number | null;
   unitName: string | null;
   displayUnit: string | null;
@@ -218,6 +219,7 @@ function carriedAlternativeToProposed(g: {
 }): ParsedIngredientResponse {
   return {
     quantity: g.quantity,
+    quantityLow: g.quantityLow,
     unit:
       g.unitId != null
         ? { id: g.unitId, name: g.displayUnit ?? g.unitName ?? "" }
@@ -424,6 +426,7 @@ export async function scanAllRecipesForReparse(
       name: recipeIngredient.displayName,
       canonicalName: ingredient.name,
       quantity: recipeIngredient.quantity,
+      quantityLow: recipeIngredient.quantityLow,
       unitId: recipeIngredient.unitId,
       unitName: unit.name,
       displayFraction: unit.displayFraction,
@@ -609,6 +612,7 @@ function viewRowToInput(
     unassigned: v.ingredientId == null,
     addAsAlias: false,
     quantity: v.quantity,
+    quantityLow: v.quantityLow,
     unitId: v.unitId,
     displayUnit: v.unitName,
     notes: v.notes,

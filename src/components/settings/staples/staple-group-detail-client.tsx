@@ -528,6 +528,9 @@ function StapleIngredientRow({
       // pill is hidden in this variant (allowUnassigned={false}).
       unassigned: false,
       quantity: row.quantity,
+      // Staples have no range support (recipe-only feature).
+      quantityLow: "",
+      isRange: false,
       unit:
         row.unitId !== "" && row.unitId != null
           ? { id: row.unitId, name: unitName }
