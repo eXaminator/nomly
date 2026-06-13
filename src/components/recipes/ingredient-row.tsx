@@ -3,6 +3,7 @@
 import * as React from "react";
 import {
   AlertTriangle,
+  ArrowLeftRight,
   ArrowUp,
   CircleCheck,
   CircleHelp,
@@ -40,6 +41,7 @@ import { IngredientNameInput } from "./ingredient-name-input";
 import { renderOriginalWithMuting } from "./original-muting";
 import { bestEffortNameHighlight } from "@/lib/recipe-import/ast/best-effort-highlight";
 import { liveMatchQuery, type DraftIngredient, type ImportAnnotation } from "./types";
+import { rangeError } from "./payload";
 import { ForceMatchPopover } from "./force-match-popover";
 import { FoldedAltChips } from "./folded-alt-chips";
 
@@ -315,6 +317,17 @@ export function IngredientRow({
   // An unspecific unit ("etwas", "a sprinkle") takes no amount — the quantity
   // input is disabled and the stored quantity stays null.
   const amountDisabled = value.unit?.unspecific === true;
+  // Range mode shows a second "von" input to the left of the (high) amount. An
+  // unspecific unit takes no amount, so the range toggle/input are hidden then.
+  const showRange = value.isRange && !amountDisabled;
+  const rowRangeError = rangeError(value);
+  function toggleRange() {
+    onChange(
+      value.isRange
+        ? { ...value, isRange: false, quantityLow: "" }
+        : { ...value, isRange: true },
+    );
+  }
 
   function onPickUnit(picked: SelectSearchItem | null) {
     // Collapse an alias pick to the real unit id while keeping the chosen
@@ -750,18 +763,56 @@ export function IngredientRow({
             </Button>
           </div>
         ) : (
-          <div className="grid items-start gap-2 grid-cols-[4rem_minmax(0,1fr)_auto_auto_auto_auto_auto_auto] md:grid-cols-[5rem_8rem_minmax(0,1fr)_minmax(0,1fr)_auto_auto_auto_auto_auto_auto]">
+          <div className="grid items-start gap-2 grid-cols-[auto_minmax(0,1fr)_auto_auto_auto_auto_auto_auto] md:grid-cols-[auto_8rem_minmax(0,1fr)_minmax(0,1fr)_auto_auto_auto_auto_auto_auto]">
             {/* Mobile flow: [Qty | Unit] · [Name] · [Notes | actions]. Desktop
                 (md+) is a single row; the trailing actions end with the
-                free-text toggle and delete. */}
-            <Input
-              inputMode="decimal"
-              placeholder="Menge"
-              value={value.quantity}
-              onChange={(e) => onChange({ ...value, quantity: e.target.value })}
-              aria-label="Menge"
-              disabled={amountDisabled}
-            />
+                free-text toggle and delete. The amount cell holds an optional
+                "von" (low) input, the (high) amount, and the range toggle. */}
+            <div className="col-start-1 row-start-1 flex items-center gap-1">
+              {showRange && (
+                <>
+                  <Input
+                    inputMode="decimal"
+                    placeholder="von"
+                    value={value.quantityLow}
+                    onChange={(e) =>
+                      onChange({ ...value, quantityLow: e.target.value })
+                    }
+                    aria-label="Menge von"
+                    aria-invalid={rowRangeError || undefined}
+                    className="w-14"
+                  />
+                  <span aria-hidden className="text-[var(--color-muted-fg)]">
+                    –
+                  </span>
+                </>
+              )}
+              <Input
+                inputMode="decimal"
+                placeholder="Menge"
+                value={value.quantity}
+                onChange={(e) => onChange({ ...value, quantity: e.target.value })}
+                aria-label="Menge"
+                disabled={amountDisabled}
+                className="w-16"
+              />
+              {!amountDisabled && (
+                <button
+                  type="button"
+                  onClick={toggleRange}
+                  aria-pressed={value.isRange}
+                  aria-label={value.isRange ? "Einzelne Menge" : "Mengenbereich"}
+                  title={
+                    value.isRange
+                      ? "Einzelne Menge"
+                      : "Mengenbereich (von–bis)"
+                  }
+                  className="shrink-0 rounded p-1 text-[var(--color-muted-fg)] hover:bg-[var(--color-bg)] hover:text-[var(--color-fg)]"
+                >
+                  <ArrowLeftRight className="size-4" />
+                </button>
+              )}
+            </div>
             <div className="col-span-4 flex flex-col gap-1 md:col-span-1 md:col-start-2 md:row-start-1">
               <SelectSearch
                 value={pickerValue}
@@ -952,6 +1003,11 @@ export function IngredientRow({
             </Button>
           </div>
         )}
+        {showRange && rowRangeError ? (
+          <p className="mt-1 text-xs text-[var(--color-danger)]">
+            Untergrenze muss kleiner als die Obergrenze sein.
+          </p>
+        ) : null}
         {editingArticleId != null ? (
           <EditArticleDialog
             ingredientId={editingArticleId}
