@@ -120,7 +120,13 @@ async function reparseGroupWithChange(
     if (r) emitted.delete(rangeKey(r));
   }
   const emittedByDefault = cleanMembers;
-  const foldedByDefault = (clean ?? []).flatMap((p) => p.foldedAlternatives ?? []).map((f) => f.range);
+  // Default-fold ranges include BOTH unmatched alternatives and unmatched
+  // coordinated-list ingredient members ("+ add ingredient" pills) — promoting
+  // either force-emits its range; the parser emits it with the role its segment
+  // carries (alternative vs main).
+  const foldedByDefault = (clean ?? [])
+    .flatMap((p) => [...(p.foldedAlternatives ?? []), ...(p.foldedIngredients ?? [])])
+    .map((f) => f.range);
   // forceEmit: unmatched (default-fold) ranges the user wants as rows.
   const forceEmit = foldedByDefault.filter((r) => emitted.has(rangeKey(r)));
   // forceFold: matched (default-emit) ranges the user removed.
@@ -160,6 +166,20 @@ export async function reparseDeletingAlternative(
 /** Promote a folded alternative (a "create alternative" chip) to its own row:
  *  re-parse the primary's line with that range force-emitted. */
 export async function reparsePromotingAlternative(
+  ingredients: readonly DraftIngredient[],
+  primaryIndex: number,
+  range: Range,
+): Promise<DraftIngredient[] | null> {
+  if (!ingredients[primaryIndex]?.rawText?.trim()) return null;
+  return reparseGroupWithChange(ingredients, primaryIndex, { emit: range });
+}
+
+/** Promote a folded INGREDIENT (a "+ add ingredient" pill) to its own MAIN row:
+ *  re-parse the primary's line with that range force-emitted. Identical to
+ *  {@link reparsePromotingAlternative} — the parser emits the range with the role
+ *  its segment carries, which for a coordinated-list member is a main. Named
+ *  separately so the UI wiring reads clearly. */
+export async function reparsePromotingIngredient(
   ingredients: readonly DraftIngredient[],
   primaryIndex: number,
   range: Range,
