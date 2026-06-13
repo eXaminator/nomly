@@ -283,6 +283,18 @@ describe("parseIngredientString — extended cases", () => {
     expect(r.unitName?.toLowerCase()).toBe("pinch");
     expect(r.name).toBe("nutmeg");
   });
+  it("written cardinal 'one onion, diced' → quantity 1, note 'diced'", () => {
+    const r = parse("one onion, diced");
+    expect(r.quantity).toBe(1);
+    expect(r.name).toBe("onion");
+    expect(r.notes).toMatch(/diced/);
+  });
+  it("written cardinals lead the line: 'two onions' → 2, 'drei Eier' → 3", () => {
+    expect(parse("two onions").quantity).toBe(2);
+    expect(parse("three carrots, chopped").quantity).toBe(3);
+    expect(parse("drei Eier").quantity).toBe(3);
+    expect(parse("zwölf Walnüsse").quantity).toBe(12);
+  });
   it("vague 'Etwas Puderzucker' → no amount, note 'Etwas'", () => {
     const r = parse("Etwas Puderzucker");
     expect(r.quantity).toBeNull();

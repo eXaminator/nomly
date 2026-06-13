@@ -2,9 +2,25 @@ import { consumeQuantity, parseSingleNumericToken, formatRangeNumber, round3 } f
 import type { Leaf } from "../render-notes";
 import { consumeGroup, groupByWhitespace, type Group } from "../tokens";
 
-const TEXT_ONE = new Set(["ein", "eine", "einen", "einem", "einer", "eins", "a", "an"]);
+const TEXT_ONE = new Set(["ein", "eine", "einen", "einem", "einer", "eins", "one", "a", "an"]);
 const TEXT_HALF = new Set(["halber", "halbe", "halbes", "halben", "half"]);
 const TEXT_QUARTER = new Set(["viertel", "quarter"]);
+/** Written cardinals 2–12 (DE + EN) leading an ingredient line — "two onions",
+ *  "drei Eier". A small CLOSED grammatical set (not an open vocabulary). One is
+ *  handled by {@link TEXT_ONE} (it also pairs with half/quarter). */
+const WRITTEN_CARDINALS = new Map<string, number>([
+  ["zwei", 2], ["two", 2],
+  ["drei", 3], ["three", 3],
+  ["vier", 4], ["four", 4],
+  ["fünf", 5], ["fuenf", 5], ["five", 5],
+  ["sechs", 6], ["six", 6],
+  ["sieben", 7], ["seven", 7],
+  ["acht", 8], ["eight", 8],
+  ["neun", 9], ["nine", 9],
+  ["zehn", 10], ["ten", 10],
+  ["elf", 11], ["eleven", 11],
+  ["zwölf", 12], ["zwoelf", 12], ["twelve", 12],
+]);
 
 /** Size words that may sit between the quantity and the unit ("1 small bunch",
  *  "1 kl. Dose"). They are SKIPPED so the unit is still found, but NOT consumed
@@ -203,6 +219,11 @@ export function applyAmountUnit(
       consumeGroup(groups[cur], "amount");
       cur += 1;
       dropArticle();
+    } else if (WRITTEN_CARDINALS.has(w)) {
+      // "two onions", "drei Eier" — a written cardinal leads the line.
+      quantity = WRITTEN_CARDINALS.get(w)!;
+      consumeGroup(groups[cur], "amount");
+      cur += 1;
     } else {
       const work = groups.slice(cur).map((g) => g.text);
       const before = work.length;
