@@ -93,24 +93,33 @@ function groupBounds(
 async function reparseGroupWithChange(
   ingredients: readonly DraftIngredient[],
   anchorIndex: number,
-  change: { emit?: Range; removeRange?: Range },
+  change: { emit?: Range; removeIndex?: number },
 ): Promise<DraftIngredient[] | null> {
   const rawText = ingredients[anchorIndex]?.rawText?.trim();
   if (!rawText) return null;
   const [start, end] = groupBounds(ingredients, anchorIndex, rawText);
+  // Clean-parse to learn the canonical members of the line + their default
+  // disposition. Rows loaded from a SAVED recipe carry no sourceRange (it's
+  // parse-session only), so we resolve a row's range from its position within
+  // the group against the clean parse's members.
+  const [clean] = await reparseLines([rawText]);
+  const cleanMembers = (clean ?? [])
+    .filter((p) => p.sourceRange)
+    .map((p) => p.sourceRange as Range);
+  const rangeOf = (i: number): Range | null =>
+    ingredients[i].sourceRange ?? cleanMembers[i - start] ?? null;
   // Member ranges currently shown AS ROWS in the group (mains + alternatives).
   const emitted = new Set<string>();
   for (let i = start; i <= end; i++) {
-    const r = ingredients[i].sourceRange;
+    const r = rangeOf(i);
     if (r) emitted.add(rangeKey(r));
   }
   if (change.emit) emitted.add(rangeKey(change.emit));
-  if (change.removeRange) emitted.delete(rangeKey(change.removeRange));
-  // Clean-parse to learn the default disposition of every member.
-  const [clean] = await reparseLines([rawText]);
-  const emittedByDefault = (clean ?? [])
-    .filter((p) => p.sourceRange)
-    .map((p) => p.sourceRange as Range);
+  if (change.removeIndex != null) {
+    const r = rangeOf(change.removeIndex);
+    if (r) emitted.delete(rangeKey(r));
+  }
+  const emittedByDefault = cleanMembers;
   const foldedByDefault = (clean ?? []).flatMap((p) => p.foldedAlternatives ?? []).map((f) => f.range);
   // forceEmit: unmatched (default-fold) ranges the user wants as rows.
   const forceEmit = foldedByDefault.filter((r) => emitted.has(rangeKey(r)));
@@ -135,9 +144,11 @@ export async function reparseDeletingAlternative(
   index: number,
 ): Promise<DraftIngredient[] | null> {
   const row = ingredients[index];
-  if (!row?.rawText?.trim() || !row.sourceRange) return null;
+  // Needs a source line to re-parse; the range is resolved inside (sourceRange
+  // when present, else positional against the clean parse for saved rows).
+  if (!row?.rawText?.trim()) return null;
   const next = await reparseGroupWithChange(ingredients, index, {
-    removeRange: row.sourceRange,
+    removeIndex: index,
   });
   if (next) return next;
   // Parser yielded nothing — fall back to a plain remove.
