@@ -35,13 +35,19 @@ import { NewIngredientsDialog } from "./new-ingredients-dialog";
 import { parsedIngredientToDraft, type DraftIngredient } from "./types";
 import {
   addAlternativeAfter,
+  addMainAfter,
   canDemote,
   demoteToAlternative,
   detachAlternative,
   moveAlternativeWithinGroup,
   promoteAlternative,
 } from "./alternatives";
-import { reparseDeletingAlternative, reparsePromotingAlternative, isConjunctionMember } from "./reparse";
+import {
+  reparseDeletingAlternative,
+  reparsePromotingAlternative,
+  reparsePromotingIngredient,
+  isConjunctionMember,
+} from "./reparse";
 import { ingredientToPayload, toNumberOrNull } from "./payload";
 import { buildUnitInflector, type UnitInflector } from "./unit-inflect";
 import type { UnitForm } from "@/lib/recipes/reparse-scan";
@@ -66,6 +72,7 @@ function DraftEditList({
   onRemoveRow,
   onRemoveAlternative,
   onPromoteFolded,
+  onPromoteFoldedIngredient,
   onMutate,
 }: {
   rows: DraftIngredient[];
@@ -73,6 +80,7 @@ function DraftEditList({
   onRemoveRow: (rowIdx: number) => void;
   onRemoveAlternative: (rowIdx: number) => void;
   onPromoteFolded: (primaryRowIdx: number, range: [number, number]) => void;
+  onPromoteFoldedIngredient: (primaryRowIdx: number, range: [number, number]) => void;
   onMutate: (fn: (rows: DraftIngredient[]) => DraftIngredient[]) => void;
 }) {
   // Unique per mounted list: several entries can be in edit mode at once, so a
@@ -124,6 +132,8 @@ function DraftEditList({
             : undefined
         }
         onPromoteFolded={(range) => onPromoteFolded(k, range)}
+        onPromoteFoldedIngredient={(range) => onPromoteFoldedIngredient(k, range)}
+        onAddMain={() => onMutate((rs) => addMainAfter(rs, k))}
       />
     );
   };
@@ -623,6 +633,23 @@ export function BulkReparseDialog({
     let next: DraftIngredient[] | null = null;
     try {
       next = await reparsePromotingAlternative(rows, primaryRowIdx, range);
+    } catch {
+      next = null;
+    }
+    if (next) setEntryState(entryIdx, { draft: next });
+  }
+  /** Promote a folded ingredient (a "+ add ingredient" pill) to its own MAIN row
+   *  by re-parsing the primary's line with that range emitted. */
+  async function promoteFoldedIngredient(
+    entryIdx: number,
+    primaryRowIdx: number,
+    range: [number, number],
+  ) {
+    const rows = states[entryIdx]?.draft;
+    if (!rows) return;
+    let next: DraftIngredient[] | null = null;
+    try {
+      next = await reparsePromotingIngredient(rows, primaryRowIdx, range);
     } catch {
       next = null;
     }
@@ -1185,6 +1212,9 @@ export function BulkReparseDialog({
                                       onRemoveRow={(k) => removeDraftRow(i, k)}
                                       onRemoveAlternative={(k) => removeAlternative(i, k)}
                                       onPromoteFolded={(k, range) => promoteFoldedAlternative(i, k, range)}
+                                      onPromoteFoldedIngredient={(k, range) =>
+                                        promoteFoldedIngredient(i, k, range)
+                                      }
                                       onMutate={(fn) => mutateDraft(i, fn)}
                                     />
                                   </div>

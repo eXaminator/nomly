@@ -108,6 +108,12 @@ type Props = {
   /** Promote one of this row's folded alternatives (a "create alternative"
    *  chip, shown next to the Original line) to its own row. */
   onPromoteFolded?: (range: [number, number]) => void;
+  /** Promote one of this row's folded INGREDIENTS (a "+ add ingredient" pill,
+   *  shown next to the Original line) to its own MAIN row. */
+  onPromoteFoldedIngredient?: (range: [number, number]) => void;
+  /** Add a fresh free-text MAIN row after this row's group ("add ingredient").
+   *  Only callable on primary rows. */
+  onAddMain?: () => void;
   /** Drag handle props from the parent {@link IngredientGroup}'s
    *  `useSortable`. Only passed to primary rows — alternatives ride along
    *  inside the same draggable container and don't have their own grip. */
@@ -129,6 +135,8 @@ export function IngredientRow({
   onPromote,
   onDetach,
   onPromoteFolded,
+  onPromoteFoldedIngredient,
+  onAddMain,
   dragAttributes,
   dragListeners,
   variant = "recipe",
@@ -661,6 +669,24 @@ export function IngredientRow({
               folded={value.foldedAlternatives}
               onPromote={onPromoteFolded}
             />
+          ) : null}
+          {onPromoteFoldedIngredient ? (
+            <FoldedAltChips
+              kind="ingredient"
+              folded={value.foldedIngredients}
+              onPromote={onPromoteFoldedIngredient}
+            />
+          ) : null}
+          {!value.isAlternative && onAddMain ? (
+            <button
+              type="button"
+              onClick={onAddMain}
+              title="Eine weitere Zutat aus dieser Originalzeile hinzufügen (eigene Hauptzutat)."
+              className="inline-flex items-center gap-1 rounded-full border border-dashed border-muted-foreground/40 px-2 py-0.5 text-xs text-muted-foreground transition-colors hover:border-foreground/60 hover:text-foreground"
+            >
+              <Plus className="size-3" />
+              Zutat
+            </button>
           ) : null}
           </div>
         ) : null}

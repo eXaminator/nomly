@@ -38,6 +38,7 @@ import {
   reparseGroupAt,
   reparseDeletingAlternative,
   reparsePromotingAlternative,
+  reparsePromotingIngredient,
   isConjunctionMember,
 } from "./reparse";
 import {
@@ -49,6 +50,7 @@ import {
 } from "./types";
 import {
   addAlternativeAfter,
+  addMainAfter,
   promoteAlternative as applyPromoteAlternative,
   detachAlternative as applyDetachAlternative,
   demoteToAlternative as applyDemoteToAlternative,
@@ -154,6 +156,24 @@ export function SectionEditor({
       next = null;
     }
     if (next) onChange({ ...section, ingredients: next });
+  }
+
+  /** Promote a folded INGREDIENT (a "+ add ingredient" pill) on the primary at
+   *  `primaryIdx` to its own MAIN row by re-parsing the line with that range
+   *  emitted. */
+  async function promoteFoldedIngredient(primaryIdx: number, range: [number, number]) {
+    let next: DraftIngredient[] | null = null;
+    try {
+      next = await reparsePromotingIngredient(section.ingredients, primaryIdx, range);
+    } catch {
+      next = null;
+    }
+    if (next) onChange({ ...section, ingredients: next });
+  }
+
+  /** Add a fresh free-text MAIN row after the group rooted at `primaryIdx`. */
+  function addMain(primaryIdx: number) {
+    onChange({ ...section, ingredients: addMainAfter(section.ingredients, primaryIdx) });
   }
 
   function addIngredient() {
@@ -508,6 +528,10 @@ export function SectionEditor({
                   onPromote={promoteAlternative}
                   onDetach={detachAlternative}
                   onPromoteFolded={(range) => promoteFoldedAlternative(g.primaryIdx, range)}
+                  onPromoteFoldedIngredient={(range) =>
+                    promoteFoldedIngredient(g.primaryIdx, range)
+                  }
+                  onAddMain={() => addMain(g.primaryIdx)}
                   onSplitAbove={
                     onSplit && g.primaryIdx > 0
                       ? () => onSplit(g.primaryIdx)
@@ -690,6 +714,8 @@ function IngredientGroup({
   onPromote,
   onDetach,
   onPromoteFolded,
+  onPromoteFoldedIngredient,
+  onAddMain,
   onSplitAbove,
   onInsertAbove,
 }: {
@@ -700,6 +726,10 @@ function IngredientGroup({
   onAddAlternative: () => void;
   /** Promote one of the primary's folded (unmatched) alternatives to a row. */
   onPromoteFolded: (range: [number, number]) => void;
+  /** Promote one of the primary's folded (unmatched) ingredients to a main. */
+  onPromoteFoldedIngredient: (range: [number, number]) => void;
+  /** Add a fresh free-text main row after this group. */
+  onAddMain: () => void;
   /** Make this primary an alternative of the row immediately above it.
    *  Undefined when the primary is the first row of the section or has
    *  its own alternatives (which would be orphaned). */
@@ -784,6 +814,8 @@ function IngredientGroup({
         onAddAlternative={onAddAlternative}
         onDemote={onDemote}
         onPromoteFolded={onPromoteFolded}
+        onPromoteFoldedIngredient={onPromoteFoldedIngredient}
+        onAddMain={onAddMain}
         dragAttributes={attributes}
         dragListeners={listeners}
       />
