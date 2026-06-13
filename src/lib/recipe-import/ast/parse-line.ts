@@ -22,6 +22,8 @@ import { collapseRedundantParens } from "./passes/redundant-parens";
  *  the orchestrator that has the lookups. */
 export type ParsedRow = {
   quantity: number | null;
+  /** Low bound of a structured lo–hi range, else null. */
+  quantityLow: number | null;
   unitName: string | null;
   name: string;
   canonicalName: string | null;
@@ -206,7 +208,7 @@ export function parseLeaves(
     unspecificTokens: lookups.unspecificUnitTokens,
     maxUnitTokens: lookups.maxUnitTokens,
   };
-  const { quantity, unitName, rangeExpression } =
+  const { quantity, unitName, rangeExpression, quantityLow } =
     applyColonAmount(source, leaves, lookups.knownUnitTokens, unspecificOpts) ??
     applyAmountUnit(source, leaves, lookups.knownUnitTokens, unspecificOpts);
   // Does the segment carry a container unit? Scans THIS segment's word leaves
@@ -231,11 +233,20 @@ export function parseLeaves(
   // The row's note, range/prep prefixes included. Captured as a NoteContext too
   // so a folded alternative can re-assemble it (its leaves appended) without any
   // string concatenation — see assembleRowNote.
-  const noteContext: NoteContext = { rangeExpression, unitName, prepNote, leadNote };
+  // A structured low–high range renders as the amount, so it must NOT also
+  // appear in the notes. Open-ended ranges (quantityLow null, e.g. "bis 3")
+  // keep their note text.
+  const noteContext: NoteContext = {
+    rangeExpression: quantityLow != null ? null : rangeExpression,
+    unitName,
+    prepNote,
+    leadNote,
+  };
   const notes = assembleRowNote(source, leaves, [], noteContext);
   return {
     noteContext,
     quantity,
+    quantityLow,
     unitName,
     name: m.name,
     canonicalName: m.canonicalName,

@@ -11,20 +11,22 @@ const lookups: SegmentLookups = {
 };
 
 describe("ast parseSegment — structured row + range-note assembly", () => {
-  it("unitless range → high bound + bare range note", () => {
+  it("unitless range → high in quantity, low in quantityLow, not in notes", () => {
     const r = parseSegment("2-3 Eier", lookups);
     expect(r.quantity).toBe(3);
+    expect(r.quantityLow).toBe(2);
     expect(r.name).toBe("Eier");
-    expect(r.notes).toBe("2-3");
+    expect(r.notes).toBeNull();
     expect(r.fixedAmount).toBe(false);
   });
 
-  it("range with unit → high bound + 'lo-hi unit' note", () => {
+  it("range with unit → high in quantity, low in quantityLow, not in notes", () => {
     const r = parseSegment("100-200 g Käse", lookups);
     expect(r.quantity).toBe(200);
+    expect(r.quantityLow).toBe(100);
     expect(r.unitName).toBe("g");
     expect(r.name).toBe("Käse");
-    expect(r.notes).toBe("100-200 g");
+    expect(r.notes).toBeNull();
   });
 
   it("matched line keeps the verbatim remainder (semicolon preserved)", () => {

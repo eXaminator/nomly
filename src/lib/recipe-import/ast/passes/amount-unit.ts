@@ -45,6 +45,8 @@ export type AmountUnit = {
   unitName: string | null;
   /** Original "lo-hi" expression when the amount was a range, else null. */
   rangeExpression: string | null;
+  /** Low bound of a true lo–hi range, else null. High bound is `quantity`. */
+  quantityLow: number | null;
 };
 
 export type UnspecificOpts = {
@@ -114,6 +116,7 @@ export function applyAmountUnit(
 
   let quantity: number | null = null;
   let rangeExpression: string | null = null;
+  let quantityLow: number | null = null;
   let unitName: string | null = null;
 
   const isUnit = (g: Group): boolean =>
@@ -167,7 +170,7 @@ export function applyAmountUnit(
         consumeGroup(groups[cur], "unit");
         cur += 1;
       }
-      return { quantity: null, unitName: m.name, rangeExpression: null };
+      return { quantity: null, unitName: m.name, rangeExpression: null, quantityLow: null };
     }
   }
 
@@ -198,6 +201,7 @@ export function applyAmountUnit(
     ) {
       const sameUnitTail = g4 != null && isUnit(g4) && norm(g4.text) === norm(g1.text);
       quantity = round3(Math.max(n1, n2));
+      quantityLow = round3(Math.min(n1, n2));
       rangeExpression = `${formatRangeNumber(n1)}-${formatRangeNumber(n2)}`;
       unitName = g1.text.replace(/\.$/, "");
       consumeGroup(g0, "amount");
@@ -285,6 +289,7 @@ export function applyAmountUnit(
       if (r) {
         quantity = r.quantity;
         rangeExpression = r.rangeExpression;
+        quantityLow = r.quantityLow;
         const n = before - work.length;
         for (let k = 0; k < n; k++) consumeGroup(groups[cur + k], "amount");
         cur += n;
@@ -346,5 +351,5 @@ export function applyAmountUnit(
     }
   }
 
-  return { quantity, unitName, rangeExpression };
+  return { quantity, unitName, rangeExpression, quantityLow };
 }

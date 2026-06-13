@@ -71,6 +71,9 @@ export type RangeResult = {
   quantity: number;
   /** Original "lo-hi" expression when the input was a range, else null. */
   rangeExpression: string | null;
+  /** Low bound of a true lo–hi range, else null (single value or open-ended
+   *  "bis X"). The high bound is in `quantity`. */
+  quantityLow: number | null;
 };
 
 /**
@@ -129,11 +132,15 @@ export function consumeQuantity(tokens: string[]): RangeResult | null {
   if (values.length === 0) return null;
 
   if (values.length === 1 && !bisPrefix) {
-    return { quantity: round3(values[0]), rangeExpression: null };
+    return { quantity: round3(values[0]), rangeExpression: null, quantityLow: null };
   }
   const max = Math.max(...values);
   const rangeExpression = bisPrefix
     ? `bis ${formatRangeNumber(values[values.length - 1])}`
     : values.map(formatRangeNumber).join("-");
-  return { quantity: round3(max), rangeExpression };
+  // A true lo–hi range yields a structured low bound; an open-ended "bis X"
+  // has no low bound (it stays note-only).
+  const quantityLow =
+    !bisPrefix && values.length > 1 ? round3(Math.min(...values)) : null;
+  return { quantity: round3(max), rangeExpression, quantityLow };
 }

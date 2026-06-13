@@ -1813,9 +1813,12 @@ describe("alternative amount/unit/notes inheritance", () => {
     ], ["el"]);
     const primary = out[0];
     const alt = out.find((r) => r.isAlternative)!;
-    expect(primary.notes).toMatch(/2-3/);
+    // The range is structured now: high in quantity, low in quantityLow, not in
+    // notes. An alt that inherits the amount inherits both bounds.
+    expect(primary.quantity).toBe(3);
+    expect(primary.quantityLow).toBe(2);
     expect(alt.quantity).toBe(3);
-    expect(alt.notes).toMatch(/2-3/);
+    expect(alt.quantityLow).toBe(2);
   });
 
   it("mirrors the inherited shared note onto the primary's candidate matches", () => {
@@ -1893,8 +1896,11 @@ describe("note fragments keep source order, comma-separated", () => {
     );
     expect(out[0].ingredientId).toBe(1);
     expect(out[0].name).toBe("vegetable oil");
-    // The range note carries its unit ("2-3 cups"), like on the unmatched path.
-    expect(out[0].notes).toBe("2-3 cups, for frying");
+    // The range is structured (quantity 3 / quantityLow 2), so only the trailing
+    // usage remains in the notes.
+    expect(out[0].quantity).toBe(3);
+    expect(out[0].quantityLow).toBe(2);
+    expect(out[0].notes).toBe("for frying");
   });
 
   it("size, paren amount, then comma-tail prep — all comma-separated, in order (new ingredient)", () => {
@@ -2430,7 +2436,9 @@ describe("front captures stay glued to the before-remainder", () => {
     );
     expect(out[0].ingredientId).toBe(1);
     expect(out[0].quantity).toBe(6); // range resolves to the high bound
-    expect(out[0].notes).toBe("5-6 große, am liebsten säuerlich");
+    expect(out[0].quantityLow).toBe(5); // low bound is structured
+    // The range is no longer in notes; the size word + paren content remain.
+    expect(out[0].notes).toBe("große, am liebsten säuerlich");
   });
 });
 
@@ -2565,10 +2573,12 @@ describe("front-capture gluing follows source contiguity", () => {
     expect(out[0].notes).toBe("Juice, small");
   });
 
-  it("'5-6 große Äpfel' stays glued — nothing was stripped between range and word", () => {
+  it("'5-6 große Äpfel' → range structured, size word kept in notes", () => {
     const out = parseIngredientLines(["5-6 große Äpfel"], makeLookups(catalog));
     expect(out[0].ingredientId).toBe(2);
-    expect(out[0].notes).toBe("5-6 große");
+    expect(out[0].quantity).toBe(6);
+    expect(out[0].quantityLow).toBe(5);
+    expect(out[0].notes).toBe("große");
   });
 });
 

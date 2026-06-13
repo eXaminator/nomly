@@ -59,6 +59,9 @@ export type UnitMatch =
 
 export type ImportedIngredient = {
   quantity: number | null;
+  /** Low bound of a structured lo–hi range, else null. The high bound stays in
+   *  `quantity`; shopping and scaling use only `quantity`. */
+  quantityLow: number | null;
   /** Best-effort resolved (global) unit. `id` null when we couldn't match
    *  anything; the UI uses {@link unitMatch} + {@link rawUnit} to render
    *  appropriately. */
@@ -950,6 +953,7 @@ export function parseIngredientLines(
         const final = pickFinalUnit(initialUnit, astSeg.defaultUnit, astSeg.quantity);
         out.push({
           quantity: astSeg.quantity,
+          quantityLow: astSeg.quantityLow,
           unit: final.resolved,
           unitMatch: final.match,
           rawUnit: final.rawUnit,
@@ -1277,16 +1281,6 @@ function inheritWithinGroup(
   hi: number,
 ): void {
   const primary = rows[lo];
-  // The range expression the primary recorded in notes ("2-3", "0,5-1") when
-  // it resolved a range to its high bound. An alt that inherits the amount
-  // took the same high bound, so it inherits the range note too.
-  // Pull the range expression straight out of the notes — don't split on
-  // commas first, since a German decimal range ("0,25-0,75 teaspoon") contains
-  // commas that the split would shred into "25-0". The optional trailing word
-  // captures the unit the range note now carries.
-  const primaryRange = (primary.notes ?? "").match(
-    /\d[\d.,/]*\s*[-–]\s*\d[\d.,/]*(?:\s+\p{L}+)?/u,
-  )?.[0];
   // Source range of the primary's amount/unit, so an alt that inherits the
   // amount keeps it un-muted on its own line.
   const primaryAmountLocal = primary.sourceRange
@@ -1302,15 +1296,14 @@ function inheritWithinGroup(
     const hasOwnUnit = alt.unit !== null;
     if (hasOwnAmount || hasOwnUnit) continue;
     alt.quantity = primary.quantity;
+    // A structured low–high range is part of the amount, so an alt inheriting
+    // the amount inherits both bounds.
+    alt.quantityLow = primary.quantityLow;
     alt.fixedAmount = primary.fixedAmount;
     alt.unit = primary.unit;
     alt.unitMatch = primary.unitMatch;
     alt.rawUnit = primary.rawUnit;
     addInheritedPart(alt, primary.sourceRange, primaryAmountLocal, "amount");
-    if (primaryRange) {
-      const cur = alt.notes?.trim();
-      alt.notes = cur && cur.length > 0 ? `${primaryRange}, ${cur}` : primaryRange;
-    }
   }
   // Trailing note of the last member → siblings that have none of their own.
   // Only a genuinely shared (line-trailing) note propagates: a note that
@@ -1607,6 +1600,7 @@ function parseGroupedIngredientLines(
           const final = pickFinalUnit(initialUnit, astSeg.defaultUnit, astSeg.quantity);
           currentGroup.ingredients.push({
             quantity: astSeg.quantity,
+            quantityLow: astSeg.quantityLow,
             unit: final.resolved,
             sourceRange: sourceRange ?? undefined,
             highlightParts:
