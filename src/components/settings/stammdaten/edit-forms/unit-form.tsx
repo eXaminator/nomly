@@ -39,6 +39,7 @@ export type UnitItem = {
   factor: number;
   isContainer: boolean;
   displayFraction: boolean;
+  unspecific: boolean;
   isGlobalDefault: boolean;
   recipeRefCount: number;
 };
@@ -78,6 +79,9 @@ export function UnitForm({ item, onPayloadChange }: EditFormProps<UnitItem>) {
   const [displayFraction, setDisplayFraction] = React.useState<boolean>(
     item?.displayFraction ?? false,
   );
+  const [unspecific, setUnspecific] = React.useState<boolean>(
+    item?.unspecific ?? false,
+  );
   const [isGlobalDefault, setIsGlobalDefault] = React.useState<boolean>(
     item?.isGlobalDefault ?? false,
   );
@@ -86,8 +90,12 @@ export function UnitForm({ item, onPayloadChange }: EditFormProps<UnitItem>) {
   React.useEffect(() => {
     const trimmed = name.trim();
     const factor = Number(factorText.replace(",", "."));
+    // An unspecific unit has no amount, so its factor is irrelevant — don't
+    // gate validity on it, and send a neutral factor=1 (the service forces it
+    // anyway).
     const valid =
-      trimmed.length > 0 && Number.isFinite(factor) && factor > 0;
+      trimmed.length > 0 &&
+      (unspecific || (Number.isFinite(factor) && factor > 0));
     // Only send plurals for aliases that still exist, trimmed.
     const aliasPluralsPayload: Record<string, string> = {};
     for (const a of aliases) {
@@ -101,10 +109,11 @@ export function UnitForm({ item, onPayloadChange }: EditFormProps<UnitItem>) {
         aliases,
         aliasPlurals: aliasPluralsPayload,
         dimension,
-        baseUnitId: baseUnit?.id ?? null,
-        factor: Number.isFinite(factor) ? factor : 0,
+        baseUnitId: unspecific ? null : baseUnit?.id ?? null,
+        factor: unspecific ? 1 : Number.isFinite(factor) ? factor : 0,
         isContainer,
         displayFraction,
+        unspecific,
         setAsGlobalDefault: isGlobalDefault,
       },
       valid,
@@ -119,6 +128,7 @@ export function UnitForm({ item, onPayloadChange }: EditFormProps<UnitItem>) {
     factorText,
     isContainer,
     displayFraction,
+    unspecific,
     isGlobalDefault,
     onPayloadChange,
   ]);
@@ -196,6 +206,22 @@ export function UnitForm({ item, onPayloadChange }: EditFormProps<UnitItem>) {
         </div>
       )}
 
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <Label>Unspezifisch</Label>
+          <p className="text-xs text-[var(--color-muted-fg)]">
+            Aktivieren für Einheiten ohne Menge (etwas, a sprinkle, ein Schuss).
+            Solche Einheiten bekommen beim Import keine Zahl; Dimension, Faktor
+            und Basis-Einheit entfallen.
+          </p>
+        </div>
+        <Switch
+          checked={unspecific}
+          onCheckedChange={(v) => setUnspecific(Boolean(v))}
+        />
+      </div>
+
+      {!unspecific && (
       <div className="flex flex-col gap-2">
         <Label>Dimension</Label>
         <div className="grid grid-cols-3 gap-2">
@@ -232,7 +258,9 @@ export function UnitForm({ item, onPayloadChange }: EditFormProps<UnitItem>) {
           </p>
         )}
       </div>
+      )}
 
+      {!unspecific && (
       <div className="flex flex-col gap-2">
         <Label>Basis-Einheit</Label>
         <SelectSearch
@@ -246,7 +274,9 @@ export function UnitForm({ item, onPayloadChange }: EditFormProps<UnitItem>) {
           dienen.
         </p>
       </div>
+      )}
 
+      {!unspecific && (
       <div className="flex flex-col gap-2">
         <Label htmlFor="unit-factor">Faktor</Label>
         <Input
@@ -267,6 +297,7 @@ export function UnitForm({ item, onPayloadChange }: EditFormProps<UnitItem>) {
           </p>
         )}
       </div>
+      )}
 
       <div className="flex items-center justify-between gap-3">
         <div>

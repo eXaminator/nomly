@@ -30,6 +30,8 @@ function makeLookups(): ParseLookups {
     ]),
     byId: new Map(),
     containerTokens: new Set(),
+    unspecificTokens: new Set(),
+    maxUnitTokens: 1,
     globalDefaultUnitId: null,
   };
   const ingredients: IngredientLookup = new Map([

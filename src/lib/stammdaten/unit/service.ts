@@ -68,8 +68,8 @@ export type UnitUpsertInput = {
   /** When true, recipe read views show this unit's quantities as fractions. */
   displayFraction: boolean;
   /** When true, the unit takes no amount; the service forces factor=1,
-   *  baseUnitId=null on save. */
-  unspecific: boolean;
+   *  baseUnitId=null on save. Omitted = false. */
+  unspecific?: boolean;
   /** When true, point the global-default-unit setting at this unit on save
    *  (single-select; overwrites any previous pointer). */
   setAsGlobalDefault?: boolean;
@@ -177,6 +177,7 @@ function loadUnitsBase(query?: string) {
       factor: unit.factor,
       isContainer: unit.isContainer,
       displayFraction: unit.displayFraction,
+      unspecific: unit.unspecific,
     })
     .from(unit)
     .where(
@@ -377,7 +378,7 @@ export function createUnit(input: UnitUpsertInput): UnitListItem {
         factor: effective.factor,
         isContainer: effective.isContainer,
         displayFraction: effective.displayFraction,
-        unspecific: effective.unspecific,
+        unspecific: effective.unspecific ?? false,
       })
       .returning({ id: unit.id })
       .all();
@@ -426,7 +427,7 @@ export function updateUnit(id: number, input: UnitUpsertInput): UnitListItem {
         factor: effective.factor,
         isContainer: effective.isContainer,
         displayFraction: effective.displayFraction,
-        unspecific: effective.unspecific,
+        unspecific: effective.unspecific ?? false,
       })
       .where(eq(unit.id, id))
       .run();
