@@ -26,6 +26,22 @@ export function formatQuantity(
   );
 }
 
+/**
+ * Format an amount or a low–high range for display. Each bound goes through
+ * {@link formatQuantity} (so fraction formatting applies to both), joined by an
+ * en-dash. Returns "" when there is no high quantity; a low bound without a high
+ * is ignored.
+ */
+export function formatAmount(
+  quantity: number | null,
+  quantityLow: number | null,
+  opts?: { fraction?: boolean },
+): string {
+  const high = formatQuantity(quantity, opts);
+  if (quantityLow == null || quantity == null) return high;
+  return `${formatQuantity(quantityLow, opts)}–${high}`;
+}
+
 /** Which fields differ from the other side of a diff — used to color-highlight
  *  the changed parts. */
 export type LineHighlight = {
@@ -45,6 +61,8 @@ export type LineHighlight = {
 
 export type ReadLineProps = {
   quantity: number | null;
+  /** Low bound of an amount range, else null → renders "low–high". */
+  quantityLow?: number | null;
   unitLabel: string | null;
   /** When true, the line's unit is flagged for fraction display; the quantity
    *  renders as a fraction when it resolves to one. */
@@ -84,6 +102,7 @@ export type ReadLineProps = {
  */
 export function RecipeIngredientReadLine({
   quantity,
+  quantityLow = null,
   unitLabel,
   displayFraction = false,
   name,
@@ -139,7 +158,7 @@ export function RecipeIngredientReadLine({
         {mark(
           highlight?.amount,
           <span>
-            {formatQuantity(quantity, { fraction: displayFraction })}{" "}
+            {formatAmount(quantity, quantityLow, { fraction: displayFraction })}{" "}
             {unitLabel ?? ""}
           </span>,
         )}
