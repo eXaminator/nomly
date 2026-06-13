@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   addAlternativeAfter,
+  addMainAfter,
   canDemote,
   demoteToAlternative,
   detachAlternative,
@@ -148,5 +149,15 @@ describe("alternative grouping helpers", () => {
     const rows = [row("A"), row("a1", true)];
     expect(shape(promoteAlternative(rows, 0))).toEqual(shape(rows));
     expect(shape(detachAlternative(rows, 0))).toEqual(shape(rows));
+  });
+
+  it("addMainAfter inserts a fresh main after the group containing idx", () => {
+    const rows = [row("A"), row("a1", true), row("B")];
+    const out = addMainAfter(rows, 0);
+    expect(out).toHaveLength(4);
+    // Inserted after the whole A-group (A + its alternative a1), before B.
+    expect(out[2].isAlternative).toBe(false);
+    expect(out[2].name).toBe("");
+    expect(out[3].name).toBe("B");
   });
 });
