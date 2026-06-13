@@ -94,6 +94,11 @@ export type ImportedIngredient = {
    *  carries its source `range` (for a force-emit re-parse) and a `label` for
    *  the UI's "create alternative" chip. Transient, not persisted. */
   foldedAlternatives?: { range: SourceRange; label: string }[];
+  /** Coordinated-list MAIN members ("A, B und C") that didn't match the catalog
+   *  — folded into THIS row's note by default and offered as "+ add ingredient"
+   *  pills. Mirrors {@link foldedAlternatives} but a pill click promotes the
+   *  range to a MAIN row, not an alternative. Transient, not persisted. */
+  foldedIngredients?: { range: SourceRange; label: string }[];
   /** Transient hint (consumed by {@link applyAlternativeInheritance}): this
    *  alternative's note is its own and must not propagate to siblings — set
    *  for notes inside a parenthetical alternative. Not persisted. */
@@ -669,6 +674,15 @@ export function parseIngredientLines(
       range: SourceRange | null;
       label: string;
     }> = [];
+    // Unmatched coordinated-list MAIN members ("Schabziger" in "Schabziger,
+    // Oregano und Basilikum") seen before the first matched main — held until a
+    // sibling main appears, then folded into it as a "+ ingredient" pill.
+    const deferredIngredientFolds: Array<{
+      connectorLeaves: Leaf[];
+      leaves: Leaf[];
+      range: SourceRange | null;
+      label: string;
+    }> = [];
     // A note that trailed a parenthetical alternative ("(or 1 large clove),
     // peeled"). Appended to the primary AFTER the line's alternatives fold in,
     // so it keeps its source order ("small, or 1 large clove, peeled").
@@ -870,6 +884,42 @@ export function parseIngredientLines(
           }
           continue;
         }
+        // A coordinated-list MAIN member ("Oregano, Schabziger und Basilikum")
+        // that didn't match is folded into the first sibling main's note by
+        // default and recorded as a foldable INGREDIENT, so the UI offers a
+        // "+ add ingredient" pill. The pill re-parses with this range
+        // force-emitted, which (because the segment's role is a main) emits a
+        // MAIN row, not an alternative.
+        if (
+          !seg.isAlternative &&
+          seg.fromCoordinatedList &&
+          !astSeg.matched &&
+          !seg.syntheticSource &&
+          !rangeIn(seg.range, options.forceEmitRanges)
+        ) {
+          if (lineFirstMainIndex !== null) {
+            foldAlternativeOntoRows(
+              originalTrimmed, out, foldTargets,
+              lineFirstMainIndex, lineFirstMainIndex,
+              seg.connectorLeaves ?? [], seg.leaves, sourceRange,
+            );
+            if (seg.range && astSeg.name.trim().length > 0) {
+              (out[lineFirstMainIndex].foldedIngredients ??= []).push({
+                range: seg.range,
+                label: astSeg.name,
+              });
+            }
+          } else {
+            // First member is unmatched — defer until a sibling main appears.
+            deferredIngredientFolds.push({
+              connectorLeaves: seg.connectorLeaves ?? [],
+              leaves: seg.leaves,
+              range: seg.range,
+              label: astSeg.name,
+            });
+          }
+          continue;
+        }
         // A matched alternative (or a force-emitted unmatched one) becomes its
         // own alternative row — even when it resolves to the SAME ingredient as
         // its primary ("Kurkuma/Gelbwurz").
@@ -936,6 +986,20 @@ export function parseIngredientLines(
               }
             }
             deferredMemberFolds.length = 0;
+            for (const d of deferredIngredientFolds) {
+              foldAlternativeOntoRows(
+                originalTrimmed, out, foldTargets,
+                lineFirstMainIndex, lineFirstMainIndex,
+                d.connectorLeaves, d.leaves, d.range,
+              );
+              if (d.range) {
+                (out[lineFirstMainIndex].foldedIngredients ??= []).push({
+                  range: d.range,
+                  label: d.label,
+                });
+              }
+            }
+            deferredIngredientFolds.length = 0;
           }
         }
       }
@@ -1482,6 +1546,30 @@ function parseGroupedIngredientLines(
             );
             if (seg.range) {
               (currentGroup.ingredients[lastPrimaryIndex].foldedAlternatives ??= []).push({
+                range: seg.range,
+                label: astSeg.name,
+              });
+            }
+            continue;
+          }
+          // A coordinated-list MAIN member that didn't match folds into the most
+          // recent main and is recorded as a "+ add ingredient" pill (mirrors
+          // parseIngredientLines).
+          if (
+            !seg.isAlternative &&
+            seg.fromCoordinatedList &&
+            !astSeg.matched &&
+            !seg.syntheticSource &&
+            lastPrimaryIndex !== null &&
+            !rangeIn(seg.range, options.forceEmitRanges)
+          ) {
+            foldAlternativeOntoRows(
+              originalTrimmed, currentGroup.ingredients, foldTargets,
+              lastPrimaryIndex, lastPrimaryIndex,
+              seg.connectorLeaves ?? [], seg.leaves, sourceRange,
+            );
+            if (seg.range && astSeg.name.trim().length > 0) {
+              (currentGroup.ingredients[lastPrimaryIndex].foldedIngredients ??= []).push({
                 range: seg.range,
                 label: astSeg.name,
               });
