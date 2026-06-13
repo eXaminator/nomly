@@ -38,6 +38,7 @@ import {
 } from "@/components/units/unit-picker";
 import { IngredientNameInput } from "./ingredient-name-input";
 import { renderOriginalWithMuting } from "./original-muting";
+import { bestEffortNameHighlight } from "@/lib/recipe-import/ast/best-effort-highlight";
 import { liveMatchQuery, type DraftIngredient, type ImportAnnotation } from "./types";
 import { ForceMatchPopover } from "./force-match-popover";
 import { FoldedAltChips } from "./folded-alt-chips";
@@ -108,6 +109,12 @@ type Props = {
   /** Promote one of this row's folded alternatives (a "create alternative"
    *  chip, shown next to the Original line) to its own row. */
   onPromoteFolded?: (range: [number, number]) => void;
+  /** Promote one of this row's folded INGREDIENTS (a "+ add ingredient" pill,
+   *  shown next to the Original line) to its own MAIN row. */
+  onPromoteFoldedIngredient?: (range: [number, number]) => void;
+  /** Add a fresh free-text MAIN row after this row's group ("add ingredient").
+   *  Only callable on primary rows. */
+  onAddMain?: () => void;
   /** Drag handle props from the parent {@link IngredientGroup}'s
    *  `useSortable`. Only passed to primary rows — alternatives ride along
    *  inside the same draggable container and don't have their own grip. */
@@ -129,6 +136,8 @@ export function IngredientRow({
   onPromote,
   onDetach,
   onPromoteFolded,
+  onPromoteFoldedIngredient,
+  onAddMain,
   dragAttributes,
   dragListeners,
   variant = "recipe",
@@ -662,6 +671,40 @@ export function IngredientRow({
               onPromote={onPromoteFolded}
             />
           ) : null}
+          {onPromoteFoldedIngredient ? (
+            <FoldedAltChips
+              kind="ingredient"
+              folded={value.foldedIngredients}
+              onPromote={onPromoteFoldedIngredient}
+            />
+          ) : null}
+          {!value.isAlternative && onAddMain ? (
+            <button
+              type="button"
+              onClick={onAddMain}
+              title="Eine weitere Zutat aus dieser Originalzeile hinzufügen (eigene Hauptzutat)."
+              className="inline-flex items-center gap-1 rounded-full border border-dashed border-muted-foreground/40 px-2 py-0.5 text-xs text-muted-foreground transition-colors hover:border-foreground/60 hover:text-foreground"
+            >
+              <Plus className="size-3" />
+              Zutat
+            </button>
+          ) : null}
+          </div>
+        ) : !value.rawText && value.manualFromLine ? (
+          // A MANUAL "add ingredient" row keeps no rawText (so reparse treats it
+          // as a manual addition), but shows a read-only hint of the line it was
+          // created from, with a best-effort highlight of the typed name.
+          <div className="inline-flex max-w-full items-center gap-1 self-start rounded-md border border-dashed border-[var(--color-border)] bg-[var(--color-muted)] px-2 py-0.5">
+            <p
+              className="truncate text-xs text-[var(--color-muted-fg)]"
+              title={value.manualFromLine}
+            >
+              <span className="opacity-70">Aus Zeile:</span>{" "}
+              {renderOriginalWithMuting(
+                value.manualFromLine,
+                bestEffortNameHighlight(value.name, value.manualFromLine),
+              )}
+            </p>
           </div>
         ) : null}
 

@@ -1,0 +1,381 @@
+# Coordinated Ingredient Lists + Manual "Add Ingredient" — Design
+
+**Date:** 2026-06-13
+**Branch:** feat/ingredient-ast-parser (or a fresh feature branch off `main`)
+**Status:** Approved design, ready for implementation plan
+
+## Goal
+
+Let a single source line that names several ingredients become several **main**
+ingredient rows. Concretely, `Oregano, Majoran und Basilikum nach Belieben`
+should yield three mains (`Oregano`, `Majoran`, `Basilikum`) sharing the note
+`nach Belieben`. Provide both an automatic parser path and manual controls so
+the user is never stuck when the parser declines to split.
+
+## Background
+
+The recipe-import AST parser already models a **source-line group**: several
+rows that share one full-line `rawText`. Two kinds exist today:
+
+- **Alternatives** — `Kurkuma/Gelbwurz`, `… oder …`, parenthetical options.
+  Matched alternatives emit as `isAlternative` rows; unmatched ones fold into
+  the primary's note and surface as **chips** (`foldedAlternatives`, rendered by
+  `FoldedAltChips` with a `CornerDownRight` icon). A chip promotes the folded
+  range to a row via `forceEmitRanges`; deleting an alternative folds it back via
+  `reparseDeletingAlternative` / `reparseGroupWithChange`.
+- **Conjunction mains** — `Salz und Pfeffer`. A bare `und` between two bare-name
+  segments splits into multiple **main** rows that share the line. A trailing note
+  (`nach Geschmack`) propagates to every member
+  (`applyConjunctionNotePropagation`). (`oder` between bare names routes to the
+  alternative path above, not to mains.)
+
+Reparse groups rows by identical `rawText` and rebuilds each group from the
+parser's output of that line, plus `forceEmitRanges`/`forceFoldRanges`
+directives. Anything the parser does not re-derive is dropped from the group on
+reparse.
+
+This feature extends the **conjunction-main** concept to **comma-separated
+coordinated lists**, reuses the **chip** mechanism for member-ingredients the
+parser is unsure about, and adds a **manual free-text main** for everything
+else.
+
+## Scope
+
+Four layers. Each is independently testable.
+
+### Layer 1 — Parser: coordinated comma-lists
+
+**The connector determines the member role — this is the central rule.** This
+layer adds detection of **comma-coordinated lists** (today a comma-list is never
+expanded — `Paprika, rot oder gelb` stays a single `Paprika` with the rest in the
+note). Once detected, the **terminal connector** decides which rule-set the
+members go through:
+
+- **`und`** (and `&`, `+` where already treated as `und`) → members go through
+  **main-ingredient rules**: matched → main rows, unmatched → ingredient pills
+  (Layer 2). New behaviour.
+- **`oder`** (and `/`, parenthetical options) → members go through the
+  **existing alternative-generation rules**: the first member is the primary,
+  the rest are alternatives (matched → `isAlternative` rows, unmatched → folded
+  alternative **chips**, exactly as `Petersilie oder Dill` already does for the
+  no-comma case). The comma-list *expansion* is new wiring, but it reuses the
+  existing alternative classification and chip rendering — no new alternative
+  logic.
+
+So a comma-list's terminal connector decides everything: `A, B und C` → three
+mains; `A, B oder C` → `A` primary with `B`/`C` as alternatives.
+
+**The existence gate is a precondition for BOTH connectors** (see "the existence
+rule" below): a comma-list is only treated as coordinated when **at least two of
+its items match the catalog**. This is what separates a real list from a comma +
+connector that is actually prep (`carrot, peeled and sliced`; `onion, chopped or
+diced`) — those have only the head in the catalog, so they stay one row + note.
+A consequence: `Paprika, rot oder gelb` (only `Paprika` in the catalog) is **not**
+a coordinated list and stays a single `Paprika` row with `rot oder gelb` in its
+note — unchanged from today. The user's `1 Gurke oder Paprika` / `1 Gurke oder
+Schmackofatz` cases are **bare `oder` (no comma)**, already handled by the
+existing alternative path; the comma-list rule only adds the multi-item case
+(`Dill, Petersilie oder Schnittlauch`). No capitalization heuristic is needed.
+
+**The existence rule (governs auto-generation everywhere):** a coordinated-list
+member is **auto-generated as a line if and only if it matches the catalog**.
+Matches are *always* auto-generated (a `und`-member → main row, an `oder`-member
+→ alternative row). Non-matches are *never* auto-generated — they are only
+offered as pills/chips the user can opt into. This is the single rule behind both
+the parser split and pill visibility (Layer 2).
+
+**Definition of a coordinated `und`-list (the new main-split trigger):**
+A segment run splits into mains when **all** hold:
+
+1. It contains one or more commas separating items, AND
+2. the final item boundary is an explicit **`und`** connector (any case — rule
+   B), AND
+3. each item is a **bare name** — no amount and no unit of its own. (A shared
+   leading amount/unit or a shared trailing note is allowed and is attached to
+   every member, exactly like `Salz und Pfeffer nach Geschmack`.)
+
+A line with commas but **no** terminal `und`/`oder` (`Zwiebel, gewürfelt`) is
+**not** a coordinated list and is left exactly as today (post-comma text stays a
+note). A comma-list whose terminal connector is **`oder`** routes to the
+alternative path, not here.
+
+**Per-member classification of an `und`-list (the catalog gate):**
+For each member of a coordinated `und`-list, run the existing ingredient matcher:
+
+- **Match found in the catalog** → emit the member as its own **main** row
+  (`isAlternative: false`), sharing the line's `rawText`. This is the auto-split.
+- **No match** → do **not** emit a row. Fold the member into the note context
+  and record it as a **potential ingredient** (new metadata; see Layer 2).
+
+This per-member rule means a **mixed** list splits the known members and pills
+the unknown ones: `Oregano, Schabziger und Basilikum` (Schabziger absent from
+the catalog) → `Oregano` + `Basilikum` as mains, `+ Schabziger` as a pill.
+
+**Why the catalog gate (vs. the pure `und` split):** the bare `Salz und Pfeffer`
+split is unconditional and stays unchanged. The **new comma-`und`-list** path is
+gated on catalog membership so it cannot wrongly split modifier lists that happen
+to use commas + `und`. Unmatched members never become silent mains — they only
+ever surface as opt-in pills.
+
+**Shared note propagation:** a coordinated list's trailing note (`nach Belieben`)
+propagates to every emitted member, reusing the existing
+`applyConjunctionNotePropagation` path (extended if needed so comma-list members
+are covered, not only `und`-split pairs).
+
+**New metadata — `foldedIngredients`:** parallel to `foldedAlternatives` on the
+parsed-row / `ImportedIngredient` shape:
+
+```ts
+// alongside foldedAlternatives?: { range: Range; label: string }[]
+foldedIngredients?: { range: Range; label: string }[];
+```
+
+Each entry is an unmatched coordinated-list member: `range` is its span within
+`rawText`; `label` is the member's display text (`Schabziger`). Recorded on the
+group's primary row, exactly like `foldedAlternatives`.
+
+### Layer 2 — "+ Potential ingredient" pills
+
+Rendered next to the existing folded-alternative chips, on the same "Original:"
+line, but visually distinct:
+
+- **Icon:** `+` (e.g. lucide `Plus`), distinct from the `CornerDownRight` used
+  for folded alternatives.
+- **Label:** the member text (`Majoran`).
+- **Click:** promote the folded range to its own **main** row. Reuses the
+  existing `forceEmitRanges` reparse machinery (`reparsePromotingAlternative` →
+  `reparseGroupWithChange` with `{ emit: range }`). Because the segment's role is
+  a coordinated-list **member** (not `isAlternative`), force-emitting it yields a
+  **main**, not an alternative. (Verify/extend the force-emit path so a
+  member-range emits with `isAlternative: false`.)
+- **Re-delete:** deleting a pill-promoted main folds it back to a pill — already
+  covered by `isConjunctionMember` + `reparseDeletingAlternative`
+  (`reparseGroupWithChange` with `{ removeIndex }`), since the member is a
+  default-fold range.
+
+**Pill visibility — a pill is shown for every potential member that currently has
+no line of its own.** This is symmetric with the existence rule:
+
+- An **unmatched** member starts with no line → its pill shows (`+ Schabziger`).
+- A **matched** member starts as a line → its pill is hidden.
+- **Removing a line re-shows its pill** — even one that was auto-matched.
+  Deleting the `Basilikum` main folds it back and `+ Basilikum` reappears, exactly
+  as deleting a matched alternative re-shows its alternative chip today
+  (force-fold → the parser emits the range as a `foldedAlternatives`/
+  `foldedIngredients` chip; verified at `index.ts:719→728`).
+- **Adding a line hides its pill** — promoting `+ Schabziger`, or typing a
+  matching name into a manual row, removes the pill (its member now has a line).
+
+So pills and lines are two views of the same member set: every potential member is
+*either* a line *or* a pill, never both, never neither.
+
+**Component:** either a new `FoldedIngredientChips` component or a `variant`
+prop on the existing `FoldedAltChips` (`folded-alt-chips.tsx`). Prefer a shared
+component with a `kind: "alternative" | "ingredient"` prop driving icon + click
+handler, to avoid duplicating the chip layout. A new prop
+`onPromoteFoldedIngredient(range)` threads from the section editor / bulk dialog
+parallel to the existing `onPromoteFolded`.
+
+### Layer 3 — Reparse reconciliation by member identity
+
+Today, `reparseGroupWithChange` reconciles a group by **source range**: it
+clean-parses the line, collects the emitted/folded ranges, and expresses the
+user's deviations as `forceEmit`/`forceFold` range sets. This breaks for **saved**
+recipes, because `sourceRange` is parse-session-only — a reloaded `Schmackofatz`
+line carries the group `rawText` but no range, so a range-keyed diff would treat
+it as "not a parser member" and propose **removing** it.
+
+**New rule:** reconcile current rows to the parser's potential members by
+**identity (normalized member label)**, not by range. The parser, for a given
+line, yields a set of **member slots** — each matched member (emitted by default)
+and each unmatched member (folded by default), with a normalized label and a
+default disposition. Reconciliation:
+
+1. **Match each current row in the group to a slot** by normalized label
+   (`normalizeForMatch` on the row's name vs the slot's label). A row that claims
+   a slot is that member's **line**.
+2. **A claimed slot is never a removal**, even if its default disposition is
+   "fold" (e.g. the unmatched `Schmackofatz`). Instead, diff the row's attributes
+   (amount, unit, note, optional flag) against the parser's rendering of that slot
+   and surface only those differences. So a re-parse of a saved recipe with a
+   pill-added `Schmackofatz` line shows **no change** unless an attribute differs.
+3. **Unclaimed slots** follow their default disposition: matched → proposed as a
+   line; unmatched → a pill. (A matched member the user deleted in an earlier
+   session leaves no line and is therefore an unclaimed matched slot — so a *fresh*
+   reparse re-proposes it. This is intentional and consistent with the existence
+   rule; the user dismisses it via the diff. In-session, the deletion is held as a
+   `forceFold` so it is not re-proposed within the same edit.)
+4. **A current row matching no slot** (a manual free-text main whose name isn't in
+   the line at all — Layer 4) is handled per Layer 4, not removed by this step.
+
+This makes `forceEmit`/`forceFold` derivable from slot claims (a claimed
+fold-default slot → `forceEmit`; an unclaimed emit-default slot → `forceFold`),
+so the existing parser directives still drive the actual re-parse — only the
+**reconciliation key** changes from range to label, with range as a tie-breaker
+when two slots share a label.
+
+**Where it applies:** the bulk dialog's current-vs-proposed diff and
+`reparseGroupWithChange`/`reparseDeletingAlternative`/`reparsePromoting*` in
+`reparse.ts`. The plain `reparseAll`/`reparseGroupAt` (recipe editor) gain the
+same label-based group rebuild so a pill-added member survives a "reparse all".
+
+### Layer 4 — Manual "Add ingredient" button (free text)
+
+This is the catch-all for adding an ingredient whose name is **not** a member of
+the source line (so no pill exists for it). Adding a member that *is* in the line
+is done via its pill (Layer 2), which produces a real group row reconciled by
+Layer 3. A control alongside the existing "Add alternative" affordance, present in
+**both** the bulk reparse dialog and the recipe section editor (they share group
+components):
+
+- **Action:** insert a new **main** row (`isAlternative: false`) immediately
+  after the clicked row's source-line group, carrying **no** `rawText` (see the
+  reparse decision below). It still renders adjacent to the group via ordering.
+- **Name:** free text the user types.
+- **Best-effort highlight:** when the typed name appears as a **token-aligned**
+  span within the **adjacent group's** `rawText`, compute `highlightParts`
+  marking that span as the ingredient highlight (via the existing AST highlight
+  rendering, `candidateHighlights` / `renderHighlights`). The match is for
+  **display only** — the row itself stores no source line. When the name does not
+  appear, leave `highlightParts` empty — it is plain free text. Highlight is
+  recomputed when the name changes; it never blocks input.
+- **Reparse behaviour — `rawText = undefined`:** the manual main is not in the
+  parser's output for any line, so it is a **pass-through manual row** in both
+  surfaces:
+  - In the **recipe editor** it **persists** across `reparseAll`/`reparseGroupAt`
+    (rows without a `rawText` are passed through untouched) — the desired
+    manual-edit behaviour.
+  - In the **bulk dialog** it is a manual row the current-vs-proposed **diff**
+    treats as current-only; the user keeps or drops it on review.
+
+  This avoids the footgun where a manual main sharing the group's `rawText` would
+  be silently dropped when the group is rebuilt from parser output. The earlier
+  framing ("reparsing will likely prompt to remove it") is satisfied in the bulk
+  dialog by the diff; in the editor the row simply persists.
+
+## Data flow
+
+```
+source line ──▶ segmentLine (detect comma-coordinated list)
+            │   terminal `oder` ──▶ existing ALTERNATIVE rules (matched→alt row,
+            │                        unmatched→foldedAlternatives chip)
+            │   terminal `und`  ──▶ MAIN rules; per-member catalog match
+            ├─▶ matched und-members        ──▶ main rows (shared rawText + note)
+            └─▶ unmatched und-members      ──▶ note fold + foldedIngredients[]
+                                                      │
+parsed row ──▶ ImportedIngredient.foldedIngredients ──┤
+            ──▶ candidateMatches / DraftIngredient ───┘
+                                                      ▼
+                              FoldedIngredientChips (+ icon)
+                                   │ click → forceEmitRanges (emit as main)
+                                   ▼
+                              reparseGroupWithChange({ emit })  ──▶ new main row
+
+manual "Add ingredient" ──▶ emptyIngredient (rawText: undefined) appended to group
+                         ──▶ best-effort highlight vs adjacent rawText (display only)
+
+reparse (group) ──▶ parser yields member SLOTS (label + default disposition)
+                ──▶ match current rows to slots by normalized label
+                ├─▶ claimed slot   ──▶ keep row; diff attributes only (never remove)
+                ├─▶ unclaimed slot ──▶ matched→propose line / unmatched→pill
+                └─▶ row w/o slot   ──▶ manual row (Layer 4); kept, not removed
+```
+
+## Files (anticipated)
+
+- `src/lib/recipe-import/ast/segment-line.ts` — detect coordinated comma-lists;
+  classify members; carry member role so force-emit yields a main.
+- `src/lib/recipe-import/ast/passes/match-ingredient.ts` /
+  `src/lib/recipe-import/ast/parse-line.ts` — per-member catalog match; record
+  `foldedIngredients`; ensure shared-note propagation reaches comma-list members.
+- `src/lib/recipe-import/index.ts` — `ImportedIngredient.foldedIngredients`;
+  force-emit of a member-range as a main; `applyConjunctionNotePropagation`
+  coverage for comma-lists.
+- `src/lib/recipe-import/types.ts` —
+  `ParsedIngredientResponse.foldedIngredients`.
+- `src/components/recipes/types.ts` — `DraftIngredient.foldedIngredients`;
+  `parsedIngredientToDraft` copies it; a `emptyMainForGroup()`-style helper if
+  warranted.
+- `src/components/recipes/reparse.ts` — promote-folded-ingredient path
+  (`reparsePromotingIngredient` or a `kind` arg on the existing promote helper);
+  **switch group reconciliation from range-keyed to label-keyed (Layer 3)** so
+  claimed slots are never removed and unclaimed manual rows are preserved.
+- `src/components/recipes/alternatives.ts` — `addMainAfter(rows, idx)` inserting
+  a sibling main at the end of the group.
+- `src/components/recipes/folded-alt-chips.tsx` — `kind` prop (alternative vs
+  ingredient) → icon + handler; or a sibling component.
+- `src/components/recipes/ingredient-row.tsx` — render ingredient pills;
+  `onPromoteFoldedIngredient`; "Add ingredient" affordance; best-effort
+  highlight for a free-text manual main.
+- `src/components/recipes/section-editor.tsx` &
+  `src/components/recipes/bulk-reparse-dialog.tsx` — wire "Add ingredient" and
+  the promote-ingredient handler in both surfaces.
+- `src/app/api/v1/ingredients/reparse/route.ts` — no change expected (already
+  passes `forceEmitRanges`/`forceFoldRanges`); confirm member-range emit.
+
+## Testing
+
+Parser (vitest, `tests/recipe-import*.test.ts`):
+
+- `Oregano, Majoran und Basilikum nach Belieben` with all three in the catalog →
+  3 mains, each note `nach Belieben`, no `foldedIngredients`.
+- Same line with none in the catalog → 1 main `Oregano`, two `foldedIngredients`
+  (`Majoran`, `Basilikum`) with correct ranges/labels.
+- Mixed (`Oregano, Schabziger und Basilikum`, Schabziger absent) → `Oregano` +
+  `Basilikum` mains, `+ Schabziger` folded.
+- `Paprika, rot oder gelb` (only `Paprika` in catalog → fails the ≥2 existence
+  gate) → **unchanged**: a single `Paprika` row with `rot oder gelb` in its note.
+  The gate keeps prep-like comma+oder runs from splitting.
+- `Dill, Petersilie oder Schnittlauch` (terminal `oder`, all catalog) →
+  `Dill` primary + `Petersilie`/`Schnittlauch` as **alternatives** (not mains) —
+  the terminal connector decides main-vs-alternative once the list is recognized.
+- `Dill, Petersilie oder Schmackofatz` (Dill+Petersilie catalog, ≥2 → a list) →
+  `Dill` primary + `Petersilie` alternative + `Schmackofatz` folded as an
+  alternative **chip** (unmatched member of an `oder` list).
+- `Zwiebel, gewürfelt` → unchanged: 1 main, `gewürfelt` stays in the note (no
+  terminal und/oder → not a coordinated list).
+- `Salz und Pfeffer nach Geschmack` → unchanged baseline (2 mains, shared note).
+- `Dill oder Petersilie` (bare `oder`, no comma) → unchanged alternative
+  behaviour; not affected by the comma-list rule.
+
+Worked examples (from the request):
+
+- `1 Gurke oder Paprika` (both catalog, terminal `oder`) → two rows for `Gurke`
+  and `Paprika` (one primary, one alternative — both auto-generated per the
+  existence rule). Deleting the `Gurke` row folds it into the surviving sibling
+  (`Paprika`)'s note **and** re-shows the `Gurke` pill. (The parser re-derives
+  which surviving slot is primary, so deleting either member behaves the same.)
+- `1 Gurke oder Schmackofatz` (Gurke catalog, Schmackofatz absent) → one row
+  `1 Gurke` with note `oder Schmackofatz` + a `Schmackofatz` pill. Promote the
+  pill → a `Schmackofatz` line. **Save, then reparse**: the saved `Schmackofatz`
+  line matches the parser's `Schmackofatz` slot → reconciled as **unchanged**
+  (no proposed removal), and its pill stays hidden. Editing its note/amount before
+  reparse → only that attribute shows as a diff.
+
+Reparse / reconciliation (vitest):
+
+- Promote a folded ingredient → it becomes a **main** (not alternative); deleting
+  it folds it back to a pill.
+- Label-keyed reconciliation: a current row whose `sourceRange` is **absent**
+  (simulating a saved recipe) but whose name matches a folded slot is kept (not
+  removed); only attribute diffs surface.
+- A current row matching **no** slot (manual free-text main) is preserved across a
+  group reparse, not removed.
+- Deleting an auto-matched member re-emits it as a chip/pill (force-fold →
+  `foldedAlternatives`/`foldedIngredients`).
+
+Component (existing patterns): `FoldedIngredientChips` renders `+` icon and
+fires the ingredient-promote handler; a pill is hidden once its member has a line
+and re-shown when that line is removed; "Add ingredient" inserts a sibling main;
+manual main highlight aligns to the adjacent line when the name matches.
+
+End-to-end: `npm run build` (RSC boundary) before committing UI changes.
+
+## Out of scope
+
+- English (lowercase) comma-lists that are not in the catalog auto-splitting —
+  the catalog gate covers known ingredients regardless of case; unknown
+  lowercase items only ever surface as pills.
+- Reordering manual mains within a group beyond existing group semantics.
+- Persisting `foldedIngredients` to the database — it is parse-session metadata,
+  like `foldedAlternatives`.

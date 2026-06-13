@@ -1,4 +1,4 @@
-import { emptyAlternative, type DraftIngredient } from "./types";
+import { emptyAlternative, emptyIngredient, type DraftIngredient } from "./types";
 
 /**
  * Pure helpers for the primary/alternative grouping of a draft ingredient
@@ -41,6 +41,24 @@ export function addAlternativeAfter(
   const insertAt = lastInGroup(rows, primaryIdx) + 1;
   const next = rows.slice();
   next.splice(insertAt, 0, emptyAlternative());
+  return next;
+}
+
+/** Insert a fresh empty MAIN row immediately after the group containing
+ *  `afterIdx`. Carries no `rawText` — a manual, non-reparsable addition that
+ *  the group reparse treats as a pass-through row (see reparse reconciliation).
+ *  Used by the "add ingredient" control. */
+export function addMainAfter(
+  rows: readonly DraftIngredient[],
+  afterIdx: number,
+): DraftIngredient[] {
+  const primaryIdx = findPrimaryIndex(rows, afterIdx);
+  const insertAt = lastInGroup(rows, primaryIdx) + 1;
+  const next = rows.slice();
+  // Remember the group's source line (display-only) so the manual row can show
+  // a read-only "Aus Zeile:" hint + best-effort highlight of the typed name.
+  const fromLine = rows[primaryIdx]?.rawText?.trim() || undefined;
+  next.splice(insertAt, 0, { ...emptyIngredient(), manualFromLine: fromLine });
   return next;
 }
 

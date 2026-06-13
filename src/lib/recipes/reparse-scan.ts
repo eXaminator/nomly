@@ -60,6 +60,12 @@ function normNotes(n: string | null | undefined): string {
   return (n ?? "").trim();
 }
 
+/** Normalize a member name/label for identity matching against parser
+ *  potentials (mirrors the editor's slot reconciliation). */
+function nameKey(s: string): string {
+  return s.trim().toLowerCase().replace(/[.,:;]+$/g, "");
+}
+
 function qtyEqual(a: number | null, b: number | null): boolean {
   if (a === null || b === null) return a === b;
   return Math.abs(a - b) < QTY_EPSILON;
@@ -467,7 +473,7 @@ export async function scanAllRecipesForReparse(
       isOptional: g.isOptional,
       alternativeForId: g.alternativeForId,
     }));
-    const proposedDerived = parseLineCached(rawLine, lookups);
+    let proposedDerived = parseLineCached(rawLine, lookups);
     // A line that now reads as noise (no rows) shouldn't propose deleting a
     // real ingredient — skip it (mirrors the per-row re-parse guard).
     if (proposedDerived.length === 0) continue;
@@ -475,16 +481,39 @@ export async function scanAllRecipesForReparse(
     // ones the parser no longer extracts) are carried through unchanged on
     // BOTH sides, so the whole alternative unit survives a reparse instead of
     // being silently trimmed on apply. See {@link carriedAlternatives}.
-    const derivedIds = new Set(
+    let derivedIds = new Set(
       proposedDerived
         .map((p) => p.ingredientId)
         .filter((id): id is number => id != null),
     );
-    const carried = carriedAlternatives(
-      group,
-      proposedDerived.length,
-      derivedIds,
-    ).map(carriedAlternativeToProposed);
+    let carriedRows = carriedAlternatives(group, proposedDerived.length, derivedIds);
+    // Reconcile by identity (spec Layer 3): a carried row that matches one of
+    // the parse's "potential" members (a folded alternative / coordinated-list
+    // ingredient, by name) is NOT a removal — the user already has it as a row.
+    // Re-emit those potentials so `proposed` includes them, and only the rows
+    // matching NO potential stay carried (genuine manual additions). Without
+    // this, a saved pill-added member ("Schmackofatz") shows as "would remove".
+    const potentials = proposedDerived.flatMap((p) =>
+      [...(p.foldedAlternatives ?? []), ...(p.foldedIngredients ?? [])],
+    );
+    if (potentials.length > 0 && carriedRows.length > 0) {
+      const carriedKeys = new Set(carriedRows.map((r) => nameKey(r.name ?? "")));
+      const reemit = potentials.filter((pot) => carriedKeys.has(nameKey(pot.label)));
+      if (reemit.length > 0) {
+        const reemitKeys = new Set(reemit.map((pot) => nameKey(pot.label)));
+        proposedDerived = parseIngredientLines([rawLine], lookups, {
+          forceEmitRanges: reemit.map((pot) => pot.range),
+        }) as unknown as ParsedIngredientResponse[];
+        derivedIds = new Set(
+          proposedDerived.map((p) => p.ingredientId).filter((id): id is number => id != null),
+        );
+        // Drop the rescued rows from the carried set (they're now real rows).
+        carriedRows = carriedAlternatives(group, proposedDerived.length, derivedIds).filter(
+          (r) => !reemitKeys.has(nameKey(r.name ?? "")),
+        );
+      }
+    }
+    const carried = carriedRows.map(carriedAlternativeToProposed);
     const proposed = [...proposedDerived, ...carried];
     // A carried alternative defaults to removal on apply, so its mere presence
     // is a proposed change — surface the group even when the derived rows

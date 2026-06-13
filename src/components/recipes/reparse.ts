@@ -63,6 +63,85 @@ export function isConjunctionMember(
   );
 }
 
+/** A parser "slot": a member the clean parse produced — either emitted as a row
+ *  or folded into the note (a chip/pill). */
+export type Slot = { range: Range; label: string };
+/** A current group row, by display name + (when in-session) its source range. */
+export type CurrentEntry = { name: string; range?: Range | null };
+export type SlotPlan = {
+  /** Default-fold slots a current row claims → force-emit so they survive. */
+  forceEmit: Range[];
+  /** Default-emit slots no current row claims → force-fold (a removed member). */
+  forceFold: Range[];
+  /** Indices into `current` of rows that match NO slot (manual additions). */
+  unmatchedManual: number[];
+};
+
+/** Normalize a member label/name for identity matching. */
+function slotKey(s: string): string {
+  return s.trim().toLowerCase().replace(/[.,:;]+$/g, "");
+}
+
+/**
+ * Reconcile the current group rows to the parser's slots so a re-parse keeps
+ * what the user has (and only proposes real changes). A current row claims a
+ * slot by its source RANGE when it has one (edit-stable, so a renamed in-session
+ * row still matches), else by its normalized LABEL (saved rows lost their
+ * range). A claimed default-fold slot is force-emitted (e.g. a saved, pill-added
+ * "Schmackofatz" is not dropped); a default-emit slot no row claims is
+ * force-folded (a removed member); a row matching no slot is a manual addition
+ * to preserve. Pure — the caller applies the directives + preserves manuals.
+ */
+export function planSlotReconciliation(
+  current: CurrentEntry[],
+  emittedSlots: Slot[],
+  foldedSlots: Slot[],
+): SlotPlan {
+  const emittedByRange = new Map<string, Range>();
+  const emittedByLabel = new Map<string, Range>();
+  for (const s of emittedSlots) {
+    emittedByRange.set(rangeKey(s.range), s.range);
+    if (!emittedByLabel.has(slotKey(s.label))) emittedByLabel.set(slotKey(s.label), s.range);
+  }
+  const foldedByRange = new Map<string, Range>();
+  const foldedByLabel = new Map<string, Range>();
+  for (const s of foldedSlots) {
+    foldedByRange.set(rangeKey(s.range), s.range);
+    if (!foldedByLabel.has(slotKey(s.label))) foldedByLabel.set(slotKey(s.label), s.range);
+  }
+  const claimedEmitted = new Set<string>();
+  const claimedFolded = new Set<string>();
+  const unmatchedManual: number[] = [];
+  current.forEach((e, i) => {
+    // Range match first (edit-stable), then label.
+    if (e.range && emittedByRange.has(rangeKey(e.range))) {
+      claimedEmitted.add(rangeKey(e.range));
+      return;
+    }
+    if (e.range && foldedByRange.has(rangeKey(e.range))) {
+      claimedFolded.add(rangeKey(e.range));
+      return;
+    }
+    const k = slotKey(e.name);
+    const er = emittedByLabel.get(k);
+    if (er) {
+      claimedEmitted.add(rangeKey(er));
+      return;
+    }
+    const fr = foldedByLabel.get(k);
+    if (fr) {
+      claimedFolded.add(rangeKey(fr));
+      return;
+    }
+    unmatchedManual.push(i);
+  });
+  const forceEmit: Range[] = [];
+  for (const s of foldedSlots) if (claimedFolded.has(rangeKey(s.range))) forceEmit.push(s.range);
+  const forceFold: Range[] = [];
+  for (const s of emittedSlots) if (!claimedEmitted.has(rangeKey(s.range))) forceFold.push(s.range);
+  return { forceEmit, forceFold, unmatchedManual };
+}
+
 /** Bounds [start,end] of the contiguous run of rows sharing `rawText`. */
 function groupBounds(
   ingredients: readonly DraftIngredient[],
@@ -103,36 +182,44 @@ async function reparseGroupWithChange(
   // parse-session only), so we resolve a row's range from its position within
   // the group against the clean parse's members.
   const [clean] = await reparseLines([rawText]);
-  const cleanMembers = (clean ?? [])
+  const cleanRows = clean ?? [];
+  // Parser slots: members emitted as rows + members folded into the note (chips
+  // for alternatives, "+" pills for coordinated ingredients).
+  const emittedSlots: Slot[] = cleanRows
     .filter((p) => p.sourceRange)
-    .map((p) => p.sourceRange as Range);
-  const rangeOf = (i: number): Range | null =>
-    ingredients[i].sourceRange ?? cleanMembers[i - start] ?? null;
-  // Member ranges currently shown AS ROWS in the group (mains + alternatives).
-  const emitted = new Set<string>();
+    .map((p) => ({ range: p.sourceRange as Range, label: p.name }));
+  const foldedSlots: Slot[] = cleanRows.flatMap((p) =>
+    [...(p.foldedAlternatives ?? []), ...(p.foldedIngredients ?? [])].map((f) => ({
+      range: f.range,
+      label: f.label,
+    })),
+  );
+  // The group rows as they should stand AFTER the explicit change: drop a
+  // removed row, and (for a promote) add a synthetic entry for the slot at the
+  // emitted range so it claims that folded slot → gets force-emitted.
+  const current: Array<CurrentEntry & { row: DraftIngredient | null }> = [];
   for (let i = start; i <= end; i++) {
-    const r = rangeOf(i);
-    if (r) emitted.add(rangeKey(r));
+    if (change.removeIndex === i) continue;
+    current.push({ name: ingredients[i].name, range: ingredients[i].sourceRange ?? null, row: ingredients[i] });
   }
-  if (change.emit) emitted.add(rangeKey(change.emit));
-  if (change.removeIndex != null) {
-    const r = rangeOf(change.removeIndex);
-    if (r) emitted.delete(rangeKey(r));
+  if (change.emit) {
+    const slot = foldedSlots.find((s) => rangeKey(s.range) === rangeKey(change.emit as Range));
+    current.push({ name: slot?.label ?? "", range: change.emit, row: null });
   }
-  const emittedByDefault = cleanMembers;
-  const foldedByDefault = (clean ?? []).flatMap((p) => p.foldedAlternatives ?? []).map((f) => f.range);
-  // forceEmit: unmatched (default-fold) ranges the user wants as rows.
-  const forceEmit = foldedByDefault.filter((r) => emitted.has(rangeKey(r)));
-  // forceFold: matched (default-emit) ranges the user removed.
-  const forceFold = emittedByDefault.filter((r) => !emitted.has(rangeKey(r)));
+  const plan = planSlotReconciliation(current, emittedSlots, foldedSlots);
   const [parsed] = await reparseLines([rawText], {
-    forceEmitRanges: [forceEmit],
-    forceFoldRanges: [forceFold],
+    forceEmitRanges: [plan.forceEmit],
+    forceFoldRanges: [plan.forceFold],
   });
   const drafts = (parsed ?? []).map(parsedIngredientToDraft);
   if (drafts.length === 0) return null;
+  // Preserve current rows that matched no parser slot — manual free-text mains
+  // the parser knows nothing about. Appended after the reparsed group rows.
+  const manualRows = plan.unmatchedManual
+    .map((i) => current[i].row)
+    .filter((r): r is DraftIngredient => r != null);
   const out = ingredients.slice();
-  out.splice(start, end - start + 1, ...drafts);
+  out.splice(start, end - start + 1, ...drafts, ...manualRows);
   return out;
 }
 
@@ -160,6 +247,20 @@ export async function reparseDeletingAlternative(
 /** Promote a folded alternative (a "create alternative" chip) to its own row:
  *  re-parse the primary's line with that range force-emitted. */
 export async function reparsePromotingAlternative(
+  ingredients: readonly DraftIngredient[],
+  primaryIndex: number,
+  range: Range,
+): Promise<DraftIngredient[] | null> {
+  if (!ingredients[primaryIndex]?.rawText?.trim()) return null;
+  return reparseGroupWithChange(ingredients, primaryIndex, { emit: range });
+}
+
+/** Promote a folded INGREDIENT (a "+ add ingredient" pill) to its own MAIN row:
+ *  re-parse the primary's line with that range force-emitted. Identical to
+ *  {@link reparsePromotingAlternative} — the parser emits the range with the role
+ *  its segment carries, which for a coordinated-list member is a main. Named
+ *  separately so the UI wiring reads clearly. */
+export async function reparsePromotingIngredient(
   ingredients: readonly DraftIngredient[],
   primaryIndex: number,
   range: Range,

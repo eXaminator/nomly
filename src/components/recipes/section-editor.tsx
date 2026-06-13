@@ -38,6 +38,7 @@ import {
   reparseGroupAt,
   reparseDeletingAlternative,
   reparsePromotingAlternative,
+  reparsePromotingIngredient,
   isConjunctionMember,
 } from "./reparse";
 import {
@@ -150,6 +151,19 @@ export function SectionEditor({
     let next: DraftIngredient[] | null = null;
     try {
       next = await reparsePromotingAlternative(section.ingredients, primaryIdx, range);
+    } catch {
+      next = null;
+    }
+    if (next) onChange({ ...section, ingredients: next });
+  }
+
+  /** Promote a folded INGREDIENT (a "+ add ingredient" pill) on the primary at
+   *  `primaryIdx` to its own MAIN row by re-parsing the line with that range
+   *  emitted. */
+  async function promoteFoldedIngredient(primaryIdx: number, range: [number, number]) {
+    let next: DraftIngredient[] | null = null;
+    try {
+      next = await reparsePromotingIngredient(section.ingredients, primaryIdx, range);
     } catch {
       next = null;
     }
@@ -508,6 +522,9 @@ export function SectionEditor({
                   onPromote={promoteAlternative}
                   onDetach={detachAlternative}
                   onPromoteFolded={(range) => promoteFoldedAlternative(g.primaryIdx, range)}
+                  onPromoteFoldedIngredient={(range) =>
+                    promoteFoldedIngredient(g.primaryIdx, range)
+                  }
                   onSplitAbove={
                     onSplit && g.primaryIdx > 0
                       ? () => onSplit(g.primaryIdx)
@@ -690,6 +707,7 @@ function IngredientGroup({
   onPromote,
   onDetach,
   onPromoteFolded,
+  onPromoteFoldedIngredient,
   onSplitAbove,
   onInsertAbove,
 }: {
@@ -700,6 +718,8 @@ function IngredientGroup({
   onAddAlternative: () => void;
   /** Promote one of the primary's folded (unmatched) alternatives to a row. */
   onPromoteFolded: (range: [number, number]) => void;
+  /** Promote one of the primary's folded (unmatched) ingredients to a main. */
+  onPromoteFoldedIngredient: (range: [number, number]) => void;
   /** Make this primary an alternative of the row immediately above it.
    *  Undefined when the primary is the first row of the section or has
    *  its own alternatives (which would be orphaned). */
@@ -784,6 +804,7 @@ function IngredientGroup({
         onAddAlternative={onAddAlternative}
         onDemote={onDemote}
         onPromoteFolded={onPromoteFolded}
+        onPromoteFoldedIngredient={onPromoteFoldedIngredient}
         dragAttributes={attributes}
         dragListeners={listeners}
       />
