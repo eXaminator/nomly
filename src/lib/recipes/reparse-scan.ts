@@ -48,6 +48,7 @@ export type CurrentRow = {
   ingredientId: number | null;
   name: string;
   quantity: number | null;
+  quantityLow: number | null;
   unitId: number | null;
   notes: string | null;
   isOptional: boolean;
@@ -110,6 +111,8 @@ export function isLineGroupChanged(
   for (let i = 0; i < current.length; i++) {
     if (currentKey(current[i]) !== proposedKey(proposed[i])) return true;
     if (!qtyEqual(current[i].quantity, proposed[i].quantity)) return true;
+    // A range that changed only its low bound is still a change.
+    if (!qtyEqual(current[i].quantityLow, proposed[i].quantityLow)) return true;
   }
   return false;
 }
@@ -179,6 +182,8 @@ export type ScanRowSummary = {
   name: string;
   canonicalName: string | null;
   quantity: number | null;
+  /** Low bound of an amount range, else null → diff renders "low–high". */
+  quantityLow: number | null;
   unitLabel: string | null;
   /** Whether this row's unit is flagged for fraction display. */
   displayFraction: boolean;
@@ -471,6 +476,7 @@ export async function scanAllRecipesForReparse(
       ingredientId: g.ingredientId,
       name: g.name ?? "",
       quantity: g.quantity,
+      quantityLow: g.quantityLow,
       unitId: g.unitId,
       notes: g.notes,
       isOptional: g.isOptional,
@@ -535,6 +541,7 @@ export async function scanAllRecipesForReparse(
         // Unassigned lines are pure text — mask any stale amount/unit left
         // over from before the unlink, matching the recipe read view.
         quantity: g.ingredientId == null ? null : g.quantity,
+        quantityLow: g.ingredientId == null ? null : g.quantityLow,
         // Match the recipe read view: display_unit, then the canonical unit name.
         unitLabel:
           g.ingredientId == null ? null : (g.displayUnit ?? g.unitName ?? null),
