@@ -68,6 +68,28 @@ describe("upsertUserFromSession", () => {
     expect(favoriteRecipeIdsForUser(u.id).size).toBe(0);
   });
 
+  it("ensureUserFromSession creates a missing user but leaves an existing one's last_login", async () => {
+    const { upsertUserFromSession } = await import("@/lib/users/service");
+    const { ensureUserFromSession } = await import("@/lib/users/current");
+
+    // Missing → created (last_login from the insert clock, seeded by name).
+    const created = ensureUserFromSession({ sub: "s9", name: "Janine" });
+    expect(created?.id).toBeGreaterThan(0);
+
+    // Existing → returned unchanged; a later login (upsert) is what bumps it.
+    const seenAt = created!.lastLoginAt;
+    const again = ensureUserFromSession({ sub: "s9", name: "Janine" });
+    expect(again?.id).toBe(created!.id);
+    expect(again?.lastLoginAt).toBe(seenAt);
+
+    upsertUserFromSession({ sub: "s9", name: "Janine", lastLoginAt: seenAt + 5000 });
+    const after = ensureUserFromSession({ sub: "s9", name: "Janine" });
+    expect(after?.lastLoginAt).toBe(seenAt + 5000);
+
+    // No identity → null.
+    expect(ensureUserFromSession({ sub: undefined, name: "x" })).toBeNull();
+  });
+
   it("removeUser deletes the user and cascades favorites", async () => {
     const { upsertUserFromSession, removeUser, listUsers } = await import("@/lib/users/service");
     const { favoriteRecipeIdsForUser } = await import("@/lib/recipes/favorites");
