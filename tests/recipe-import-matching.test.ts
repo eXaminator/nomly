@@ -2097,6 +2097,17 @@ describe("conjunction members share the full line (highlights align)", () => {
     expect(out[1].rawText).toBe("Salz und Pfeffer (nach Geschmack)");
   });
 
+  it("propagates a trailing group note to all conjunction members ('nach Geschmack')", () => {
+    for (const line of ["Salz & Pfeffer (nach Geschmack)", "Salz und Pfeffer (nach Geschmack)"]) {
+      const out = parseIngredientLines([line], makeLookups(cat));
+      expect(out).toHaveLength(2);
+      expect(out[0].name).toBe("Salz");
+      expect(out[1].name).toBe("Pfeffer");
+      expect(out[0].notes).toBe("nach Geschmack");
+      expect(out[1].notes).toBe("nach Geschmack");
+    }
+  });
+
   it("force-folds a conjunction member into the first sibling's note + chip (delete)", () => {
     const line = "Salz und Pfeffer";
     const normal = parseIngredientLines([line], makeLookups(cat));

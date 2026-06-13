@@ -945,6 +945,7 @@ export function parseIngredientLines(
     }
   }
   applyAlternativeInheritance(out);
+  applyConjunctionNotePropagation(out);
   return out;
 }
 
@@ -1052,6 +1053,48 @@ function applyAlternativeInheritance(rows: ImportedIngredient[]): void {
     let hi = i;
     while (hi + 1 < rows.length && rows[hi + 1].isAlternative) hi += 1;
     if (hi > i) inheritWithinGroup(rows, i, hi);
+    i = hi + 1;
+  }
+}
+
+/**
+ * Propagate a conjunction group's trailing note to its members. For
+ * "Salz & Pfeffer (nach Geschmack)" the "(nach Geschmack)" trails the last
+ * member but applies to the whole group — copy it to every co-equal main in the
+ * same source-line group that brought no note of its own. Notes ONLY (unlike
+ * alternatives, conjunction members don't share an amount). A "conjunction
+ * group" is a contiguous run of >1 main rows sharing the same `rawText`.
+ */
+function applyConjunctionNotePropagation(rows: ImportedIngredient[]): void {
+  let i = 0;
+  while (i < rows.length) {
+    const raw = rows[i].rawText?.trim();
+    let hi = i;
+    while (hi + 1 < rows.length && raw && rows[hi + 1].rawText?.trim() === raw) hi += 1;
+    const isConjunctionGroup =
+      hi > i && !!raw && rows.slice(i, hi + 1).every((r) => !r.isAlternative);
+    if (isConjunctionGroup) {
+      const last = rows[hi];
+      const sharedNote = last.localNote ? undefined : last.notes?.trim();
+      const sharedNoteLocal =
+        sharedNote && last.sourceRange
+          ? trailingNoteRange(
+              last.rawText.slice(last.sourceRange[0], last.sourceRange[1]),
+              sharedNote,
+            )
+          : null;
+      if (sharedNote && sharedNote.length > 0) {
+        for (let k = i; k < hi; k++) {
+          const cur = rows[k].notes?.trim();
+          if (cur && cur.length > 0) continue;
+          rows[k].notes = sharedNote;
+          addInheritedPart(rows[k], last.sourceRange, sharedNoteLocal, "note");
+          rows[k].candidateMatches = rows[k].candidateMatches.map((c) =>
+            mergeSharedNote(c, sharedNote),
+          );
+        }
+      }
+    }
     i = hi + 1;
   }
 }
@@ -1481,7 +1524,10 @@ function parseGroupedIngredientLines(
   if (groups.length > 1 && groups[0].title === null && groups[0].ingredients.length === 0) {
     groups.shift();
   }
-  for (const g of groups) applyAlternativeInheritance(g.ingredients);
+  for (const g of groups) {
+    applyAlternativeInheritance(g.ingredients);
+    applyConjunctionNotePropagation(g.ingredients);
+  }
   return groups;
 }
 
