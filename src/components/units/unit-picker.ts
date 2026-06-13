@@ -3,7 +3,11 @@ import type { SelectSearchItem } from "@/components/ui/select-search";
 /** A unit-picker option that also carries the real `unitId` it resolves to.
  *  Alias options ("clove") have a synthetic negative `id` but a positive
  *  `unitId` (the canonical unit, e.g. Zehe). */
-export type UnitPickerItem = SelectSearchItem & { unitId: number };
+export type UnitPickerItem = SelectSearchItem & {
+  unitId: number;
+  /** True when the resolved unit takes no amount (etwas, a sprinkle). */
+  unspecific?: boolean;
+};
 
 /**
  * Alias-aware unit search for {@link SelectSearch}: lists canonical units AND
@@ -26,8 +30,8 @@ export async function searchUnitsWithAliases(q: string): Promise<UnitPickerItem[
  */
 export function resolveUnitPick(
   picked: SelectSearchItem | null,
-): { id: number; name: string } | null {
+): { id: number; name: string; unspecific?: boolean } | null {
   if (!picked) return null;
   const unitId = (picked as Partial<UnitPickerItem>).unitId ?? picked.id;
-  return { id: unitId, name: picked.name };
+  return { id: unitId, name: picked.name, unspecific: picked.unspecific };
 }

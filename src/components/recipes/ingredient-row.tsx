@@ -312,13 +312,22 @@ export function IngredientRow({
   /** Global-unit picker. Former ingredient sub-units are now global units, so
    *  they surface here like any other unit. */
   const pickerValue: SelectSearchItem | null = value.unit;
+  // An unspecific unit ("etwas", "a sprinkle") takes no amount — the quantity
+  // input is disabled and the stored quantity stays null.
+  const amountDisabled = value.unit?.unspecific === true;
 
   function onPickUnit(picked: SelectSearchItem | null) {
+    // Collapse an alias pick to the real unit id while keeping the chosen
+    // spelling as the display name → the row shows e.g. "clove".
+    const unit = resolveUnitPick(picked);
+    // An unspecific unit takes no amount: clear the quantity and mark it fixed
+    // (so it never scales with servings). The amount input is disabled below.
+    const unspecific = unit?.unspecific === true;
     onChange({
       ...value,
-      // Collapse an alias pick to the real unit id while keeping the chosen
-      // spelling as the display name → the row shows e.g. "clove".
-      unit: resolveUnitPick(picked),
+      unit,
+      quantity: unspecific ? "" : value.quantity,
+      fixedAmount: unspecific ? true : value.fixedAmount,
       importAnnotation: clearAnnotationOn(value.importAnnotation, "unit"),
     });
   }
@@ -500,6 +509,7 @@ export function IngredientRow({
           value={value.quantity}
           onChange={(e) => onChange({ ...value, quantity: e.target.value })}
           aria-label="Menge"
+          disabled={amountDisabled}
           className="col-start-1 row-start-1"
         />
         <div className="col-start-2 col-span-2 row-start-1 md:col-span-1">
@@ -750,6 +760,7 @@ export function IngredientRow({
               value={value.quantity}
               onChange={(e) => onChange({ ...value, quantity: e.target.value })}
               aria-label="Menge"
+              disabled={amountDisabled}
             />
             <div className="col-span-4 flex flex-col gap-1 md:col-span-1 md:col-start-2 md:row-start-1">
               <SelectSearch

@@ -11,6 +11,8 @@ export type ComboboxItem = {
   name: string;
   /** Optional secondary text (e.g. alias that matched, dimension hint). */
   detail?: string;
+  /** True when the item is a unit that takes no amount (etwas, a sprinkle). */
+  unspecific?: boolean;
 };
 
 export type ComboboxProps = {
