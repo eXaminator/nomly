@@ -133,6 +133,7 @@ const parse = (raw: string) => {
   const r = out[0];
   return {
     quantity: r?.quantity ?? null,
+    quantityLow: r?.quantityLow ?? null,
     unitName: r?.unit?.name ?? r?.rawUnit ?? null,
     name: r?.name ?? "",
     notes: r?.notes ?? null,
@@ -194,49 +195,52 @@ describe("parseIngredientString", () => {
       isOptional: false,
     });
   });
-  it("uses the max of a range and records the range — with its unit — in notes", () => {
+  it("a range is structured: high in quantity, low in quantityLow, NOT in notes", () => {
     expect(parse("100-200 g Käse")).toMatchObject({
       quantity: 200,
+      quantityLow: 100,
       unitName: "g",
       name: "Käse",
-      // The range note carries the unit it ranges over, like the amount does.
-      notes: "100-200 g",
+      // The range is now a first-class amount, so it no longer lands in notes.
+      notes: null,
       isOptional: false,
     });
   });
-  it("range with fractions: max + note shown as fractions, like the amount", () => {
+  it("range with fractions: high in quantity, low bound captured", () => {
     const r = parse("1/2-1 cup peanut butter");
     expect(r.quantity).toBe(1);
+    expect(r.quantityLow).toBe(0.5);
     expect(r.unitName).toBe("cup");
     expect(r.name).toBe("peanut butter");
-    // Range bounds use the same fraction presentation as the main amount.
-    expect(r.notes).toBe("1/2-1 cup");
+    expect(r.notes).toBeNull();
   });
-  it("range across token boundaries: max + fraction note with unit", () => {
+  it("range across token boundaries: high 1.5, low 1", () => {
     const r = parse("1- 1 1/2 teaspoons sea salt");
     expect(r.quantity).toBe(1.5);
+    expect(r.quantityLow).toBe(1);
     expect(r.unitName).toBe("teaspoons");
     expect(r.name).toBe("sea salt");
-    expect(r.notes).toBe("1-1 1/2 teaspoons");
+    expect(r.notes).toBeNull();
   });
-  it("range with thirds: fractions, never long decimals", () => {
+  it("range with thirds: structured bounds, never long decimals in notes", () => {
     const r = parse("1/3-2/3 cup yogurt");
     expect(r.quantity).toBeCloseTo(0.667, 2);
-    expect(r.notes).toBe("1/3-2/3 cup");
+    expect(r.quantityLow).toBeCloseTo(0.333, 2);
+    expect(r.notes).toBeNull();
   });
-  it("range with a non-fraction decimal caps at 2 places", () => {
+  it("range with a non-fraction decimal: both bounds captured", () => {
     const r = parse("0,25-0,4 l Wasser");
-    // 0.25 → "1/4" (clean fraction); 0.4 → "0,4" (2-decimal cap, no fraction).
-    expect(r.notes).toBe("1/4-0,4 l");
+    expect(r.quantity).toBe(0.4);
+    expect(r.quantityLow).toBe(0.25);
+    expect(r.notes).toBeNull();
   });
-  it("a unitless range keeps the bare range note (pipeline defaults the unit)", () => {
-    // The range note has no unit to append → stays "2-3"; the pipeline then
-    // fills the empty unit slot with the global default (Stück).
+  it("a unitless range is structured; the pipeline still defaults the unit", () => {
     const r = parse("2-3 Eier");
     expect(r.quantity).toBe(3);
+    expect(r.quantityLow).toBe(2);
     expect(r.unitName).toBe("Stück");
     expect(r.name).toBe("Eier");
-    expect(r.notes).toBe("2-3");
+    expect(r.notes).toBeNull();
   });
   it("a quantity with no unit gets the default unit", () => {
     expect(parse("3 Eier")).toMatchObject({
@@ -792,11 +796,12 @@ describe("parseIngredientString — extended cases", () => {
     expect(r.isOptional).toBe(true);
     expect(r.name).toBe("Salz");
   });
-  it("range with repeated unit '25 g – 50 g' uses max + note", () => {
+  it("range with repeated unit '25 g – 50 g' is structured (max + low, not in notes)", () => {
     const r = parse("25 g – 50 g gekühlte Marzipan-Rohmasse");
     expect(r.quantity).toBe(50);
+    expect(r.quantityLow).toBe(25);
     expect(r.unitName).toBe("g");
-    expect(r.notes).toMatch(/25-50/);
+    expect(r.notes ?? "").not.toMatch(/25-50/);
   });
   it("'1 garlic clove' parses unit from the trailing token", () => {
     const r = parse("1 garlic clove");
@@ -823,19 +828,21 @@ describe("parseIngredientString — extended cases", () => {
     expect(r.name).toBe("Ingwer");
   });
 
-  it("'4 to 6 cups chicken stock' uses max + range note", () => {
+  it("'4 to 6 cups chicken stock' is structured (max + low, not in notes)", () => {
     const r = parse("4 to 6 cups chicken stock");
     expect(r.quantity).toBe(6);
+    expect(r.quantityLow).toBe(4);
     expect(r.unitName).toBe("cups");
     expect(r.name).toBe("chicken stock");
-    expect(r.notes).toMatch(/4-6/);
+    expect(r.notes ?? "").not.toMatch(/4-6/);
   });
-  it("'1 bis 2 EL Milch' uses max + range note", () => {
+  it("'1 bis 2 EL Milch' is structured (max + low, not in notes)", () => {
     const r = parse("1 bis 2 EL Milch");
     expect(r.quantity).toBe(2);
+    expect(r.quantityLow).toBe(1);
     expect(r.unitName).toBe("EL");
     expect(r.name).toBe("Milch");
-    expect(r.notes).toMatch(/1-2/);
+    expect(r.notes ?? "").not.toMatch(/1-2/);
   });
   it("'Heaping 1 teaspoon sea salt' peels modifier before quantity", () => {
     const r = parse("Heaping 1 teaspoon sea salt");

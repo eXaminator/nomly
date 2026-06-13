@@ -19,6 +19,7 @@ const rowSchema = z.object({
   addAsAlias: z.boolean().optional(),
   unassigned: z.boolean().optional(),
   quantity: z.number().nullable(),
+  quantityLow: z.number().nullable().optional(),
   unitId: z.number().int().nullable(),
   displayUnit: z.string().nullable(),
   notes: z.string().nullable(),

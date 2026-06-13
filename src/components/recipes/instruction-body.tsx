@@ -9,6 +9,7 @@ import type { IngredientDietaryClass } from "@/lib/recipes/diet";
 /** The subset of an ingredient row needed to render one tooltip line. */
 export type MentionTip = {
   quantity: number | null;
+  quantityLow: number | null;
   unitLabel: string | null;
   name: string;
   canonicalName: string | null;
@@ -129,6 +130,7 @@ export function InstructionBody({
                   <DietMarker kind={row.dietaryClass} />
                   <RecipeIngredientReadLine
                     quantity={row.quantity}
+                    quantityLow={row.quantityLow}
                     unitLabel={row.unitLabel}
                     name={row.name}
                     canonicalName={row.canonicalName}

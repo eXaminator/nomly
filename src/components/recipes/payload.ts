@@ -9,6 +9,19 @@ export function toNumberOrNull(raw: string): number | null {
 }
 
 /**
+ * True when the row is in range mode but the low bound is missing, non-numeric,
+ * or not strictly below the high bound. Used to show an inline error and block
+ * save. A non-range row is never a range error.
+ */
+export function rangeError(ing: DraftIngredient): boolean {
+  if (!ing.isRange) return false;
+  const low = toNumberOrNull(ing.quantityLow);
+  const high = toNumberOrNull(ing.quantity);
+  if (low === null || high === null) return true;
+  return low >= high;
+}
+
+/**
  * Map a {@link DraftIngredient} (form / pill-UI state) to the recipe-ingredient
  * payload the server's recipe-update path expects. Returns null when the row
  * has no usable name. Shared by the recipe form and the bulk re-parse dialog so
@@ -26,6 +39,8 @@ export function ingredientToPayload(ing: DraftIngredient) {
     unassigned: ing.unassigned,
     addAsAlias: ing.unassigned ? false : ing.addAsAlias,
     quantity: toNumberOrNull(ing.quantity),
+    // Only carry the low bound when the row is explicitly in range mode.
+    quantityLow: ing.isRange ? toNumberOrNull(ing.quantityLow) : null,
     unitId: ing.unit?.id ?? null,
     displayUnit: ing.unit?.name ?? null,
     notes: ing.notes.trim() || null,

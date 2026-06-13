@@ -73,6 +73,7 @@ function cur(over: Partial<CurrentRow> = {}): CurrentRow {
     ingredientId: 5,
     name: "Tomate",
     quantity: 2,
+    quantityLow: null,
     unitId: 3,
     notes: null,
     isOptional: false,
@@ -84,6 +85,7 @@ function cur(over: Partial<CurrentRow> = {}): CurrentRow {
 function prop(over: Partial<ParsedIngredientResponse> = {}): ParsedIngredientResponse {
   return {
     quantity: 2,
+    quantityLow: null,
     unit: { id: 3, name: "g" },
     unitMatch: "matched",
     rawUnit: null,

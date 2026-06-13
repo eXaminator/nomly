@@ -18,7 +18,7 @@ import {
   InstructionBody,
   type MentionTips,
 } from "@/components/recipes/instruction-body";
-import { formatQuantity } from "@/components/recipes/ingredient-read-line";
+import { formatAmount } from "@/components/recipes/ingredient-read-line";
 import {
   UpcomingUsesButton,
   UpcomingUsesProvider,
@@ -214,6 +214,7 @@ export function RecipeDetail({
               }
               group.tips.push({
                 quantity: i.quantity,
+                quantityLow: i.quantityLow,
                 unitLabel: i.unitLabel,
                 name: i.ingredientName,
                 canonicalName: i.canonicalIngredientName,
@@ -283,7 +284,7 @@ export function RecipeDetail({
                     column instead of being indented past it. */}
                 {unassigned ? null : (
                   <span className="inline-flex min-w-12 shrink-0 items-center font-mono text-[var(--color-muted-fg)]">
-                    {formatQuantity(ing.quantity, { fraction: ing.displayFraction })}{" "}
+                    {formatAmount(ing.quantity, ing.quantityLow, { fraction: ing.displayFraction })}{" "}
                     {ing.unitLabel ?? ""}
                   </span>
                 )}

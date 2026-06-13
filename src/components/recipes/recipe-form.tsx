@@ -26,7 +26,7 @@ import { moveAlternativeWithinGroup } from "./alternatives";
 import { splitSectionAt } from "./split-section";
 import { TagInput } from "./tag-input";
 import { hasReparsableRows, reparseAll } from "./reparse";
-import { ingredientToPayload, toNumberOrNull } from "./payload";
+import { ingredientToPayload, rangeError, toNumberOrNull } from "./payload";
 import { cn } from "@/lib/cn";
 import {
   emptyRecipe,
@@ -317,6 +317,15 @@ export function RecipeForm({ initial, recipeId, tagSuggestions }: Props) {
 
     if (!draft.title.trim()) {
       setError("Titel ist erforderlich.");
+      return;
+    }
+    const hasRangeError = draft.sections.some((s) =>
+      s.ingredients.some((ing) => rangeError(ing)),
+    );
+    if (hasRangeError) {
+      setError(
+        "Ein Mengenbereich ist ungültig: Die Untergrenze muss kleiner als die Obergrenze sein.",
+      );
       return;
     }
     const payload = buildPayload(draft);

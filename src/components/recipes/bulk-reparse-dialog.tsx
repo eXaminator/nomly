@@ -52,7 +52,7 @@ import { ingredientToPayload, toNumberOrNull } from "./payload";
 import { buildUnitInflector, type UnitInflector } from "./unit-inflect";
 import type { UnitForm } from "@/lib/recipes/reparse-scan";
 import {
-  formatQuantity,
+  formatAmount,
   RecipeIngredientReadLine,
   type LineHighlight,
 } from "./ingredient-read-line";
@@ -214,8 +214,12 @@ function aliasWarningText(w: AliasWarning): string {
     : `Alias „${w.aliasName}“ angelegt — kollidiert mit einem Alias von ${others}`;
 }
 
-function amountStr(q: number | null, unit: string | null): string {
-  return `${formatQuantity(q)} ${unit ?? ""}`.replace(/\s+/g, " ").trim();
+function amountStr(
+  q: number | null,
+  qLow: number | null,
+  unit: string | null,
+): string {
+  return `${formatAmount(q, qLow)} ${unit ?? ""}`.replace(/\s+/g, " ").trim();
 }
 /** Stable identity of a row's ingredient mapping — what the diff compares to
  *  decide if the mapping CHANGED. A catalog id for matched rows, the sentinel
@@ -311,11 +315,12 @@ function computeHighlights(
       // An unassigned draft is pure text — its amount is dropped on save, so
       // compare it as amountless (mirrors the masked current side).
       amount:
-        amountStr(c.quantity, inflect(c.unitLabel, c.quantity)) !==
+        amountStr(c.quantity, c.quantityLow, inflect(c.unitLabel, c.quantity)) !==
         (d.unassigned
           ? ""
           : amountStr(
               toNumberOrNull(d.quantity),
+              d.isRange ? toNumberOrNull(d.quantityLow) : null,
               inflect(d.unit?.name ?? null, toNumberOrNull(d.quantity)),
             )),
       name: c.name.trim() !== d.name.trim(),
@@ -343,6 +348,7 @@ type ScanRowSummary = {
   name: string;
   canonicalName: string | null;
   quantity: number | null;
+  quantityLow: number | null;
   unitLabel: string | null;
   displayFraction: boolean;
   notes: string | null;
@@ -1075,6 +1081,7 @@ export function BulkReparseDialog({
                                             <RecipeIngredientReadLine
                                               key={k}
                                               quantity={c.quantity}
+                                              quantityLow={c.quantityLow}
                                               unitLabel={inflect(c.unitLabel, c.quantity)}
                                               displayFraction={c.displayFraction}
                                               name={c.name}
@@ -1122,6 +1129,11 @@ export function BulkReparseDialog({
                                                     d.unassigned
                                                       ? null
                                                       : toNumberOrNull(d.quantity)
+                                                  }
+                                                  quantityLow={
+                                                    d.unassigned || !d.isRange
+                                                      ? null
+                                                      : toNumberOrNull(d.quantityLow)
                                                   }
                                                   unitLabel={
                                                     d.unassigned
