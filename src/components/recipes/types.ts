@@ -105,6 +105,10 @@ export type DraftIngredient = {
    *  Each renders as a "create alternative" chip under the primary; clicking
    *  re-parses the line with that range emitted. Parse-session only. */
   foldedAlternatives?: { range: [number, number]; label: string }[];
+  /** Unmatched coordinated-list MAIN members folded into THIS row's note —
+   *  rendered as "+ add ingredient" pills; clicking re-parses the line with that
+   *  range emitted as a MAIN. Parse-session only. */
+  foldedIngredients?: { range: [number, number]; label: string }[];
   /** Categorised highlight spans into `rawText` (own amount/name/note +
    *  inherited amount/note) — coloured by kind in the "Original:" line so the
    *  parse decisions are legible. Parse-session only. */
@@ -233,6 +237,9 @@ export type ParsedIngredientResponse = {
   /** Unmatched alternatives folded into this row's note — surfaced as
    *  "create alternative" chips. */
   foldedAlternatives?: { range: [number, number]; label: string }[];
+  /** Unmatched coordinated-list MAIN members folded into this row's note —
+   *  surfaced as "+ add ingredient" pills that promote to a main. */
+  foldedIngredients?: { range: [number, number]; label: string }[];
   /** Categorised highlight spans into `rawText` (own amount/name/note +
    *  inherited amount/note) — coloured by kind in the source-line view. */
   highlightParts?: { range: [number, number]; kind: "amount" | "name" | "note" | "dropped" }[];
@@ -303,6 +310,7 @@ export function parsedIngredientToDraft(
     fixedAmount: i.fixedAmount ?? false,
     isAlternative: i.isAlternative ?? false,
     foldedAlternatives: i.foldedAlternatives,
+    foldedIngredients: i.foldedIngredients,
     rawText: i.rawText,
     sourceRange: i.sourceRange,
     highlightParts: i.highlightParts,
