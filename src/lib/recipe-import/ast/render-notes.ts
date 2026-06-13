@@ -35,38 +35,46 @@ export type Leaf = Lexeme & {
  *  - everything else is emitted byte-for-byte from the original gaps;
  *  - comma/space runs collapse, edges trim, empty → null.
  */
+/** A leaf that's dropped from the note: consumed by a field, a root-level paren
+ *  or bracket delimiter, or a pluralization marker. */
+function isRemovedFromNote(lf: Leaf): boolean {
+  const isParenRootDelim =
+    (lf.kind === "open" || lf.kind === "close") && lf.depth === 0 && !lf.bracket;
+  const isBracketDelim = (lf.kind === "open" || lf.kind === "close") && lf.bracket;
+  // A dash the parser DIDN'T consume survives verbatim ("150 - 200 g") — not
+  // listed here. Comma boundaries come from CONSUMED spans.
+  return (
+    lf.consumed === true || isParenRootDelim || isBracketDelim || lf.role === "plural-marker"
+  );
+}
+
 export function renderNote(source: string, leaves: readonly Leaf[]): string | null {
   let out = "";
   let lastEnd = -1;
   let pendingBreak = false;
   let started = false;
 
-  for (const lf of leaves) {
-    const isParenRootDelim =
-      (lf.kind === "open" || lf.kind === "close") && lf.depth === 0 && !lf.bracket;
-    const isBracketDelim = (lf.kind === "open" || lf.kind === "close") && lf.bracket;
-    // A pluralization marker ("(er)", "/n") is fully transparent: dropped from
-    // the note like a paren, but it never introduces a comma boundary.
+  for (let idx = 0; idx < leaves.length; idx++) {
+    const lf = leaves[idx];
+    // A pluralization marker ("(er)", "/n") is dropped like a paren but never
+    // introduces a comma boundary.
     const isPluralMarker = lf.role === "plural-marker";
-    // A dash the parser DIDN'T consume just survives verbatim ("150 - 200 g",
-    // "fein - gehackt"). Comma boundaries come from CONSUMED spans, not from a
-    // user-written dash; a leading "- " is cleaned by tidyNote's edge-trim.
-    const removed =
-      lf.consumed === true ||
-      isParenRootDelim ||
-      isBracketDelim ||
-      isPluralMarker;
-
-    if (removed) {
+    if (isRemovedFromNote(lf)) {
       if (started && !isPluralMarker) pendingBreak = true;
       continue;
     }
+    // A footnote "*" GLUED to a following surviving token ("*siehe") attaches
+    // forward — render it normally so it stays with that token. Otherwise (a
+    // trailing "*", or one glued only to a dropped ")" — "(gemahlen)*") it
+    // attaches to the PRECEDING note text, never a new comma clause.
+    const next = leaves[idx + 1];
+    const starGluedForward =
+      lf.text === "*" && next != null && next.start === lf.end && !isRemovedFromNote(next);
+
     if (!started) {
       out = lf.text;
       started = true;
-    } else if (lf.text === "*") {
-      // A footnote marker attaches to the preceding note text ("gemahlen*"),
-      // never a new comma clause — even across a dropped ")" ("(gemahlen)*").
+    } else if (lf.text === "*" && !starGluedForward) {
       out += lf.text;
     } else {
       // `breakBefore` marks a leaf whose preceding source is NOT contiguous with

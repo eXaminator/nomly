@@ -133,11 +133,22 @@ export function leavesToCandidateTokens(
       setSep(sepString(lf));
       continue;
     }
+    // A parenthesis is a token boundary even when GLUED to a word
+    // ("Paprika(gewürfelt)" → "paprika" + "gewürfelt"), so the base word matches
+    // the catalog on its own rather than fusing into "paprikagewürfelt".
+    if (lf.kind === "open") {
+      flush();
+      emitted = false;
+    }
     // Content leaf: word / number / punct / open / close.
     if (startIdx < 0) startIdx = i;
     raw += lf.text;
     endIdx = i;
     if (lf.depth > 0 || lf.kind === "open") inParens = true;
+    if (lf.kind === "close") {
+      flush();
+      emitted = false;
+    }
   }
   flush();
   return out;

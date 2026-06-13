@@ -1290,6 +1290,42 @@ describe("parseIngredientLines — unmatched alternative folds + offers a chip",
     expect(emitted[1].ingredientMatch).toBe("new");
   });
 
+  it("matches a base word glued to a parenthesis ('Paprika(gewürfelt)' → Paprika)", () => {
+    const catalog: IngredientCatalog = [
+      { ingredientId: 1, canonicalName: "Paprika", aliasName: "Paprika", tokens: ["paprika"] },
+    ];
+    const out = parseIngredientLines(["100 g Paprika(gewürfelt)"], makeLookups(catalog));
+    expect(out[0].ingredientId).toBe(1);
+    expect(out[0].ingredientMatch).toBe("existing");
+    expect(out[0].notes).toBe("gewürfelt");
+  });
+
+  it("keeps a glued lowercase '/word' descriptor in the note ('kleine/mittlere')", () => {
+    const catalog: IngredientCatalog = [
+      { ingredientId: 1, canonicalName: "Paprika", aliasName: "Paprika", tokens: ["paprika"] },
+    ];
+    const out = parseIngredientLines(
+      ["1 kleine/mittlere Paprika (in feine Streifen geschnitten)"],
+      makeLookups(catalog),
+    );
+    expect(out[0].ingredientId).toBe(1);
+    expect(out[0].notes).toBe("kleine/mittlere, in feine Streifen geschnitten");
+  });
+
+  it("a footnote '*' glued to a following word stays with it ('*siehe …')", () => {
+    const catalog: IngredientCatalog = [
+      { ingredientId: 1, canonicalName: "Cayennepfeffer", aliasName: "Cayennepfeffer", tokens: ["cayennepfeffer"] },
+    ];
+    const out = parseIngredientLines(
+      ["1 TL Cayennepfeffer (ODER 4-6 getrocknete Chilis (*siehe Anmerkungen))"],
+      makeLookups(catalog, ["tl"]),
+    );
+    // The "*" is glued forward to "siehe" → it stays attached there, not pulled
+    // back onto the preceding word.
+    expect(out[0].notes).toMatch(/\*siehe Anmerkungen/);
+    expect(out[0].notes).not.toMatch(/Chilis\*/);
+  });
+
   it("drops a parenthesis whose content was fully consumed (no stray '( )')", () => {
     const catalog: IngredientCatalog = [
       { ingredientId: 1, canonicalName: "Gewürzgurken", aliasName: "Gewürzgurken", tokens: ["gewürzgurken"] },
