@@ -17,6 +17,8 @@ type Filters = {
   not?: string;
   diet?: string;
   update?: string;
+  /** User id whose favorites to show (the `fav` query param). */
+  fav?: string;
 };
 
 type Props = {
@@ -82,9 +84,9 @@ export function RecipeGridVirtual({
   totalUnfiltered,
   filters,
 }: Props) {
-  const { q, must, not, diet, update } = filters;
-  const filterKey = `${q ?? ""}|${must ?? ""}|${not ?? ""}|${diet ?? ""}|${update ?? ""}`;
-  const filtersActive = Boolean(q?.trim() || must || not || diet || update);
+  const { q, must, not, diet, update, fav } = filters;
+  const filterKey = `${q ?? ""}|${must ?? ""}|${not ?? ""}|${diet ?? ""}|${update ?? ""}|${fav ?? ""}`;
+  const filtersActive = Boolean(q?.trim() || must || not || diet || update || fav);
 
   // `loaded` is tagged with the filter key it belongs to, so a stale result
   // from a previous filter never shows after the filter changes — we fall
@@ -105,6 +107,7 @@ export function RecipeGridVirtual({
     if (not) params.set("not", not);
     if (diet) params.set("diet", diet);
     if (update) params.set("update", update);
+    if (fav) params.set("fav", fav);
     const qs = params.toString();
     fetch(`/api/v1/recipes${qs ? `?${qs}` : ""}`)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`${r.status}`))))
@@ -117,7 +120,7 @@ export function RecipeGridVirtual({
     return () => {
       active = false;
     };
-  }, [filterKey, q, must, not, diet, update]);
+  }, [filterKey, q, must, not, diet, update, fav]);
 
   const full = loaded?.key === filterKey ? loaded.recipes : null;
   const recipes = full ?? initialRecipes;

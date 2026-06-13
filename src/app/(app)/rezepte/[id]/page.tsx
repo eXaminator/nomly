@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { RecipeDetail } from "@/components/recipes/recipe-detail";
 import { getRecipe } from "@/lib/recipes/service";
+import { getCurrentUser } from "@/lib/users/current";
 
 export const dynamic = "force-dynamic";
 
@@ -28,7 +29,8 @@ export default async function RecipeViewPage({
   const { id: rawId } = await params;
   const id = Number(rawId);
   if (!Number.isInteger(id) || id <= 0) notFound();
-  const recipe = getRecipe(id);
+  const me = await getCurrentUser();
+  const recipe = getRecipe(id, me?.id ?? null);
   if (!recipe) notFound();
 
   // Optional meal-context query param. When set, the recipe view enables
