@@ -1300,6 +1300,22 @@ describe("parseIngredientLines — unmatched alternative folds + offers a chip",
     expect(out[0].notes).toBe("gewürfelt");
   });
 
+  it("treats glued '(…)' and '/…' markers identically (plural ending vs full word)", () => {
+    const catalog: IngredientCatalog = [
+      { ingredientId: 1, canonicalName: "Paprika", aliasName: "Paprika", tokens: ["paprika"] },
+    ];
+    const note = (line: string) => {
+      const r = parseIngredientLines([line], makeLookups(catalog))[0];
+      return { id: r.ingredientId, notes: r.notes };
+    };
+    // A full word is content in both forms (matched base + the word as a note).
+    expect(note("100 g Paprika(gewürfelt)")).toEqual({ id: 1, notes: "gewürfelt" });
+    expect(note("100 g Paprika/gewürfelt")).toEqual({ id: 1, notes: "gewürfelt" });
+    // A real plural ending folds as a marker in both forms (base matches, no note).
+    expect(note("100 g Paprika(s)")).toEqual({ id: 1, notes: null });
+    expect(note("100 g Paprika/s")).toEqual({ id: 1, notes: null });
+  });
+
   it("keeps a glued lowercase '/word' descriptor in the note ('kleine/mittlere')", () => {
     const catalog: IngredientCatalog = [
       { ingredientId: 1, canonicalName: "Paprika", aliasName: "Paprika", tokens: ["paprika"] },
