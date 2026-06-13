@@ -6,6 +6,7 @@ import { buildRedirectUri, getOidcConfig } from "@/lib/oidc";
 import { env } from "@/lib/env";
 import { getSession } from "@/lib/server-session";
 import type { SessionData } from "@/lib/session";
+import { upsertUserFromSession } from "@/lib/users/service";
 
 const STATE_COOKIE = "__nomly_oidc_state";
 
@@ -70,6 +71,10 @@ export async function GET(request: Request) {
   };
   Object.assign(session, data);
   await session.save();
+
+  // Mirror the OIDC identity into the local user table (creating + seeding
+  // favorites on first login, refreshing name + last_login afterwards).
+  upsertUserFromSession({ sub: data.sub, name: data.name, lastLoginAt: now });
 
   const nextPath =
     stateData.next.startsWith("/") && !stateData.next.startsWith("//")
