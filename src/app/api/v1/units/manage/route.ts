@@ -17,6 +17,7 @@ const upsertSchema = z.object({
   factor: z.number().positive(),
   isContainer: z.boolean().default(false),
   displayFraction: z.boolean().default(false),
+  unspecific: z.boolean().default(false),
   setAsGlobalDefault: z.boolean().default(false),
 });
 

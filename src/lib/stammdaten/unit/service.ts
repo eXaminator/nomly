@@ -48,6 +48,9 @@ export type UnitListItem = {
   /** True for the single unit configured as the global default (applied to a
    *  quantity-bearing line with no explicit unit). */
   isGlobalDefault: boolean;
+  /** When true, this unit takes no amount (etwas, a sprinkle); factor and base
+   *  unit are forced to the defaults (1 / null). */
+  unspecific: boolean;
   recipeRefCount: number;
 };
 
@@ -64,6 +67,9 @@ export type UnitUpsertInput = {
   isContainer: boolean;
   /** When true, recipe read views show this unit's quantities as fractions. */
   displayFraction: boolean;
+  /** When true, the unit takes no amount; the service forces factor=1,
+   *  baseUnitId=null on save. */
+  unspecific: boolean;
   /** When true, point the global-default-unit setting at this unit on save
    *  (single-select; overwrites any previous pointer). */
   setAsGlobalDefault?: boolean;
@@ -150,6 +156,7 @@ function loadUnitsBase(query?: string) {
         factor: unit.factor,
         isContainer: unit.isContainer,
         displayFraction: unit.displayFraction,
+        unspecific: unit.unspecific,
       })
       .from(unit)
       .orderBy(sql`unaccent(${unit.name})`)
@@ -215,6 +222,7 @@ export function listUnitsManaged(query?: string): UnitListItem[] {
     isContainer: row.isContainer,
     displayFraction: row.displayFraction,
     isGlobalDefault: row.id === globalDefaultId,
+    unspecific: row.unspecific,
     recipeRefCount: recipeCounts.get(row.id) ?? 0,
   }));
 }
@@ -239,6 +247,7 @@ export function getUnitDetail(id: number): UnitListItem | null {
     isContainer: row.isContainer,
     displayFraction: row.displayFraction,
     isGlobalDefault: row.id === getGlobalDefaultUnitId(),
+    unspecific: row.unspecific,
     recipeRefCount: recipeCounts.get(row.id) ?? 0,
   };
 }
@@ -351,18 +360,24 @@ function validateInput(
 }
 
 export function createUnit(input: UnitUpsertInput): UnitListItem {
-  const { name, plural, aliases, aliasPlurals } = validateInput(input);
+  // An unspecific unit takes no amount — factor/base unit are meaningless and
+  // forced to the defaults so validation and storage stay consistent.
+  const effective: UnitUpsertInput = input.unspecific
+    ? { ...input, baseUnitId: null, factor: 1 }
+    : input;
+  const { name, plural, aliases, aliasPlurals } = validateInput(effective);
   const id = db.transaction((tx) => {
     const inserted = tx
       .insert(unit)
       .values({
         name,
         plural,
-        dimension: input.dimension,
-        baseUnitId: input.baseUnitId ?? null,
-        factor: input.factor,
-        isContainer: input.isContainer,
-        displayFraction: input.displayFraction,
+        dimension: effective.dimension,
+        baseUnitId: effective.baseUnitId ?? null,
+        factor: effective.factor,
+        isContainer: effective.isContainer,
+        displayFraction: effective.displayFraction,
+        unspecific: effective.unspecific,
       })
       .returning({ id: unit.id })
       .all();
@@ -397,17 +412,21 @@ export function updateUnit(id: number, input: UnitUpsertInput): UnitListItem {
     );
   }
 
-  const { name, plural, aliases, aliasPlurals } = validateInput(input, id);
+  const effective: UnitUpsertInput = input.unspecific
+    ? { ...input, baseUnitId: null, factor: 1 }
+    : input;
+  const { name, plural, aliases, aliasPlurals } = validateInput(effective, id);
 
   db.transaction((tx) => {
     tx.update(unit)
       .set({
         name,
         plural,
-        baseUnitId: input.baseUnitId ?? null,
-        factor: input.factor,
-        isContainer: input.isContainer,
-        displayFraction: input.displayFraction,
+        baseUnitId: effective.baseUnitId ?? null,
+        factor: effective.factor,
+        isContainer: effective.isContainer,
+        displayFraction: effective.displayFraction,
+        unspecific: effective.unspecific,
       })
       .where(eq(unit.id, id))
       .run();
