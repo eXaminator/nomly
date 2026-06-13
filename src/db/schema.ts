@@ -104,6 +104,15 @@ export const unit = sqliteTable("unit", {
   displayFraction: integer("display_fraction", { mode: "boolean" })
     .notNull()
     .default(false),
+  /**
+   * When true, this unit takes NO amount (e.g. "etwas", "a sprinkle", "ein
+   * Schuss"). The parser never assigns it a quantity (any leading number is
+   * dropped); dimension/factor/baseUnit are meaningless and forced to the
+   * defaults (dimension stays non-null, factor = 1, baseUnitId = NULL).
+   */
+  unspecific: integer("unspecific", { mode: "boolean" })
+    .notNull()
+    .default(false),
 });
 
 export const unitAlias = sqliteTable("unit_alias", {
