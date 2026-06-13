@@ -2713,3 +2713,40 @@ describe("coordinated und-lists → mains", () => {
     ]);
   });
 });
+
+describe("coordinated und-lists → potential ingredients", () => {
+  it("folds an unmatched und-member and records it as a potential ingredient", () => {
+    // Only Oregano + Basilikum in the catalog; Schabziger absent.
+    const cat: IngredientCatalog = [
+      { ingredientId: 1, canonicalName: "Oregano", aliasName: "Oregano", tokens: ["oregano"] },
+      { ingredientId: 2, canonicalName: "Basilikum", aliasName: "Basilikum", tokens: ["basilikum"] },
+    ];
+    const out = parseIngredientLines(
+      ["Oregano, Schabziger und Basilikum"],
+      makeLookups(cat),
+    );
+    expect(out.map((r) => r.name)).toEqual(["Oregano", "Basilikum"]);
+    const folded = out[0].foldedIngredients ?? [];
+    expect(folded.map((f) => f.label)).toContain("Schabziger");
+  });
+});
+
+describe("coordinated lists — non-regression", () => {
+  it("leaves 'Zwiebel, gewürfelt' as one main with a note (no terminal und/oder)", () => {
+    const out = parseIngredientLines(
+      ["Zwiebel, gewürfelt"],
+      makeLookups([
+        { ingredientId: 1, canonicalName: "Zwiebel", aliasName: "Zwiebel", tokens: ["zwiebel"] },
+      ]),
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0].name).toBe("Zwiebel");
+    expect(out[0].notes).toBe("gewürfelt");
+  });
+
+  it("keeps the bare 'Salz und Pfeffer' two-main split (no comma)", () => {
+    const out = parseIngredientLines(["Salz und Pfeffer nach Geschmack"], makeLookups([]));
+    expect(out.map((r) => r.name)).toEqual(["Salz", "Pfeffer"]);
+    expect(out.map((r) => r.notes)).toEqual(["nach Geschmack", "nach Geschmack"]);
+  });
+});
