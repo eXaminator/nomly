@@ -46,6 +46,14 @@ export type PreviewIngredient = {
    * under a synthetic "Ausrüstung" section at the bottom of the meal.
    */
   isEquipment: boolean;
+  /**
+   * Display-only context line: an `exclude_from_shopping_list` PRIMARY that's
+   * normally dropped, but kept here because a non-excluded ALTERNATIVE below it
+   * IS shown — so the alternative doesn't dangle under a missing primary. The
+   * dialog renders it without a checkbox; it's never selectable, never counted
+   * as required, never added to the list.
+   */
+  readOnly?: boolean;
 };
 
 /**
@@ -202,12 +210,32 @@ export function previewMeals(start: string, lengthDays: number): PreviewMeal[] {
     unparsedByRecipe.set(l.recipeId, arr);
   }
 
+  // Primaries that still have a NON-excluded alternative referencing them —
+  // their alternative will be displayed, so an excluded such primary is kept
+  // read-only (instead of dropped) so the alternative isn't orphaned.
+  const parentsOfShownAlternatives = new Set<number>();
+  for (const l of lines) {
+    if (l.alternativeForId != null && !l.excludeFromShoppingList) {
+      parentsOfShownAlternatives.add(l.alternativeForId);
+    }
+  }
+  // recipeIngredientIds to render display-only (excluded primary, kept as
+  // context for a shown alternative).
+  const readOnlyIds = new Set<number>();
   const linesByRecipe = new Map<number, typeof lines>();
   for (const l of lines) {
     // exclude_from_shopping_list is a stamm-level "never include" flag
     // (Wasser, Salz set by the user). Optional lines are still rendered —
     // the dialog flags them and starts them unchecked.
-    if (l.excludeFromShoppingList) continue;
+    if (l.excludeFromShoppingList) {
+      // Keep an excluded PRIMARY read-only when a shown alternative depends on
+      // it; drop everything else excluded as before.
+      if (l.alternativeForId == null && parentsOfShownAlternatives.has(l.recipeIngredientId)) {
+        readOnlyIds.add(l.recipeIngredientId);
+      } else {
+        continue;
+      }
+    }
     const arr = linesByRecipe.get(l.recipeId) ?? [];
     arr.push(l);
     linesByRecipe.set(l.recipeId, arr);
@@ -281,6 +309,7 @@ export function previewMeals(start: string, lengthDays: number): PreviewMeal[] {
         isOptional: !!l.isOptional,
         alternativeForId: l.alternativeForId,
         isEquipment: !!l.isEquipment,
+        readOnly: readOnlyIds.has(l.recipeIngredientId) || undefined,
       });
     }
     // Peel equipment items out of their original sections and collect them

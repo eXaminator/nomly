@@ -185,6 +185,42 @@ describe("shopping preview", () => {
     expect(names).not.toContain("Salz");
   });
 
+  it("keeps an excluded PRIMARY read-only when a shown alternative depends on it", async () => {
+    const { db } = await import("@/db");
+    const { ingredient, recipeIngredient } = await import("@/db/schema");
+    const { eq } = await import("drizzle-orm");
+    // Tomate is the primary; exclude it from the shopping list.
+    db.update(ingredient)
+      .set({ excludeFromShoppingList: true })
+      .where(eq(ingredient.id, ctx.ingredientIds.tomate))
+      .run();
+    // Its recipe_ingredient row, then a (non-excluded) alternative under it.
+    const tomateRow = db
+      .select({ id: recipeIngredient.id })
+      .from(recipeIngredient)
+      .where(eq(recipeIngredient.ingredientId, ctx.ingredientIds.tomate))
+      .get()!;
+    db.insert(recipeIngredient)
+      .values({
+        sectionId: ctx.sectionId,
+        ingredientId: ctx.ingredientIds.eier,
+        quantity: 2,
+        unitId: null,
+        isOptional: true,
+        alternativeForId: tomateRow.id,
+      })
+      .run();
+    const { previewMeals } = await import("@/lib/shopping/preview");
+    const items = previewMeals("2026-05-23", 1)[0].sections.flatMap((s) => s.ingredients);
+    const tomate = items.find((i) => i.ingredientName === "Tomate");
+    const alt = items.find((i) => i.alternativeForId === tomateRow.id);
+    // The excluded primary stays, display-only (no checkbox in the UI)…
+    expect(tomate?.readOnly).toBe(true);
+    // …and its alternative is shown normally (optional, not read-only).
+    expect(alt).toBeTruthy();
+    expect(alt?.readOnly).toBeFalsy();
+  });
+
   it("never surfaces an unassigned (ingredient_id NULL) line in the preview", async () => {
     const { db } = await import("@/db");
     const { recipeIngredient } = await import("@/db/schema");

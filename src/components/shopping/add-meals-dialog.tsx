@@ -34,7 +34,7 @@ function flattenIngredients(meal: PreviewMeal): PreviewIngredient[] {
  *  those individually. */
 function defaultSelectableIds(items: PreviewIngredient[]): number[] {
   return items
-    .filter((i) => !isOptionalIngredient(i))
+    .filter((i) => !isOptionalIngredient(i) && !i.readOnly)
     .map((i) => i.recipeIngredientId);
 }
 import { previewMeals as apiPreview, addMealsToList } from "./api";
@@ -550,7 +550,7 @@ function mealSelectionState(
   selected: Set<number>,
 ): "none" | "some" | "all" {
   if (items.length === 0) return "none";
-  const required = items.filter((i) => !isOptionalIngredient(i));
+  const required = items.filter((i) => !isOptionalIngredient(i) && !i.readOnly);
   const anySelected = items.some((i) => selected.has(i.recipeIngredientId));
   if (!anySelected) return "none";
   if (required.length === 0) return "some";
@@ -573,6 +573,23 @@ function IngredientCheckbox({
   onToggle: () => void;
   onChangeQuantity: (value: string) => void;
 }) {
+  // Display-only: an excluded primary kept as context for a shown alternative.
+  // No checkbox, not clickable, never added — a spacer keeps its name aligned
+  // with the checkbox rows.
+  if (ing.readOnly) {
+    return (
+      <li>
+        <div className="flex items-start gap-2 text-sm italic text-[var(--color-muted-fg)]">
+          <span className="mt-1 size-3.5 shrink-0" aria-hidden="true" />
+          <span className="flex flex-1 flex-wrap items-center gap-2">
+            <span>{ing.ingredientName}</span>
+            <span className="text-xs">· nicht auf der Liste</span>
+            {ing.notes ? <span className="text-xs">· {ing.notes}</span> : null}
+          </span>
+        </div>
+      </li>
+    );
+  }
   return (
     <li>
       <label
