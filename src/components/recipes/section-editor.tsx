@@ -50,7 +50,6 @@ import {
 } from "./types";
 import {
   addAlternativeAfter,
-  addMainAfter,
   promoteAlternative as applyPromoteAlternative,
   detachAlternative as applyDetachAlternative,
   demoteToAlternative as applyDemoteToAlternative,
@@ -169,11 +168,6 @@ export function SectionEditor({
       next = null;
     }
     if (next) onChange({ ...section, ingredients: next });
-  }
-
-  /** Add a fresh free-text MAIN row after the group rooted at `primaryIdx`. */
-  function addMain(primaryIdx: number) {
-    onChange({ ...section, ingredients: addMainAfter(section.ingredients, primaryIdx) });
   }
 
   function addIngredient() {
@@ -531,7 +525,6 @@ export function SectionEditor({
                   onPromoteFoldedIngredient={(range) =>
                     promoteFoldedIngredient(g.primaryIdx, range)
                   }
-                  onAddMain={() => addMain(g.primaryIdx)}
                   onSplitAbove={
                     onSplit && g.primaryIdx > 0
                       ? () => onSplit(g.primaryIdx)
@@ -715,7 +708,6 @@ function IngredientGroup({
   onDetach,
   onPromoteFolded,
   onPromoteFoldedIngredient,
-  onAddMain,
   onSplitAbove,
   onInsertAbove,
 }: {
@@ -728,8 +720,6 @@ function IngredientGroup({
   onPromoteFolded: (range: [number, number]) => void;
   /** Promote one of the primary's folded (unmatched) ingredients to a main. */
   onPromoteFoldedIngredient: (range: [number, number]) => void;
-  /** Add a fresh free-text main row after this group. */
-  onAddMain: () => void;
   /** Make this primary an alternative of the row immediately above it.
    *  Undefined when the primary is the first row of the section or has
    *  its own alternatives (which would be orphaned). */
@@ -815,7 +805,6 @@ function IngredientGroup({
         onDemote={onDemote}
         onPromoteFolded={onPromoteFolded}
         onPromoteFoldedIngredient={onPromoteFoldedIngredient}
-        onAddMain={onAddMain}
         dragAttributes={attributes}
         dragListeners={listeners}
       />
