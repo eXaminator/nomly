@@ -8,6 +8,8 @@ import {
 import type { ImportedCandidateMatch, ImportedNameProposal } from "../../index";
 import type { AstCandidateToken } from "../candidate-tokens";
 import { renderNote, type Leaf } from "../render-notes";
+import { renderHighlights } from "../render-highlights";
+import type { HighlightPart } from "../../source-ranges";
 import { SIZE_MODIFIERS } from "./amount-unit";
 
 const normWord = (s: string): string => s.toLowerCase().replace(/[.,:!?]+$/, "");
@@ -118,6 +120,34 @@ function candidateNotes(
   return notes;
 }
 
+/** Per-candidate highlight spans: temporarily mark this candidate's covered
+ *  leaves as the ingredient name (role "ingredient"), render the highlights so
+ *  the "Original:" line reflects THIS candidate's name/note split, then restore.
+ *  Mirrors {@link candidateNotes}; offsets are absolute into the line. */
+function candidateHighlights(
+  source: string,
+  leaves: readonly Leaf[],
+  remainder: Leaf[],
+  m: IngredientCandidateMatch,
+): HighlightPart[] {
+  const tokens = m.candidate as AstCandidateToken[];
+  const marked: Array<{ leaf: Leaf; role: Leaf["role"] }> = [];
+  for (const ti of m.coveredCandidateTokens) {
+    const tok = tokens[ti];
+    if (!tok) continue;
+    for (let li = tok.leafStart; li <= tok.leafEnd; li++) {
+      const lf = remainder[li];
+      if (lf && lf.role !== "plural-marker" && !lf.consumed) {
+        marked.push({ leaf: lf, role: lf.role });
+        lf.role = "ingredient";
+      }
+    }
+  }
+  const parts = renderHighlights(source, leaves);
+  for (const { leaf, role } of marked) leaf.role = role;
+  return parts;
+}
+
 function toCandidate(
   source: string,
   leaves: readonly Leaf[],
@@ -131,6 +161,7 @@ function toCandidate(
     score: m.score,
     name: m.aliasName,
     notes: candidateNotes(source, leaves, remainder, m),
+    highlightParts: candidateHighlights(source, leaves, remainder, m),
     isEquipment: m.isEquipment ?? false,
   };
 }

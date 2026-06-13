@@ -72,6 +72,9 @@ export type ServerMatch = {
   name: string;
   /** Finished notes applied on pick — the input tokens outside the span. */
   notes: string | null;
+  /** Highlight spans applied on pick — re-colours the "Original:" line for
+   *  this candidate's name/amount/note split. */
+  highlightParts?: { range: [number, number]; kind: "amount" | "name" | "note" | "dropped" }[];
   /** True when the underlying ingredient is flagged as equipment. The pill
    *  click and auto-select rule default `isOptional` to true on first
    *  resolution to equipment — matching the import-time behavior. */
@@ -160,6 +163,7 @@ export function IngredientRow({
           score: c.score,
           name: c.name,
           notes: c.notes,
+          highlightParts: c.highlightParts,
           isEquipment: c.isEquipment,
         }));
       }
@@ -313,8 +317,12 @@ export function IngredientRow({
   /** Click on a candidate pill: switch the row's name + ingredient link to the
    *  picked candidate. The row KEEPS its current note — clicking a pill only
    *  changes which ingredient is linked, never throws away a note the user has
-   *  (or the parse produced); the candidate's own derived note is only used to
-   *  FILL an empty note. `ingredient_id` links to the picked canonical.
+   *  re-derives the name/note split (and the "Original:" highlighting) for the
+   *  picked candidate: "1/2 medium head red cabbage" → pick "red cabbage" →
+   *  "red cabbage" highlighted as the name, note "medium". The candidate's
+   *  derived note replaces the row's note; an EMPTY candidate note keeps the
+   *  current note (so an inherited/edited note isn't wiped). `ingredient_id`
+   *  links to the picked canonical.
    *
    *  Equipment-flagged ingredients (Backpapier, Backform, …) default the
    *  row to isOptional=true on first resolution, mirroring the import-time
@@ -324,7 +332,8 @@ export function IngredientRow({
     onChange({
       ...value,
       name: c.name,
-      notes: value.notes.trim().length > 0 ? value.notes : c.notes ?? "",
+      notes: c.notes && c.notes.trim().length > 0 ? c.notes : value.notes,
+      highlightParts: c.highlightParts ?? value.highlightParts,
       selectedIngredientId: c.ingredientId,
       canonicalName:
         c.name.toLowerCase() === c.canonicalName.toLowerCase()

@@ -1290,6 +1290,27 @@ describe("parseIngredientLines — unmatched alternative folds + offers a chip",
     expect(emitted[1].ingredientMatch).toBe("new");
   });
 
+  it("each candidate carries its own name/notes split AND highlight spans", () => {
+    const catalog: IngredientCatalog = [
+      { ingredientId: 1, canonicalName: "cabbage", aliasName: "cabbage", tokens: ["cabbage"] },
+      { ingredientId: 2, canonicalName: "red cabbage", aliasName: "red cabbage", tokens: ["red", "cabbage"] },
+    ];
+    const line = "1/2 medium head red cabbage";
+    const out = parseIngredientLines([line], makeLookups(catalog, ["head"]));
+    const byName = Object.fromEntries(out[0].candidateMatches.map((c) => [c.name, c]));
+    const nameSpan = (c: (typeof out)[0]["candidateMatches"][number]) =>
+      (c.highlightParts ?? [])
+        .filter((p) => p.kind === "name")
+        .map((p) => line.slice(p.range[0], p.range[1]))
+        .join(" ");
+    // Picking "red cabbage": "red cabbage" is the name span, note drops to "medium".
+    expect(byName["red cabbage"].notes).toBe("medium");
+    expect(nameSpan(byName["red cabbage"])).toBe("red cabbage");
+    // Picking "cabbage": only "cabbage" is the name, "red" stays a note.
+    expect(byName["cabbage"].notes).toBe("medium, red");
+    expect(nameSpan(byName["cabbage"])).toBe("cabbage");
+  });
+
   it("matches a base word glued to a parenthesis ('Paprika(gewürfelt)' → Paprika)", () => {
     const catalog: IngredientCatalog = [
       { ingredientId: 1, canonicalName: "Paprika", aliasName: "Paprika", tokens: ["paprika"] },

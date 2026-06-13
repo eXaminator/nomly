@@ -41,6 +41,9 @@ export type DraftIngredientCandidate = {
   /** Finished notes to apply if the user picks this pill — the input tokens
    *  outside the matched span plus the parser's base notes. */
   notes: string | null;
+  /** Highlight spans to apply on pick — re-colours the "Original:" line for
+   *  this candidate's name/amount/note split. */
+  highlightParts?: { range: [number, number]; kind: "amount" | "name" | "note" | "dropped" }[];
   /** True when the underlying ingredient is flagged as equipment — the pill
    *  click handler and auto-select rule default `isOptional` to true. */
   isEquipment: boolean;
@@ -206,6 +209,7 @@ export type ParsedIngredientResponse = {
     score: number;
     name: string;
     notes: string | null;
+    highlightParts?: { range: [number, number]; kind: "amount" | "name" | "note" | "dropped" }[];
     isEquipment: boolean;
   }>;
   notes: string | null;
@@ -283,6 +287,7 @@ export function parsedIngredientToDraft(
       score: c.score,
       name: c.name,
       notes: c.notes ?? null,
+      highlightParts: c.highlightParts,
       isEquipment: c.isEquipment ?? false,
     })),
     addAsAlias: false,

@@ -145,6 +145,10 @@ export type ImportedCandidateMatch = {
   /** Finished notes to apply if the user picks this candidate — the input
    *  tokens outside the span plus the parser's base notes. */
   notes: string | null;
+  /** Highlight spans (into the line) if the user picks this candidate — its
+   *  name span + the resulting amount/note split, so the "Original:" line
+   *  re-colours on pick. */
+  highlightParts: HighlightPart[];
   /** True when the underlying ingredient is flagged as equipment. The pill
    *  UI / live-match auto-select use this to default the row's
    *  `isOptional` to true when a row resolves to an equipment item,
