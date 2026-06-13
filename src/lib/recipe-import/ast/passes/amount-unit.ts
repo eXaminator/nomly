@@ -92,9 +92,10 @@ export function applyAmountUnit(
 
   const isUnit = (g: Group): boolean =>
     knownUnitTokens.has(g.text.toLowerCase()) || knownUnitTokens.has(norm(g.text));
-  // A size compound like "12-count" / "28-ounce" / "4-inch" — a number dashed to
-  // a word.
-  const isSizeCompound = (g: Group): boolean => /^\d+[-–]\p{L}+\.?$/u.test(g.text);
+  // A size compound like "12-count" / "28-ounce" / "4-inch" / "15.5-ounce" — a
+  // number (possibly decimal) dashed to a word.
+  const isSizeCompound = (g: Group): boolean =>
+    /^\d+(?:[.,]\d+)?[-–]\p{L}+\.?$/u.test(g.text);
   // A group that is part of a parenthetical ("(28", "oz.)") — skip it when
   // hunting for the unit so "(28 oz.) can" still finds "can".
   const isParenGroup = (g: Group): boolean =>

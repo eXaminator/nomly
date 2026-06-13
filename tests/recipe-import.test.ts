@@ -390,6 +390,15 @@ describe("parseIngredientString — extended cases", () => {
     expect(r.name).toBe("coleslaw mix");
     expect(r.notes).toMatch(/10-ounce/i);
   });
+  it("skips a DECIMAL size compound between amount and container unit", () => {
+    // "2 15.5-ounce cans chickpeas" — "15.5-ounce" is a decimal size compound;
+    // it must be demoted to a note so "cans" reads as the unit (quantity 2).
+    const r = parse("2 15.5-ounce cans chickpeas, drained");
+    expect(r.quantity).toBe(2);
+    expect(r.unitName?.toLowerCase()).toBe("cans");
+    expect(r.name).toBe("chickpeas");
+    expect(r.notes).toMatch(/15\.5-ounce/i);
+  });
   it("hyphenated parenthesized size 1 (28-ounce) can whole peeled tomatoes", () => {
     // "(28-ounce)" uses a hyphen instead of a space between number and unit —
     // it must still be hoisted as a front size note so "can" reads as the unit.
