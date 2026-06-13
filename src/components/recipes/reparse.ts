@@ -46,6 +46,23 @@ async function reparseLines(
  */
 const rangeKey = (r: Range): string => `${r[0]},${r[1]}`;
 
+/** Whether the row at `idx` is a conjunction main — a main (non-alternative)
+ *  row that shares its source line with at least one OTHER main ("Salz und
+ *  Pfeffer"). Deleting one of these folds it into a sibling (like an
+ *  alternative); a lone main, or an alternatives primary (whose line-mates are
+ *  alternatives, not mains), is not one. */
+export function isConjunctionMember(
+  rows: readonly DraftIngredient[],
+  idx: number,
+): boolean {
+  const row = rows[idx];
+  const raw = row?.rawText?.trim();
+  if (!row || row.isAlternative || !raw) return false;
+  return rows.some(
+    (r, j) => j !== idx && !r.isAlternative && r.rawText?.trim() === raw,
+  );
+}
+
 /** Bounds [start,end] of the contiguous run of rows sharing `rawText`. */
 function groupBounds(
   ingredients: readonly DraftIngredient[],
@@ -60,14 +77,18 @@ function groupBounds(
 }
 
 /**
- * Re-parse the source line behind a row's group, with the set of alternatives
- * the user wants AS ROWS adjusted by `change` (emit a folded range, or remove a
+ * Re-parse the source line behind a row's group, with the set of MEMBERS the
+ * user wants AS ROWS adjusted by `change` (emit a folded range, or remove a
  * row), then replace the group. The note is regenerated entirely by the parser.
+ * A "member" is any row from the line with a `sourceRange` — an alternative OR a
+ * conjunction main ("Salz und Pfeffer").
  *
- * Default disposition per alternative: a MATCHED one is a row, an UNMATCHED one
- * folds. We recover that from a clean parse, then express the user's deviations
- * as forceEmit (unmatched ranges they kept as rows) and forceFold (matched
- * ranges they removed) — so chips and deletes compose without clobbering.
+ * Default disposition: a MATCHED alternative and every conjunction main are
+ * rows; an UNMATCHED alternative folds (chip). We recover that from a clean
+ * parse, then express the user's deviations as forceEmit (default-fold ranges
+ * they kept as rows) and forceFold (default-emit ranges they removed) — so chips
+ * and deletes compose without clobbering. The alternatives primary always stays
+ * a row (it's never the removed range here), so it's never force-folded.
  */
 async function reparseGroupWithChange(
   ingredients: readonly DraftIngredient[],
@@ -77,18 +98,18 @@ async function reparseGroupWithChange(
   const rawText = ingredients[anchorIndex]?.rawText?.trim();
   if (!rawText) return null;
   const [start, end] = groupBounds(ingredients, anchorIndex, rawText);
-  // Alternative ranges currently shown AS ROWS in the group.
+  // Member ranges currently shown AS ROWS in the group (mains + alternatives).
   const emitted = new Set<string>();
   for (let i = start; i <= end; i++) {
     const r = ingredients[i].sourceRange;
-    if (ingredients[i].isAlternative && r) emitted.add(rangeKey(r));
+    if (r) emitted.add(rangeKey(r));
   }
   if (change.emit) emitted.add(rangeKey(change.emit));
   if (change.removeRange) emitted.delete(rangeKey(change.removeRange));
-  // Clean-parse to learn the default disposition of every alternative.
+  // Clean-parse to learn the default disposition of every member.
   const [clean] = await reparseLines([rawText]);
   const emittedByDefault = (clean ?? [])
-    .filter((p) => p.isAlternative && p.sourceRange)
+    .filter((p) => p.sourceRange)
     .map((p) => p.sourceRange as Range);
   const foldedByDefault = (clean ?? []).flatMap((p) => p.foldedAlternatives ?? []).map((f) => f.range);
   // forceEmit: unmatched (default-fold) ranges the user wants as rows.
@@ -106,8 +127,9 @@ async function reparseGroupWithChange(
   return out;
 }
 
-/** Delete an alternative row: re-parse the line with it folded (and any prior
- *  folds preserved). Returns null when the row has no source line to re-parse. */
+/** Delete a member row (an alternative, or a conjunction main): re-parse the
+ *  line with it folded into a sibling's note (and any prior folds preserved),
+ *  leaving a chip to re-add it. Returns null when the row has no source line. */
 export async function reparseDeletingAlternative(
   ingredients: readonly DraftIngredient[],
   index: number,

@@ -34,7 +34,12 @@ import { Label } from "@/components/ui/label";
 import { MarkdownEditor } from "@/components/ui/markdown-editor";
 import { Textarea } from "@/components/ui/textarea";
 import { IngredientRow } from "./ingredient-row";
-import { reparseGroupAt, reparseDeletingAlternative, reparsePromotingAlternative } from "./reparse";
+import {
+  reparseGroupAt,
+  reparseDeletingAlternative,
+  reparsePromotingAlternative,
+  isConjunctionMember,
+} from "./reparse";
 import { FoldedAltChips } from "./folded-alt-chips";
 import {
   emptyIngredient,
@@ -268,11 +273,11 @@ export function SectionEditor({
 
   async function requestRemove(i: number) {
     const row = section.ingredients[i];
-    if (row.isAlternative) {
-      // Alternative: delete it by RE-PARSING its source line with the
-      // alternative folded into the primary's note — the note is regenerated
-      // by the AST, never string-concatenated. Falls back to a plain remove
-      // when there's no source line/range (a manually-added alternative).
+    if (row.isAlternative || isConjunctionMember(section.ingredients, i)) {
+      // An alternative — or a conjunction main ("Salz und Pfeffer") — is deleted
+      // by RE-PARSING its source line with it folded into a sibling's note (AST-
+      // generated, never string-concatenated), leaving a chip to re-add it.
+      // Falls back to a plain remove when there's no source line/range.
       let next: DraftIngredient[] | null = null;
       try {
         next = await reparseDeletingAlternative(section.ingredients, i);

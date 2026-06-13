@@ -41,7 +41,7 @@ import {
   moveAlternativeWithinGroup,
   promoteAlternative,
 } from "./alternatives";
-import { reparseDeletingAlternative, reparsePromotingAlternative } from "./reparse";
+import { reparseDeletingAlternative, reparsePromotingAlternative, isConjunctionMember } from "./reparse";
 import { FoldedAltChips } from "./folded-alt-chips";
 import { ingredientToPayload, toNumberOrNull } from "./payload";
 import { buildUnitInflector, type UnitInflector } from "./unit-inflect";
@@ -582,6 +582,13 @@ export function BulkReparseDialog({
     );
   }
   function removeDraftRow(entryIdx: number, rowIdx: number) {
+    const rows = states[entryIdx]?.draft;
+    // A conjunction main ("Salz und Pfeffer") deletes like an alternative: fold
+    // into a sibling + chip, via re-parse. A lone main is a plain remove.
+    if (rows && isConjunctionMember(rows, rowIdx)) {
+      void removeAlternative(entryIdx, rowIdx);
+      return;
+    }
     setStates((prev) =>
       prev.map((s, idx) =>
         idx === entryIdx
