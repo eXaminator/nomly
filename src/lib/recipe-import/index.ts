@@ -648,6 +648,19 @@ export function parseIngredientLines(
     // an alt from this line never folds into a primary from a previous line.
     let lastPrimaryIndex: number | null = null;
     const originalTrimmed = rawLine.trim();
+    // Index of the FIRST main (non-alternative) row emitted from this line —
+    // the sibling a force-folded conjunction member ("Salz und Pfeffer", delete
+    // Pfeffer) folds into. Null until the first main is emitted.
+    let lineFirstMainIndex: number | null = null;
+    // Conjunction members force-folded BEFORE any main was emitted (deleting the
+    // FIRST member): held until the first surviving main appears, then folded
+    // into it.
+    const deferredMemberFolds: Array<{
+      connectorLeaves: Leaf[];
+      leaves: Leaf[];
+      range: SourceRange | null;
+      label: string;
+    }> = [];
     // A note that trailed a parenthetical alternative ("(or 1 large clove),
     // peeled"). Appended to the primary AFTER the line's alternatives fold in,
     // so it keeps its source order ("small, or 1 large clove, peeled").
@@ -687,28 +700,53 @@ export function parseIngredientLines(
         if (astSeg.isOptional && seg.isAlternative && lastPrimaryIndex !== null) {
           out[lastPrimaryIndex].isOptional = true;
         }
-        // Force-fold: the caller (delete-on-reparse) asked this alternative to
-        // fold into its primary's note instead of becoming a row — honour it
-        // regardless of catalog match. Record it as a chip too, so the user can
-        // bring the just-deleted alternative back.
+        // Force-fold (delete-on-reparse): fold this member into a sibling's note
+        // instead of a row, and record a chip so it can be brought back.
+        //  - an ALTERNATIVE folds into its primary;
+        //  - a conjunction MAIN folds into the first sibling main of the line
+        //    (or, if it's the first member, defer until a sibling appears).
         if (
-          seg.isAlternative &&
           !seg.syntheticSource &&
-          lastPrimaryIndex !== null &&
           rangeIn(seg.range, options.forceFoldRanges)
         ) {
-          foldAlternativeOntoRows(
-            originalTrimmed, out, foldTargets,
-            lastPrimaryIndex, lastPrimaryIndex,
-            seg.connectorLeaves ?? [], seg.leaves, sourceRange,
-          );
-          if (seg.range && astSeg.name.trim().length > 0) {
-            (out[lastPrimaryIndex].foldedAlternatives ??= []).push({
-              range: seg.range,
-              label: astSeg.name,
-            });
+          if (seg.isAlternative && lastPrimaryIndex !== null) {
+            foldAlternativeOntoRows(
+              originalTrimmed, out, foldTargets,
+              lastPrimaryIndex, lastPrimaryIndex,
+              seg.connectorLeaves ?? [], seg.leaves, sourceRange,
+            );
+            if (seg.range && astSeg.name.trim().length > 0) {
+              (out[lastPrimaryIndex].foldedAlternatives ??= []).push({
+                range: seg.range,
+                label: astSeg.name,
+              });
+            }
+            continue;
           }
-          continue;
+          if (!seg.isAlternative && astSeg.name.trim().length > 0) {
+            if (lineFirstMainIndex !== null) {
+              foldAlternativeOntoRows(
+                originalTrimmed, out, foldTargets,
+                lineFirstMainIndex, lineFirstMainIndex,
+                seg.connectorLeaves ?? [], seg.leaves, sourceRange,
+              );
+              if (seg.range) {
+                (out[lineFirstMainIndex].foldedAlternatives ??= []).push({
+                  range: seg.range,
+                  label: astSeg.name,
+                });
+              }
+            } else {
+              // First member deleted — defer until a surviving sibling appears.
+              deferredMemberFolds.push({
+                connectorLeaves: seg.connectorLeaves ?? [],
+                leaves: seg.leaves,
+                range: seg.range,
+                label: astSeg.name,
+              });
+            }
+            continue;
+          }
         }
         // Skip the row when the parser couldn't pull a real ingredient name
         // out of the line. Familywall data legitimately has entries like
@@ -868,7 +906,28 @@ export function parseIngredientLines(
           ctx: astSeg.noteContext,
           folds: [],
         });
-        if (!seg.isAlternative) lastPrimaryIndex = out.length - 1;
+        if (!seg.isAlternative) {
+          lastPrimaryIndex = out.length - 1;
+          // First main of the line: flush any conjunction members that were
+          // force-folded before it existed (a deleted first member) into it.
+          if (lineFirstMainIndex === null) {
+            lineFirstMainIndex = out.length - 1;
+            for (const d of deferredMemberFolds) {
+              foldAlternativeOntoRows(
+                originalTrimmed, out, foldTargets,
+                lineFirstMainIndex, lineFirstMainIndex,
+                d.connectorLeaves, d.leaves, d.range,
+              );
+              if (d.range) {
+                (out[lineFirstMainIndex].foldedAlternatives ??= []).push({
+                  range: d.range,
+                  label: d.label,
+                });
+              }
+            }
+            deferredMemberFolds.length = 0;
+          }
+        }
       }
     }
     if (pendingTailLeaves && lastPrimaryIndex !== null) {

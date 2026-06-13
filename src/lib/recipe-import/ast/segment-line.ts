@@ -126,10 +126,14 @@ function makeIngredient(
   // it extends back over the connector ("oder X", "alternativ: X") so the
   // highlighter can mark the connector as dropped — mirrors the legacy
   // findSegmentRange(withConnector) behaviour.
-  const connLeaves = meta.isAlternative ? connectorLeavesBefore(all, from, baseDepth) : [];
-  const rangeStart = meta.isAlternative
-    ? connLeaves[0]?.start ?? slice[0].start
-    : slice[0].start;
+  // Capture the connector token(s) before this segment for BOTH alternatives
+  // ("oder X") and conjunction members ("und Pfeffer") — used when the member
+  // folds into a sibling's note. Only an ALTERNATIVE extends its range back over
+  // the connector (so the highlighter strikes it); a conjunction main keeps its
+  // range at its own content.
+  const connLeaves = connectorLeavesBefore(all, from, baseDepth);
+  const rangeStart =
+    meta.isAlternative && connLeaves[0] ? connLeaves[0].start : slice[0].start;
   const range: [number, number] = [rangeStart, slice[slice.length - 1].end];
   const segText = source.slice(slice[0].start, range[1]).trim();
   if (segText.length === 0) return null;
@@ -160,7 +164,9 @@ function connectorLeavesBefore(
     const w = norm(l.text);
     const isConnTok =
       isWordIn(l, OR_WORDS) ||
+      isWordIn(l, CONJ_WORDS) ||
       l.kind === "slash" ||
+      (l.kind === "punct" && l.text === "&") ||
       ALT_LEADER_WORDS.has(w) ||
       w === "o" ||
       (l.kind === "punct" && (l.text === ":" || l.text === "."));

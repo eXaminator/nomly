@@ -2097,6 +2097,28 @@ describe("conjunction members share the full line (highlights align)", () => {
     expect(out[1].rawText).toBe("Salz und Pfeffer (nach Geschmack)");
   });
 
+  it("force-folds a conjunction member into the first sibling's note + chip (delete)", () => {
+    const line = "Salz und Pfeffer";
+    const normal = parseIngredientLines([line], makeLookups(cat));
+    expect(normal).toHaveLength(2);
+    // Delete the 2nd member → folds into the 1st (Salz), with a chip to re-add.
+    const delSecond = parseIngredientLines([line], makeLookups(cat), {
+      forceFoldRanges: [normal[1].sourceRange!],
+    });
+    expect(delSecond).toHaveLength(1);
+    expect(delSecond[0].name).toBe("Salz");
+    expect(delSecond[0].isAlternative).toBe(false);
+    expect(delSecond[0].notes).toBe("und Pfeffer");
+    expect(delSecond[0].foldedAlternatives?.map((f) => f.label)).toEqual(["Pfeffer"]);
+    // Delete the 1st member → deferred fold into the surviving sibling (Pfeffer).
+    const delFirst = parseIngredientLines([line], makeLookups(cat), {
+      forceFoldRanges: [normal[0].sourceRange!],
+    });
+    expect(delFirst).toHaveLength(1);
+    expect(delFirst[0].name).toBe("Pfeffer");
+    expect(delFirst[0].foldedAlternatives?.map((f) => f.label)).toEqual(["Salz"]);
+  });
+
   it("highlightParts align with rawText (no mid-word split on a later member)", () => {
     const out = parseIngredientLines(["Salz und Pfeffer (nach Geschmack)"], makeLookups(cat));
     const pfeffer = out[1];
