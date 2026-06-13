@@ -958,8 +958,8 @@ function conjunctionSplit(
       }
       if (KNOWN_PAIRS.some(([x, y]) => x === norm(a.text) && y === norm(b.text))) {
         return [
-          { from, to: i + 1, rawText: source.slice(all[from].start, a.end).trim() },
-          { from: i + 1, to, rawText: source.slice(b.start, all[to - 1].end).trim() },
+          { from, to: i + 1, rawText: source.trim() },
+          { from: i + 1, to, rawText: source.trim() },
         ];
       }
     }
@@ -1007,10 +1007,13 @@ function conjunctionSplit(
   }
 
   const ranges = sliceBySeps(all, from, to, seps);
+  // Each conjunction member keeps the FULL original line as rawText (not its
+  // sub-piece): it links the members into one source-line group and keeps each
+  // row's highlightParts (absolute into the line) aligned with what it renders.
   return ranges.map((r) => ({
     from: r.from,
     to: r.to,
-    rawText: source.slice(all[r.from].start, all[r.to - 1].end).trim(),
+    rawText: source.trim(),
   }));
 }
 

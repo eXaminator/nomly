@@ -2082,6 +2082,38 @@ describe("vocab rules apply only on the no-match path", () => {
   });
 });
 
+describe("conjunction members share the full line (highlights align)", () => {
+  const cat: IngredientCatalog = [
+    { ingredientId: 1, canonicalName: "Salz", aliasName: "Salz", tokens: ["salz"] },
+    { ingredientId: 2, canonicalName: "Pfeffer", aliasName: "Pfeffer", tokens: ["pfeffer"] },
+  ];
+
+  it("each conjunction member keeps the FULL original line as rawText", () => {
+    const out = parseIngredientLines(["Salz und Pfeffer (nach Geschmack)"], makeLookups(cat));
+    expect(out).toHaveLength(2);
+    expect(out[0].name).toBe("Salz");
+    expect(out[1].name).toBe("Pfeffer");
+    expect(out[0].rawText).toBe("Salz und Pfeffer (nach Geschmack)");
+    expect(out[1].rawText).toBe("Salz und Pfeffer (nach Geschmack)");
+  });
+
+  it("highlightParts align with rawText (no mid-word split on a later member)", () => {
+    const out = parseIngredientLines(["Salz und Pfeffer (nach Geschmack)"], makeLookups(cat));
+    const pfeffer = out[1];
+    const sliced = (pfeffer.highlightParts ?? []).map((p) => ({
+      kind: p.kind,
+      text: pfeffer.rawText!.slice(p.range[0], p.range[1]),
+    }));
+    // Parts index into the shared full line, so they slice cleanly.
+    expect(sliced).toEqual([
+      { kind: "name", text: "Pfeffer" },
+      { kind: "dropped", text: "(" },
+      { kind: "note", text: "nach Geschmack" },
+      { kind: "dropped", text: ")" },
+    ]);
+  });
+});
+
 describe("raw-remainder notes — matched lines keep the source verbatim", () => {
   // Flavor 1: only amount/unit/flags are consumed before matching; after a
   // match the notes are the verbatim source remainder before+after the
