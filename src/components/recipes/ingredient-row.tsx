@@ -38,6 +38,7 @@ import {
 } from "@/components/units/unit-picker";
 import { IngredientNameInput } from "./ingredient-name-input";
 import { renderOriginalWithMuting } from "./original-muting";
+import { bestEffortNameHighlight } from "@/lib/recipe-import/ast/best-effort-highlight";
 import { liveMatchQuery, type DraftIngredient, type ImportAnnotation } from "./types";
 import { ForceMatchPopover } from "./force-match-popover";
 import { FoldedAltChips } from "./folded-alt-chips";
@@ -688,6 +689,22 @@ export function IngredientRow({
               Zutat
             </button>
           ) : null}
+          </div>
+        ) : !value.rawText && value.manualFromLine ? (
+          // A MANUAL "add ingredient" row keeps no rawText (so reparse treats it
+          // as a manual addition), but shows a read-only hint of the line it was
+          // created from, with a best-effort highlight of the typed name.
+          <div className="inline-flex max-w-full items-center gap-1 self-start rounded-md border border-dashed border-[var(--color-border)] bg-[var(--color-muted)] px-2 py-0.5">
+            <p
+              className="truncate text-xs text-[var(--color-muted-fg)]"
+              title={value.manualFromLine}
+            >
+              <span className="opacity-70">Aus Zeile:</span>{" "}
+              {renderOriginalWithMuting(
+                value.manualFromLine,
+                bestEffortNameHighlight(value.name, value.manualFromLine),
+              )}
+            </p>
           </div>
         ) : null}
 

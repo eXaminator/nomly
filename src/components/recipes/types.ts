@@ -96,6 +96,12 @@ export type DraftIngredient = {
    *  the parser was working from. Undefined for manually-added rows and for
    *  rows loaded from an existing recipe. */
   rawText?: string;
+  /** Display-only source line a MANUAL "add ingredient" row was created from
+   *  (the group's original line). Distinct from `rawText` (which stays
+   *  undefined so reparse treats the row as a manual, non-reparsable addition)
+   *  — used only to show a read-only "Aus Zeile:" hint with a best-effort
+   *  highlight of the typed name. Session-only; never persisted. */
+  manualFromLine?: string;
   /** Char range `[start, end)` of this row's own segment within `rawText`.
    *  For an alternative it includes the connector ("oder Ahornsirup"). Used to
    *  fold the alternative back into the primary's notes on removal. Parse-

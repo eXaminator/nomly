@@ -55,7 +55,10 @@ export function addMainAfter(
   const primaryIdx = findPrimaryIndex(rows, afterIdx);
   const insertAt = lastInGroup(rows, primaryIdx) + 1;
   const next = rows.slice();
-  next.splice(insertAt, 0, emptyIngredient());
+  // Remember the group's source line (display-only) so the manual row can show
+  // a read-only "Aus Zeile:" hint + best-effort highlight of the typed name.
+  const fromLine = rows[primaryIdx]?.rawText?.trim() || undefined;
+  next.splice(insertAt, 0, { ...emptyIngredient(), manualFromLine: fromLine });
   return next;
 }
 
