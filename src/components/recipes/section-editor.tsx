@@ -40,7 +40,6 @@ import {
   reparsePromotingAlternative,
   isConjunctionMember,
 } from "./reparse";
-import { FoldedAltChips } from "./folded-alt-chips";
 import {
   emptyIngredient,
   parsedIngredientToDraft,
@@ -784,6 +783,7 @@ function IngredientGroup({
         onReparse={() => onReparse(group.primaryIdx)}
         onAddAlternative={onAddAlternative}
         onDemote={onDemote}
+        onPromoteFolded={onPromoteFolded}
         dragAttributes={attributes}
         dragListeners={listeners}
       />
@@ -810,14 +810,6 @@ function IngredientGroup({
           );
         })}
       </SortableContext>
-      {group.primary.foldedAlternatives?.length ? (
-        <div className="py-1 pl-3">
-          <FoldedAltChips
-            folded={group.primary.foldedAlternatives}
-            onPromote={onPromoteFolded}
-          />
-        </div>
-      ) : null}
     </div>
   );
 }

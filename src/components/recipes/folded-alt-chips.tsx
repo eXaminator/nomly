@@ -5,9 +5,9 @@ import { cn } from "@/lib/cn";
 /**
  * "Create alternative" chips for the unmatched alternatives folded into a
  * primary's note. Each chip promotes one folded alternative to its own row
- * (the parent re-parses the line with that range emitted). Rendered stacked at
- * the END of the primary's alternatives, with the alternatives icon
- * (CornerDownRight), in both the recipe form and the bulk-reparse dialog.
+ * (the parent re-parses the line with that range emitted). Rendered inline next
+ * to the row's "Original:" line, with the alternatives icon (CornerDownRight),
+ * in both the recipe form and the bulk-reparse dialog.
  */
 export function FoldedAltChips({
   folded,
@@ -18,7 +18,7 @@ export function FoldedAltChips({
 }) {
   if (!folded || folded.length === 0) return null;
   return (
-    <div className="flex flex-col items-start gap-1 pt-1">
+    <div className="flex flex-wrap items-center gap-1.5">
       {folded.map((f, i) => (
         <button
           key={`${f.range[0]}-${f.range[1]}-${i}`}

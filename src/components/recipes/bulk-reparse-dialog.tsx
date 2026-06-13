@@ -42,7 +42,6 @@ import {
   promoteAlternative,
 } from "./alternatives";
 import { reparseDeletingAlternative, reparsePromotingAlternative, isConjunctionMember } from "./reparse";
-import { FoldedAltChips } from "./folded-alt-chips";
 import { ingredientToPayload, toNumberOrNull } from "./payload";
 import { buildUnitInflector, type UnitInflector } from "./unit-inflect";
 import type { UnitForm } from "@/lib/recipes/reparse-scan";
@@ -124,6 +123,7 @@ function DraftEditList({
             ? () => onMutate((rs) => demoteToAlternative(rs, k))
             : undefined
         }
+        onPromoteFolded={(range) => onPromoteFolded(k, range)}
       />
     );
   };
@@ -154,10 +154,6 @@ function DraftEditList({
               />
             ))}
           </SortableContext>
-          <FoldedAltChips
-            folded={rows[g.leaderIdx].foldedAlternatives}
-            onPromote={(range) => onPromoteFolded(g.leaderIdx, range)}
-          />
         </React.Fragment>
       ))}
     </DndContext>

@@ -40,6 +40,7 @@ import { IngredientNameInput } from "./ingredient-name-input";
 import { renderOriginalWithMuting } from "./original-muting";
 import { liveMatchQuery, type DraftIngredient, type ImportAnnotation } from "./types";
 import { ForceMatchPopover } from "./force-match-popover";
+import { FoldedAltChips } from "./folded-alt-chips";
 
 /**
  * Mirror of the server-side {@link MIN_AUTO_MATCH_SCORE} (see
@@ -101,6 +102,9 @@ type Props = {
    *  right after the old group's last sibling. Only rendered when
    *  `value.isAlternative`. */
   onDetach?: () => void;
+  /** Promote one of this row's folded alternatives (a "create alternative"
+   *  chip, shown next to the Original line) to its own row. */
+  onPromoteFolded?: (range: [number, number]) => void;
   /** Drag handle props from the parent {@link IngredientGroup}'s
    *  `useSortable`. Only passed to primary rows — alternatives ride along
    *  inside the same draggable container and don't have their own grip. */
@@ -121,6 +125,7 @@ export function IngredientRow({
   onDemote,
   onPromote,
   onDetach,
+  onPromoteFolded,
   dragAttributes,
   dragListeners,
   variant = "recipe",
@@ -602,7 +607,9 @@ export function IngredientRow({
         {value.rawText ? (
           // Boxed, indented (it sits inside the fields column) original line:
           // the source text plus two actions — reparse → linked, or drop the
-          // whole text in as free text.
+          // whole text in as free text. The "create alternative" chips for any
+          // folded alternatives sit right next to it.
+          <div className="flex flex-wrap items-center gap-2">
           <div className="inline-flex max-w-full items-center gap-1 self-start rounded-md border border-[var(--color-border)] bg-[var(--color-muted)] py-0.5 pl-2 pr-1">
             <p
               className="truncate text-xs text-[var(--color-muted-fg)]"
@@ -640,6 +647,13 @@ export function IngredientRow({
             >
               <Unlink className="size-3.5" />
             </button>
+          </div>
+          {onPromoteFolded ? (
+            <FoldedAltChips
+              folded={value.foldedAlternatives}
+              onPromote={onPromoteFolded}
+            />
+          ) : null}
           </div>
         ) : null}
 
