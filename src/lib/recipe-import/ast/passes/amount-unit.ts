@@ -39,6 +39,10 @@ export type AmountUnit = {
   quantifierId: number | null;
   /** Canonical name of the claiming quantifier, else null. */
   quantifierName: string | null;
+  /** The original source text of the matched quantifier window (e.g. "a" when
+   *  the canonical is "ein"), else null. Preserves the user's own spelling so
+   *  the tooltip can show "a bunch" rather than "ein Bund". */
+  quantifierSource: string | null;
 };
 
 export type UnspecificOpts = {
@@ -117,6 +121,7 @@ export function applyAmountUnit(
   let unitName: string | null = null;
   let quantifierId: number | null = null;
   let quantifierName: string | null = null;
+  let quantifierSource: string | null = null;
   // A claiming quantifier owns the amount slot — even when its value is null —
   // so the unit probe below must NOT default a following unit's quantity to 1.
   let quantifierWon = false;
@@ -185,6 +190,7 @@ export function applyAmountUnit(
         quantity = q.entry.value;
         quantifierId = q.entry.id;
         quantifierName = q.entry.name;
+        quantifierSource = q.source;
         quantifierWon = true;
         // Drop a bare article sitting AFTER a fraction word ("half a teaspoon"
         // → drop "a"; "juice of half a lemon" → 0.5 lemon). This is a syntax
@@ -222,6 +228,7 @@ export function applyAmountUnit(
         quantityLow: null,
         quantifierId,
         quantifierName,
+        quantifierSource,
       };
     }
   }
@@ -366,5 +373,5 @@ export function applyAmountUnit(
     }
   }
 
-  return { quantity, unitName, rangeExpression, quantityLow, quantifierId, quantifierName };
+  return { quantity, unitName, rangeExpression, quantityLow, quantifierId, quantifierName, quantifierSource };
 }

@@ -102,6 +102,18 @@ export type DraftIngredient = {
    *  like "einige"), else null. Display-only: lets the bulk-reparse diff render
    *  the effective number for a quantifier-backed proposed row. Not persisted. */
   quantifierValue?: number | null;
+  /** Original source text of the matched quantifier window (e.g. "a" when the
+   *  canonical is "ein"), else null. Display-only: drives the tooltip so it reads
+   *  "a bunch" rather than "ein Bund". Session-only; never persisted. */
+  quantifierSource?: string | null;
+  /** Original source spelling of the unit token the parser saw (e.g. "bunch"
+   *  when the canonical resolved to "Bund"), else null. Distinct from
+   *  `importAnnotation.rawUnit`, which is suppressed for matched units to
+   *  dedupe the badge — this field is populated UNCONDITIONALLY on import so the
+   *  quantifier tooltip can show the typed unit ("a bunch", not "a Bund").
+   *  Null for saved rows (the original spelling isn't persisted, so the tooltip
+   *  falls back to the unit label). Session-only; never persisted. */
+  rawUnit?: string | null;
   unit: ComboboxItem | null;
   notes: string;
   /** When true, the row renders dimmed/italic in the read view and is skipped
@@ -229,6 +241,9 @@ export type ParsedIngredientResponse = {
    *  The edit form shows this WORDING in the amount field rather than the
    *  resolved number. */
   quantifierName?: string | null;
+  /** Original source text of the matched quantifier window (e.g. "a" when the
+   *  canonical is "ein"), else null. Drives the tooltip. */
+  quantifierSource?: string | null;
   unit: { id: number; name: string } | null;
   unitMatch: "matched" | "defaulted" | "unresolved" | "empty";
   rawUnit: string | null;
@@ -348,6 +363,11 @@ export function parsedIngredientToDraft(
     isRange: i.quantityLow != null,
     quantifierId: i.quantifierId ?? null,
     quantifierName: i.quantifierName ?? null,
+    quantifierSource: i.quantifierSource ?? null,
+    // Preserve the original unit spelling unconditionally (independent of the
+    // badge-dedup suppression on importAnnotation.rawUnit) so the quantifier
+    // tooltip can read the typed unit ("a bunch") even for a matched unit.
+    rawUnit: i.rawUnit ?? null,
     // For a NUMERIC quantifier the parser sets `quantity` to the resolved value
     // (a preview convenience); capture it as the quantifier's effective number.
     quantifierValue: i.quantifierId != null ? i.quantity : null,
@@ -400,6 +420,7 @@ export function emptyIngredient(): DraftIngredient {
     quantityLow: "",
     isRange: false,
     quantifierId: null,
+    rawUnit: null,
     unit: null,
     notes: "",
     isOptional: false,
@@ -486,6 +507,9 @@ export function recipeToDraft(recipe: RecipeView): DraftRecipe {
         quantifierId: i.quantifierId,
         quantifierName: i.quantifierName,
         quantifierValue: i.quantifierValue,
+        // Saved rows don't preserve the original unit spelling, so the tooltip
+        // falls back to the unit label.
+        rawUnit: null,
         unit:
           i.unitId !== null && i.unitName
             ? { id: i.unitId, name: i.unitName }
@@ -531,6 +555,7 @@ export function emptyRecipe(): DraftRecipe {
             quantityLow: "",
             isRange: false,
             quantifierId: null,
+            rawUnit: null,
             unit: null,
             notes: "",
             isOptional: false,

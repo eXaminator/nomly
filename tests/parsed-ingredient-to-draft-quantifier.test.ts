@@ -65,6 +65,22 @@ describe("parsedIngredientToDraft — quantifier wording", () => {
     expect(draft.quantity).toBe("200");
     expect(draft.quantifierId).toBeNull();
   });
+
+  it("carries the original unit spelling onto draft.rawUnit even for a MATCHED unit", () => {
+    // Tooltip path: source said "bunch", parser matched canonical "Bund".
+    // importAnnotation.rawUnit is suppressed for matched units (badge dedup),
+    // but draft.rawUnit must keep "bunch" so the tooltip reads "a bunch".
+    const draft = parsedIngredientToDraft(
+      minimalParsed({
+        unit: { id: 5, name: "Bund" },
+        unitMatch: "matched",
+        rawUnit: "bunch",
+      }),
+    );
+    expect(draft.rawUnit).toBe("bunch");
+    // The badge-dedup suppression on the annotation stays as-is.
+    expect(draft.importAnnotation?.rawUnit).toBeNull();
+  });
 });
 
 // ---------------------------------------------------------------------------

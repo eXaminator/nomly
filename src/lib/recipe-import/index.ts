@@ -69,6 +69,10 @@ export type ImportedIngredient = {
   quantifierId: number | null;
   /** Canonical name of the claiming quantifier, else null. */
   quantifierName: string | null;
+  /** Original source text of the matched quantifier window (e.g. "a" when the
+   *  canonical is "ein"), else null. Preserved for the tooltip so "a bunch"
+   *  shows rather than "ein Bund". */
+  quantifierSource: string | null;
   /** Best-effort resolved (global) unit. `id` null when we couldn't match
    *  anything; the UI uses {@link unitMatch} + {@link rawUnit} to render
    *  appropriately. */
@@ -971,6 +975,7 @@ export function parseIngredientLines(
           quantityLow: astSeg.quantityLow,
           quantifierId: astSeg.quantifierId,
           quantifierName: astSeg.quantifierName,
+          quantifierSource: astSeg.quantifierSource,
           unit: final.resolved,
           unitMatch: final.match,
           rawUnit: final.rawUnit,
@@ -1616,6 +1621,7 @@ function parseGroupedIngredientLines(
             quantityLow: astSeg.quantityLow,
             quantifierId: astSeg.quantifierId,
             quantifierName: astSeg.quantifierName,
+            quantifierSource: astSeg.quantifierSource,
             unit: final.resolved,
             sourceRange: sourceRange ?? undefined,
             highlightParts:
