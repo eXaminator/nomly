@@ -217,6 +217,8 @@ export function RecipeDetail({
               group.tips.push({
                 quantity: i.quantity,
                 quantityLow: i.quantityLow,
+                quantifierName: i.quantifierName,
+                quantifierValue: i.quantifierValue,
                 unitLabel: i.unitLabel,
                 name: i.ingredientName,
                 canonicalName: i.canonicalIngredientName,

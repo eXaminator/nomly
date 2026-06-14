@@ -10,6 +10,11 @@ import type { IngredientDietaryClass } from "@/lib/recipes/diet";
 export type MentionTip = {
   quantity: number | null;
   quantityLow: number | null;
+  /** Quantifier reference fields so a quantifier-backed amount ("einige",
+   *  "a"/"ein" → 1) renders the same as the ingredient list — without these
+   *  the tooltip showed a blank amount for quantifier rows. */
+  quantifierName: string | null;
+  quantifierValue: number | null;
   unitLabel: string | null;
   name: string;
   canonicalName: string | null;
@@ -131,6 +136,8 @@ export function InstructionBody({
                   <RecipeIngredientReadLine
                     quantity={row.quantity}
                     quantityLow={row.quantityLow}
+                    quantifierName={row.quantifierName}
+                    quantifierValue={row.quantifierValue}
                     unitLabel={row.unitLabel}
                     name={row.name}
                     canonicalName={row.canonicalName}
