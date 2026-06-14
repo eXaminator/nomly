@@ -3,6 +3,7 @@ import { db } from "../../db/index.ts";
 import {
   ingredient,
   mealPlan,
+  quantifier,
   recipe,
   recipeIngredient,
   recipeSection,
@@ -150,7 +151,11 @@ export function previewMeals(start: string, lengthDays: number): PreviewMeal[] {
       recipeIngredientId: recipeIngredient.id,
       ingredientId: recipeIngredient.ingredientId,
       ingredientName: ingredient.name,
-      qty: recipeIngredient.quantity,
+      // Effective quantity: literal `quantity` if set, else the referenced
+      // quantifier's `value` (null for unspecified ones like "einige").
+      // Mirrors the COALESCE in merge.ts loadRecipeIngredients so the preview
+      // seed field matches what the snapshot will contribute.
+      qty: sql<number | null>`COALESCE(${recipeIngredient.quantity}, ${quantifier.value})`,
       unitId: recipeIngredient.unitId,
       unitName: unit.name,
       notes: recipeIngredient.notes,
@@ -164,6 +169,7 @@ export function previewMeals(start: string, lengthDays: number): PreviewMeal[] {
     .innerJoin(recipeSection, eq(recipeSection.id, recipeIngredient.sectionId))
     .innerJoin(ingredient, eq(ingredient.id, recipeIngredient.ingredientId))
     .leftJoin(unit, eq(unit.id, recipeIngredient.unitId))
+    .leftJoin(quantifier, eq(quantifier.id, recipeIngredient.quantifierId))
     // The inner join on `ingredient` already drops "Nicht zugeordnet" lines
     // (ingredient_id NULL); the explicit guard documents that intent.
     .where(
@@ -183,7 +189,10 @@ export function previewMeals(start: string, lengthDays: number): PreviewMeal[] {
       recipeId: recipeSection.recipeId,
       recipeIngredientId: recipeIngredient.id,
       displayName: recipeIngredient.displayName,
-      qty: recipeIngredient.quantity,
+      // Effective quantity: literal or quantifier value (mirrors the main
+      // lines query; unassigned rows will rarely have a quantifier_id but
+      // the COALESCE is harmless and keeps both selects consistent).
+      qty: sql<number | null>`COALESCE(${recipeIngredient.quantity}, ${quantifier.value})`,
       // Same display rule as the recipe view: the source's verbatim unit
       // wins over the canonical unit name.
       unitLabel: sql<
@@ -195,6 +204,7 @@ export function previewMeals(start: string, lengthDays: number): PreviewMeal[] {
     .from(recipeIngredient)
     .innerJoin(recipeSection, eq(recipeSection.id, recipeIngredient.sectionId))
     .leftJoin(unit, eq(unit.id, recipeIngredient.unitId))
+    .leftJoin(quantifier, eq(quantifier.id, recipeIngredient.quantifierId))
     .where(
       and(
         inArray(recipeSection.recipeId, recipeIds),
