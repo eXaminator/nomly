@@ -22,21 +22,21 @@ afterAll(() => {
 
 // Shared setup: seed Tandoor + the real catalog once, then introspect.
 let firstRunCounts: Awaited<
-  ReturnType<typeof import("@/lib/familywall/seed-catalog").runFamilywallCatalogSeed>
+  ReturnType<typeof import("@/lib/catalog/seed-catalog").runIngredientCatalogSeed>
 >;
 let secondRunCounts: typeof firstRunCounts;
 
 beforeAll(async () => {
   const { runSeed } = await import("@/db/seed");
-  const { runFamilywallCatalogSeed } = await import(
-    "@/lib/familywall/seed-catalog"
+  const { runIngredientCatalogSeed } = await import(
+    "@/lib/catalog/seed-catalog"
   );
   runSeed();
-  firstRunCounts = runFamilywallCatalogSeed();
-  secondRunCounts = runFamilywallCatalogSeed();
+  firstRunCounts = runIngredientCatalogSeed();
+  secondRunCounts = runIngredientCatalogSeed();
 });
 
-describe("runFamilywallCatalogSeed", () => {
+describe("runIngredientCatalogSeed", () => {
   it("parses every catalog entry without warnings", () => {
     expect(firstRunCounts.entries).toBeGreaterThan(700);
     expect(firstRunCounts.warnings).toEqual([]);

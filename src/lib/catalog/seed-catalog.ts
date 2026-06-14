@@ -1,8 +1,8 @@
 /**
  * Catalog seeder — applies the in-code `INGREDIENT_CATALOG` to the database.
- * Runs after `runSeed()` (which seeds units + categories) and before
- * familywall import. The catalog is the single source of truth for
- * ingredient identity, aliases, sub-units, and metadata.
+ * Runs after `runSeed()` (which seeds units + categories). The catalog is the
+ * single source of truth for ingredient identity, aliases, sub-units, and
+ * metadata.
  *
  * Per-entry behaviour:
  *  - Find an existing row by canonical name, or insert a new one.
@@ -69,16 +69,16 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 /**
  * Run the catalog seeder against the live DB. Returns counts + warnings.
  */
-export function runFamilywallCatalogSeed(): CatalogSeedCounts {
+export function runIngredientCatalogSeed(): CatalogSeedCounts {
   const parsed = loadIngredientCatalog();
-  return runFamilywallCatalogSeedWith(parsed);
+  return runIngredientCatalogSeedWith(parsed);
 }
 
 /**
  * Inner entry point — takes a pre-parsed catalog. Tests inject a fixture
  * catalog here so they don't have to round-trip through the data file.
  */
-export function runFamilywallCatalogSeedWith(
+export function runIngredientCatalogSeedWith(
   parsed: ParsedCatalog,
 ): CatalogSeedCounts {
   const counts: CatalogSeedCounts = {
