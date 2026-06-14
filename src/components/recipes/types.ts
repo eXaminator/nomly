@@ -217,6 +217,10 @@ export type ParsedIngredientResponse = {
    *  `quantity` (= the quantifier's value) as a preview convenience; the
    *  persistence boundary collapses that to the reference only. */
   quantifierId?: number | null;
+  /** Canonical name of the resolved quantifier ("zwei", "einige"), else null.
+   *  The edit form shows this WORDING in the amount field rather than the
+   *  resolved number. */
+  quantifierName?: string | null;
   unit: { id: number; name: string } | null;
   unitMatch: "matched" | "defaulted" | "unresolved" | "empty";
   rawUnit: string | null;
@@ -325,7 +329,13 @@ export function parsedIngredientToDraft(
     addAsAlias: false,
     // Import never auto-produces unassigned rows — it always tries to match.
     unassigned: false,
-    quantity: quantityToInputString(i.quantity),
+    // A quantifier-backed row shows the quantifier WORDING in the amount field
+    // (the one place quantifiers display as words, not the resolved number);
+    // its numeric quantity stays empty since the reference owns the amount.
+    quantity:
+      i.quantifierId != null && i.quantifierName
+        ? i.quantifierName
+        : quantityToInputString(i.quantity),
     quantityLow: quantityToInputString(i.quantityLow ?? null),
     isRange: i.quantityLow != null,
     quantifierId: i.quantifierId ?? null,
@@ -452,7 +462,13 @@ export function recipeToDraft(recipe: RecipeView): DraftRecipe {
         candidates: [],
         addAsAlias: false,
         unassigned: i.ingredientId == null,
-        quantity: quantityToInputString(i.quantity),
+        // A row backed by a quantifier shows the quantifier WORDING ("einige",
+        // "zwei") in the amount field; the numeric quantity stays empty since
+        // the reference owns the amount.
+        quantity:
+          i.quantifierId != null && i.quantifierName
+            ? i.quantifierName
+            : quantityToInputString(i.quantity),
         quantityLow: quantityToInputString(i.quantityLow ?? null),
         isRange: i.quantityLow != null,
         quantifierId: i.quantifierId,

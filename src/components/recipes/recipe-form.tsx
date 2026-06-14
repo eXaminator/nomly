@@ -26,7 +26,13 @@ import { moveAlternativeWithinGroup } from "./alternatives";
 import { splitSectionAt } from "./split-section";
 import { TagInput } from "./tag-input";
 import { hasReparsableRows, reparseAll } from "./reparse";
-import { ingredientToPayload, rangeError, toNumberOrNull } from "./payload";
+import {
+  amountInputError,
+  ingredientToPayload,
+  rangeError,
+  toNumberOrNull,
+} from "./payload";
+import { loadQuantifiers } from "./quantifier-list";
 import { cn } from "@/lib/cn";
 import {
   emptyRecipe,
@@ -325,6 +331,20 @@ export function RecipeForm({ initial, recipeId, tagSuggestions }: Props) {
     if (hasRangeError) {
       setError(
         "Ein Mengenbereich ist ungültig: Die Untergrenze muss kleiner als die Obergrenze sein.",
+      );
+      return;
+    }
+    // The amount field accepts a number OR a known quantifier word; block save
+    // if any row's amount text is neither (mirrors the range-error gate above).
+    // Load the quantifier list once here so we resolve against the same data
+    // the rows do.
+    const quantifiers = await loadQuantifiers();
+    const hasAmountError = draft.sections.some((s) =>
+      s.ingredients.some((ing) => amountInputError(ing, quantifiers)),
+    );
+    if (hasAmountError) {
+      setError(
+        "Eine Menge ist ungültig: Bitte eine Zahl oder einen bekannten Mengenbezeichner (z. B. „einige“, „zwei“) eingeben.",
       );
       return;
     }

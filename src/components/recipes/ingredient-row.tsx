@@ -41,7 +41,13 @@ import { IngredientNameInput } from "./ingredient-name-input";
 import { renderOriginalWithMuting } from "./original-muting";
 import { bestEffortNameHighlight } from "@/lib/recipe-import/ast/best-effort-highlight";
 import { liveMatchQuery, type DraftIngredient, type ImportAnnotation } from "./types";
-import { rangeError } from "./payload";
+import {
+  amountInputError,
+  rangeError,
+  resolveAmountInput,
+  type AmountQuantifier,
+} from "./payload";
+import { loadQuantifiers } from "./quantifier-list";
 import { ForceMatchPopover } from "./force-match-popover";
 import { FoldedAltChips } from "./folded-alt-chips";
 
@@ -147,6 +153,13 @@ export function IngredientRow({
   const [defaultUnits, setDefaultUnits] = React.useState<SelectSearchItem[]>([]);
   React.useEffect(() => {
     void loadDefaultUnits().then(setDefaultUnits);
+  }, []);
+  // Configured quantifiers ("einige", "zwei", "ein paar") the amount field
+  // resolves typed text against. Loaded on mount, mirroring the unit picker's
+  // fetch-from-a-read-route pattern.
+  const [quantifiers, setQuantifiers] = React.useState<AmountQuantifier[]>([]);
+  React.useEffect(() => {
+    void loadQuantifiers().then(setQuantifiers);
   }, []);
   const [editingArticleId, setEditingArticleId] = React.useState<number | null>(
     null,
@@ -321,6 +334,36 @@ export function IngredientRow({
   // unspecific unit takes no amount, so the range toggle/input are hidden then.
   const showRange = value.isRange && !amountDisabled;
   const rowRangeError = rangeError(value);
+  // Invalid amount text: a non-empty value that's neither numeric nor a known
+  // quantifier. Surfaced the same way as a range error (aria-invalid + inline
+  // hint) and blocks save in the form (mirrors rangeError there).
+  const rowAmountError = amountInputError(value, quantifiers);
+
+  /**
+   * Resolve the amount field against the quantifier list on every keystroke:
+   *  - numeric → keep the text as the quantity, clear quantifierId.
+   *  - a known quantifier name/alias → set quantifierId, keep the typed
+   *    wording as the displayed quantity string (the payload layer nulls the
+   *    numeric quantity when a quantifierId is set).
+   *  - anything else → clear quantifierId, keep the text (rowAmountError flags
+   *    it invalid). Range mode is incompatible with a quantifier, so a
+   *    quantifier match also drops range mode + the low bound.
+   */
+  function onAmountChange(text: string) {
+    const res = resolveAmountInput(text, quantifiers);
+    if (res.quantifierId != null) {
+      onChange({
+        ...value,
+        quantity: text,
+        quantifierId: res.quantifierId,
+        isRange: false,
+        quantityLow: "",
+      });
+      return;
+    }
+    onChange({ ...value, quantity: text, quantifierId: null });
+  }
+
   function toggleRange() {
     onChange(
       value.isRange
@@ -517,11 +560,11 @@ export function IngredientRow({
     return (
       <div className="grid items-start gap-2 grid-cols-[4rem_minmax(0,1fr)_auto] md:grid-cols-[5rem_8rem_minmax(0,1fr)_minmax(0,1fr)_auto]">
         <Input
-          inputMode="decimal"
           placeholder="Menge"
           value={value.quantity}
-          onChange={(e) => onChange({ ...value, quantity: e.target.value })}
+          onChange={(e) => onAmountChange(e.target.value)}
           aria-label="Menge"
+          aria-invalid={rowAmountError || undefined}
           disabled={amountDisabled}
           className="col-start-1 row-start-1"
         />
@@ -788,11 +831,11 @@ export function IngredientRow({
                 </>
               )}
               <Input
-                inputMode="decimal"
                 placeholder="Menge"
                 value={value.quantity}
-                onChange={(e) => onChange({ ...value, quantity: e.target.value })}
+                onChange={(e) => onAmountChange(e.target.value)}
                 aria-label="Menge"
+                aria-invalid={(rowAmountError || rowRangeError) || undefined}
                 disabled={amountDisabled}
                 className="w-16"
               />
@@ -1006,6 +1049,12 @@ export function IngredientRow({
         {showRange && rowRangeError ? (
           <p className="mt-1 text-xs text-[var(--color-danger)]">
             Untergrenze muss kleiner als die Obergrenze sein.
+          </p>
+        ) : null}
+        {rowAmountError ? (
+          <p className="mt-1 text-xs text-[var(--color-danger)]">
+            Menge muss eine Zahl oder ein bekannter Mengenbezeichner sein (z. B.
+            „einige", „zwei", „ein paar").
           </p>
         ) : null}
         {editingArticleId != null ? (
