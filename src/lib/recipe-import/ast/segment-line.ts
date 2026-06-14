@@ -885,6 +885,10 @@ type ParenAlt = {
   /** A leading nested paren BEFORE the leader ("((10 g) oder X)") that belongs
    *  to the primary — its leaf range [from,to), hoisted onto the primary. */
   leadParen: [number, number] | null;
+  /** A leading bare NOTE before a comma+marker ("(Mark einer Schote, Alternativ
+   *  X)") that belongs to the primary — its leaf range [noteStart, commaIdx]
+   *  INCLUDING the trailing comma, hoisted onto the primary as a note. */
+  primaryNote: [number, number] | null;
 };
 
 /**
@@ -988,6 +992,30 @@ function extractParenAlt(
       cf = j;
     }
   }
+  // A leading bare note before the marker ("(Mark einer Schote, Alternativ X)"):
+  // when the paren does NOT open with a marker but has a top-level comma followed
+  // by one, the pre-comma part is the primary's note and the marker after the
+  // comma introduces the alternative. Resume leader detection past the comma.
+  let primaryNote: [number, number] | null = null;
+  {
+    const first = nextContentWord(all, cf, innerClose);
+    const isMarker = (l: Leaf | null | undefined): boolean =>
+      l != null && (OR_WORDS.has(norm(l.text)) || ALT_LEADER_WORDS.has(norm(l.text)));
+    if (first && !isMarker(first)) {
+      const cDepth = all[innerOpen].depth + 1;
+      let commaIdx = -1;
+      for (let i = cf; i < innerClose; i++) {
+        if (all[i].depth === cDepth && all[i].kind === "comma") {
+          commaIdx = i;
+          break;
+        }
+      }
+      if (commaIdx >= 0 && isMarker(nextContentWord(all, commaIdx + 1, innerClose))) {
+        primaryNote = [cf, commaIdx + 1]; // note words + the trailing comma
+        cf = commaIdx + 1;
+      }
+    }
+  }
   const leadWord = nextContentWord(all, cf, innerClose);
   if (!leadWord) return null;
   let leaderIdx = all.indexOf(leadWord, cf);
@@ -1018,6 +1046,7 @@ function extractParenAlt(
     leader: connector,
     tailFrom: close + 1,
     leadParen,
+    primaryNote,
   };
 }
 
@@ -1065,6 +1094,18 @@ function buildParenAlt(
           .slice(alt.leadParen[0], alt.leadParen[1])
           .map((l) => ({ ...l, depth: Math.max(0, l.depth - (baseDepth + 1)) }));
         leaves = [...s.leaves, ...hoisted];
+      }
+      if (idx === 0 && alt.primaryNote) {
+        // A bare leading note ("Mark einer Schote,") becomes the primary's note.
+        // Flatten to depth 0 and put the trailing comma FIRST in leaf order so it
+        // reads as a clause boundary after the primary's name — keeping the note
+        // words out of the no-match name scan (which stops at the first comma).
+        const raw = all
+          .slice(alt.primaryNote[0], alt.primaryNote[1])
+          .map((l) => ({ ...l, depth: 0 }));
+        const comma = raw[raw.length - 1];
+        const noteWords = raw.slice(0, -1);
+        leaves = [...leaves, comma, ...noteWords];
       }
       out.push({
         ...s,

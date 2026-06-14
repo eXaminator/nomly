@@ -694,6 +694,28 @@ describe("colon-in-name treated as section + listed items", () => {
     expect(out[1].isAlternative).toBe(true);
   });
 
+  it("'(<note>, Alternativ X)' in parens: leading note stays on the primary, X is the alternative", () => {
+    // "1 Vanilleschote (Mark einer Schote, Alternativ 1 Päckchen Vanillezucker)"
+    // — the parenthetical opens with a NOTE ("Mark einer Schote") BEFORE the
+    // "Alternativ" marker. The note belongs to the primary; the marker after the
+    // comma introduces the real alternative.
+    const catalog: IngredientCatalog = [
+      { ingredientId: 1, canonicalName: "Vanilleschote", aliasName: "Vanilleschote", tokens: ["vanilleschote"] },
+      { ingredientId: 2, canonicalName: "Vanillezucker", aliasName: "Vanillezucker", tokens: ["vanillezucker"] },
+    ];
+    const out = parseIngredientLines(
+      ["1 Vanilleschote (Mark einer Schote, Alternativ 1 Päckchen Vanillezucker)"],
+      makeLookups(catalog, ["päckchen"]),
+    );
+    expect(out).toHaveLength(2);
+    expect(out[0].ingredientId).toBe(1);
+    expect(out[0].isAlternative).toBe(false);
+    expect(out[0].notes).toBe("Mark einer Schote");
+    expect(out[1].ingredientId).toBe(2);
+    expect(out[1].isAlternative).toBe(true);
+    expect(out[1].isOptional).toBe(true);
+  });
+
   it("'(Alternativ A oder B)' in parens yields one alternative row per option", () => {
     const catalog: IngredientCatalog = [
       { ingredientId: 1, canonicalName: "Ahornsirup", aliasName: "Ahornsirup", tokens: ["ahornsirup"] },
