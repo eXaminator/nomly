@@ -15,6 +15,7 @@ import {
   type UnitLookup,
 } from "@/lib/recipe-import";
 import type { IngredientCatalog } from "@/lib/recipe-import/matching";
+import { testQuantifierLookup } from "./_helpers/quantifiers";
 
 function makeLookups(
   catalog: IngredientCatalog,
@@ -40,7 +41,7 @@ function makeLookups(
       canonicalName: entry.canonicalName,
     });
   }
-  return { units, ingredients, ingredientCatalog: catalog };
+  return { units, ingredients, ingredientCatalog: catalog, quantifiers: testQuantifierLookup() };
 }
 
 describe("parseIngredientLines — substring matcher + threshold", () => {

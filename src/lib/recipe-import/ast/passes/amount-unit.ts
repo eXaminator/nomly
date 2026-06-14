@@ -4,26 +4,6 @@ import { consumeGroup, groupByWhitespace, type Group } from "../tokens";
 import { matchQuantifierAt } from "./quantifier";
 import type { QuantifierLookup } from "../../index";
 
-const TEXT_ONE = new Set(["ein", "eine", "einen", "einem", "einer", "eins", "one", "a", "an"]);
-const TEXT_HALF = new Set(["halber", "halbe", "halbes", "halben", "half"]);
-const TEXT_QUARTER = new Set(["viertel", "quarter"]);
-/** Written cardinals 2–12 (DE + EN) leading an ingredient line — "two onions",
- *  "drei Eier". A small CLOSED grammatical set (not an open vocabulary). One is
- *  handled by {@link TEXT_ONE} (it also pairs with half/quarter). */
-const WRITTEN_CARDINALS = new Map<string, number>([
-  ["zwei", 2], ["two", 2],
-  ["drei", 3], ["three", 3],
-  ["vier", 4], ["four", 4],
-  ["fünf", 5], ["fuenf", 5], ["five", 5],
-  ["sechs", 6], ["six", 6],
-  ["sieben", 7], ["seven", 7],
-  ["acht", 8], ["eight", 8],
-  ["neun", 9], ["nine", 9],
-  ["zehn", 10], ["ten", 10],
-  ["elf", 11], ["eleven", 11],
-  ["zwölf", 12], ["zwoelf", 12], ["twelve", 12],
-]);
-
 /** Size words that may sit between the quantity and the unit ("1 small bunch",
  *  "1 kl. Dose"). They are SKIPPED so the unit is still found, but NOT consumed
  *  — they stay verbatim in the note. */
@@ -37,6 +17,12 @@ export const SIZE_MODIFIERS = new Set([
 ]);
 
 const norm = (s: string): string => s.toLowerCase().replace(/[.,]+$/, "");
+
+/** A minimal article set kept ONLY for the "drop a bare article sitting AFTER a
+ *  fraction" tidy ("half a teaspoon" / "halber a …" → drop the "a"). This is a
+ *  SYNTAX rule, not a number-word value — recognition of standalone number-words
+ *  (ein/eine/a/zwei/half/…) now lives in the DB-driven quantifier table. */
+const ARTICLES = new Set(["a", "an", "ein", "eine", "einen", "einem", "einer", "eins"]);
 
 /** Connectors that link the unit to the ingredient ("Pinch of …", "Dose von …").
  *  Consumed onto the unit so they never reach the notes. */
@@ -69,9 +55,11 @@ const wordKey = (g: Group): string => g.text.toLowerCase().replace(/[.,]$/, "");
 
 /**
  * Consume the leading amount + unit of a segment, marking the claimed leaves.
- * Handles numeric runs/ranges (via {@link consumeQuantity}) and the common
- * text amounts (ein/eine/a → 1, halber → 0.5, viertel → 0.25). A bare unit with
- * no quantity implies quantity 1. Mutates `leaves`.
+ * Handles numeric runs/ranges (via {@link consumeQuantity}) and leading
+ * word-form quantifiers (ein/eine/a → 1, halber → 0.5, viertel → 0.25, written
+ * cardinals → 2..12, …) via the DB-driven quantifier table in `opts.quantifiers`
+ * — see {@link matchQuantifierAt}. A bare unit with no quantity implies quantity
+ * 1. Mutates `leaves`.
  */
 export function applyAmountUnit(
   source: string,
@@ -198,9 +186,18 @@ export function applyAmountUnit(
         quantifierId = q.entry.id;
         quantifierName = q.entry.name;
         quantifierWon = true;
-        // "a half" / "a quarter" style fractional follow-ups stay with the
-        // numeric/text paths below; a claiming quantifier just seeds the slot
-        // and lets the unit probe find the real unit after it.
+        // Drop a bare article sitting AFTER a fraction word ("half a teaspoon"
+        // → drop "a"; "juice of half a lemon" → 0.5 lemon). This is a syntax
+        // tidy on the leftover article, not a number-word value.
+        if (
+          q.entry.value != null &&
+          q.entry.value < 1 &&
+          cur < groups.length &&
+          ARTICLES.has(wordKey(groups[cur]))
+        ) {
+          consumeGroup(groups[cur], "amount");
+          cur += 1;
+        }
       }
     }
   }
@@ -296,59 +293,20 @@ export function applyAmountUnit(
     }
   }
 
-  const ARTICLES = new Set(["a", "an", "ein", "eine", "einen", "einem", "einer", "eins"]);
-  const dropArticle = () => {
-    if (cur < groups.length && ARTICLES.has(wordKey(groups[cur]))) {
-      consumeGroup(groups[cur], "amount");
-      cur += 1;
-    }
-  };
-
-  if (cur < groups.length) {
-    const w = wordKey(groups[cur]);
-    const next = cur + 1 < groups.length ? wordKey(groups[cur + 1]) : "";
-    if (TEXT_ONE.has(w) && TEXT_HALF.has(next)) {
-      // "eine halbe Tasse" → 0.5
-      quantity = 0.5;
-      consumeGroup(groups[cur], "amount");
-      consumeGroup(groups[cur + 1], "amount");
-      cur += 2;
-    } else if (TEXT_ONE.has(w) && TEXT_QUARTER.has(next)) {
-      quantity = 0.25;
-      consumeGroup(groups[cur], "amount");
-      consumeGroup(groups[cur + 1], "amount");
-      cur += 2;
-    } else if (TEXT_ONE.has(w)) {
-      quantity = 1;
-      consumeGroup(groups[cur], "amount");
-      cur += 1;
-    } else if (TEXT_HALF.has(w)) {
-      quantity = 0.5;
-      consumeGroup(groups[cur], "amount");
-      cur += 1;
-      dropArticle(); // "half a teaspoon" → drop "a"
-    } else if (TEXT_QUARTER.has(w)) {
-      quantity = 0.25;
-      consumeGroup(groups[cur], "amount");
-      cur += 1;
-      dropArticle();
-    } else if (WRITTEN_CARDINALS.has(w)) {
-      // "two onions", "drei Eier" — a written cardinal leads the line.
-      quantity = WRITTEN_CARDINALS.get(w)!;
-      consumeGroup(groups[cur], "amount");
-      cur += 1;
-    } else {
-      const work = groups.slice(cur).map((g) => g.text);
-      const before = work.length;
-      const r = consumeQuantity(work);
-      if (r) {
-        quantity = r.quantity;
-        rangeExpression = r.rangeExpression;
-        quantityLow = r.quantityLow;
-        const n = before - work.length;
-        for (let k = 0; k < n; k++) consumeGroup(groups[cur + k], "amount");
-        cur += n;
-      }
+  // Numeric amount syntax (digits / fractions / ranges / decimals — "2",
+  // "1/2", "0,5", "2-3", "1 1/2", "½"). Word-form quantifiers were already
+  // claimed above via the quantifier table, so skip this once one has won.
+  if (cur < groups.length && quantity === null && !quantifierWon) {
+    const work = groups.slice(cur).map((g) => g.text);
+    const before = work.length;
+    const r = consumeQuantity(work);
+    if (r) {
+      quantity = r.quantity;
+      rangeExpression = r.rangeExpression;
+      quantityLow = r.quantityLow;
+      const n = before - work.length;
+      for (let k = 0; k < n; k++) consumeGroup(groups[cur + k], "amount");
+      cur += n;
     }
   }
 

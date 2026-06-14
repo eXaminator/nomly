@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { parseIngredientLines, type ParseLookups } from "@/lib/recipe-import";
+import { testQuantifierLookup } from "./_helpers/quantifiers";
 
 // A focused corpus of the split/guard cases the entity-first Phase 2 refactor
 // touches. Each line is parsed with the SAME empty-catalog lookups the unit
@@ -30,6 +31,7 @@ const EMPTY_LOOKUPS: ParseLookups = {
   },
   ingredients: new Map(),
   ingredientCatalog: [],
+  quantifiers: testQuantifierLookup(),
 };
 
 describe("parser parity corpus (Phase 2 guard cases)", () => {
