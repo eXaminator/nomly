@@ -31,6 +31,12 @@ const STAMMDATEN_LINKS: Array<{
       "Maßeinheiten mit Aliasen, Plural, Dimension und Faktor zu ihrer Basis-Einheit.",
   },
   {
+    href: "/einstellungen/mengenwoerter",
+    title: "Mengenwörter",
+    description:
+      "Mengenangaben wie 'eine Prise' oder 'einige' — Name, numerischer Wert und Aliase.",
+  },
+  {
     href: "/einstellungen/kategorien",
     title: "Kategorien",
     description:

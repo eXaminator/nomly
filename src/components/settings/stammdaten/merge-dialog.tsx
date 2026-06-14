@@ -259,9 +259,16 @@ function pluralFor(kind: EntityKind): string {
       return "tags";
     case "supermarket":
       return "supermarkets";
+    case "quantifier":
+      return "quantifiers";
   }
 }
 
 function hasAliasTable(kind: EntityKind): boolean {
-  return kind === "ingredient" || kind === "unit" || kind === "category";
+  return (
+    kind === "ingredient" ||
+    kind === "unit" ||
+    kind === "category" ||
+    kind === "quantifier"
+  );
 }

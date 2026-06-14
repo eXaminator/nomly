@@ -640,6 +640,8 @@ function pluralFor(kind: EntityKind): string {
       return "tags";
     case "supermarket":
       return "supermarkets";
+    case "quantifier":
+      return "quantifiers";
   }
 }
 
