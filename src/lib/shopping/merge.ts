@@ -1,6 +1,6 @@
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { db } from "../../db/index.ts";
-import { recipeIngredient, shoppingItemSource } from "../../db/schema.ts";
+import { quantifier, recipeIngredient, shoppingItemSource } from "../../db/schema.ts";
 import { upsertShoppingItemForIngredient } from "./itemUpsert.ts";
 
 export type AddMealsSelection = {
@@ -27,6 +27,12 @@ export type AddMealsResult = {
 type RecipeIngredientRow = {
   id: number;
   ingredientId: number;
+  /**
+   * Effective quantity at snapshot time: the literal `quantity` if present,
+   * else the referenced quantifier's `value` (which is null for an
+   * unspecified quantifier like "einige"). A null here flows through the
+   * downstream null/check-off path exactly like a bare null-quantity row.
+   */
   quantity: number | null;
   unitId: number | null;
   notes: string | null;
@@ -216,12 +222,18 @@ function loadRecipeIngredients(
     .select({
       id: recipeIngredient.id,
       ingredientId: recipeIngredient.ingredientId,
-      quantity: recipeIngredient.quantity,
+      // Effective quantity: the literal `quantity`, else the referenced
+      // quantifier's `value` (null for an unspecified one like "einige").
+      // Snapshotting the effective number keeps the contribution self-
+      // sufficient — a numeric quantifier scales like any number and a
+      // value-less one resolves to null (the existing check-off path).
+      quantity: sql<number | null>`COALESCE(${recipeIngredient.quantity}, ${quantifier.value})`,
       unitId: recipeIngredient.unitId,
       notes: recipeIngredient.notes,
       fixedAmount: recipeIngredient.fixedAmount,
     })
     .from(recipeIngredient)
+    .leftJoin(quantifier, eq(quantifier.id, recipeIngredient.quantifierId))
     // Skip "Nicht zugeordnet" lines (ingredient_id NULL): they have no
     // article to aggregate against and must never reach a shopping item.
     .where(
