@@ -30,6 +30,10 @@ export type RecipeIngredientInput = {
    *  `quantity`/`quantityLow` MUST be null. Mutually exclusive with a literal
    *  quantity — never both. Optional/back-compat: omitted = no quantifier. */
   quantifierId?: number | null;
+  /** Source word the quantifier was matched from ("a" for canonical "ein"),
+   *  preserved for display in the amount field. Mirrors {@link displayUnit}.
+   *  Only meaningful with a quantifierId. Optional/back-compat: omitted = none. */
+  displayQuantifier?: string | null;
   unitId: number | null;
   /** Display override for the unit — used when the user picked / typed an
    *  alias ("Tasse") for a canonical unit ("Cup"). NULL = render the
@@ -198,6 +202,10 @@ export type RecipeIngredientView = {
   /** Numeric value of the referenced quantifier — may be null for an
    *  unspecified quantifier like "einige". Null when no quantifier is set. */
   quantifierValue: number | null;
+  /** Source word the quantifier was matched from ("a" for canonical "ein"),
+   *  from the stored display_quantifier. Null when no quantifier / no source.
+   *  Mirrors how {@link displayUnit} preserves the unit's source spelling. */
+  quantifierSource: string | null;
   unitId: number | null;
   /** display_unit OR unit.name fallback (coalesced server-side, in that order
    *  of preference). This is the *raw* matched label as stored — the recipe

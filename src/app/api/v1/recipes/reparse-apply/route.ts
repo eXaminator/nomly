@@ -20,6 +20,12 @@ const rowSchema = z.object({
   unassigned: z.boolean().optional(),
   quantity: z.number().nullable(),
   quantityLow: z.number().nullable().optional(),
+  // A quantifier-backed amount ("a"/"ein", "einige"): without this field Zod
+  // strips it from the row, so the applied recipe loses the amount entirely.
+  quantifierId: z.number().int().positive().nullable().optional(),
+  // The matched source word ("a") shown for the quantifier — likewise stripped
+  // (and the wording lost) if it's not in the schema.
+  displayQuantifier: z.string().nullable().optional(),
   unitId: z.number().int().nullable(),
   displayUnit: z.string().nullable(),
   notes: z.string().nullable(),

@@ -302,6 +302,13 @@
       "when": 1781461136683,
       "tag": "0042_seed_quantifiers",
       "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "6",
+      "when": 1781463933900,
+      "tag": "0043_recipe_ingredient_display_quantifier",
+      "breakpoints": true
     }
   ]
 }

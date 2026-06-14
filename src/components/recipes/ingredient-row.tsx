@@ -356,12 +356,14 @@ export function IngredientRow({
         ...value,
         quantity: text,
         quantifierId: res.quantifierId,
+        // The word the user typed ("a") is the source to remember verbatim.
+        quantifierSource: text.trim(),
         isRange: false,
         quantityLow: "",
       });
       return;
     }
-    onChange({ ...value, quantity: text, quantifierId: null });
+    onChange({ ...value, quantity: text, quantifierId: null, quantifierSource: null });
   }
 
   function toggleRange() {

@@ -465,6 +465,7 @@ export async function scanAllRecipesForReparse(
       quantifierId: recipeIngredient.quantifierId,
       quantifierName: quantifier.name,
       quantifierValue: quantifier.value,
+      displayQuantifier: recipeIngredient.displayQuantifier,
       unitId: recipeIngredient.unitId,
       unitName: unit.name,
       displayFraction: unit.displayFraction,
@@ -581,8 +582,8 @@ export async function scanAllRecipesForReparse(
         quantifierId: g.ingredientId == null ? null : g.quantifierId,
         quantifierName: g.ingredientId == null ? null : (g.quantifierName ?? null),
         quantifierValue: g.ingredientId == null ? null : (g.quantifierValue ?? null),
-        // Source text is never stored — current side always null.
-        quantifierSource: null,
+        // The matched source word ("a"), now persisted as display_quantifier.
+        quantifierSource: g.ingredientId == null ? null : (g.displayQuantifier ?? null),
         // Match the recipe read view: display_unit, then the canonical unit name.
         unitLabel:
           g.ingredientId == null ? null : (g.displayUnit ?? g.unitName ?? null),
@@ -661,6 +662,10 @@ function viewRowToInput(
     addAsAlias: false,
     quantity: v.quantity,
     quantityLow: v.quantityLow,
+    // Carry the quantifier ref + its source word so an untouched quantifier
+    // row keeps its amount when the recipe is rebuilt around a changed line.
+    quantifierId: v.quantifierId,
+    displayQuantifier: v.quantifierSource,
     unitId: v.unitId,
     displayUnit: v.unitName,
     notes: v.notes,

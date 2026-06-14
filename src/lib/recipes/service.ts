@@ -338,6 +338,11 @@ function writeSections(
           quantityLow:
             ing.unassigned || quantifierId != null ? null : ing.quantityLow ?? null,
           quantifierId,
+          // Preserve the matched source word ("a" for canonical "ein") for
+          // display — only when a quantifier is actually set. Mirrors
+          // displayUnit's alias preservation.
+          displayQuantifier:
+            quantifierId != null ? ing.displayQuantifier?.trim() || null : null,
           unitId: ing.unassigned ? null : ing.unitId,
           // Same alias-preservation as displayName, but for units. Stored
           // only when it differs from the canonical unit name — keeps a
@@ -484,6 +489,7 @@ export function getRecipe(
     quantifierId: number | null;
     quantifierName: string | null;
     quantifierValue: number | null;
+    displayQuantifier: string | null;
     unitId: number | null;
     unitName: string | null;
     canonicalUnitName: string | null;
@@ -519,6 +525,7 @@ export function getRecipe(
             quantifierId: recipeIngredient.quantifierId,
             quantifierName: quantifierTable.name,
             quantifierValue: quantifierTable.value,
+            displayQuantifier: recipeIngredient.displayQuantifier,
             unitId: recipeIngredient.unitId,
             // Render order: display_unit override → canonical unit name.
             unitName: sql<
@@ -678,6 +685,7 @@ export function getRecipe(
           quantifierId: i.ingredientId == null ? null : i.quantifierId,
           quantifierName: i.ingredientId == null ? null : i.quantifierName,
           quantifierValue: i.ingredientId == null ? null : i.quantifierValue,
+          quantifierSource: i.ingredientId == null ? null : i.displayQuantifier,
           unitId: i.ingredientId == null ? null : i.unitId,
           unitName: i.ingredientId == null ? null : i.unitName,
           unitLabel: i.ingredientId == null ? null : unitLabelFor(i),

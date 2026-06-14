@@ -14,6 +14,9 @@ const ingredientSchema = z
     /** Reference to a configured quantifier ("zwei", "einige"). Mutually
      *  exclusive with a literal `quantity` (see refine below) — never both. */
     quantifierId: z.number().int().positive().nullable().optional(),
+    /** Source word the quantifier matched ("a" for "ein"), preserved for
+     *  display in the amount field. Mirrors displayUnit. */
+    displayQuantifier: z.string().nullable().default(null),
     unitId: z.number().int().positive().nullable(),
     displayUnit: z.string().nullable().default(null),
     notes: z.string().nullable(),

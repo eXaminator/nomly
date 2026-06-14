@@ -508,4 +508,77 @@ describe("POST /api/v1/recipes/reparse-apply", () => {
         .some((a) => a.name === "Tomate"),
     ).toBe(false);
   });
+
+  it("persists a quantifier reference (regression: the row schema dropped quantifierId)", async () => {
+    // "a small bunch coriander" → quantifier "a"/"ein" (value 1) claims the
+    // amount slot; the persisted row must carry quantifierId (quantity null),
+    // not lose the amount entirely.
+    const ein = db
+      .select()
+      .from(schema.quantifier)
+      .all()
+      .find((q) => q.name === "ein");
+    expect(ein, "default quantifier 'ein' should be seeded by migrations").toBeDefined();
+
+    const korianderId = db
+      .insert(schema.ingredient)
+      .values({ name: "Koriander" })
+      .returning({ id: schema.ingredient.id })
+      .all()[0].id;
+    const bundId = db
+      .insert(schema.unit)
+      .values({ name: "Testbund", dimension: "count" })
+      .returning({ id: schema.unit.id })
+      .all()[0].id;
+
+    const { recipeId, rowIds } = makeRecipe("Quant", [
+      { displayName: "Koriander", rawLine: "a small bunch coriander" },
+    ]);
+
+    const res = await post({
+      recipes: [
+        {
+          recipeId,
+          replacements: [
+            {
+              replaceRowIds: [rowIds[0]],
+              rows: [
+                prow({
+                  ingredientName: "Koriander",
+                  ingredientId: korianderId,
+                  quantity: null,
+                  quantifierId: ein!.id,
+                  // The matched source word — must survive, not collapse to "ein".
+                  displayQuantifier: "a",
+                  unitId: bundId,
+                  rawLine: "a small bunch coriander",
+                }),
+              ],
+            },
+          ],
+        },
+      ],
+    });
+    expect(res.status).toBe(200);
+
+    const row = db
+      .select()
+      .from(schema.recipeIngredient)
+      .all()
+      .find((r) => r.displayName === "Koriander" && r.unitId === bundId);
+    expect(row).toBeDefined();
+    expect(row!.quantifierId).toBe(ein!.id);
+    expect(row!.quantity).toBeNull();
+    // The source word is preserved so the amount field can show "a", not "ein".
+    expect(row!.displayQuantifier).toBe("a");
+
+    // …and the read model exposes it as quantifierSource for the edit form.
+    const getRecipe = (await import("@/lib/recipes/service")).getRecipe;
+    const view = getRecipe(recipeId)!;
+    const ing = view.sections
+      .flatMap((s) => s.ingredients)
+      .find((i) => i.ingredientName === "Koriander");
+    expect(ing?.quantifierSource).toBe("a");
+    expect(ing?.quantifierValue).toBe(1);
+  });
 });

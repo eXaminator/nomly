@@ -356,8 +356,8 @@ export function parsedIngredientToDraft(
     // (the one place quantifiers display as words, not the resolved number);
     // its numeric quantity stays empty since the reference owns the amount.
     quantity:
-      i.quantifierId != null && i.quantifierName
-        ? i.quantifierName
+      i.quantifierId != null
+        ? (i.quantifierSource ?? i.quantifierName ?? "")
         : quantityToInputString(i.quantity),
     quantityLow: quantityToInputString(i.quantityLow ?? null),
     isRange: i.quantityLow != null,
@@ -495,18 +495,20 @@ export function recipeToDraft(recipe: RecipeView): DraftRecipe {
         candidates: [],
         addAsAlias: false,
         unassigned: i.ingredientId == null,
-        // A row backed by a quantifier shows the quantifier WORDING ("einige",
-        // "zwei") in the amount field; the numeric quantity stays empty since
-        // the reference owns the amount.
+        // A row backed by a quantifier shows the quantifier WORDING in the
+        // amount field — the matched source word ("a") when stored, else the
+        // canonical name ("ein"); the numeric quantity stays empty since the
+        // reference owns the amount.
         quantity:
-          i.quantifierId != null && i.quantifierName
-            ? i.quantifierName
+          i.quantifierId != null
+            ? (i.quantifierSource ?? i.quantifierName ?? "")
             : quantityToInputString(i.quantity),
         quantityLow: quantityToInputString(i.quantityLow ?? null),
         isRange: i.quantityLow != null,
         quantifierId: i.quantifierId,
         quantifierName: i.quantifierName,
         quantifierValue: i.quantifierValue,
+        quantifierSource: i.quantifierSource,
         // Saved rows don't preserve the original unit spelling, so the tooltip
         // falls back to the unit label.
         rawUnit: null,

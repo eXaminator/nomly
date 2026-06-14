@@ -127,6 +127,10 @@ export function ingredientToPayload(ing: DraftIngredient) {
     quantityLow:
       hasQuantifier || !ing.isRange ? null : toNumberOrNull(ing.quantityLow),
     quantifierId: ing.quantifierId,
+    // The amount field shows the matched source word for a quantifier row
+    // ("a"); persist it as display_quantifier so the wording survives the
+    // round-trip. Null for non-quantifier rows. Mirrors displayUnit below.
+    displayQuantifier: hasQuantifier ? ing.quantity.trim() || null : null,
     unitId: ing.unit?.id ?? null,
     displayUnit: ing.unit?.name ?? null,
     notes: ing.notes.trim() || null,

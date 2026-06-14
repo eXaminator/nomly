@@ -323,6 +323,14 @@ export const recipeIngredient = sqliteTable(
       onDelete: "restrict",
     }),
     /**
+     * Mirror of `display_unit` for the quantifier: when the source said "a"
+     * but the row resolves to canonical quantifier "ein", `display_quantifier`
+     * preserves "a" for display in the amount field / tooltip. Effective-amount
+     * math still keys off `quantifier_id` → quantifier.value. NULL = render the
+     * canonical quantifier name. Only meaningful when `quantifier_id` is set.
+     */
+    displayQuantifier: text("display_quantifier"),
+    /**
      * Mirror of `display_name` for units: when the source said "Tasse" but
      * the row resolves to canonical unit "Cup", `display_unit` preserves
      * "Tasse" for display. Shopping-list math still keys off `unit_id`.
