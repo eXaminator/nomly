@@ -142,6 +142,41 @@ export function SelectSearch({
     }
   }, [open]);
 
+  // Touch twin of the onWheel workaround below: inside a Radix Dialog/Drawer,
+  // `react-remove-scroll` preventDefaults touchmove on anything outside the
+  // dialog body — including this portaled popover — so on mobile the list
+  // can't be scrolled by finger. Scroll it manually and preventDefault, but
+  // let the edges bubble so an overscroll doesn't feel stuck. A non-passive
+  // native listener is required because React's touchmove is passive (can't
+  // preventDefault).
+  React.useEffect(() => {
+    if (!open) return;
+    const el = listRef.current;
+    if (!el) return;
+    let lastY = 0;
+    const onTouchStart = (e: TouchEvent) => {
+      lastY = e.touches[0]?.clientY ?? 0;
+    };
+    const onTouchMove = (e: TouchEvent) => {
+      if (el.scrollHeight <= el.clientHeight) return;
+      const y = e.touches[0]?.clientY ?? lastY;
+      const dy = lastY - y; // >0 → finger up → scroll content down
+      lastY = y;
+      const atTop = dy < 0 && el.scrollTop <= 0;
+      const atBottom =
+        dy > 0 && Math.ceil(el.scrollTop + el.clientHeight) >= el.scrollHeight;
+      if (atTop || atBottom) return;
+      el.scrollTop += dy;
+      e.preventDefault();
+    };
+    el.addEventListener("touchstart", onTouchStart, { passive: true });
+    el.addEventListener("touchmove", onTouchMove, { passive: false });
+    return () => {
+      el.removeEventListener("touchstart", onTouchStart);
+      el.removeEventListener("touchmove", onTouchMove);
+    };
+  }, [open]);
+
   // Keep the active option in view when keyboard navigation moves it past
   // the visible region of the (potentially long) list.
   React.useEffect(() => {

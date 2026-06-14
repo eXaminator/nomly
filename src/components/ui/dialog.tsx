@@ -40,8 +40,11 @@ export function DialogContent({
         // never sticky-overlays the body content. Callers override the
         // desktop width with `sm:max-w-...`.
         className={cn(
-          "fixed inset-0 z-50 flex h-screen w-screen max-w-none flex-col overflow-hidden rounded-none border-0 bg-[var(--color-card)] shadow-lg duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out",
-          "sm:inset-auto sm:left-1/2 sm:top-1/2 sm:h-auto sm:w-full sm:max-w-lg sm:max-h-[85vh] sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-[var(--radius)] sm:border sm:border-[var(--color-border)]",
+          // `h-dvh` (dynamic viewport height) so a fullscreen mobile dialog
+          // shrinks when the keyboard opens, keeping the footer buttons in
+          // reach instead of stranded below the keyboard.
+          "fixed inset-0 z-50 flex h-dvh w-screen max-w-none flex-col overflow-hidden rounded-none border-0 bg-[var(--color-card)] shadow-lg duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out",
+          "sm:inset-auto sm:left-1/2 sm:top-1/2 sm:h-auto sm:w-full sm:max-w-lg sm:max-h-[85dvh] sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-[var(--radius)] sm:border sm:border-[var(--color-border)]",
           className,
         )}
         {...props}
