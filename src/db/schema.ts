@@ -129,6 +129,23 @@ export const unitAlias = sqliteTable("unit_alias", {
   plural: text("plural"),
 });
 
+export const quantifier = sqliteTable("quantifier", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  name: text("name").notNull().unique(),
+  /** Numeric value of the quantifier; NULL = unspecified ("einige"). */
+  value: real("value"),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdAt: integer("created_at").notNull().default(now),
+});
+
+export const quantifierAlias = sqliteTable("quantifier_alias", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  quantifierId: integer("quantifier_id")
+    .notNull()
+    .references(() => quantifier.id, { onDelete: "cascade" }),
+  name: text("name").notNull().unique(),
+});
+
 export const category = sqliteTable("category", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   name: text("name").notNull().unique(),
@@ -302,6 +319,9 @@ export const recipeIngredient = sqliteTable(
      */
     quantityLow: real("quantity_low"),
     unitId: integer("unit_id").references(() => unit.id, { onDelete: "set null" }),
+    quantifierId: integer("quantifier_id").references(() => quantifier.id, {
+      onDelete: "restrict",
+    }),
     /**
      * Mirror of `display_name` for units: when the source said "Tasse" but
      * the row resolves to canonical unit "Cup", `display_unit` preserves

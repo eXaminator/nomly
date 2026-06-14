@@ -288,6 +288,13 @@
       "when": 1781383981794,
       "tag": "0040_sour_blob",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "6",
+      "when": 1781441163540,
+      "tag": "0041_flimsy_sunspot",
+      "breakpoints": true
     }
   ]
 }
