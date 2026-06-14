@@ -25,6 +25,11 @@ export type RecipeIngredientInput = {
   /** Low bound of a structured amount range, else null. Optional/back-compat:
    *  omitted = no range (single amount). */
   quantityLow?: number | null;
+  /** Reference to a configured quantifier ("zwei", "einige"). When set, the
+   *  row's amount is the quantifier (resolved via {@link effectiveQuantity});
+   *  `quantity`/`quantityLow` MUST be null. Mutually exclusive with a literal
+   *  quantity — never both. Optional/back-compat: omitted = no quantifier. */
+  quantifierId?: number | null;
   unitId: number | null;
   /** Display override for the unit — used when the user picked / typed an
    *  alias ("Tasse") for a canonical unit ("Cup"). NULL = render the
@@ -184,6 +189,15 @@ export type RecipeIngredientView = {
   /** Low bound of a structured amount range, else null. High bound is in
    *  {@link quantity}. */
   quantityLow: number | null;
+  /** Reference to the configured quantifier this row's amount uses, else null.
+   *  When set, {@link quantity}/{@link quantityLow} are null and the effective
+   *  number is {@link quantifierValue}. */
+  quantifierId: number | null;
+  /** Canonical name of the referenced quantifier ("zwei", "einige"), else null. */
+  quantifierName: string | null;
+  /** Numeric value of the referenced quantifier — may be null for an
+   *  unspecified quantifier like "einige". Null when no quantifier is set. */
+  quantifierValue: number | null;
   unitId: number | null;
   /** display_unit OR unit.name fallback (coalesced server-side, in that order
    *  of preference). This is the *raw* matched label as stored — the recipe

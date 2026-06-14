@@ -87,6 +87,13 @@ export type DraftIngredient = {
   /** Range mode toggle: when true the editor shows the low input and the row is
    *  invalid unless quantityLow parses and is < quantity. */
   isRange: boolean;
+  /** Reference to a configured quantifier ("zwei", "einige") when the parser
+   *  resolved the amount to one, else null. At the persistence boundary
+   *  (`ingredientToPayload`) a set id collapses `quantity`/`quantityLow` to
+   *  null — a row's amount is EITHER a literal number OR a quantifier ref,
+   *  never both. Phase 5 will own the edit-field interplay (clearing the id on
+   *  a manual numeric edit / showing the quantifier wording). */
+  quantifierId: number | null;
   unit: ComboboxItem | null;
   notes: string;
   /** When true, the row renders dimmed/italic in the read view and is skipped
@@ -205,6 +212,11 @@ export type ParsedIngredientResponse = {
   quantity: number | null;
   /** Low bound of a structured range, else null. */
   quantityLow: number | null;
+  /** Reference to a configured quantifier the parser resolved ("zwei",
+   *  "einige"), else null. For a NUMERIC quantifier the parser also sets
+   *  `quantity` (= the quantifier's value) as a preview convenience; the
+   *  persistence boundary collapses that to the reference only. */
+  quantifierId?: number | null;
   unit: { id: number; name: string } | null;
   unitMatch: "matched" | "defaulted" | "unresolved" | "empty";
   rawUnit: string | null;
@@ -316,6 +328,7 @@ export function parsedIngredientToDraft(
     quantity: quantityToInputString(i.quantity),
     quantityLow: quantityToInputString(i.quantityLow ?? null),
     isRange: i.quantityLow != null,
+    quantifierId: i.quantifierId ?? null,
     unit:
       i.unit && unitDisplayName !== null
         ? { id: i.unit.id, name: unitDisplayName }
@@ -364,6 +377,7 @@ export function emptyIngredient(): DraftIngredient {
     quantity: "",
     quantityLow: "",
     isRange: false,
+    quantifierId: null,
     unit: null,
     notes: "",
     isOptional: false,
@@ -441,6 +455,7 @@ export function recipeToDraft(recipe: RecipeView): DraftRecipe {
         quantity: quantityToInputString(i.quantity),
         quantityLow: quantityToInputString(i.quantityLow ?? null),
         isRange: i.quantityLow != null,
+        quantifierId: i.quantifierId,
         unit:
           i.unitId !== null && i.unitName
             ? { id: i.unitId, name: i.unitName }
@@ -485,6 +500,7 @@ export function emptyRecipe(): DraftRecipe {
             quantity: "",
             quantityLow: "",
             isRange: false,
+            quantifierId: null,
             unit: null,
             notes: "",
             isOptional: false,

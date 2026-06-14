@@ -33,14 +33,24 @@ export function ingredientToPayload(ing: DraftIngredient) {
   // "Nicht zugeordnet": free-text line with no article. Drop the ingredient
   // link and alias intent; the server persists ingredient_id NULL with `name`
   // as display_name.
+  //
+  // The persisted invariant: a row's amount is EITHER a literal number OR a
+  // quantifier reference, never both. When a quantifier is set, the reference
+  // wins and we emit quantity/quantityLow as null (the draft may still carry
+  // a numeric `quantity` string from the import-preview convenience, where a
+  // numeric quantifier like "zwei" sets both — we collapse it here).
+  const hasQuantifier = ing.quantifierId != null;
   return {
     ingredientName: name,
     ingredientId: ing.unassigned ? null : ing.selectedIngredientId,
     unassigned: ing.unassigned,
     addAsAlias: ing.unassigned ? false : ing.addAsAlias,
-    quantity: toNumberOrNull(ing.quantity),
-    // Only carry the low bound when the row is explicitly in range mode.
-    quantityLow: ing.isRange ? toNumberOrNull(ing.quantityLow) : null,
+    quantity: hasQuantifier ? null : toNumberOrNull(ing.quantity),
+    // Only carry the low bound when the row is explicitly in range mode (and
+    // not a quantifier row, where the reference wins).
+    quantityLow:
+      hasQuantifier || !ing.isRange ? null : toNumberOrNull(ing.quantityLow),
+    quantifierId: ing.quantifierId,
     unitId: ing.unit?.id ?? null,
     displayUnit: ing.unit?.name ?? null,
     notes: ing.notes.trim() || null,
