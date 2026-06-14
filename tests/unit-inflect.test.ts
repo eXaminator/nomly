@@ -15,11 +15,14 @@ const FORMS: UnitForm[] = [
 describe("buildUnitInflector", () => {
   const inflect = buildUnitInflector(FORMS);
 
-  it("uses the plural for amounts other than 1, singular for 1 / null", () => {
+  it("plural for >1 or unspecified (null); singular for exactly 1 and partials below 1", () => {
     expect(inflect("Zehe", 2)).toBe("Zehen");
+    expect(inflect("Zehe", 1.5)).toBe("Zehen");
     expect(inflect("Zehe", 1)).toBe("Zehe");
-    expect(inflect("Zehe", null)).toBe("Zehe");
-    expect(inflect("Zehe", 0.5)).toBe("Zehen");
+    // Unspecified amount ("einige Zehen") reads as plural.
+    expect(inflect("Zehe", null)).toBe("Zehen");
+    // A partial amount below 1 ("0,5 Zehe") takes the singular.
+    expect(inflect("Zehe", 0.5)).toBe("Zehe");
   });
 
   it("normalises a plural input back to the quantity-correct form", () => {

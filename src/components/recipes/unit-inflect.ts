@@ -1,12 +1,14 @@
+import { pluralizeLabel } from "@/lib/units/label";
 import type { UnitForm } from "@/lib/recipes/reparse-scan";
 
 /**
  * Inflect a unit label by quantity, using the catalog's known forms. Given any
  * label — a singular, a plural, the canonical name, or an alias — it resolves
- * to that form's pair and returns the quantity-correct spelling: plural for an
- * amount other than 1 (and only when a plural is configured), singular
- * otherwise. A label the catalog doesn't know (free text) is returned verbatim,
- * since we have no forms to inflect it with.
+ * to that form's pair and returns the quantity-correct spelling via the shared
+ * {@link pluralizeLabel} rule (plural for >1 or an unspecified/null amount,
+ * singular for exactly 1 and partials below 1, and only when a plural is
+ * configured). A label the catalog doesn't know (free text) is returned
+ * verbatim, since we have no forms to inflect it with.
  *
  * The bulk-reparse diff uses this for BOTH rendering and change detection:
  * inflecting both sides by their own quantity makes a pure singular/plural
@@ -33,7 +35,6 @@ export function buildUnitInflector(forms: UnitForm[]): UnitInflector {
     if (label == null) return null;
     const pair = byToken.get(label.trim().toLowerCase());
     if (!pair) return label; // free text — keep the user's spelling verbatim
-    if (pair.plural && quantity !== null && quantity !== 1) return pair.plural;
-    return pair.singular;
+    return pluralizeLabel({ name: pair.singular, plural: pair.plural }, quantity);
   };
 }
