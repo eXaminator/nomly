@@ -222,7 +222,11 @@ export function applyAmountUnit(
         cur += 1;
       }
       return {
-        quantity: null,
+        // The unspecific unit itself takes no amount, but a leading quantifier
+        // may already have claimed the slot — keep its value ("a drizzle" → 1)
+        // so the amount reads "1 drizzle", not "ein drizzle". `quantity` is the
+        // quantifier's value when one won, else null (a bare unspecific unit).
+        quantity,
         unitName: m.name,
         rangeExpression: null,
         quantityLow: null,

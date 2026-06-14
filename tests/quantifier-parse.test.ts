@@ -155,6 +155,23 @@ describe("quantifier recognition — leading amount-word", () => {
     expect(out[0].unit?.name).toBe("pinch");
     expect(out[0].name).toBe("salt");
   });
+
+  it("'a drizzle oil' → quantifier 'ein' (eff 1) before an UNSPECIFIC unit keeps the value", () => {
+    // "drizzle" is an unspecific unit (no amount of its own), but the leading
+    // quantifier "a"/"ein" claimed the amount slot with value 1 — so the
+    // effective quantity is 1 ("1 drizzle"), not the quantifier name
+    // ("ein drizzle"). Mirrors the normal-unit case above.
+    const out = parseIngredientLines(
+      ["a drizzle oil"],
+      makeLookups(cat("oil"), [], ["drizzle"]),
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0].quantifierName).toBe("ein");
+    expect(out[0].quantifierId).toBe(1);
+    expect(out[0].quantity).toBe(1);
+    expect(out[0].unit?.name?.toLowerCase()).toBe("drizzle");
+    expect(out[0].name).toBe("oil");
+  });
 });
 
 describe("quantifierSource — original matched window text", () => {
