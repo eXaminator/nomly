@@ -42,6 +42,32 @@ export function formatAmount(
   return `${formatQuantity(quantityLow, opts)}–${high}`;
 }
 
+/**
+ * Determine the effective display string for an ingredient amount, taking
+ * quantifiers into account:
+ * - If `quantity` is set, it (and any `quantityLow`) format as a normal
+ *   amount/range.
+ * - If `quantity` is null but `quantifierValue` is set, the quantifier's
+ *   numeric value is used as the effective high bound.
+ * - If both are null but `quantifierName` is set, the name is returned
+ *   verbatim ("einige").
+ * - Otherwise returns "".
+ */
+export function displayAmount(
+  a: {
+    quantity: number | null;
+    quantityLow?: number | null;
+    quantifierName?: string | null;
+    quantifierValue?: number | null;
+  },
+  opts?: { fraction?: boolean },
+): string {
+  const effHigh = a.quantity ?? a.quantifierValue ?? null;
+  if (effHigh != null) return formatAmount(effHigh, a.quantityLow ?? null, opts);
+  if (a.quantifierName) return a.quantifierName;
+  return "";
+}
+
 /** Which fields differ from the other side of a diff — used to color-highlight
  *  the changed parts. */
 export type LineHighlight = {
@@ -63,6 +89,12 @@ export type ReadLineProps = {
   quantity: number | null;
   /** Low bound of an amount range, else null → renders "low–high". */
   quantityLow?: number | null;
+  /** Name of the quantifier ("einige"), displayed verbatim when no numeric
+   *  amount is available. */
+  quantifierName?: string | null;
+  /** Numeric value of the quantifier — used as the effective amount when
+   *  `quantity` is null. */
+  quantifierValue?: number | null;
   unitLabel: string | null;
   /** When true, the line's unit is flagged for fraction display; the quantity
    *  renders as a fraction when it resolves to one. */
@@ -103,6 +135,8 @@ export type ReadLineProps = {
 export function RecipeIngredientReadLine({
   quantity,
   quantityLow = null,
+  quantifierName = null,
+  quantifierValue = null,
   unitLabel,
   displayFraction = false,
   name,
@@ -158,7 +192,7 @@ export function RecipeIngredientReadLine({
         {mark(
           highlight?.amount,
           <span>
-            {formatAmount(quantity, quantityLow, { fraction: displayFraction })}{" "}
+            {displayAmount({ quantity, quantityLow, quantifierName, quantifierValue }, { fraction: displayFraction })}{" "}
             {unitLabel ?? ""}
           </span>,
         )}

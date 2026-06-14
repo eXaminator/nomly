@@ -19,7 +19,7 @@ import {
   InstructionBody,
   type MentionTips,
 } from "@/components/recipes/instruction-body";
-import { formatAmount } from "@/components/recipes/ingredient-read-line";
+import { displayAmount } from "@/components/recipes/ingredient-read-line";
 import {
   UpcomingUsesButton,
   UpcomingUsesProvider,
@@ -286,7 +286,7 @@ export function RecipeDetail({
                     column instead of being indented past it. */}
                 {unassigned ? null : (
                   <span className="inline-flex min-w-12 shrink-0 items-center font-mono text-[var(--color-muted-fg)]">
-                    {formatAmount(ing.quantity, ing.quantityLow, { fraction: ing.displayFraction })}{" "}
+                    {displayAmount({ quantity: ing.quantity, quantityLow: ing.quantityLow, quantifierName: ing.quantifierName, quantifierValue: ing.quantifierValue }, { fraction: ing.displayFraction })}{" "}
                     {ing.unitLabel ?? ""}
                   </span>
                 )}
