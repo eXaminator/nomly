@@ -69,7 +69,7 @@ const STAMMDATEN_LINKS: Array<{
     href: "/einstellungen/api-tokens",
     title: "API-Tokens",
     description:
-      "Bearer-Tokens für Maschinen-Zugriff auf die API — Home Assistant, Familywall-Import.",
+      "Bearer-Tokens für Maschinen-Zugriff auf die API — Home Assistant und andere Integrationen.",
   },
   {
     href: "/einstellungen/benutzer",
