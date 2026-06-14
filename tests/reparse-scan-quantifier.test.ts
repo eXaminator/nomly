@@ -126,6 +126,19 @@ describe("isLineGroupChanged — quantifierId comparison", () => {
       ),
     ).toBe(false);
   });
+
+  it("false when the same quantifier carries its numeric value as quantity (real parser output)", async () => {
+    const { isLineGroupChanged } = await import("@/lib/recipes/reparse-scan");
+    // A stored quantifier row collapses quantity to null, but the parser sets
+    // quantity = the quantifier's value (preview convenience). Same quantifier
+    // id → NOT a change, even though the raw `quantity` fields differ (null vs 2).
+    expect(
+      isLineGroupChanged(
+        [{ id: 1, ingredientId: 5, name: "Mehl", quantity: null, quantityLow: null, quantifierId: 7, unitId: null, notes: null, isOptional: false, alternativeForId: null }],
+        [{ quantity: 2, quantityLow: null, quantifierId: 7, quantifierName: "zwei", unit: null, unitMatch: "empty", rawUnit: null, name: "Mehl", ingredientId: 5, ingredientMatch: "existing", canonicalIngredientName: null, notes: null, isOptional: false, fixedAmount: false, isAlternative: false }],
+      ),
+    ).toBe(false);
+  });
 });
 
 // ---------------------------------------------------------------------------

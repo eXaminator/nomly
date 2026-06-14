@@ -120,9 +120,19 @@ export function isLineGroupChanged(
   if (current.length !== proposed.length) return true;
   for (let i = 0; i < current.length; i++) {
     if (currentKey(current[i]) !== proposedKey(proposed[i])) return true;
-    if (!qtyEqual(current[i].quantity, proposed[i].quantity)) return true;
+    // When a quantifier owns the amount, the literal quantity is null at the
+    // persistence level — but the parser carries the quantifier's value in
+    // `quantity` as a preview convenience. Compare against that persisted
+    // form (null when a quantifier is set) so a row that resolves to the SAME
+    // quantifier isn't flagged as changed just because the proposed side
+    // echoes the numeric value (e.g. "a"/"ein" → 1).
+    const curQty = current[i].quantifierId != null ? null : current[i].quantity;
+    const propQty = proposed[i].quantifierId != null ? null : proposed[i].quantity;
+    if (!qtyEqual(curQty, propQty)) return true;
     // A range that changed only its low bound is still a change.
-    if (!qtyEqual(current[i].quantityLow, proposed[i].quantityLow)) return true;
+    const curLow = current[i].quantifierId != null ? null : current[i].quantityLow;
+    const propLow = proposed[i].quantifierId != null ? null : proposed[i].quantityLow;
+    if (!qtyEqual(curLow, propLow)) return true;
     // A pure literal→quantifier change (or vice versa) at the same effective
     // number is still a meaningful change — the two representations are not
     // equivalent at the persistence level (quantifierId vs a numeric quantity).
