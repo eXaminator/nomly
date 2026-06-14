@@ -34,7 +34,6 @@ export type QuantifierPayload = {
   name: string;
   value: number | null;
   aliases: string[];
-  sortOrder: number;
 };
 
 /** Pure payload builder — exported for unit tests. */
@@ -42,30 +41,21 @@ export function buildQuantifierPayload(args: {
   name: string;
   valueText: string;
   aliases: string[];
-  sortOrderText: string;
 }): { payload: QuantifierPayload; valid: boolean } {
   const trimmedName = args.name.trim();
   const valueTrimmed = args.valueText.trim();
   const valueNum =
     valueTrimmed.length === 0 ? null : Number(valueTrimmed.replace(",", "."));
-  const sortOrderTrimmed = args.sortOrderText.trim();
-  const sortOrderNum =
-    sortOrderTrimmed.length === 0
-      ? 0
-      : Number(sortOrderTrimmed.replace(",", "."));
 
   const valueValid =
     valueTrimmed.length === 0 || (Number.isFinite(valueNum) && valueNum != null);
-  const sortOrderValid =
-    sortOrderTrimmed.length === 0 || Number.isFinite(sortOrderNum);
-  const valid = trimmedName.length > 0 && valueValid && sortOrderValid;
+  const valid = trimmedName.length > 0 && valueValid;
 
   return {
     payload: {
       name: trimmedName,
       value: valueValid && valueTrimmed.length > 0 ? valueNum : null,
       aliases: args.aliases,
-      sortOrder: sortOrderValid ? sortOrderNum : 0,
     },
     valid,
   };
@@ -80,9 +70,6 @@ export function QuantifierForm({
     item?.value != null ? String(item.value) : "",
   );
   const [aliases, setAliases] = React.useState<string[]>(item?.aliases ?? []);
-  const [sortOrderText, setSortOrderText] = React.useState(
-    item ? String(item.sortOrder) : "0",
-  );
   const impact = useImpactData("quantifier", item?.id ?? -1, item != null);
 
   React.useEffect(() => {
@@ -90,10 +77,9 @@ export function QuantifierForm({
       name,
       valueText,
       aliases,
-      sortOrderText,
     });
     onPayloadChange(payload, valid);
-  }, [name, valueText, aliases, sortOrderText, onPayloadChange]);
+  }, [name, valueText, aliases, onPayloadChange]);
 
   const valueTrimmed = valueText.trim();
   const valueNum = Number(valueTrimmed.replace(",", "."));
@@ -139,19 +125,6 @@ export function QuantifierForm({
           onChange={setAliases}
           canonicalName={name}
         />
-      </div>
-
-      <div className="flex flex-col gap-2">
-        <Label htmlFor="quantifier-sortorder">Sortierung</Label>
-        <Input
-          id="quantifier-sortorder"
-          inputMode="numeric"
-          value={sortOrderText}
-          onChange={(e) => setSortOrderText(e.target.value)}
-        />
-        <p className="text-xs text-[var(--color-muted-fg)]">
-          Reihenfolge in Listen — kleinere Werte zuerst.
-        </p>
       </div>
     </div>
   );
