@@ -12,6 +12,9 @@ process.env.DATABASE_URL = join(tempDir, "test.db");
 {
   const sqlite = new Database(process.env.DATABASE_URL);
   migrate(drizzle(sqlite), { migrationsFolder: "./drizzle" });
+  // Migrations now seed the default quantifiers. This suite exercises runSeed's
+  // own insert/skip counting, so clear the table first to let it add from zero.
+  sqlite.exec("DELETE FROM quantifier_alias; DELETE FROM quantifier;");
   sqlite.close();
 }
 

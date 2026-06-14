@@ -26,6 +26,10 @@ process.env.DATABASE_URL = join(tempDir, "test.db");
   const sqlite = new Database(process.env.DATABASE_URL);
   migrate(drizzle(sqlite), { migrationsFolder: "./drizzle" });
 
+  // Migrations now seed the default quantifiers; this test needs a controlled
+  // single-quantifier fixture, so clear the table before inserting it.
+  sqlite.exec("DELETE FROM quantifier_alias; DELETE FROM quantifier;");
+
   // Seed a quantifier ("zwei", value=2) — no alias that matches "2" as a word,
   // so the parser will emit a plain numeric literal for "2 Mehl".
   const q = sqlite
