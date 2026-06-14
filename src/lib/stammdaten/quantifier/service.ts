@@ -89,7 +89,7 @@ function loadQuantifiersBase(query?: string) {
         sortOrder: quantifier.sortOrder,
       })
       .from(quantifier)
-      .orderBy(asc(quantifier.sortOrder), sql`unaccent(${quantifier.name})`)
+      .orderBy(sql`unaccent(${quantifier.name})`)
       .all();
   }
   const pattern = `%${query.trim().toLowerCase().replace(/[%_]/g, "\\$&")}%`;
@@ -111,7 +111,7 @@ function loadQuantifiersBase(query?: string) {
         inArray(quantifier.id, aliasMatchIds),
       ),
     )
-    .orderBy(asc(quantifier.sortOrder), sql`unaccent(${quantifier.name})`)
+    .orderBy(sql`unaccent(${quantifier.name})`)
     .all();
 }
 
