@@ -15,6 +15,8 @@ export type MentionTip = {
    *  the tooltip showed a blank amount for quantifier rows. */
   quantifierName: string | null;
   quantifierValue: number | null;
+  /** Matched source word ("noch mehr"), shown for a value-less quantifier. */
+  quantifierSource: string | null;
   unitLabel: string | null;
   name: string;
   canonicalName: string | null;
@@ -138,6 +140,7 @@ export function InstructionBody({
                     quantityLow={row.quantityLow}
                     quantifierName={row.quantifierName}
                     quantifierValue={row.quantifierValue}
+                    quantifierSource={row.quantifierSource}
                     unitLabel={row.unitLabel}
                     name={row.name}
                     canonicalName={row.canonicalName}

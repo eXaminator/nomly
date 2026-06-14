@@ -50,8 +50,9 @@ export function formatAmount(
  *   amount/range.
  * - If `quantity` is null but `quantifierValue` is set, the quantifier's
  *   numeric value is used as the effective high bound.
- * - If both are null but `quantifierName` is set, the name is returned
- *   verbatim ("einige").
+ * - If both are null (a value-less quantifier like "einige"/"mehr"), the
+ *   matched source word ("noch mehr") is returned when known, else the
+ *   canonical `quantifierName` ("mehr").
  * - Otherwise returns "".
  */
 export function displayAmount(
@@ -60,12 +61,14 @@ export function displayAmount(
     quantityLow?: number | null;
     quantifierName?: string | null;
     quantifierValue?: number | null;
+    quantifierSource?: string | null;
   },
   opts?: { fraction?: boolean },
 ): string {
   const effHigh = a.quantity ?? a.quantifierValue ?? null;
   if (effHigh != null) return formatAmount(effHigh, a.quantityLow ?? null, opts);
-  if (a.quantifierName) return a.quantifierName;
+  const word = a.quantifierSource ?? a.quantifierName ?? null;
+  if (word) return word;
   return "";
 }
 
@@ -198,7 +201,7 @@ export function RecipeIngredientReadLine({
   const mark = (on: boolean | undefined, node: ReactNode) =>
     on && tone ? <span className={hlClass}>{node}</span> : node;
   const amountText = displayAmount(
-    { quantity, quantityLow, quantifierName, quantifierValue },
+    { quantity, quantityLow, quantifierName, quantifierValue, quantifierSource },
     { fraction: displayFraction },
   );
   // The amount is backed by a quantifier when a quantifier name is present.

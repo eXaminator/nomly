@@ -384,6 +384,7 @@ type ScanRowSummary = {
   quantifierId: number | null;
   quantifierName: string | null;
   quantifierValue: number | null;
+  quantifierSource: string | null;
   unitLabel: string | null;
   displayFraction: boolean;
   notes: string | null;
@@ -1134,6 +1135,7 @@ export function BulkReparseDialog({
                                               quantityLow={c.quantityLow}
                                               quantifierName={c.quantifierName}
                                               quantifierValue={c.quantifierValue}
+                                              quantifierSource={c.quantifierSource}
                                               quantifierTooltip
                                               unitLabel={inflect(
                                                 c.unitLabel,

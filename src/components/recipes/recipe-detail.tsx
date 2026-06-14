@@ -219,6 +219,7 @@ export function RecipeDetail({
                 quantityLow: i.quantityLow,
                 quantifierName: i.quantifierName,
                 quantifierValue: i.quantifierValue,
+                quantifierSource: i.quantifierSource,
                 unitLabel: i.unitLabel,
                 name: i.ingredientName,
                 canonicalName: i.canonicalIngredientName,
@@ -288,7 +289,7 @@ export function RecipeDetail({
                     column instead of being indented past it. */}
                 {unassigned ? null : (
                   <span className="inline-flex min-w-12 shrink-0 items-center font-mono text-[var(--color-muted-fg)]">
-                    {displayAmount({ quantity: ing.quantity, quantityLow: ing.quantityLow, quantifierName: ing.quantifierName, quantifierValue: ing.quantifierValue }, { fraction: ing.displayFraction })}{" "}
+                    {displayAmount({ quantity: ing.quantity, quantityLow: ing.quantityLow, quantifierName: ing.quantifierName, quantifierValue: ing.quantifierValue, quantifierSource: ing.quantifierSource }, { fraction: ing.displayFraction })}{" "}
                     {ing.unitLabel ?? ""}
                   </span>
                 )}

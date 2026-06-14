@@ -16,6 +16,30 @@ describe("displayAmount", () => {
     ).toBe("einige");
   });
 
+  it("prefers the matched source word over the canonical name for a value-less quantifier", () => {
+    // "noch mehr" (alias of canonical "mehr") should read as "noch mehr".
+    expect(
+      displayAmount({
+        quantity: null,
+        quantifierValue: null,
+        quantifierName: "mehr",
+        quantifierSource: "noch mehr",
+      }),
+    ).toBe("noch mehr");
+  });
+
+  it("shows the number (not the source) when the quantifier has a value", () => {
+    // A value-bearing quantifier still renders its number ("a"/"ein" → 1).
+    expect(
+      displayAmount({
+        quantity: null,
+        quantifierValue: 1,
+        quantifierName: "ein",
+        quantifierSource: "a",
+      }),
+    ).toBe("1");
+  });
+
   it("returns empty string when all amount fields are null/undefined", () => {
     expect(displayAmount({ quantity: null })).toBe("");
   });
