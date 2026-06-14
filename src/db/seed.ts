@@ -3,15 +3,19 @@ import { db } from "./index.ts";
 import {
   category,
   ingredientAlias,
+  quantifier,
+  quantifierAlias,
   unit,
   unitAlias,
 } from "./schema.ts";
 import { SEED_UNITS } from "./seed-data/units.ts";
 import { SEED_CATEGORIES } from "./seed-data/categories.ts";
+import { SEED_QUANTIFIERS } from "./seed-data/quantifiers.ts";
 
 export type SeedCounts = {
   units: { added: number; skipped: number; aliasesAdded: number };
   categories: { added: number; skipped: number; aliasesAdded: number };
+  quantifiers: { added: number; skipped: number; aliasesAdded: number };
 };
 
 const norm = (s: string) => s.trim();
@@ -193,6 +197,7 @@ export function runSeed(): SeedCounts {
   const counts: SeedCounts = {
     units: { added: 0, skipped: 0, aliasesAdded: 0 },
     categories: { added: 0, skipped: 0, aliasesAdded: 0 },
+    quantifiers: { added: 0, skipped: 0, aliasesAdded: 0 },
   };
 
   db.transaction((tx) => {
@@ -332,6 +337,37 @@ export function runSeed(): SeedCounts {
       categoryIdByName.set(lower(name), inserted[0].id);
       counts.categories.added += 1;
     }
+
+    // -- Quantifiers --
+    const quantifierIdByName = new Map<string, number>();
+    for (const row of tx.select().from(quantifier).all()) {
+      quantifierIdByName.set(lower(row.name), row.id);
+    }
+    for (let i = 0; i < SEED_QUANTIFIERS.length; i++) {
+      const q = SEED_QUANTIFIERS[i];
+      const name = norm(q.name);
+      const existingId = quantifierIdByName.get(lower(name));
+      let id: number;
+      if (existingId !== undefined) {
+        id = existingId;
+        counts.quantifiers.skipped += 1;
+      } else {
+        const inserted = tx
+          .insert(quantifier)
+          .values({ name, value: q.value, sortOrder: i })
+          .returning({ id: quantifier.id })
+          .all();
+        id = inserted[0].id;
+        quantifierIdByName.set(lower(name), id);
+        counts.quantifiers.added += 1;
+      }
+      for (const aliasName of q.aliases) {
+        if (lower(aliasName) === lower(name)) continue;
+        addAlias(tx, "quantifier", id, aliasName, () => {
+          counts.quantifiers.aliasesAdded += 1;
+        });
+      }
+    }
   });
 
   return counts;
@@ -346,14 +382,19 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
  */
 function addAlias(
   tx: Tx,
-  kind: "unit" | "ingredient",
+  kind: "unit" | "ingredient" | "quantifier",
   parentId: number,
   rawName: string,
   onAdded: () => void,
 ): void {
   const aliasName = norm(rawName);
   if (aliasName.length === 0) return;
-  const table = kind === "unit" ? unitAlias : ingredientAlias;
+  const table =
+    kind === "unit"
+      ? unitAlias
+      : kind === "quantifier"
+        ? quantifierAlias
+        : ingredientAlias;
   const exists = tx
     .select({ id: table.id })
     .from(table)
@@ -363,6 +404,10 @@ function addAlias(
   try {
     if (kind === "unit") {
       tx.insert(unitAlias).values({ unitId: parentId, name: aliasName }).run();
+    } else if (kind === "quantifier") {
+      tx.insert(quantifierAlias)
+        .values({ quantifierId: parentId, name: aliasName })
+        .run();
     } else {
       tx.insert(ingredientAlias)
         .values({ ingredientId: parentId, name: aliasName })
