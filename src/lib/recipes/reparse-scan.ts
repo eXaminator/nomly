@@ -2,6 +2,7 @@ import { asc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import {
   ingredient,
+  quantifier,
   recipe,
   recipeIngredient,
   recipeSection,
@@ -189,6 +190,16 @@ export type ScanRowSummary = {
   unitLabel: string | null;
   /** Whether this row's unit is flagged for fraction display. */
   displayFraction: boolean;
+  /** The configured quantifier this row's amount references, else null. The
+   *  diff compares this (alongside quantity/unit) so a literal amount vs a
+   *  quantifier with the same effective number reads as a CHANGE. */
+  quantifierId: number | null;
+  /** Canonical name of the referenced quantifier ("zwei"), else null — drives
+   *  the diff's quantifier hover tooltip. */
+  quantifierName: string | null;
+  /** Numeric value of the referenced quantifier (null for an unspecified one
+   *  like "einige"), else null — the effective amount the diff renders. */
+  quantifierValue: number | null;
   notes: string | null;
   isOptional: boolean;
   isAlternative: boolean;
@@ -435,6 +446,9 @@ export async function scanAllRecipesForReparse(
       canonicalName: ingredient.name,
       quantity: recipeIngredient.quantity,
       quantityLow: recipeIngredient.quantityLow,
+      quantifierId: recipeIngredient.quantifierId,
+      quantifierName: quantifier.name,
+      quantifierValue: quantifier.value,
       unitId: recipeIngredient.unitId,
       unitName: unit.name,
       displayFraction: unit.displayFraction,
@@ -449,6 +463,8 @@ export async function scanAllRecipesForReparse(
     .innerJoin(recipe, eq(recipe.id, recipeSection.recipeId))
     .leftJoin(ingredient, eq(ingredient.id, recipeIngredient.ingredientId))
     .leftJoin(unit, eq(unit.id, recipeIngredient.unitId))
+    // LEFT join: most rows reference no quantifier (literal-amount rows).
+    .leftJoin(quantifier, eq(quantifier.id, recipeIngredient.quantifierId))
     .orderBy(
       asc(recipe.id),
       asc(recipeSection.sortOrder),
@@ -545,6 +561,9 @@ export async function scanAllRecipesForReparse(
         // over from before the unlink, matching the recipe read view.
         quantity: g.ingredientId == null ? null : g.quantity,
         quantityLow: g.ingredientId == null ? null : g.quantityLow,
+        quantifierId: g.ingredientId == null ? null : g.quantifierId,
+        quantifierName: g.ingredientId == null ? null : (g.quantifierName ?? null),
+        quantifierValue: g.ingredientId == null ? null : (g.quantifierValue ?? null),
         // Match the recipe read view: display_unit, then the canonical unit name.
         unitLabel:
           g.ingredientId == null ? null : (g.displayUnit ?? g.unitName ?? null),

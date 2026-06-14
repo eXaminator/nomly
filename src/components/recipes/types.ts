@@ -94,6 +94,14 @@ export type DraftIngredient = {
    *  never both. Phase 5 will own the edit-field interplay (clearing the id on
    *  a manual numeric edit / showing the quantifier wording). */
   quantifierId: number | null;
+  /** Canonical name of the referenced quantifier ("zwei", "einige"), else null.
+   *  Display-only: surfaces the quantifier wording in the bulk-reparse diff's
+   *  hover tooltip. Not persisted (the id is the source of truth). */
+  quantifierName?: string | null;
+  /** Numeric value of the referenced quantifier (null for an unspecified one
+   *  like "einige"), else null. Display-only: lets the bulk-reparse diff render
+   *  the effective number for a quantifier-backed proposed row. Not persisted. */
+  quantifierValue?: number | null;
   unit: ComboboxItem | null;
   notes: string;
   /** When true, the row renders dimmed/italic in the read view and is skipped
@@ -339,6 +347,10 @@ export function parsedIngredientToDraft(
     quantityLow: quantityToInputString(i.quantityLow ?? null),
     isRange: i.quantityLow != null,
     quantifierId: i.quantifierId ?? null,
+    quantifierName: i.quantifierName ?? null,
+    // For a NUMERIC quantifier the parser sets `quantity` to the resolved value
+    // (a preview convenience); capture it as the quantifier's effective number.
+    quantifierValue: i.quantifierId != null ? i.quantity : null,
     unit:
       i.unit && unitDisplayName !== null
         ? { id: i.unit.id, name: unitDisplayName }
@@ -472,6 +484,8 @@ export function recipeToDraft(recipe: RecipeView): DraftRecipe {
         quantityLow: quantityToInputString(i.quantityLow ?? null),
         isRange: i.quantityLow != null,
         quantifierId: i.quantifierId,
+        quantifierName: i.quantifierName,
+        quantifierValue: i.quantifierValue,
         unit:
           i.unitId !== null && i.unitName
             ? { id: i.unitId, name: i.unitName }
