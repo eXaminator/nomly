@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
   buildIngredientCatalog,
   buildIngredientLookup,
+  buildQuantifierLookup,
   buildUnitLookup,
   parseIngredientLines,
 } from "@/lib/recipe-import";
@@ -32,6 +33,7 @@ export async function POST(request: Request) {
     units: buildUnitLookup(),
     ingredients: buildIngredientLookup(),
     ingredientCatalog: buildIngredientCatalog(),
+    quantifiers: buildQuantifierLookup(),
   };
   const results = parseIngredientLines([parsed.data.text], lookups);
   if (results.length === 0) {

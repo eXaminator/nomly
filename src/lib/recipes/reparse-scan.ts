@@ -11,6 +11,7 @@ import {
 import {
   buildIngredientCatalog,
   buildIngredientLookup,
+  buildQuantifierLookup,
   buildUnitLookup,
   parseIngredientLines,
 } from "@/lib/recipe-import";
@@ -39,6 +40,7 @@ type ReparseLookups = {
   ingredients: ReturnType<typeof buildIngredientLookup>;
   ingredientCatalog: ReturnType<typeof buildIngredientCatalog>;
   ingredientCatalogIndex: CatalogBlockIndex;
+  quantifiers: ReturnType<typeof buildQuantifierLookup>;
 };
 
 /** Current (stored) ingredient row, reduced to the fields that decide whether
@@ -415,6 +417,7 @@ export async function scanAllRecipesForReparse(
     ingredients,
     ingredientCatalog,
     ingredientCatalogIndex: catalogIndex,
+    quantifiers: buildQuantifierLookup(),
   };
   // Muted recipes / lines are skipped entirely (not parsed, not returned) —
   // diffs the user has intentionally hand-handled.

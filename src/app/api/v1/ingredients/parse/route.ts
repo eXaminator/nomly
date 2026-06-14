@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
   buildIngredientCatalog,
   buildIngredientLookup,
+  buildQuantifierLookup,
   buildUnitLookup,
   parseIngredientLinesIntoSections,
 } from "@/lib/recipe-import";
@@ -29,6 +30,7 @@ export async function POST(request: Request) {
     units: buildUnitLookup(),
     ingredients: buildIngredientLookup(),
     ingredientCatalog: buildIngredientCatalog(),
+    quantifiers: buildQuantifierLookup(),
   };
   const lines = pairTableLines(
     rawLines,
