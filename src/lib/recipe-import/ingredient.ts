@@ -481,52 +481,6 @@ export const PREP_LEADING_TOKENS = new Set([
 ]);
 
 /**
- * Color/variety adjectives that don't stand alone as ingredients. When a
- * conjunction sits between two of these ("yellow and red grape tomatoes"),
- * the two sides describe the same noun and must not be split apart —
- * otherwise we'd produce a phantom "yellow" ingredient. Inflection-aware
- * lookup catches German declined forms ("gelbe"/"gelber"/"gelben" → "gelb").
- */
-const COLOR_ADJECTIVE_BASES = new Set([
-  // English
-  "yellow",
-  "red",
-  "green",
-  "blue",
-  "white",
-  "black",
-  "purple",
-  "pink",
-  "brown",
-  "gray",
-  "grey",
-  // German bases — declined forms collapse via the suffix stripper below.
-  "gelb",
-  "rot",
-  "grün",
-  "blau",
-  "weiß",
-  "weiss",
-  "schwarz",
-  "lila",
-  "rosa",
-  "braun",
-  "grau",
-]);
-
-export function isColorAdjective(token: string): boolean {
-  const lower = token.toLowerCase();
-  if (COLOR_ADJECTIVE_BASES.has(lower)) return true;
-  for (const suffix of ["er", "en", "es", "em", "e"]) {
-    if (lower.endsWith(suffix)) {
-      const stem = lower.slice(0, -suffix.length);
-      if (COLOR_ADJECTIVE_BASES.has(stem)) return true;
-    }
-  }
-  return false;
-}
-
-/**
  * Single-token names that should never become ingredient rows on their own —
  * descriptors / colors / preparation states that only make sense modifying a
  * head noun. Truncated source lines like "8 frische" or "1 cup fresh" leak
