@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import * as Popover from "@radix-ui/react-popover";
 import { Button } from "@/components/ui/button";
 import { type ComboboxItem } from "@/components/ui/combobox";
 import { UnitSelect } from "./unit-select";
@@ -51,6 +52,9 @@ export function AddItemDialog({ open, onClose, onAdded }: Props) {
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [createOpen, setCreateOpen] = React.useState(false);
+  // Whether the suggestion popover is open (anchored under the name field).
+  const [suggestOpen, setSuggestOpen] = React.useState(false);
+  const suggestListRef = React.useRef<HTMLUListElement>(null);
 
   React.useEffect(() => {
     if (!open) {
@@ -63,8 +67,40 @@ export function AddItemDialog({ open, onClose, onAdded }: Props) {
       setHits([]);
       setError(null);
       setCreateOpen(false);
+      setSuggestOpen(false);
     }
   }, [open]);
+
+  // Touch-scroll the portaled suggestion list on mobile. The dialog's
+  // `react-remove-scroll` preventDefaults touchmove outside its body — which
+  // includes this popover — so scroll it manually (mirrors select-search). A
+  // non-passive native listener is required to preventDefault.
+  React.useEffect(() => {
+    const el = suggestListRef.current;
+    if (!el) return;
+    let lastY = 0;
+    const onTouchStart = (e: TouchEvent) => {
+      lastY = e.touches[0]?.clientY ?? 0;
+    };
+    const onTouchMove = (e: TouchEvent) => {
+      if (el.scrollHeight <= el.clientHeight) return;
+      const y = e.touches[0]?.clientY ?? lastY;
+      const dy = lastY - y;
+      lastY = y;
+      const atTop = dy < 0 && el.scrollTop <= 0;
+      const atBottom =
+        dy > 0 && Math.ceil(el.scrollTop + el.clientHeight) >= el.scrollHeight;
+      if (atTop || atBottom) return;
+      el.scrollTop += dy;
+      e.preventDefault();
+    };
+    el.addEventListener("touchstart", onTouchStart, { passive: true });
+    el.addEventListener("touchmove", onTouchMove, { passive: false });
+    return () => {
+      el.removeEventListener("touchstart", onTouchStart);
+      el.removeEventListener("touchmove", onTouchMove);
+    };
+  }, [hits.length, suggestOpen]);
 
   // Fetch the generic "Stück" fallback once per open — used for brand-new
   // articles (which have no own default unit) and when no hit is selected yet.
@@ -146,6 +182,7 @@ export function AddItemDialog({ open, onClose, onAdded }: Props) {
 
   function openCreateDialog() {
     if (query.trim().length === 0) return;
+    setSuggestOpen(false);
     setCreateOpen(true);
   }
 
@@ -175,31 +212,99 @@ export function AddItemDialog({ open, onClose, onAdded }: Props) {
         <DialogHeader>
           <DialogTitle>Artikel hinzufügen</DialogTitle>
           <DialogDescription>
-            Tipp den Namen — bestehende Artikel erscheinen unten. Findet sich
-            nichts, legst du einen neuen Artikel an.
+            Tipp den Namen — bestehende Artikel werden vorgeschlagen. Findet
+            sich nichts, legst du einen neuen Artikel an.
           </DialogDescription>
         </DialogHeader>
         <DialogBody className="flex flex-col gap-3">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
             <div className="flex flex-1 flex-col gap-2">
               <Label htmlFor="add-name">Name</Label>
-              <Input
-                id="add-name"
-                autoFocus
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="z. B. Toilettenpapier"
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    if (hits.length === 0) {
-                      openCreateDialog();
-                    } else {
-                      void pickExisting(hits[0]);
-                    }
-                  }
-                }}
-              />
+              <Popover.Root
+                open={suggestOpen && query.trim().length > 0}
+                onOpenChange={setSuggestOpen}
+              >
+                <Popover.Anchor asChild>
+                  <Input
+                    id="add-name"
+                    autoFocus
+                    value={query}
+                    onChange={(e) => {
+                      setQuery(e.target.value);
+                      setSuggestOpen(true);
+                    }}
+                    onFocus={() => setSuggestOpen(true)}
+                    placeholder="z. B. Toilettenpapier"
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        if (hits.length === 0) {
+                          openCreateDialog();
+                        } else {
+                          void pickExisting(hits[0]);
+                        }
+                      }
+                    }}
+                  />
+                </Popover.Anchor>
+                <Popover.Portal>
+                  <Popover.Content
+                    align="start"
+                    sideOffset={4}
+                    // Keep focus (and the keyboard) in the input so typing
+                    // continues while the suggestions float above the form.
+                    onOpenAutoFocus={(e) => e.preventDefault()}
+                    className="z-50 w-[var(--radix-popover-trigger-width)] min-w-[12rem] overflow-hidden rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-card)] shadow-lg"
+                  >
+                    {hits.length > 0 ? (
+                      <ul
+                        ref={suggestListRef}
+                        className="flex max-h-60 flex-col divide-y divide-[var(--color-border)] overflow-y-auto overscroll-contain"
+                      >
+                        {hits.map((h) => (
+                          <li key={`${h.kind}:${h.id}`}>
+                            <button
+                              type="button"
+                              // onMouseDown (fires before the input's blur) +
+                              // preventDefault keeps focus in the input so the
+                              // tap registers without closing the popover first.
+                              onMouseDown={(e) => {
+                                e.preventDefault();
+                                void pickExisting(h);
+                              }}
+                              disabled={busy}
+                              className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left hover:bg-[var(--color-muted)] focus-visible:outline-none focus-visible:bg-[var(--color-muted)]"
+                            >
+                              <span className="flex flex-col">
+                                <span className="font-medium">{h.name}</span>
+                                {h.matchedAlias ? (
+                                  <span className="text-xs text-[var(--color-muted-fg)]">
+                                    Alias: {h.matchedAlias}
+                                  </span>
+                                ) : null}
+                              </span>
+                              <span className="text-xs uppercase tracking-wider text-[var(--color-muted-fg)]">
+                                Artikel
+                              </span>
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <button
+                        type="button"
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          openCreateDialog();
+                        }}
+                        className="block w-full px-3 py-2 text-left text-sm text-[var(--color-muted-fg)] hover:bg-[var(--color-muted)]"
+                      >
+                        Kein Treffer — „{query.trim()}“ als neuen Artikel anlegen.
+                      </button>
+                    )}
+                  </Popover.Content>
+                </Popover.Portal>
+              </Popover.Root>
             </div>
             <div className="flex flex-col gap-2 sm:w-20">
               <Label htmlFor="add-quantity">Menge</Label>
@@ -232,36 +337,6 @@ export function AddItemDialog({ open, onClose, onAdded }: Props) {
               placeholder="z. B. die große Packung"
             />
           </div>
-          {hits.length > 0 ? (
-            <ul className="flex max-h-60 flex-col divide-y divide-[var(--color-border)] overflow-y-auto rounded-[var(--radius)] border border-[var(--color-border)]">
-              {hits.map((h) => (
-                <li key={`${h.kind}:${h.id}`}>
-                  <button
-                    type="button"
-                    onClick={() => pickExisting(h)}
-                    disabled={busy}
-                    className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left hover:bg-[var(--color-muted)] focus-visible:outline-none focus-visible:bg-[var(--color-muted)]"
-                  >
-                    <span className="flex flex-col">
-                      <span className="font-medium">{h.name}</span>
-                      {h.matchedAlias ? (
-                        <span className="text-xs text-[var(--color-muted-fg)]">
-                          Alias: {h.matchedAlias}
-                        </span>
-                      ) : null}
-                    </span>
-                    <span className="text-xs uppercase tracking-wider text-[var(--color-muted-fg)]">
-                      Artikel
-                    </span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          ) : query.trim().length > 0 ? (
-            <div className="rounded-[var(--radius)] border border-dashed border-[var(--color-border)] px-3 py-2 text-sm text-[var(--color-muted-fg)]">
-              Kein Treffer — „{query.trim()}“ als neuen Artikel anlegen.
-            </div>
-          ) : null}
           {error ? (
             <p className="text-sm text-[var(--color-danger)]">{error}</p>
           ) : null}
