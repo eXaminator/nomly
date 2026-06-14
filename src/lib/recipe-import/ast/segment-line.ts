@@ -502,20 +502,20 @@ function segmentRange(
     if (seps.length > 0) {
       const segs = sliceBySeps(all, from, to, seps);
       const primaryEnd = segs[0].to;
-      // Guards on the primary (first segment).
-      const primaryLastWord = prevContentWord(all, primaryEnd, segs[0].from);
       const endsWithDash =
         primaryEnd - 1 >= segs[0].from && all[primaryEnd - 1].kind === "dash";
-      const primaryText = source.slice(all[segs[0].from].start, all[primaryEnd - 1].end).trim();
-      void primaryLastWord;
       const allNonEmpty = segs.every((s) => s.to > s.from);
+      // Split the chain only when EVERY segment is a nameable ingredient — the
+      // catalog (or a head-noun fragment) flanks each "oder". A bare-descriptor
+      // segment ("20 oz. fresh", "6 dried") shares the head noun of a sibling,
+      // so the line stays whole. This replaces the old primary-only headless
+      // guard with a symmetric, catalog-aware test (entity-first Pass 5).
+      const allIngredientLike = segs.every((s) =>
+        fragmentIsIngredientLike(source, all, s.from, s.to, opts),
+      );
       // A dash-compound stem ("Weizen- oder Dinkelmehl") that the elision
       // expander above could NOT resolve (no catalog hit) stays ONE ingredient.
-      if (
-        allNonEmpty &&
-        !endsWithDash &&
-        !preIsHeadlessModifier(primaryText, opts.unitTokens)
-      ) {
+      if (allNonEmpty && !endsWithDash && allIngredientLike) {
         const out: LineSegment[] = [];
         segs.forEach((s, idx) => {
           // Strip a leading substitute marker on alternatives ("or sub X").
@@ -710,6 +710,27 @@ function coordinatedList(
   const knownCount = items.filter(([a, b]) => itemMatchesCatalog(all, a, b, known)).length;
   if (knownCount < 2) return null;
   return { items, connector };
+}
+
+/**
+ * Whether a connector-flanking fragment [a,b) is a nameable ingredient: it
+ * either names a catalog entry, or carries its own head noun (it is NOT just an
+ * amount + descriptors). The catalog is the primary signal; the descriptor
+ * vocabulary survives only as the head-noun test (the spec's one allowed home),
+ * never as a standalone split guard. Used by the or-chain split to decide
+ * symmetrically — a bare-descriptor side ("20 oz. fresh") shares the head noun
+ * of its sibling, so the line stays whole.
+ */
+function fragmentIsIngredientLike(
+  source: string,
+  all: readonly Leaf[],
+  a: number,
+  b: number,
+  opts: SegmentOptions,
+): boolean {
+  if (itemMatchesCatalog(all, a, b, opts.knownIngredients)) return true;
+  const text = source.slice(all[a].start, all[b - 1].end).trim();
+  return !preIsHeadlessModifier(text, opts.unitTokens);
 }
 
 /** Whether the item span [a,b) names a catalog ingredient: a content word (or an
