@@ -11,16 +11,12 @@ import { segmentLine, type LineSegment } from "@/lib/recipe-import/ast/segment-l
 import { lex } from "@/lib/recipe-import/ast/lexer";
 
 /** Test helper: AST-segment a line and return its ingredient segments. */
-function segs(
-  line: string,
-  opts: Partial<{ useFirstWins: boolean }> = {},
-): Extract<LineSegment, { kind: "ingredient" }>[] {
+function segs(line: string): Extract<LineSegment, { kind: "ingredient" }>[] {
   const trimmed = line.trim();
   return segmentLine(trimmed, lex(trimmed).map((t) => ({ ...t })), {
     containerTokens: new Set(),
     knownIngredients: new Set(),
     unitTokens: new Set(),
-    useFirstWins: opts.useFirstWins ?? false,
   }).filter((s): s is Extract<LineSegment, { kind: "ingredient" }> => s.kind === "ingredient");
 }
 /** The segText of each ingredient segment — mirrors the legacy splitConjunctions

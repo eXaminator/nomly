@@ -481,52 +481,6 @@ export const PREP_LEADING_TOKENS = new Set([
 ]);
 
 /**
- * Color/variety adjectives that don't stand alone as ingredients. When a
- * conjunction sits between two of these ("yellow and red grape tomatoes"),
- * the two sides describe the same noun and must not be split apart —
- * otherwise we'd produce a phantom "yellow" ingredient. Inflection-aware
- * lookup catches German declined forms ("gelbe"/"gelber"/"gelben" → "gelb").
- */
-const COLOR_ADJECTIVE_BASES = new Set([
-  // English
-  "yellow",
-  "red",
-  "green",
-  "blue",
-  "white",
-  "black",
-  "purple",
-  "pink",
-  "brown",
-  "gray",
-  "grey",
-  // German bases — declined forms collapse via the suffix stripper below.
-  "gelb",
-  "rot",
-  "grün",
-  "blau",
-  "weiß",
-  "weiss",
-  "schwarz",
-  "lila",
-  "rosa",
-  "braun",
-  "grau",
-]);
-
-export function isColorAdjective(token: string): boolean {
-  const lower = token.toLowerCase();
-  if (COLOR_ADJECTIVE_BASES.has(lower)) return true;
-  for (const suffix of ["er", "en", "es", "em", "e"]) {
-    if (lower.endsWith(suffix)) {
-      const stem = lower.slice(0, -suffix.length);
-      if (COLOR_ADJECTIVE_BASES.has(stem)) return true;
-    }
-  }
-  return false;
-}
-
-/**
  * Single-token names that should never become ingredient rows on their own —
  * descriptors / colors / preparation states that only make sense modifying a
  * head noun. Truncated source lines like "8 frische" or "1 cup fresh" leak
@@ -580,10 +534,15 @@ const STANDALONE_DESCRIPTOR_NAMES = new Set<string>([
   "reif", "reife", "reifer", "reifes", "reifen",
   // English descriptors
   "fresh", "dried", "peeled", "chopped", "diced", "sliced", "minced",
+  "frozen", "canned",
   "red", "green", "yellow", "white", "black", "blue",
   "small", "large", "medium", "big",
   "light", "dark", "raw", "cooked", "uncooked", "steamed",
   "firm", "block", "crushed", "grains", "store-bought",
+  // German freeze/preserve states (with inflections)
+  "gefroren", "gefrorene", "gefrorener", "gefrorenes", "gefrorenen",
+  "tiefgekühlt", "tiefgekühlte", "tiefgekühlter", "tiefgekühltes", "tiefgekühlten",
+  "tiefgefroren", "tk",
   // Misc tokens that show up in truncated lines
   "zest", "leaves", "peel",
 ]);
@@ -615,10 +574,20 @@ export function isStandaloneDescriptor(name: string): boolean {
  * ingredient with alternative modifiers, not two ("6 dried" in "6 dried or
  * fresh shiitake mushrooms"). Used by the AST segmenter's or-chain guard.
  */
-export function preIsHeadlessModifier(pre: string): boolean {
+export function preIsHeadlessModifier(
+  pre: string,
+  unitTokens?: ReadonlySet<string>,
+): boolean {
   const tokens = pre.trim().toLowerCase().split(/\s+/).filter(Boolean);
   let i = 0;
   while (i < tokens.length && /^[\d¼½¾⅓⅔⅛⅜⅝⅞.,/–-]+$/.test(tokens[i])) i += 1;
+  // Skip a unit token between the amount and the descriptor ("20 oz. fresh" →
+  // the "oz" mustn't make the primary look like it has a head noun). Strip a
+  // trailing dot first ("oz." → "oz"), mirroring the amount/unit pass.
+  if (unitTokens && i < tokens.length) {
+    const u = tokens[i].replace(/[.,]+$/, "");
+    if (unitTokens.has(u)) i += 1;
+  }
   const rest = tokens.slice(i);
   if (rest.length === 0) return false;
   return rest.every((t) => STANDALONE_DESCRIPTOR_NAMES.has(t));

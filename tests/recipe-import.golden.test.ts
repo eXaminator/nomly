@@ -1,15 +1,13 @@
 /**
- * "Golden" parser coverage test against a curated subset of family-wall
+ * "Golden" parser coverage test against a curated set of real-recipe
  * ingredient lines. Each entry pairs a raw line with the LLM-annotated
  * "ideal" parse outcome — what a perfect parser would extract, regardless
  * of what our current heuristics actually produce.
  *
- * Dataset: 4,595 unique ingredient lines were extracted from
- * data/familywall-cache/ via scripts/dump-ingredients.mts. Hand-annotating
- * every one is impractical (most are minor variants — "1 Bund Basilikum"
- * vs "1 Bund Petersilie" — so the marginal information per case is low).
- * Instead this file curates ~100 representatives that cover every distinct
- * pattern observed.
+ * The ~100 curated representatives cover the distinct patterns observed
+ * across a large corpus of real ingredient lines (hand-annotating every
+ * line is impractical — most are minor variants like "1 Bund Basilikum"
+ * vs "1 Bund Petersilie", so the marginal information per case is low).
  *
  * The test is INFORMATIONAL, not pass/fail: it scores each case as
  * exact / partial / fail and prints a coverage report. Failing cases are

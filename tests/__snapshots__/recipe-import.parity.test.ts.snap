@@ -1,0 +1,149 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`parser parity corpus (Phase 2 guard cases) > parity: 2 cups mixed yellow and red grape tomatoes (halved) 1`] = `
+[
+  {
+    "isAlternative": false,
+    "name": "cups mixed yellow and red grape tomatoes",
+    "notes": "halved",
+    "quantity": 2,
+    "unit": null,
+  },
+]
+`;
+
+exports[`parser parity corpus (Phase 2 guard cases) > parity: 6 dried or fresh shiitake mushrooms 1`] = `
+[
+  {
+    "isAlternative": false,
+    "name": "dried or fresh shiitake mushrooms",
+    "notes": null,
+    "quantity": 6,
+    "unit": null,
+  },
+]
+`;
+
+exports[`parser parity corpus (Phase 2 guard cases) > parity: 20 oz. fresh or frozen cheese tortellini 1`] = `
+[
+  {
+    "isAlternative": false,
+    "name": "oz",
+    "notes": "fresh or frozen cheese tortellini",
+    "quantity": 20,
+    "unit": null,
+  },
+]
+`;
+
+exports[`parser parity corpus (Phase 2 guard cases) > parity: 100 g Mehl und Zucker 1`] = `
+[
+  {
+    "isAlternative": false,
+    "name": "g Mehl",
+    "notes": null,
+    "quantity": 100,
+    "unit": null,
+  },
+  {
+    "isAlternative": false,
+    "name": "Zucker",
+    "notes": null,
+    "quantity": null,
+    "unit": null,
+  },
+]
+`;
+
+exports[`parser parity corpus (Phase 2 guard cases) > parity: 200 g Weizen- oder Dinkelmehl 1`] = `
+[
+  {
+    "isAlternative": false,
+    "name": "g Weizen oder Dinkelmehl",
+    "notes": null,
+    "quantity": 200,
+    "unit": null,
+  },
+]
+`;
+
+exports[`parser parity corpus (Phase 2 guard cases) > parity: Honig oder Ahornsirup 1`] = `
+[
+  {
+    "isAlternative": false,
+    "name": "Honig",
+    "notes": "oder Ahornsirup",
+    "quantity": null,
+    "unit": null,
+  },
+]
+`;
+
+exports[`parser parity corpus (Phase 2 guard cases) > parity: Salt and Pepper 1`] = `
+[
+  {
+    "isAlternative": false,
+    "name": "Salt",
+    "notes": null,
+    "quantity": null,
+    "unit": null,
+  },
+  {
+    "isAlternative": false,
+    "name": "Pepper",
+    "notes": null,
+    "quantity": null,
+    "unit": null,
+  },
+]
+`;
+
+exports[`parser parity corpus (Phase 2 guard cases) > parity: Salz & Pfeffer 1`] = `
+[
+  {
+    "isAlternative": false,
+    "name": "Salz",
+    "notes": null,
+    "quantity": null,
+    "unit": null,
+  },
+  {
+    "isAlternative": false,
+    "name": "Pfeffer",
+    "notes": null,
+    "quantity": null,
+    "unit": null,
+  },
+]
+`;
+
+exports[`parser parity corpus (Phase 2 guard cases) > parity: Salz und Pfeffer 1`] = `
+[
+  {
+    "isAlternative": false,
+    "name": "Salz",
+    "notes": null,
+    "quantity": null,
+    "unit": null,
+  },
+  {
+    "isAlternative": false,
+    "name": "Pfeffer",
+    "notes": null,
+    "quantity": null,
+    "unit": null,
+  },
+]
+`;
+
+exports[`parser parity corpus (Phase 2 guard cases) > parity: gelbe und rote Paprika 1`] = `
+[
+  {
+    "isAlternative": false,
+    "name": "gelbe und rote Paprika",
+    "notes": null,
+    "quantity": null,
+    "unit": null,
+  },
+]
+`;

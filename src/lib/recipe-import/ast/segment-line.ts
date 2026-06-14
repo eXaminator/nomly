@@ -1,5 +1,4 @@
 import {
-  isColorAdjective,
   isStandaloneDescriptor,
   normalizeForMatch,
   preIsHeadlessModifier,
@@ -69,7 +68,6 @@ export type SegmentOptions = {
    *  ("1 cup + 1/2 tbsp olive oil") from an ingredient-joining one
    *  ("1 Eigelb + 1 EL Milch"). */
   unitTokens: ReadonlySet<string>;
-  useFirstWins: boolean;
 };
 
 const norm = (s: string): string => s.toLowerCase().replace(/[.,:]+$/, "");
@@ -95,13 +93,6 @@ const ALT_LEADER_WORDS = new Set([
 ]);
 const OR_WORDS = new Set(["oder", "or"]);
 const CONJ_WORDS = new Set(["und", "and"]);
-/** Well-known adjacent pairs that read as two ingredients even without a
- *  conjunction ("Salz Pfeffer") — split only in the Familywall first-wins mode
- *  (mirrors the legacy preprocessAlternatives injection). */
-const KNOWN_PAIRS: ReadonlyArray<readonly [string, string]> = [
-  ["salz", "pfeffer"],
-  ["salt", "pepper"],
-];
 
 /** A depth-0 word leaf whose text equals one of `set` (normalised). */
 function isWordIn(l: Leaf, set: ReadonlySet<string>): boolean {
@@ -502,16 +493,20 @@ function segmentRange(
     if (seps.length > 0) {
       const segs = sliceBySeps(all, from, to, seps);
       const primaryEnd = segs[0].to;
-      // Guards on the primary (first segment).
-      const primaryLastWord = prevContentWord(all, primaryEnd, segs[0].from);
       const endsWithDash =
         primaryEnd - 1 >= segs[0].from && all[primaryEnd - 1].kind === "dash";
-      const primaryText = source.slice(all[segs[0].from].start, all[primaryEnd - 1].end).trim();
-      void primaryLastWord;
       const allNonEmpty = segs.every((s) => s.to > s.from);
+      // Split the chain only when EVERY segment is a nameable ingredient — the
+      // catalog (or a head-noun fragment) flanks each "oder". A bare-descriptor
+      // segment ("20 oz. fresh", "6 dried") shares the head noun of a sibling,
+      // so the line stays whole. This replaces the old primary-only headless
+      // guard with a symmetric, catalog-aware test (entity-first Pass 5).
+      const allIngredientLike = segs.every((s) =>
+        fragmentIsIngredientLike(source, all, s.from, s.to, opts),
+      );
       // A dash-compound stem ("Weizen- oder Dinkelmehl") that the elision
       // expander above could NOT resolve (no catalog hit) stays ONE ingredient.
-      if (allNonEmpty && !endsWithDash && !preIsHeadlessModifier(primaryText)) {
+      if (allNonEmpty && !endsWithDash && allIngredientLike) {
         const out: LineSegment[] = [];
         segs.forEach((s, idx) => {
           // Strip a leading substitute marker on alternatives ("or sub X").
@@ -708,6 +703,27 @@ function coordinatedList(
   return { items, connector };
 }
 
+/**
+ * Whether a connector-flanking fragment [a,b) is a nameable ingredient: it
+ * either names a catalog entry, or carries its own head noun (it is NOT just an
+ * amount + descriptors). The catalog is the primary signal; the descriptor
+ * vocabulary survives only as the head-noun test (the spec's one allowed home),
+ * never as a standalone split guard. Used by the or-chain split to decide
+ * symmetrically — a bare-descriptor side ("20 oz. fresh") shares the head noun
+ * of its sibling, so the line stays whole.
+ */
+function fragmentIsIngredientLike(
+  source: string,
+  all: readonly Leaf[],
+  a: number,
+  b: number,
+  opts: SegmentOptions,
+): boolean {
+  if (itemMatchesCatalog(all, a, b, opts.knownIngredients)) return true;
+  const text = source.slice(all[a].start, all[b - 1].end).trim();
+  return !preIsHeadlessModifier(text, opts.unitTokens);
+}
+
 /** Whether the item span [a,b) names a catalog ingredient: a content word (or an
  *  adjacent word phrase) whose normalised form is a known alias key. */
 function itemMatchesCatalog(
@@ -869,6 +885,10 @@ type ParenAlt = {
   /** A leading nested paren BEFORE the leader ("((10 g) oder X)") that belongs
    *  to the primary — its leaf range [from,to), hoisted onto the primary. */
   leadParen: [number, number] | null;
+  /** A leading bare NOTE before a comma+marker ("(Mark einer Schote, Alternativ
+   *  X)") that belongs to the primary — its leaf range [noteStart, commaIdx]
+   *  INCLUDING the trailing comma, hoisted onto the primary as a note. */
+  primaryNote: [number, number] | null;
 };
 
 /**
@@ -972,6 +992,30 @@ function extractParenAlt(
       cf = j;
     }
   }
+  // A leading bare note before the marker ("(Mark einer Schote, Alternativ X)"):
+  // when the paren does NOT open with a marker but has a top-level comma followed
+  // by one, the pre-comma part is the primary's note and the marker after the
+  // comma introduces the alternative. Resume leader detection past the comma.
+  let primaryNote: [number, number] | null = null;
+  {
+    const first = nextContentWord(all, cf, innerClose);
+    const isMarker = (l: Leaf | null | undefined): boolean =>
+      l != null && (OR_WORDS.has(norm(l.text)) || ALT_LEADER_WORDS.has(norm(l.text)));
+    if (first && !isMarker(first)) {
+      const cDepth = all[innerOpen].depth + 1;
+      let commaIdx = -1;
+      for (let i = cf; i < innerClose; i++) {
+        if (all[i].depth === cDepth && all[i].kind === "comma") {
+          commaIdx = i;
+          break;
+        }
+      }
+      if (commaIdx >= 0 && isMarker(nextContentWord(all, commaIdx + 1, innerClose))) {
+        primaryNote = [cf, commaIdx + 1]; // note words + the trailing comma
+        cf = commaIdx + 1;
+      }
+    }
+  }
   const leadWord = nextContentWord(all, cf, innerClose);
   if (!leadWord) return null;
   let leaderIdx = all.indexOf(leadWord, cf);
@@ -1002,6 +1046,7 @@ function extractParenAlt(
     leader: connector,
     tailFrom: close + 1,
     leadParen,
+    primaryNote,
   };
 }
 
@@ -1049,6 +1094,18 @@ function buildParenAlt(
           .slice(alt.leadParen[0], alt.leadParen[1])
           .map((l) => ({ ...l, depth: Math.max(0, l.depth - (baseDepth + 1)) }));
         leaves = [...s.leaves, ...hoisted];
+      }
+      if (idx === 0 && alt.primaryNote) {
+        // A bare leading note ("Mark einer Schote,") becomes the primary's note.
+        // Flatten to depth 0 and put the trailing comma FIRST in leaf order so it
+        // reads as a clause boundary after the primary's name — keeping the note
+        // words out of the no-match name scan (which stops at the first comma).
+        const raw = all
+          .slice(alt.primaryNote[0], alt.primaryNote[1])
+          .map((l) => ({ ...l, depth: 0 }));
+        const comma = raw[raw.length - 1];
+        const noteWords = raw.slice(0, -1);
+        leaves = [...leaves, comma, ...noteWords];
       }
       out.push({
         ...s,
@@ -1105,24 +1162,6 @@ function conjunctionSplit(
     }
   }
 
-  // First-wins (Familywall): a well-known adjacent pair with no conjunction
-  // ("Salz Pfeffer") reads as two ingredients — split between them.
-  if (opts.useFirstWins) {
-    for (let i = from; i + 1 < to; i++) {
-      const a = all[i];
-      const b = all[i + 1];
-      if (a.depth !== depth || b.depth !== depth || a.kind !== "word" || b.kind !== "word") {
-        continue;
-      }
-      if (KNOWN_PAIRS.some(([x, y]) => x === norm(a.text) && y === norm(b.text))) {
-        return [
-          { from, to: i + 1, rawText: source.trim() },
-          { from: i + 1, to, rawText: source.trim() },
-        ];
-      }
-    }
-  }
-
   const commaIdx = firstTopComma(all, from, to, depth);
   const seps = conjSeparators(all, from, to, depth, opts.unitTokens).filter((sep) => {
     // Comma guard: a conjunction after the first top-level comma connects prep.
@@ -1130,10 +1169,19 @@ function conjunctionSplit(
     // Dash-compound: "Weizen- und …" (the leaf before the separator is a dash,
     // i.e. the preceding token ends with a dash — even across whitespace).
     if (all[sep.at - 1]?.kind === "dash") return false;
-    // Color-adjective guard: parallel adjectives modify one downstream noun.
+    // Parallel-modifier guard: when the words IMMEDIATELY flanking the
+    // conjunction are both bare descriptors with no head noun of their own
+    // ("gelbe und rote", "yellow and red"), they modify one shared downstream
+    // noun — not two ingredients. Generalises the old color-only guard to the
+    // descriptor vocabulary (colors are a subset), the spec's allowed home.
     const before = prevContentWord(all, sep.at, from);
     const after = nextContentWord(all, sep.at + sep.span, to);
-    if (before && after && isColorAdjective(before.text) && isColorAdjective(after.text)) {
+    if (
+      before &&
+      after &&
+      isStandaloneDescriptor(before.text) &&
+      isStandaloneDescriptor(after.text)
+    ) {
       return false;
     }
     return true;
@@ -1176,4 +1224,3 @@ function conjunctionSplit(
 }
 
 void normalizeForMatch;
-void isStandaloneDescriptor;

@@ -86,8 +86,8 @@ export function ApiTokensPageClient({ initial }: Props) {
 
       {tokens.length === 0 ? (
         <div className="rounded-[var(--radius)] border border-dashed border-[var(--color-border)] px-6 py-12 text-center text-sm text-[var(--color-muted-fg)]">
-          Noch keine Tokens. Erstelle einen, um Home Assistant oder den
-          Familywall-Import auf die nomly-API zugreifen zu lassen.
+          Noch keine Tokens. Erstelle einen, um Home Assistant oder andere
+          Integrationen auf die nomly-API zugreifen zu lassen.
         </div>
       ) : (
         <ul className="flex flex-col divide-y divide-[var(--color-border)] overflow-hidden rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-card)]">
@@ -270,7 +270,7 @@ function CreateTokenDialog({
                 in der iframe-URL übergeben — gedacht fürs Home-Assistant-Dashboard.
               </>
             ) : (
-              <>Voller Zugriff auf die API — z. B. für Sensoren, Einkaufsliste oder den Familywall-Import.</>
+              <>Voller Zugriff auf die API — z. B. für Sensoren, Einkaufsliste oder andere Integrationen.</>
             )}
           </p>
         </div>

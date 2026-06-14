@@ -1,5 +1,5 @@
 /**
- * Types + lookup for the familywall ingredient catalog. The actual data
+ * Types + lookup for the curated ingredient catalog. The actual data
  * lives in `./ingredient-catalog-data.ts` (hand-edited TS array).
  *
  * The catalog is consumed by `./seed-catalog.ts` which applies each entry

@@ -3,7 +3,7 @@ import {
   loadIngredientCatalog,
   findAliasCollisions,
   type CatalogEntry,
-} from "@/lib/familywall/ingredient-catalog";
+} from "@/lib/catalog/ingredient-catalog";
 
 describe("loadIngredientCatalog", () => {
   it("returns the full hand-edited catalog (no warnings)", () => {

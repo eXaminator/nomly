@@ -694,6 +694,28 @@ describe("colon-in-name treated as section + listed items", () => {
     expect(out[1].isAlternative).toBe(true);
   });
 
+  it("'(<note>, Alternativ X)' in parens: leading note stays on the primary, X is the alternative", () => {
+    // "1 Vanilleschote (Mark einer Schote, Alternativ 1 Päckchen Vanillezucker)"
+    // — the parenthetical opens with a NOTE ("Mark einer Schote") BEFORE the
+    // "Alternativ" marker. The note belongs to the primary; the marker after the
+    // comma introduces the real alternative.
+    const catalog: IngredientCatalog = [
+      { ingredientId: 1, canonicalName: "Vanilleschote", aliasName: "Vanilleschote", tokens: ["vanilleschote"] },
+      { ingredientId: 2, canonicalName: "Vanillezucker", aliasName: "Vanillezucker", tokens: ["vanillezucker"] },
+    ];
+    const out = parseIngredientLines(
+      ["1 Vanilleschote (Mark einer Schote, Alternativ 1 Päckchen Vanillezucker)"],
+      makeLookups(catalog, ["päckchen"]),
+    );
+    expect(out).toHaveLength(2);
+    expect(out[0].ingredientId).toBe(1);
+    expect(out[0].isAlternative).toBe(false);
+    expect(out[0].notes).toBe("Mark einer Schote");
+    expect(out[1].ingredientId).toBe(2);
+    expect(out[1].isAlternative).toBe(true);
+    expect(out[1].isOptional).toBe(true);
+  });
+
   it("'(Alternativ A oder B)' in parens yields one alternative row per option", () => {
     const catalog: IngredientCatalog = [
       { ingredientId: 1, canonicalName: "Ahornsirup", aliasName: "Ahornsirup", tokens: ["ahornsirup"] },
@@ -1819,6 +1841,38 @@ describe("alternative amount/unit/notes inheritance", () => {
     expect(primary.quantityLow).toBe(2);
     expect(alt.quantity).toBe(3);
     expect(alt.quantityLow).toBe(2);
+  });
+
+  it("does NOT split 'qty unit ADJ or ADJ X' on 'or' — a unit between amount and the bare adjective keeps the line whole", () => {
+    // "20 oz. fresh or frozen cheese tortellini": "fresh" is a bare quality
+    // modifier (sharing the head noun with "frozen"), so this is ONE ingredient
+    // with a fresh/frozen note — not "20 oz. fresh" OR "frozen cheese tortellini".
+    // The unit ("oz") sitting between the amount and "fresh" must not defeat the
+    // headless-modifier guard.
+    const catalog: IngredientCatalog = [
+      {
+        ingredientId: 1,
+        canonicalName: "cheese tortellini",
+        aliasName: "cheese tortellini",
+        tokens: ["cheese", "tortellini"],
+      },
+    ];
+    const out = parseIngredientLines(
+      ["20 oz. fresh or frozen cheese tortellini"],
+      makeLookups(catalog, ["oz"]),
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0].isAlternative).toBe(false);
+    expect(out[0].quantity).toBe(20);
+    expect(out[0].unit?.name).toBe("oz");
+    // "frozen" leading the primary must be guarded too.
+    const out2 = parseIngredientLines(
+      ["20 oz. frozen or fresh cheese tortellini"],
+      makeLookups(catalog, ["oz"]),
+    );
+    expect(out2).toHaveLength(1);
+    expect(out2[0].quantity).toBe(20);
+    expect(out2[0].unit?.name).toBe("oz");
   });
 
   it("mirrors the inherited shared note onto the primary's candidate matches", () => {

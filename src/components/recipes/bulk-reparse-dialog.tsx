@@ -57,6 +57,7 @@ import {
   type LineHighlight,
 } from "./ingredient-read-line";
 import { diffNotes, type NotesDiff } from "./notes-diff";
+import { notesForAdoptedName } from "./alias-notes";
 import type { AliasWarning, NewIngredientDefaults } from "@/lib/recipes/types";
 
 /**
@@ -690,15 +691,30 @@ export function BulkReparseDialog({
           selected: true,
           draft: s.draft.map((d, j) => {
             if (j !== rowIdx) return d;
+            const sel = d.candidates.find(
+              (c) => c.ingredientId === d.selectedIngredientId,
+            );
             if (d.addAsAlias) {
-              // Undo: restore the parser's proposed alias name (the selected
-              // candidate's finished name).
-              const sel = d.candidates.find(
-                (c) => c.ingredientId === d.selectedIngredientId,
-              );
-              return { ...d, name: sel?.name ?? d.name, addAsAlias: false };
+              // Undo: restore the parser's proposed alias name AND its note (the
+              // peeled words come back to the note now that the shorter alias is
+              // the name again).
+              return {
+                ...d,
+                name: sel?.name ?? d.name,
+                notes: sel?.notes ?? d.notes,
+                addAsAlias: false,
+              };
             }
-            return { ...d, name: originalName, addAsAlias: true };
+            // Keep the original spelling as the name. The words it carries beyond
+            // the matched alias were peeled into the note — drop them so they
+            // aren't duplicated in both the name and the note.
+            const aliasName = sel?.name ?? d.name;
+            return {
+              ...d,
+              name: originalName,
+              notes: notesForAdoptedName(d.notes, originalName, aliasName) ?? "",
+              addAsAlias: true,
+            };
           }),
         };
       }),

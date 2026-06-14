@@ -23,7 +23,7 @@ export default function ApiTokensPage() {
         <h1 className="text-2xl font-semibold tracking-tight">API-Tokens</h1>
         <p className="text-[var(--color-muted-fg)]">
           Bearer-Tokens für Maschinen-Zugriff auf die nomly-API — z. B. Home
-          Assistant oder der Familywall-Import. Jeder Aufruf sendet den Token als{" "}
+          Assistant oder andere Integrationen. Jeder Aufruf sendet den Token als{" "}
           <code className="rounded bg-[var(--color-muted)] px-1 py-0.5 text-xs">
             Authorization: Bearer …
           </code>
