@@ -2,7 +2,8 @@
  * Singular/plural display logic for units and their aliases.
  *
  * The rule across the app: a configured plural is used for any amount *other
- * than 1*; amount 1 (and a missing amount) uses the singular. The label shown
+ * than 1* — including an unspecified (null) amount; amount 1 and partial
+ * amounts below 1 use the singular. The label shown
  * for a recipe line is whichever label was *matched* during import — the
  * canonical unit or one of its aliases — so each can carry its own plural.
  *
@@ -23,12 +24,14 @@ export type UnitLabelInfo = LabelForm & {
 
 /**
  * Pick the singular or plural form of a label for a given amount. Plural wins
- * only when one is configured AND the quantity is greater than 1 — a partial
- * amount below 1 ("0,5 Dose", "eine halbe Dose") and exactly 1 both take the
- * singular, as does a missing amount.
+ * when one is configured AND the quantity is greater than 1 OR the quantity is
+ * unspecified (null) — an unspecified amount ("einige Stiele", "etwas") reads
+ * as plural, because a genuinely singular amount would carry the explicit
+ * value 1. A partial amount below 1 ("0,5 Dose", "eine halbe Dose") and
+ * exactly 1 both take the singular.
  */
 export function pluralizeLabel(form: LabelForm, quantity: number | null): string {
-  if (form.plural && quantity !== null && quantity > 1) return form.plural;
+  if (form.plural && (quantity === null || quantity > 1)) return form.plural;
   return form.name;
 }
 

@@ -40,8 +40,10 @@ describe("pluralizeLabel", () => {
     expect(pluralizeLabel({ name: "g", plural: null }, 500)).toBe("g");
   });
 
-  it("uses the singular when quantity is null", () => {
-    expect(pluralizeLabel({ name: "Dose", plural: "Dosen" }, null)).toBe("Dose");
+  it("uses the plural when quantity is null (unspecified amount)", () => {
+    // An unspecified amount ("einige Dosen", "etwas") reads as plural — a truly
+    // singular amount would carry the explicit value 1.
+    expect(pluralizeLabel({ name: "Dose", plural: "Dosen" }, null)).toBe("Dosen");
   });
 });
 
