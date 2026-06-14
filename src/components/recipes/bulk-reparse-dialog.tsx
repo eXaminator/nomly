@@ -1209,7 +1209,7 @@ export function BulkReparseDialog({
                                                   unitSource={
                                                     d.unassigned
                                                       ? null
-                                                      : (d.importAnnotation?.rawUnit ?? null)
+                                                      : (d.rawUnit ?? null)
                                                   }
                                                   quantifierTooltip
                                                   unitLabel={
