@@ -1602,17 +1602,29 @@ export function autocompleteItems(rawQuery: string): AutocompleteHit[] {
     });
   }
 
-  // Exact matches (canonical name or a matched alias, diacritic-insensitive)
-  // first, then prefix matches, then the rest — preserving the existing
-  // alphabetical order within each tier (stable via the index tiebreak). This
-  // keeps a freshly-completed exact word ("Zucker") pinned to the top instead
-  // of slipping below a longer substring match ("Apfelzucker") or an alias.
+  // Relevance tiers, best (lowest) wins; alphabetical order is preserved within
+  // a tier via the stable index tiebreak below. Beyond exact/prefix we add two
+  // signals so genuine hits beat incidental ones:
+  //   • word-start — the query begins a word inside the name ("Bio Öl" for "öl").
+  //   • accent-exact — the name literally contains the query *as typed*
+  //     (diacritics preserved). This lifts real "Öl" articles ("Olivenöl",
+  //     "Sonnenblumenöl") above ones that only match because accent-folding
+  //     turned "ö" into "o" ("ai-ol-i", "brokk-ol-i"). It has no effect when
+  //     the query carries no diacritics (then accent-exact == folded substring).
+  const qExact = q.normalize("NFC").toLowerCase();
+  const queryHasDiacritics = qExact !== qn;
+  const wordStartRe = new RegExp(`[^\\p{L}\\p{N}]${qn.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "u");
+  const scoreCandidate = (s: string): number => {
+    const fold = unaccent(s);
+    if (fold === qn) return 0;
+    if (fold.startsWith(qn)) return 1;
+    if (wordStartRe.test(fold)) return 2;
+    if (queryHasDiacritics && s.normalize("NFC").toLowerCase().includes(qExact)) return 3;
+    return 4;
+  };
   const tier = (h: AutocompleteHit): number => {
-    const name = unaccent(h.name);
-    const alias = h.matchedAlias ? unaccent(h.matchedAlias) : null;
-    if (name === qn || alias === qn) return 0;
-    if (name.startsWith(qn) || (alias != null && alias.startsWith(qn))) return 1;
-    return 2;
+    const t = scoreCandidate(h.name);
+    return h.matchedAlias ? Math.min(t, scoreCandidate(h.matchedAlias)) : t;
   };
   return hits
     .map((h, i) => ({ h, i }))

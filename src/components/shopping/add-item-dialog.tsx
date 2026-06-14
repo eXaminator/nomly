@@ -39,6 +39,7 @@ async function searchUnits(query: string): Promise<ComboboxItem[]> {
 
 export function AddItemDialog({ open, onClose, onAdded }: Props) {
   const [query, setQuery] = React.useState("");
+  const [note, setNote] = React.useState("");
   const [quantity, setQuantity] = React.useState("1");
   const [unit, setUnit] = React.useState<ComboboxItem | null>(null);
   // The user picked a unit by hand — stop auto-defaulting it from the article.
@@ -55,6 +56,7 @@ export function AddItemDialog({ open, onClose, onAdded }: Props) {
     if (!open) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setQuery("");
+      setNote("");
       setQuantity("1");
       setUnit(null);
       setUnitTouched(false);
@@ -132,6 +134,7 @@ export function AddItemDialog({ open, onClose, onAdded }: Props) {
         ingredientId: hit.id,
         quantity: parsedQuantity(),
         unitId: effectiveUnitFor(hit)?.id ?? null,
+        note: note.trim().length > 0 ? note.trim() : undefined,
       });
       onAdded();
     } catch (e) {
@@ -156,6 +159,7 @@ export function AddItemDialog({ open, onClose, onAdded }: Props) {
         quantity: parsedQuantity(),
         // New articles have no own default unit yet → Stück (unless overridden).
         unitId: (unitTouched ? unit : stueckFallback)?.id ?? null,
+        note: note.trim().length > 0 ? note.trim() : undefined,
       });
       onAdded();
     } catch (e) {
@@ -218,6 +222,15 @@ export function AddItemDialog({ open, onClose, onAdded }: Props) {
                 }}
               />
             </div>
+          </div>
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="add-note">Kommentar (optional)</Label>
+            <Input
+              id="add-note"
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              placeholder="z. B. die große Packung"
+            />
           </div>
           {hits.length > 0 ? (
             <ul className="flex max-h-60 flex-col divide-y divide-[var(--color-border)] overflow-y-auto rounded-[var(--radius)] border border-[var(--color-border)]">

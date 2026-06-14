@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
-import { ArrowDown, ArrowUp, ArrowUpDown, Plus, Search, X } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, Combine, Plus, Search, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -386,12 +386,16 @@ export function ListShell<TItem>({
             <Button
               variant="outline"
               onClick={() => setProposalsOpen(true)}
+              aria-label="Ähnliche zusammenführen"
+              title="Ähnliche zusammenführen"
             >
-              Ähnliche zusammenführen
+              <Combine className="size-4" />
+              <span className="hidden sm:inline">Ähnliche zusammenführen</span>
             </Button>
           )}
-          <Button onClick={openCreate}>
-            <Plus className="size-4" /> Neu
+          <Button onClick={openCreate} aria-label="Neu" title="Neu">
+            <Plus className="size-4" />
+            <span className="hidden sm:inline">Neu</span>
           </Button>
         </div>
       </div>

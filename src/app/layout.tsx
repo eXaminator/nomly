@@ -24,6 +24,10 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
+  // Shrink the layout viewport (and `dvh` units) when the on-screen keyboard
+  // opens, instead of letting it overlay the page — so fixed footers, dialog
+  // action buttons, and the bottom nav stay reachable above the keyboard.
+  interactiveWidget: "resizes-content",
   themeColor: [
     { media: "(prefers-color-scheme: light)", color: "#E1721F" },
     { media: "(prefers-color-scheme: dark)",  color: "#E1721F" },

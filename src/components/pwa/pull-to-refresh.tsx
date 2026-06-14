@@ -32,10 +32,27 @@ export function PullToRefresh() {
     setPull(v);
   }, []);
 
+  // Don't arm the gesture while the user is interacting with something: a
+  // modal/drawer is open (Radix sets `data-scroll-locked` on <body>) or an
+  // editable field is focused. Otherwise scrolling a dialog's list to its end
+  // and dragging further bubbles to the page and reloads — wiping the input.
+  const interactionActive = () => {
+    if (document.body.hasAttribute("data-scroll-locked")) return true;
+    const el = document.activeElement as HTMLElement | null;
+    if (!el) return false;
+    const tag = el.tagName;
+    return (
+      tag === "INPUT" ||
+      tag === "TEXTAREA" ||
+      tag === "SELECT" ||
+      el.isContentEditable
+    );
+  };
+
   React.useEffect(() => {
     const onStart = (e: TouchEvent) => {
       if (refreshingRef.current) return;
-      if (e.touches.length !== 1 || window.scrollY > 0) {
+      if (e.touches.length !== 1 || window.scrollY > 0 || interactionActive()) {
         startY.current = null;
         return;
       }
