@@ -34,7 +34,6 @@ import {
 import {
   detectSectionHeader,
   normalizeForMatch,
-  isStandaloneDescriptor,
   stripVocabTail,
 } from "./ingredient.ts";
 import { tokenizeEntryNameForCatalog } from "./ast/candidate-tokens.ts";
@@ -608,23 +607,9 @@ function pickFinalUnit(
 
 /**
  * Per-importer knobs that loosen the parser's defensive defaults. URL /
- * paste / API callers leave these unset (strict behavior). Familywall
- * passes `alternativesMode: "first-wins"` + a relaxed
- * `autoMatchScoreThreshold` because its catalog is exhaustive — falling
- * back to "new ingredient" there is a worse outcome than absorbing a
- * descriptor compound into the broader catalog row.
+ * paste / API callers normally leave these unset (strict behavior).
  */
 export type ParseIngredientsOptions = {
-  /**
-   * How `X oder Y` alternatives + adjacent unconjoined pairs are handled:
-   *  - "preserve" (default) — leave the user's text alone, let the matcher
-   *    see "Butter oder Margarine" as a 3-token candidate.
-   *  - "first-wins" — drop "oder Y" tails (Butter wins), expand dash-prefix
-   *    "Weizen- oder Dinkelmehl" → "Weizenmehl", and inject `und` between
-   *    adjacent Salz/Pfeffer pairs so the conjunction splitter yields two
-   *    rows.
-   */
-  alternativesMode?: "preserve" | "first-wins";
   /**
    * Auto-match score gate. Default {@link MIN_AUTO_MATCH_SCORE}. Lower it
    * (e.g. 130) only when the catalog is known to cover every ingredient
@@ -668,7 +653,6 @@ export function parseIngredientLines(
   ]);
   const knownIngredientKeys = new Set(lookups.ingredients.keys());
   const threshold = options.autoMatchScoreThreshold ?? MIN_AUTO_MATCH_SCORE;
-  const useFirstWins = options.alternativesMode === "first-wins";
   const out: ImportedIngredient[] = [];
   // Per emitted-row state for AST note re-rendering when an alternative folds
   // into a row (keyed by the row object so it works across lines/groups).
@@ -720,7 +704,6 @@ export function parseIngredientLines(
       containerTokens: lookups.units.containerTokens,
       knownIngredients: knownIngredientKeys,
       unitTokens: knownUnitTokens,
-      useFirstWins,
     })) {
       if (seg.kind === "header") continue;
       if (seg.tailNoteLeaves && seg.tailNoteLeaves.length) pendingTailLeaves = seg.tailNoteLeaves;
@@ -840,13 +823,6 @@ export function parseIngredientLines(
         // expansion rules caught the line. Drop rather than pollute the
         // catalog with a colon-bearing ingredient name.
         if (astSeg.name.includes(":")) continue;
-        // Familywall opt-in: drop rows whose name is a bare descriptor token
-        // ("frische", "fresh", "red") with no head noun — usually truncated
-        // source lines like "8 frische" or "1 cup fresh". Without this, the
-        // first such row creates a "frische" canonical and subsequent
-        // "frische X" lines tie at score 130 between the orphan and the real
-        // head-noun canonical, cascading more orphan matches.
-        if (useFirstWins && isStandaloneDescriptor(astSeg.name)) continue;
         // A leading "or X" / "oder X" almost always means we just split a
         // conjunction that connected alternatives. Attach as a note on the
         // previous row instead of creating a separate ingredient.
@@ -1413,7 +1389,6 @@ function parseGroupedIngredientLines(
   ]);
   const knownIngredientKeys = new Set(lookups.ingredients.keys());
   const threshold = options.autoMatchScoreThreshold ?? MIN_AUTO_MATCH_SCORE;
-  const useFirstWins = options.alternativesMode === "first-wins";
   const groups: ParsedSectionGroup[] = [];
   // Per-row AST note re-render state (keyed by the row object), shared across
   // all sections — same mechanism as parseIngredientLines.
@@ -1447,7 +1422,6 @@ function parseGroupedIngredientLines(
         containerTokens: lookups.units.containerTokens,
         knownIngredients: knownIngredientKeys,
         unitTokens: knownUnitTokens,
-        useFirstWins,
       })) {
         if (seg.kind === "header") {
           groups.push({ title: seg.title, ingredients: [] });
@@ -1508,9 +1482,6 @@ function parseGroupedIngredientLines(
             groups.push({ title: seg.rawText, ingredients: [] });
             continue;
           }
-          // Familywall opt-in: drop bare-descriptor rows — see comment in
-          // {@link parseIngredientLines} for the cascade this prevents.
-          if (useFirstWins && isStandaloneDescriptor(astSeg.name)) continue;
           const currentGroup = groups[groups.length - 1];
           // An optional marker on an alternative flags the whole block optional.
           if (astSeg.isOptional && seg.isAlternative && lastPrimaryIndex !== null) {

@@ -68,7 +68,6 @@ export type SegmentOptions = {
    *  ("1 cup + 1/2 tbsp olive oil") from an ingredient-joining one
    *  ("1 Eigelb + 1 EL Milch"). */
   unitTokens: ReadonlySet<string>;
-  useFirstWins: boolean;
 };
 
 const norm = (s: string): string => s.toLowerCase().replace(/[.,:]+$/, "");
@@ -94,13 +93,6 @@ const ALT_LEADER_WORDS = new Set([
 ]);
 const OR_WORDS = new Set(["oder", "or"]);
 const CONJ_WORDS = new Set(["und", "and"]);
-/** Well-known adjacent pairs that read as two ingredients even without a
- *  conjunction ("Salz Pfeffer") — split only in the Familywall first-wins mode
- *  (mirrors the legacy preprocessAlternatives injection). */
-const KNOWN_PAIRS: ReadonlyArray<readonly [string, string]> = [
-  ["salz", "pfeffer"],
-  ["salt", "pepper"],
-];
 
 /** A depth-0 word leaf whose text equals one of `set` (normalised). */
 function isWordIn(l: Leaf, set: ReadonlySet<string>): boolean {
@@ -1126,24 +1118,6 @@ function conjunctionSplit(
   if (opts.containerTokens.size > 0) {
     for (let i = from; i < to; i++) {
       if (all[i].kind === "word" && opts.containerTokens.has(norm(all[i].text))) return single;
-    }
-  }
-
-  // First-wins (Familywall): a well-known adjacent pair with no conjunction
-  // ("Salz Pfeffer") reads as two ingredients — split between them.
-  if (opts.useFirstWins) {
-    for (let i = from; i + 1 < to; i++) {
-      const a = all[i];
-      const b = all[i + 1];
-      if (a.depth !== depth || b.depth !== depth || a.kind !== "word" || b.kind !== "word") {
-        continue;
-      }
-      if (KNOWN_PAIRS.some(([x, y]) => x === norm(a.text) && y === norm(b.text))) {
-        return [
-          { from, to: i + 1, rawText: source.trim() },
-          { from: i + 1, to, rawText: source.trim() },
-        ];
-      }
     }
   }
 
