@@ -1,6 +1,8 @@
 import { consumeQuantity, parseSingleNumericToken, formatRangeNumber, round3 } from "../numeric";
 import type { Leaf } from "../render-notes";
 import { consumeGroup, groupByWhitespace, type Group } from "../tokens";
+import { matchQuantifierAt } from "./quantifier";
+import type { QuantifierLookup } from "../../index";
 
 const TEXT_ONE = new Set(["ein", "eine", "einen", "einem", "einer", "eins", "one", "a", "an"]);
 const TEXT_HALF = new Set(["halber", "halbe", "halbes", "halben", "half"]);
@@ -47,6 +49,10 @@ export type AmountUnit = {
   rangeExpression: string | null;
   /** Low bound of a true lo–hi range, else null. High bound is `quantity`. */
   quantityLow: number | null;
+  /** id of a leading quantifier word that claimed the amount slot, else null. */
+  quantifierId: number | null;
+  /** Canonical name of the claiming quantifier, else null. */
+  quantifierName: string | null;
 };
 
 export type UnspecificOpts = {
@@ -54,6 +60,9 @@ export type UnspecificOpts = {
   unspecificTokens?: ReadonlySet<string>;
   /** Max unit-name token width to probe (default 1 = single-token only). */
   maxUnitTokens?: number;
+  /** Configurable amount-words ("einige", "zwei", "ein"). When present, a
+   *  leading quantifier may claim the amount slot per the unit-first rule. */
+  quantifiers?: QuantifierLookup;
 };
 
 const wordKey = (g: Group): string => g.text.toLowerCase().replace(/[.,]$/, "");
@@ -118,6 +127,11 @@ export function applyAmountUnit(
   let rangeExpression: string | null = null;
   let quantityLow: number | null = null;
   let unitName: string | null = null;
+  let quantifierId: number | null = null;
+  let quantifierName: string | null = null;
+  // A claiming quantifier owns the amount slot — even when its value is null —
+  // so the unit probe below must NOT default a following unit's quantity to 1.
+  let quantifierWon = false;
 
   const isUnit = (g: Group): boolean =>
     knownUnitTokens.has(g.text.toLowerCase()) || knownUnitTokens.has(norm(g.text));
@@ -157,6 +171,40 @@ export function applyAmountUnit(
     for (let k = 0; k < len; k++) consumeGroup(groups[i + k], "unit");
   };
 
+  // Configurable quantifier ("einige Stiele", "zwei Äpfel", "a pinch"): a
+  // LEADING amount-word claims the amount slot UNLESS doing so would strip the
+  // segment of its only unit. The resolution rule:
+  //  - the quantifier wins if it isn't a unit at all, OR it is a unit but
+  //    ANOTHER unit token follows it (to serve as the real unit);
+  //  - if it's the only unit (nothing else follows), it stays a unit — handled
+  //    by the unspecific/normal unit logic below (quantifier NOT set).
+  // When it wins: quantity = entry.value (may be null — do NOT default a
+  // following unit's quantity to 1), and the row records the quantifier id/name.
+  if (opts.quantifiers) {
+    const q = matchQuantifierAt(groups, cur, opts.quantifiers);
+    if (q) {
+      const window = groups.slice(cur, cur + q.len);
+      const windowText = window.map((g) => g.text).join(" ");
+      const windowIsUnit =
+        knownUnitTokens.has(windowText.toLowerCase()) ||
+        knownUnitTokens.has(norm(windowText));
+      const unitFollows = groups
+        .slice(cur + q.len)
+        .some((g) => g.leaves.every((l) => !l.consumed) && isUnit(g));
+      if (!windowIsUnit || unitFollows) {
+        for (let k = 0; k < q.len; k++) consumeGroup(groups[cur + k], "amount");
+        cur += q.len;
+        quantity = q.entry.value;
+        quantifierId = q.entry.id;
+        quantifierName = q.entry.name;
+        quantifierWon = true;
+        // "a half" / "a quarter" style fractional follow-ups stay with the
+        // numeric/text paths below; a claiming quantifier just seeds the slot
+        // and lets the unit probe find the real unit after it.
+      }
+    }
+  }
+
   // Unspecific units ("etwas", "a sprinkle", "ein Schuss") take NO amount. If
   // the segment leads with one — including a multi-word alias whose first word
   // is an article ("a sprinkle") — claim it as the unit with a null quantity
@@ -170,7 +218,14 @@ export function applyAmountUnit(
         consumeGroup(groups[cur], "unit");
         cur += 1;
       }
-      return { quantity: null, unitName: m.name, rangeExpression: null, quantityLow: null };
+      return {
+        quantity: null,
+        unitName: m.name,
+        rangeExpression: null,
+        quantityLow: null,
+        quantifierId,
+        quantifierName,
+      };
     }
   }
 
@@ -318,7 +373,9 @@ export function applyAmountUnit(
     if (isUnspecificName(probed.name)) {
       // Unspecific unit: drop any number parsed in front ("2 etwas" → null).
       quantity = null;
-    } else if (quantity === null) {
+    } else if (quantity === null && !quantifierWon) {
+      // A claiming quantifier already owns the slot — its (possibly null) value
+      // stands; only a bare unit with no amount-word in front implies 1.
       quantity = 1;
     }
     cur = probe + probed.len;
@@ -347,9 +404,9 @@ export function applyAmountUnit(
       consumeGroup(last, "unit");
       unitName = last.text.replace(/\.$/, "");
       if (isUnspecificName(unitName)) quantity = null;
-      else if (quantity === null) quantity = 1;
+      else if (quantity === null && !quantifierWon) quantity = 1;
     }
   }
 
-  return { quantity, unitName, rangeExpression, quantityLow };
+  return { quantity, unitName, rangeExpression, quantityLow, quantifierId, quantifierName };
 }

@@ -2,7 +2,7 @@ import type {
   CatalogBlockIndex,
   IngredientCatalog,
 } from "../matching";
-import type { ImportedCandidateMatch, ImportedNameProposal } from "../index";
+import type { ImportedCandidateMatch, ImportedNameProposal, QuantifierLookup } from "../index";
 import type { HighlightPart } from "../source-ranges";
 import { lex } from "./lexer";
 import { renderNote, tidyNote, type Leaf } from "./render-notes";
@@ -24,6 +24,12 @@ export type ParsedRow = {
   quantity: number | null;
   /** Low bound of a structured lo–hi range, else null. */
   quantityLow: number | null;
+  /** id of a leading quantifier word ("einige", "zwei") that claimed the amount
+   *  slot, else null. The quantifier's numeric value is reflected in
+   *  {@link quantity} (which may be null for an unspecified quantifier). */
+  quantifierId: number | null;
+  /** Canonical name of the claiming quantifier, else null. */
+  quantifierName: string | null;
   unitName: string | null;
   name: string;
   canonicalName: string | null;
@@ -78,6 +84,9 @@ export type SegmentLookups = {
    *  canned-vs-fresh decider. Injected by the caller (closure over the unit
    *  lookup) to avoid an index.ts import cycle. */
   lineUnitId?: (unitName: string | null, quantity: number | null) => number | null;
+  /** Configurable amount-words ("einige", "zwei", "ein"). When present, a
+   *  leading quantifier may claim the amount slot per the unit-first rule. */
+  quantifiers?: QuantifierLookup;
 };
 
 /**
@@ -207,8 +216,9 @@ export function parseLeaves(
   const unspecificOpts = {
     unspecificTokens: lookups.unspecificUnitTokens,
     maxUnitTokens: lookups.maxUnitTokens,
+    quantifiers: lookups.quantifiers,
   };
-  const { quantity, unitName, rangeExpression, quantityLow } =
+  const { quantity, unitName, rangeExpression, quantityLow, quantifierId, quantifierName } =
     applyColonAmount(source, leaves, lookups.knownUnitTokens, unspecificOpts) ??
     applyAmountUnit(source, leaves, lookups.knownUnitTokens, unspecificOpts);
   // Does the segment carry a container unit? Scans THIS segment's word leaves
@@ -247,6 +257,8 @@ export function parseLeaves(
     noteContext,
     quantity,
     quantityLow,
+    quantifierId,
+    quantifierName,
     unitName,
     name: m.name,
     canonicalName: m.canonicalName,

@@ -63,6 +63,12 @@ export type ImportedIngredient = {
   /** Low bound of a structured lo–hi range, else null. The high bound stays in
    *  `quantity`; shopping and scaling use only `quantity`. */
   quantityLow: number | null;
+  /** id of a leading quantifier word ("einige", "zwei", "ein") that claimed the
+   *  amount slot, else null. Its numeric value is reflected in {@link quantity}
+   *  (null for an unspecified quantifier). */
+  quantifierId: number | null;
+  /** Canonical name of the claiming quantifier, else null. */
+  quantifierName: string | null;
   /** Best-effort resolved (global) unit. `id` null when we couldn't match
    *  anything; the UI uses {@link unitMatch} + {@link rawUnit} to render
    *  appropriately. */
@@ -749,6 +755,7 @@ export function parseIngredientLines(
           catalog: lookups.ingredientCatalog ?? [],
           catalogIndex: lookups.ingredientCatalogIndex,
           threshold,
+          quantifiers: lookups.quantifiers,
           lineUnitId: (name: string | null, qty: number | null) =>
             resolveUnit(lookups.units, name, qty).resolved?.id ?? null,
         };
@@ -962,6 +969,8 @@ export function parseIngredientLines(
         out.push({
           quantity: astSeg.quantity,
           quantityLow: astSeg.quantityLow,
+          quantifierId: astSeg.quantifierId,
+          quantifierName: astSeg.quantifierName,
           unit: final.resolved,
           unitMatch: final.match,
           rawUnit: final.rawUnit,
@@ -1473,6 +1482,7 @@ function parseGroupedIngredientLines(
             catalog: lookups.ingredientCatalog ?? [],
             catalogIndex: lookups.ingredientCatalogIndex,
             threshold,
+            quantifiers: lookups.quantifiers,
             lineUnitId: (name: string | null, qty: number | null) =>
               resolveUnit(lookups.units, name, qty).resolved?.id ?? null,
           };
@@ -1604,6 +1614,8 @@ function parseGroupedIngredientLines(
           currentGroup.ingredients.push({
             quantity: astSeg.quantity,
             quantityLow: astSeg.quantityLow,
+            quantifierId: astSeg.quantifierId,
+            quantifierName: astSeg.quantifierName,
             unit: final.resolved,
             sourceRange: sourceRange ?? undefined,
             highlightParts:
