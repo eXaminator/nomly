@@ -102,6 +102,10 @@ export type DraftIngredient = {
    *  like "einige"), else null. Display-only: lets the bulk-reparse diff render
    *  the effective number for a quantifier-backed proposed row. Not persisted. */
   quantifierValue?: number | null;
+  /** Original source text of the matched quantifier window (e.g. "a" when the
+   *  canonical is "ein"), else null. Display-only: drives the tooltip so it reads
+   *  "a bunch" rather than "ein Bund". Session-only; never persisted. */
+  quantifierSource?: string | null;
   unit: ComboboxItem | null;
   notes: string;
   /** When true, the row renders dimmed/italic in the read view and is skipped
@@ -229,6 +233,9 @@ export type ParsedIngredientResponse = {
    *  The edit form shows this WORDING in the amount field rather than the
    *  resolved number. */
   quantifierName?: string | null;
+  /** Original source text of the matched quantifier window (e.g. "a" when the
+   *  canonical is "ein"), else null. Drives the tooltip. */
+  quantifierSource?: string | null;
   unit: { id: number; name: string } | null;
   unitMatch: "matched" | "defaulted" | "unresolved" | "empty";
   rawUnit: string | null;
@@ -348,6 +355,7 @@ export function parsedIngredientToDraft(
     isRange: i.quantityLow != null,
     quantifierId: i.quantifierId ?? null,
     quantifierName: i.quantifierName ?? null,
+    quantifierSource: i.quantifierSource ?? null,
     // For a NUMERIC quantifier the parser sets `quantity` to the resolved value
     // (a preview convenience); capture it as the quantifier's effective number.
     quantifierValue: i.quantifierId != null ? i.quantity : null,

@@ -69,6 +69,26 @@ export function displayAmount(
   return "";
 }
 
+/**
+ * Produce the tooltip text for a quantifier-backed amount. Prefers the
+ * original user-typed source text over canonical names so the tooltip reads
+ * "a bunch" rather than "ein Bund". Both the quantifier and unit parts are
+ * optional; the function joins whichever are non-empty with a single space.
+ *
+ * Priority: quantifierSource > quantifierName for the quantifier part;
+ *           unitSource > unitLabel for the unit part.
+ */
+export function quantifierTooltipText(a: {
+  quantifierSource?: string | null;
+  quantifierName?: string | null;
+  unitSource?: string | null;
+  unitLabel?: string | null;
+}): string {
+  const q = (a.quantifierSource ?? a.quantifierName ?? "").trim();
+  const u = (a.unitSource ?? a.unitLabel ?? "").trim();
+  return [q, u].filter((s) => s.length > 0).join(" ");
+}
+
 /** Which fields differ from the other side of a diff — used to color-highlight
  *  the changed parts. */
 export type LineHighlight = {
@@ -102,7 +122,14 @@ export type ReadLineProps = {
    *  ("Entspricht: zwei"). Used by the bulk-reparse diff; the recipe-detail read
    *  view leaves it off so a quantifier-backed amount just renders its number. */
   quantifierTooltip?: boolean;
+  /** Original source text of the matched quantifier window ("a" when the
+   *  canonical is "ein"). When provided, the tooltip prefers this over
+   *  `quantifierName` so it shows "a bunch" rather than "ein Bund". */
+  quantifierSource?: string | null;
   unitLabel: string | null;
+  /** Original unit token the user typed ("bunch" for canonical "Bund"). When
+   *  provided, the tooltip prefers this over `unitLabel`. */
+  unitSource?: string | null;
   /** When true, the line's unit is flagged for fraction display; the quantity
    *  renders as a fraction when it resolves to one. */
   displayFraction?: boolean;
@@ -145,7 +172,9 @@ export function RecipeIngredientReadLine({
   quantifierName = null,
   quantifierValue = null,
   quantifierTooltip = false,
+  quantifierSource = null,
   unitLabel,
+  unitSource = null,
   displayFraction = false,
   name,
   canonicalName,
@@ -194,7 +223,7 @@ export function RecipeIngredientReadLine({
           collisionPadding={8}
           className="z-50 max-w-xs rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-card)] px-3 py-1.5 text-xs text-[var(--color-fg)] shadow-md"
         >
-          Entspricht: <strong>{quantifierName}</strong>
+          Entspricht: <strong>{quantifierTooltipText({ quantifierSource, quantifierName, unitSource, unitLabel })}</strong>
         </Popover.Content>
       </Popover.Portal>
     </Popover.Root>

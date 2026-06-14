@@ -19,7 +19,7 @@ export function matchQuantifierAt(
   groups: readonly Group[],
   i: number,
   quantifiers: QuantifierLookup,
-): { len: number; entry: QuantifierLookupEntry } | null {
+): { len: number; entry: QuantifierLookupEntry; source: string } | null {
   const maxLen = Math.min(quantifiers.maxTokens, groups.length - i);
   for (let len = maxLen; len >= 1; len--) {
     const win = groups.slice(i, i + len);
@@ -28,7 +28,7 @@ export function matchQuantifierAt(
     const lower = raw.toLowerCase();
     const entry =
       quantifiers.byNameOrAlias.get(lower) ?? quantifiers.byNameOrAlias.get(norm(lower));
-    if (entry) return { len, entry };
+    if (entry) return { len, entry, source: raw };
   }
   return null;
 }

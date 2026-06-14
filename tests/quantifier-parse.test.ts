@@ -156,3 +156,35 @@ describe("quantifier recognition — leading amount-word", () => {
     expect(out[0].name).toBe("salt");
   });
 });
+
+describe("quantifierSource — original matched window text", () => {
+  it("'a bunch coriander' → quantifierSource='a' (alias of ein)", () => {
+    // "a" is an alias of quantifier "ein". The source text "a" should be
+    // preserved so the tooltip reads "a bunch" rather than "ein Bund".
+    const out = parseIngredientLines(
+      ["a bunch coriander"],
+      makeLookups(cat("coriander"), ["bunch"]),
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0].quantifierName).toBe("ein");
+    expect(out[0].quantifierSource).toBe("a");
+  });
+
+  it("'einige Stiele Petersilie' → quantifierSource='einige' (canonical matches source)", () => {
+    const out = parseIngredientLines(
+      ["einige Stiele Petersilie"],
+      makeLookups(cat("Petersilie"), ["Stiel", "Stiele"]),
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0].quantifierSource).toBe("einige");
+  });
+
+  it("no quantifier → quantifierSource is null", () => {
+    const out = parseIngredientLines(
+      ["2 EL Öl"],
+      makeLookups(cat("Öl"), ["EL"]),
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0].quantifierSource).toBeNull();
+  });
+});

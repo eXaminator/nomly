@@ -30,6 +30,10 @@ export type ParsedRow = {
   quantifierId: number | null;
   /** Canonical name of the claiming quantifier, else null. */
   quantifierName: string | null;
+  /** Original source text of the matched quantifier window (e.g. "a" when the
+   *  canonical is "ein"), else null. Preserved so the tooltip shows "a bunch"
+   *  rather than "ein Bund". */
+  quantifierSource: string | null;
   unitName: string | null;
   name: string;
   canonicalName: string | null;
@@ -218,7 +222,7 @@ export function parseLeaves(
     maxUnitTokens: lookups.maxUnitTokens,
     quantifiers: lookups.quantifiers,
   };
-  const { quantity, unitName, rangeExpression, quantityLow, quantifierId, quantifierName } =
+  const { quantity, unitName, rangeExpression, quantityLow, quantifierId, quantifierName, quantifierSource } =
     applyColonAmount(source, leaves, lookups.knownUnitTokens, unspecificOpts) ??
     applyAmountUnit(source, leaves, lookups.knownUnitTokens, unspecificOpts);
   // Does the segment carry a container unit? Scans THIS segment's word leaves
@@ -259,6 +263,7 @@ export function parseLeaves(
     quantityLow,
     quantifierId,
     quantifierName,
+    quantifierSource,
     unitName,
     name: m.name,
     canonicalName: m.canonicalName,

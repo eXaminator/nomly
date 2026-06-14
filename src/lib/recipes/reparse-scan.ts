@@ -211,6 +211,8 @@ export type ScanRowSummary = {
   /** Numeric value of the referenced quantifier (null for an unspecified one
    *  like "einige"), else null — the effective amount the diff renders. */
   quantifierValue: number | null;
+  /** Always null for current (DB) rows — source text is not stored. */
+  quantifierSource: string | null;
   notes: string | null;
   isOptional: boolean;
   isAlternative: boolean;
@@ -249,6 +251,9 @@ function carriedAlternativeToProposed(g: {
   return {
     quantity: g.quantity,
     quantityLow: g.quantityLow,
+    quantifierId: null,
+    quantifierName: null,
+    quantifierSource: null,
     unit:
       g.unitId != null
         ? { id: g.unitId, name: g.displayUnit ?? g.unitName ?? "" }
@@ -576,6 +581,8 @@ export async function scanAllRecipesForReparse(
         quantifierId: g.ingredientId == null ? null : g.quantifierId,
         quantifierName: g.ingredientId == null ? null : (g.quantifierName ?? null),
         quantifierValue: g.ingredientId == null ? null : (g.quantifierValue ?? null),
+        // Source text is never stored — current side always null.
+        quantifierSource: null,
         // Match the recipe read view: display_unit, then the canonical unit name.
         unitLabel:
           g.ingredientId == null ? null : (g.displayUnit ?? g.unitName ?? null),
