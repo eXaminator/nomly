@@ -27,9 +27,11 @@ const ingredientSchema = z
     message: "Eine nicht zugeordnete Zutat darf keine ingredientId tragen.",
     path: ["unassigned"],
   })
-  // A row's amount is EITHER a literal quantity OR a quantifier reference —
-  // never both. (A quantifier MAY coexist with a unitId; that's allowed.)
-  .refine((v) => !(v.quantity != null && v.quantifierId != null), {
+  // A row's amount is EITHER a literal quantity/range OR a quantifier
+  // reference — never both. quantityLow is the range's low bound, so it is
+  // equally incompatible with a quantifier reference. (A quantifier MAY
+  // coexist with a unitId; that's allowed.)
+  .refine((v) => !((v.quantity != null || v.quantityLow != null) && v.quantifierId != null), {
     message:
       "Eine Zutat kann nicht gleichzeitig eine Menge und einen Mengenbezeichner tragen.",
     path: ["quantifierId"],

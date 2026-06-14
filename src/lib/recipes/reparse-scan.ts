@@ -52,6 +52,10 @@ export type CurrentRow = {
   name: string;
   quantity: number | null;
   quantityLow: number | null;
+  /** Quantifier reference stored on this row, else null. Included so a pure
+   *  literal-number → quantifier-reference change (same effective number)
+   *  surfaces in the diff rather than being silently ignored. */
+  quantifierId: number | null;
   unitId: number | null;
   notes: string | null;
   isOptional: boolean;
@@ -104,7 +108,10 @@ function proposedKey(p: ParsedIngredientResponse): string {
 /**
  * True when the freshly parsed rows differ from the current rows on any
  * meaningful field — ingredient mapping, display name, notes, quantity,
- * unit, optional flag, alternative flag — or in row count.
+ * quantifier reference, unit, optional flag, alternative flag — or in row
+ * count. A pure literal-number → quantifier-reference change (same effective
+ * number, same ingredient, same unit) is a change because the two amount
+ * forms are not equivalent at the persistence level.
  */
 export function isLineGroupChanged(
   current: CurrentRow[],
@@ -116,6 +123,10 @@ export function isLineGroupChanged(
     if (!qtyEqual(current[i].quantity, proposed[i].quantity)) return true;
     // A range that changed only its low bound is still a change.
     if (!qtyEqual(current[i].quantityLow, proposed[i].quantityLow)) return true;
+    // A pure literal→quantifier change (or vice versa) at the same effective
+    // number is still a meaningful change — the two representations are not
+    // equivalent at the persistence level (quantifierId vs a numeric quantity).
+    if ((current[i].quantifierId ?? null) !== (proposed[i].quantifierId ?? null)) return true;
   }
   return false;
 }
@@ -496,6 +507,7 @@ export async function scanAllRecipesForReparse(
       name: g.name ?? "",
       quantity: g.quantity,
       quantityLow: g.quantityLow,
+      quantifierId: g.quantifierId ?? null,
       unitId: g.unitId,
       notes: g.notes,
       isOptional: g.isOptional,
