@@ -511,7 +511,11 @@ function segmentRange(
       const allNonEmpty = segs.every((s) => s.to > s.from);
       // A dash-compound stem ("Weizen- oder Dinkelmehl") that the elision
       // expander above could NOT resolve (no catalog hit) stays ONE ingredient.
-      if (allNonEmpty && !endsWithDash && !preIsHeadlessModifier(primaryText)) {
+      if (
+        allNonEmpty &&
+        !endsWithDash &&
+        !preIsHeadlessModifier(primaryText, opts.unitTokens)
+      ) {
         const out: LineSegment[] = [];
         segs.forEach((s, idx) => {
           // Strip a leading substitute marker on alternatives ("or sub X").

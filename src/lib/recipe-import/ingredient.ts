@@ -580,10 +580,15 @@ const STANDALONE_DESCRIPTOR_NAMES = new Set<string>([
   "reif", "reife", "reifer", "reifes", "reifen",
   // English descriptors
   "fresh", "dried", "peeled", "chopped", "diced", "sliced", "minced",
+  "frozen", "canned",
   "red", "green", "yellow", "white", "black", "blue",
   "small", "large", "medium", "big",
   "light", "dark", "raw", "cooked", "uncooked", "steamed",
   "firm", "block", "crushed", "grains", "store-bought",
+  // German freeze/preserve states (with inflections)
+  "gefroren", "gefrorene", "gefrorener", "gefrorenes", "gefrorenen",
+  "tiefgekühlt", "tiefgekühlte", "tiefgekühlter", "tiefgekühltes", "tiefgekühlten",
+  "tiefgefroren", "tk",
   // Misc tokens that show up in truncated lines
   "zest", "leaves", "peel",
 ]);
@@ -615,10 +620,20 @@ export function isStandaloneDescriptor(name: string): boolean {
  * ingredient with alternative modifiers, not two ("6 dried" in "6 dried or
  * fresh shiitake mushrooms"). Used by the AST segmenter's or-chain guard.
  */
-export function preIsHeadlessModifier(pre: string): boolean {
+export function preIsHeadlessModifier(
+  pre: string,
+  unitTokens?: ReadonlySet<string>,
+): boolean {
   const tokens = pre.trim().toLowerCase().split(/\s+/).filter(Boolean);
   let i = 0;
   while (i < tokens.length && /^[\d¼½¾⅓⅔⅛⅜⅝⅞.,/–-]+$/.test(tokens[i])) i += 1;
+  // Skip a unit token between the amount and the descriptor ("20 oz. fresh" →
+  // the "oz" mustn't make the primary look like it has a head noun). Strip a
+  // trailing dot first ("oz." → "oz"), mirroring the amount/unit pass.
+  if (unitTokens && i < tokens.length) {
+    const u = tokens[i].replace(/[.,]+$/, "");
+    if (unitTokens.has(u)) i += 1;
+  }
   const rest = tokens.slice(i);
   if (rest.length === 0) return false;
   return rest.every((t) => STANDALONE_DESCRIPTOR_NAMES.has(t));
