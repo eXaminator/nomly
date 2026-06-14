@@ -3,7 +3,8 @@ export type EntityKind =
   | "unit"
   | "category"
   | "tag"
-  | "supermarket";
+  | "supermarket"
+  | "quantifier";
 
 export const ENTITY_LABELS: Record<
   EntityKind,
@@ -17,6 +18,11 @@ export const ENTITY_LABELS: Record<
     singular: "Supermarkt",
     plural: "Supermärkte",
     article: "der",
+  },
+  quantifier: {
+    singular: "Mengenwort",
+    plural: "Mengenwörter",
+    article: "das",
   },
 };
 

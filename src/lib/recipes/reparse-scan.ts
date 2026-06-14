@@ -2,6 +2,7 @@ import { asc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import {
   ingredient,
+  quantifier,
   recipe,
   recipeIngredient,
   recipeSection,
@@ -11,6 +12,7 @@ import {
 import {
   buildIngredientCatalog,
   buildIngredientLookup,
+  buildQuantifierLookup,
   buildUnitLookup,
   parseIngredientLines,
 } from "@/lib/recipe-import";
@@ -39,6 +41,7 @@ type ReparseLookups = {
   ingredients: ReturnType<typeof buildIngredientLookup>;
   ingredientCatalog: ReturnType<typeof buildIngredientCatalog>;
   ingredientCatalogIndex: CatalogBlockIndex;
+  quantifiers: ReturnType<typeof buildQuantifierLookup>;
 };
 
 /** Current (stored) ingredient row, reduced to the fields that decide whether
@@ -49,6 +52,10 @@ export type CurrentRow = {
   name: string;
   quantity: number | null;
   quantityLow: number | null;
+  /** Quantifier reference stored on this row, else null. Included so a pure
+   *  literal-number → quantifier-reference change (same effective number)
+   *  surfaces in the diff rather than being silently ignored. */
+  quantifierId: number | null;
   unitId: number | null;
   notes: string | null;
   isOptional: boolean;
@@ -101,7 +108,10 @@ function proposedKey(p: ParsedIngredientResponse): string {
 /**
  * True when the freshly parsed rows differ from the current rows on any
  * meaningful field — ingredient mapping, display name, notes, quantity,
- * unit, optional flag, alternative flag — or in row count.
+ * quantifier reference, unit, optional flag, alternative flag — or in row
+ * count. A pure literal-number → quantifier-reference change (same effective
+ * number, same ingredient, same unit) is a change because the two amount
+ * forms are not equivalent at the persistence level.
  */
 export function isLineGroupChanged(
   current: CurrentRow[],
@@ -113,6 +123,10 @@ export function isLineGroupChanged(
     if (!qtyEqual(current[i].quantity, proposed[i].quantity)) return true;
     // A range that changed only its low bound is still a change.
     if (!qtyEqual(current[i].quantityLow, proposed[i].quantityLow)) return true;
+    // A pure literal→quantifier change (or vice versa) at the same effective
+    // number is still a meaningful change — the two representations are not
+    // equivalent at the persistence level (quantifierId vs a numeric quantity).
+    if ((current[i].quantifierId ?? null) !== (proposed[i].quantifierId ?? null)) return true;
   }
   return false;
 }
@@ -187,6 +201,16 @@ export type ScanRowSummary = {
   unitLabel: string | null;
   /** Whether this row's unit is flagged for fraction display. */
   displayFraction: boolean;
+  /** The configured quantifier this row's amount references, else null. The
+   *  diff compares this (alongside quantity/unit) so a literal amount vs a
+   *  quantifier with the same effective number reads as a CHANGE. */
+  quantifierId: number | null;
+  /** Canonical name of the referenced quantifier ("zwei"), else null — drives
+   *  the diff's quantifier hover tooltip. */
+  quantifierName: string | null;
+  /** Numeric value of the referenced quantifier (null for an unspecified one
+   *  like "einige"), else null — the effective amount the diff renders. */
+  quantifierValue: number | null;
   notes: string | null;
   isOptional: boolean;
   isAlternative: boolean;
@@ -415,6 +439,7 @@ export async function scanAllRecipesForReparse(
     ingredients,
     ingredientCatalog,
     ingredientCatalogIndex: catalogIndex,
+    quantifiers: buildQuantifierLookup(),
   };
   // Muted recipes / lines are skipped entirely (not parsed, not returned) —
   // diffs the user has intentionally hand-handled.
@@ -432,6 +457,9 @@ export async function scanAllRecipesForReparse(
       canonicalName: ingredient.name,
       quantity: recipeIngredient.quantity,
       quantityLow: recipeIngredient.quantityLow,
+      quantifierId: recipeIngredient.quantifierId,
+      quantifierName: quantifier.name,
+      quantifierValue: quantifier.value,
       unitId: recipeIngredient.unitId,
       unitName: unit.name,
       displayFraction: unit.displayFraction,
@@ -446,6 +474,8 @@ export async function scanAllRecipesForReparse(
     .innerJoin(recipe, eq(recipe.id, recipeSection.recipeId))
     .leftJoin(ingredient, eq(ingredient.id, recipeIngredient.ingredientId))
     .leftJoin(unit, eq(unit.id, recipeIngredient.unitId))
+    // LEFT join: most rows reference no quantifier (literal-amount rows).
+    .leftJoin(quantifier, eq(quantifier.id, recipeIngredient.quantifierId))
     .orderBy(
       asc(recipe.id),
       asc(recipeSection.sortOrder),
@@ -477,6 +507,7 @@ export async function scanAllRecipesForReparse(
       name: g.name ?? "",
       quantity: g.quantity,
       quantityLow: g.quantityLow,
+      quantifierId: g.quantifierId ?? null,
       unitId: g.unitId,
       notes: g.notes,
       isOptional: g.isOptional,
@@ -542,6 +573,9 @@ export async function scanAllRecipesForReparse(
         // over from before the unlink, matching the recipe read view.
         quantity: g.ingredientId == null ? null : g.quantity,
         quantityLow: g.ingredientId == null ? null : g.quantityLow,
+        quantifierId: g.ingredientId == null ? null : g.quantifierId,
+        quantifierName: g.ingredientId == null ? null : (g.quantifierName ?? null),
+        quantifierValue: g.ingredientId == null ? null : (g.quantifierValue ?? null),
         // Match the recipe read view: display_unit, then the canonical unit name.
         unitLabel:
           g.ingredientId == null ? null : (g.displayUnit ?? g.unitName ?? null),

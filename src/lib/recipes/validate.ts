@@ -11,6 +11,9 @@ const ingredientSchema = z
     unassigned: z.boolean().default(false),
     quantity: z.number().nullable(),
     quantityLow: z.number().nullable().default(null),
+    /** Reference to a configured quantifier ("zwei", "einige"). Mutually
+     *  exclusive with a literal `quantity` (see refine below) — never both. */
+    quantifierId: z.number().int().positive().nullable().optional(),
     unitId: z.number().int().positive().nullable(),
     displayUnit: z.string().nullable().default(null),
     notes: z.string().nullable(),
@@ -23,6 +26,15 @@ const ingredientSchema = z
   .refine((v) => !(v.unassigned && v.ingredientId != null), {
     message: "Eine nicht zugeordnete Zutat darf keine ingredientId tragen.",
     path: ["unassigned"],
+  })
+  // A row's amount is EITHER a literal quantity/range OR a quantifier
+  // reference — never both. quantityLow is the range's low bound, so it is
+  // equally incompatible with a quantifier reference. (A quantifier MAY
+  // coexist with a unitId; that's allowed.)
+  .refine((v) => !((v.quantity != null || v.quantityLow != null) && v.quantifierId != null), {
+    message:
+      "Eine Zutat kann nicht gleichzeitig eine Menge und einen Mengenbezeichner tragen.",
+    path: ["quantifierId"],
   });
 
 const sectionSchema = z.object({

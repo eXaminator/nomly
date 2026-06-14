@@ -3,6 +3,8 @@ import { db } from "../../db/index.ts";
 import {
   ingredient,
   ingredientAlias,
+  quantifier,
+  quantifierAlias,
   unit,
   unitAlias,
 } from "../../db/schema.ts";
@@ -61,6 +63,12 @@ export type ImportedIngredient = {
   /** Low bound of a structured lo–hi range, else null. The high bound stays in
    *  `quantity`; shopping and scaling use only `quantity`. */
   quantityLow: number | null;
+  /** id of a leading quantifier word ("einige", "zwei", "ein") that claimed the
+   *  amount slot, else null. Its numeric value is reflected in {@link quantity}
+   *  (null for an unspecified quantifier). */
+  quantifierId: number | null;
+  /** Canonical name of the claiming quantifier, else null. */
+  quantifierName: string | null;
   /** Best-effort resolved (global) unit. `id` null when we couldn't match
    *  anything; the UI uses {@link unitMatch} + {@link rawUnit} to render
    *  appropriately. */
@@ -313,6 +321,33 @@ export function buildUnitLookup(): UnitLookup {
   };
 }
 
+export type QuantifierLookupEntry = { id: number; name: string; value: number | null };
+export type QuantifierLookup = {
+  byNameOrAlias: Map<string, QuantifierLookupEntry>;
+  byId: Map<number, QuantifierLookupEntry>;
+  maxTokens: number;
+};
+export function buildQuantifierLookup(): QuantifierLookup {
+  const byNameOrAlias = new Map<string, QuantifierLookupEntry>();
+  const byId = new Map<number, QuantifierLookupEntry>();
+  for (const q of db.select().from(quantifier).all()) {
+    const entry = { id: q.id, name: q.name, value: q.value ?? null };
+    byNameOrAlias.set(q.name.toLowerCase(), entry);
+    byId.set(q.id, entry);
+  }
+  for (const a of db
+    .select({ id: quantifier.id, name: quantifier.name, value: quantifier.value, alias: quantifierAlias.name })
+    .from(quantifierAlias)
+    .innerJoin(quantifier, eq(quantifier.id, quantifierAlias.quantifierId))
+    .all()) {
+    const key = a.alias.toLowerCase();
+    if (!byNameOrAlias.has(key)) byNameOrAlias.set(key, { id: a.id, name: a.name, value: a.value ?? null });
+  }
+  let maxTokens = 1;
+  for (const k of byNameOrAlias.keys()) maxTokens = Math.max(maxTokens, k.trim().split(/\s+/).length);
+  return { byNameOrAlias, byId, maxTokens };
+}
+
 export type ResolveUnitResult = {
   resolved: { id: number; name: string } | null;
   match: UnitMatch;
@@ -553,6 +588,9 @@ export type ParseLookups = {
    *  parses thousands of lines against the same catalog). Must be built from
    *  the SAME catalog instance. */
   ingredientCatalogIndex?: CatalogBlockIndex;
+  /** Pre-built quantifier lookup for word-form quantity recognition ("ein",
+   *  "zwei", "einige", …). Optional for backward compatibility. */
+  quantifiers?: QuantifierLookup;
 };
 
 /**
@@ -717,6 +755,7 @@ export function parseIngredientLines(
           catalog: lookups.ingredientCatalog ?? [],
           catalogIndex: lookups.ingredientCatalogIndex,
           threshold,
+          quantifiers: lookups.quantifiers,
           lineUnitId: (name: string | null, qty: number | null) =>
             resolveUnit(lookups.units, name, qty).resolved?.id ?? null,
         };
@@ -930,6 +969,8 @@ export function parseIngredientLines(
         out.push({
           quantity: astSeg.quantity,
           quantityLow: astSeg.quantityLow,
+          quantifierId: astSeg.quantifierId,
+          quantifierName: astSeg.quantifierName,
           unit: final.resolved,
           unitMatch: final.match,
           rawUnit: final.rawUnit,
@@ -1441,6 +1482,7 @@ function parseGroupedIngredientLines(
             catalog: lookups.ingredientCatalog ?? [],
             catalogIndex: lookups.ingredientCatalogIndex,
             threshold,
+            quantifiers: lookups.quantifiers,
             lineUnitId: (name: string | null, qty: number | null) =>
               resolveUnit(lookups.units, name, qty).resolved?.id ?? null,
           };
@@ -1572,6 +1614,8 @@ function parseGroupedIngredientLines(
           currentGroup.ingredients.push({
             quantity: astSeg.quantity,
             quantityLow: astSeg.quantityLow,
+            quantifierId: astSeg.quantifierId,
+            quantifierName: astSeg.quantifierName,
             unit: final.resolved,
             sourceRange: sourceRange ?? undefined,
             highlightParts:
@@ -1912,6 +1956,7 @@ export async function importRecipeFromUrl(
       units: unitLookup,
       ingredients: ingredientLookup,
       ingredientCatalog,
+      quantifiers: buildQuantifierLookup(),
     },
   );
   const merged = mergeIngredientAndInstructionSections(

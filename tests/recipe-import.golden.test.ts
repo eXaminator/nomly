@@ -23,6 +23,7 @@
 import { describe, it, expect } from "vitest";
 
 import { parseIngredientLines, type ParseLookups } from "@/lib/recipe-import";
+import { testQuantifierLookup } from "./_helpers/quantifiers";
 
 /**
  * The full set of unit tokens the parser sees in production — names +
@@ -130,6 +131,7 @@ const TEST_LOOKUPS: ParseLookups = {
   },
   ingredients: new Map(),
   ingredientCatalog: [],
+  quantifiers: testQuantifierLookup(),
 };
 
 /** The legacy ParsedIngredient-ish shape the scoring below reads, produced by

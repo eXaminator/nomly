@@ -531,6 +531,8 @@ function StapleIngredientRow({
       // Staples have no range support (recipe-only feature).
       quantityLow: "",
       isRange: false,
+      // Staples have no quantifier support (recipe-only feature).
+      quantifierId: null,
       unit:
         row.unitId !== "" && row.unitId != null
           ? { id: row.unitId, name: unitName }

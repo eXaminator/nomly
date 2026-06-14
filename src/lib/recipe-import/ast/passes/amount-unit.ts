@@ -1,26 +1,8 @@
 import { consumeQuantity, parseSingleNumericToken, formatRangeNumber, round3 } from "../numeric";
 import type { Leaf } from "../render-notes";
 import { consumeGroup, groupByWhitespace, type Group } from "../tokens";
-
-const TEXT_ONE = new Set(["ein", "eine", "einen", "einem", "einer", "eins", "one", "a", "an"]);
-const TEXT_HALF = new Set(["halber", "halbe", "halbes", "halben", "half"]);
-const TEXT_QUARTER = new Set(["viertel", "quarter"]);
-/** Written cardinals 2–12 (DE + EN) leading an ingredient line — "two onions",
- *  "drei Eier". A small CLOSED grammatical set (not an open vocabulary). One is
- *  handled by {@link TEXT_ONE} (it also pairs with half/quarter). */
-const WRITTEN_CARDINALS = new Map<string, number>([
-  ["zwei", 2], ["two", 2],
-  ["drei", 3], ["three", 3],
-  ["vier", 4], ["four", 4],
-  ["fünf", 5], ["fuenf", 5], ["five", 5],
-  ["sechs", 6], ["six", 6],
-  ["sieben", 7], ["seven", 7],
-  ["acht", 8], ["eight", 8],
-  ["neun", 9], ["nine", 9],
-  ["zehn", 10], ["ten", 10],
-  ["elf", 11], ["eleven", 11],
-  ["zwölf", 12], ["zwoelf", 12], ["twelve", 12],
-]);
+import { matchQuantifierAt } from "./quantifier";
+import type { QuantifierLookup } from "../../index";
 
 /** Size words that may sit between the quantity and the unit ("1 small bunch",
  *  "1 kl. Dose"). They are SKIPPED so the unit is still found, but NOT consumed
@@ -36,6 +18,12 @@ export const SIZE_MODIFIERS = new Set([
 
 const norm = (s: string): string => s.toLowerCase().replace(/[.,]+$/, "");
 
+/** A minimal article set kept ONLY for the "drop a bare article sitting AFTER a
+ *  fraction" tidy ("half a teaspoon" / "halber a …" → drop the "a"). This is a
+ *  SYNTAX rule, not a number-word value — recognition of standalone number-words
+ *  (ein/eine/a/zwei/half/…) now lives in the DB-driven quantifier table. */
+const ARTICLES = new Set(["a", "an", "ein", "eine", "einen", "einem", "einer", "eins"]);
+
 /** Connectors that link the unit to the ingredient ("Pinch of …", "Dose von …").
  *  Consumed onto the unit so they never reach the notes. */
 const POST_UNIT_CONNECTORS = new Set(["of", "von", "vom"]);
@@ -47,6 +35,10 @@ export type AmountUnit = {
   rangeExpression: string | null;
   /** Low bound of a true lo–hi range, else null. High bound is `quantity`. */
   quantityLow: number | null;
+  /** id of a leading quantifier word that claimed the amount slot, else null. */
+  quantifierId: number | null;
+  /** Canonical name of the claiming quantifier, else null. */
+  quantifierName: string | null;
 };
 
 export type UnspecificOpts = {
@@ -54,15 +46,20 @@ export type UnspecificOpts = {
   unspecificTokens?: ReadonlySet<string>;
   /** Max unit-name token width to probe (default 1 = single-token only). */
   maxUnitTokens?: number;
+  /** Configurable amount-words ("einige", "zwei", "ein"). When present, a
+   *  leading quantifier may claim the amount slot per the unit-first rule. */
+  quantifiers?: QuantifierLookup;
 };
 
 const wordKey = (g: Group): string => g.text.toLowerCase().replace(/[.,]$/, "");
 
 /**
  * Consume the leading amount + unit of a segment, marking the claimed leaves.
- * Handles numeric runs/ranges (via {@link consumeQuantity}) and the common
- * text amounts (ein/eine/a → 1, halber → 0.5, viertel → 0.25). A bare unit with
- * no quantity implies quantity 1. Mutates `leaves`.
+ * Handles numeric runs/ranges (via {@link consumeQuantity}) and leading
+ * word-form quantifiers (ein/eine/a → 1, halber → 0.5, viertel → 0.25, written
+ * cardinals → 2..12, …) via the DB-driven quantifier table in `opts.quantifiers`
+ * — see {@link matchQuantifierAt}. A bare unit with no quantity implies quantity
+ * 1. Mutates `leaves`.
  */
 export function applyAmountUnit(
   source: string,
@@ -118,6 +115,11 @@ export function applyAmountUnit(
   let rangeExpression: string | null = null;
   let quantityLow: number | null = null;
   let unitName: string | null = null;
+  let quantifierId: number | null = null;
+  let quantifierName: string | null = null;
+  // A claiming quantifier owns the amount slot — even when its value is null —
+  // so the unit probe below must NOT default a following unit's quantity to 1.
+  let quantifierWon = false;
 
   const isUnit = (g: Group): boolean =>
     knownUnitTokens.has(g.text.toLowerCase()) || knownUnitTokens.has(norm(g.text));
@@ -157,6 +159,49 @@ export function applyAmountUnit(
     for (let k = 0; k < len; k++) consumeGroup(groups[i + k], "unit");
   };
 
+  // Configurable quantifier ("einige Stiele", "zwei Äpfel", "a pinch"): a
+  // LEADING amount-word claims the amount slot UNLESS doing so would strip the
+  // segment of its only unit. The resolution rule:
+  //  - the quantifier wins if it isn't a unit at all, OR it is a unit but
+  //    ANOTHER unit token follows it (to serve as the real unit);
+  //  - if it's the only unit (nothing else follows), it stays a unit — handled
+  //    by the unspecific/normal unit logic below (quantifier NOT set).
+  // When it wins: quantity = entry.value (may be null — do NOT default a
+  // following unit's quantity to 1), and the row records the quantifier id/name.
+  if (opts.quantifiers) {
+    const q = matchQuantifierAt(groups, cur, opts.quantifiers);
+    if (q) {
+      const window = groups.slice(cur, cur + q.len);
+      const windowText = window.map((g) => g.text).join(" ");
+      const windowIsUnit =
+        knownUnitTokens.has(windowText.toLowerCase()) ||
+        knownUnitTokens.has(norm(windowText));
+      const unitFollows = groups
+        .slice(cur + q.len)
+        .some((g) => g.leaves.every((l) => !l.consumed) && isUnit(g));
+      if (!windowIsUnit || unitFollows) {
+        for (let k = 0; k < q.len; k++) consumeGroup(groups[cur + k], "amount");
+        cur += q.len;
+        quantity = q.entry.value;
+        quantifierId = q.entry.id;
+        quantifierName = q.entry.name;
+        quantifierWon = true;
+        // Drop a bare article sitting AFTER a fraction word ("half a teaspoon"
+        // → drop "a"; "juice of half a lemon" → 0.5 lemon). This is a syntax
+        // tidy on the leftover article, not a number-word value.
+        if (
+          q.entry.value != null &&
+          q.entry.value < 1 &&
+          cur < groups.length &&
+          ARTICLES.has(wordKey(groups[cur]))
+        ) {
+          consumeGroup(groups[cur], "amount");
+          cur += 1;
+        }
+      }
+    }
+  }
+
   // Unspecific units ("etwas", "a sprinkle", "ein Schuss") take NO amount. If
   // the segment leads with one — including a multi-word alias whose first word
   // is an article ("a sprinkle") — claim it as the unit with a null quantity
@@ -170,7 +215,14 @@ export function applyAmountUnit(
         consumeGroup(groups[cur], "unit");
         cur += 1;
       }
-      return { quantity: null, unitName: m.name, rangeExpression: null, quantityLow: null };
+      return {
+        quantity: null,
+        unitName: m.name,
+        rangeExpression: null,
+        quantityLow: null,
+        quantifierId,
+        quantifierName,
+      };
     }
   }
 
@@ -241,59 +293,20 @@ export function applyAmountUnit(
     }
   }
 
-  const ARTICLES = new Set(["a", "an", "ein", "eine", "einen", "einem", "einer", "eins"]);
-  const dropArticle = () => {
-    if (cur < groups.length && ARTICLES.has(wordKey(groups[cur]))) {
-      consumeGroup(groups[cur], "amount");
-      cur += 1;
-    }
-  };
-
-  if (cur < groups.length) {
-    const w = wordKey(groups[cur]);
-    const next = cur + 1 < groups.length ? wordKey(groups[cur + 1]) : "";
-    if (TEXT_ONE.has(w) && TEXT_HALF.has(next)) {
-      // "eine halbe Tasse" → 0.5
-      quantity = 0.5;
-      consumeGroup(groups[cur], "amount");
-      consumeGroup(groups[cur + 1], "amount");
-      cur += 2;
-    } else if (TEXT_ONE.has(w) && TEXT_QUARTER.has(next)) {
-      quantity = 0.25;
-      consumeGroup(groups[cur], "amount");
-      consumeGroup(groups[cur + 1], "amount");
-      cur += 2;
-    } else if (TEXT_ONE.has(w)) {
-      quantity = 1;
-      consumeGroup(groups[cur], "amount");
-      cur += 1;
-    } else if (TEXT_HALF.has(w)) {
-      quantity = 0.5;
-      consumeGroup(groups[cur], "amount");
-      cur += 1;
-      dropArticle(); // "half a teaspoon" → drop "a"
-    } else if (TEXT_QUARTER.has(w)) {
-      quantity = 0.25;
-      consumeGroup(groups[cur], "amount");
-      cur += 1;
-      dropArticle();
-    } else if (WRITTEN_CARDINALS.has(w)) {
-      // "two onions", "drei Eier" — a written cardinal leads the line.
-      quantity = WRITTEN_CARDINALS.get(w)!;
-      consumeGroup(groups[cur], "amount");
-      cur += 1;
-    } else {
-      const work = groups.slice(cur).map((g) => g.text);
-      const before = work.length;
-      const r = consumeQuantity(work);
-      if (r) {
-        quantity = r.quantity;
-        rangeExpression = r.rangeExpression;
-        quantityLow = r.quantityLow;
-        const n = before - work.length;
-        for (let k = 0; k < n; k++) consumeGroup(groups[cur + k], "amount");
-        cur += n;
-      }
+  // Numeric amount syntax (digits / fractions / ranges / decimals — "2",
+  // "1/2", "0,5", "2-3", "1 1/2", "½"). Word-form quantifiers were already
+  // claimed above via the quantifier table, so skip this once one has won.
+  if (cur < groups.length && quantity === null && !quantifierWon) {
+    const work = groups.slice(cur).map((g) => g.text);
+    const before = work.length;
+    const r = consumeQuantity(work);
+    if (r) {
+      quantity = r.quantity;
+      rangeExpression = r.rangeExpression;
+      quantityLow = r.quantityLow;
+      const n = before - work.length;
+      for (let k = 0; k < n; k++) consumeGroup(groups[cur + k], "amount");
+      cur += n;
     }
   }
 
@@ -318,7 +331,9 @@ export function applyAmountUnit(
     if (isUnspecificName(probed.name)) {
       // Unspecific unit: drop any number parsed in front ("2 etwas" → null).
       quantity = null;
-    } else if (quantity === null) {
+    } else if (quantity === null && !quantifierWon) {
+      // A claiming quantifier already owns the slot — its (possibly null) value
+      // stands; only a bare unit with no amount-word in front implies 1.
       quantity = 1;
     }
     cur = probe + probed.len;
@@ -347,9 +362,9 @@ export function applyAmountUnit(
       consumeGroup(last, "unit");
       unitName = last.text.replace(/\.$/, "");
       if (isUnspecificName(unitName)) quantity = null;
-      else if (quantity === null) quantity = 1;
+      else if (quantity === null && !quantifierWon) quantity = 1;
     }
   }
 
-  return { quantity, unitName, rangeExpression, quantityLow };
+  return { quantity, unitName, rangeExpression, quantityLow, quantifierId, quantifierName };
 }

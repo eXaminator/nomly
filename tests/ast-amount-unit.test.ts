@@ -3,13 +3,15 @@ import { lex } from "@/lib/recipe-import/ast/lexer";
 import { renderNote, type Leaf } from "@/lib/recipe-import/ast/render-notes";
 import { applyAmountUnit } from "@/lib/recipe-import/ast/passes/amount-unit";
 import { applyOptional } from "@/lib/recipe-import/ast/passes/optional";
+import { testQuantifierLookup } from "./_helpers/quantifiers";
 
 const UNITS = new Set(["g", "kg", "ml", "l", "el", "tl", "tsp", "cup", "cups"]);
+const QUANTIFIERS = testQuantifierLookup();
 
 function run(line: string) {
   const leaves: Leaf[] = lex(line).map((t) => ({ ...t }));
   const isOptional = applyOptional(leaves);
-  const au = applyAmountUnit(line, leaves, UNITS);
+  const au = applyAmountUnit(line, leaves, UNITS, { quantifiers: QUANTIFIERS });
   return { ...au, isOptional, note: renderNote(line, leaves) };
 }
 

@@ -87,6 +87,21 @@ export type DraftIngredient = {
   /** Range mode toggle: when true the editor shows the low input and the row is
    *  invalid unless quantityLow parses and is < quantity. */
   isRange: boolean;
+  /** Reference to a configured quantifier ("zwei", "einige") when the parser
+   *  resolved the amount to one, else null. At the persistence boundary
+   *  (`ingredientToPayload`) a set id collapses `quantity`/`quantityLow` to
+   *  null — a row's amount is EITHER a literal number OR a quantifier ref,
+   *  never both. Phase 5 will own the edit-field interplay (clearing the id on
+   *  a manual numeric edit / showing the quantifier wording). */
+  quantifierId: number | null;
+  /** Canonical name of the referenced quantifier ("zwei", "einige"), else null.
+   *  Display-only: surfaces the quantifier wording in the bulk-reparse diff's
+   *  hover tooltip. Not persisted (the id is the source of truth). */
+  quantifierName?: string | null;
+  /** Numeric value of the referenced quantifier (null for an unspecified one
+   *  like "einige"), else null. Display-only: lets the bulk-reparse diff render
+   *  the effective number for a quantifier-backed proposed row. Not persisted. */
+  quantifierValue?: number | null;
   unit: ComboboxItem | null;
   notes: string;
   /** When true, the row renders dimmed/italic in the read view and is skipped
@@ -205,6 +220,15 @@ export type ParsedIngredientResponse = {
   quantity: number | null;
   /** Low bound of a structured range, else null. */
   quantityLow: number | null;
+  /** Reference to a configured quantifier the parser resolved ("zwei",
+   *  "einige"), else null. For a NUMERIC quantifier the parser also sets
+   *  `quantity` (= the quantifier's value) as a preview convenience; the
+   *  persistence boundary collapses that to the reference only. */
+  quantifierId?: number | null;
+  /** Canonical name of the resolved quantifier ("zwei", "einige"), else null.
+   *  The edit form shows this WORDING in the amount field rather than the
+   *  resolved number. */
+  quantifierName?: string | null;
   unit: { id: number; name: string } | null;
   unitMatch: "matched" | "defaulted" | "unresolved" | "empty";
   rawUnit: string | null;
@@ -313,9 +337,20 @@ export function parsedIngredientToDraft(
     addAsAlias: false,
     // Import never auto-produces unassigned rows — it always tries to match.
     unassigned: false,
-    quantity: quantityToInputString(i.quantity),
+    // A quantifier-backed row shows the quantifier WORDING in the amount field
+    // (the one place quantifiers display as words, not the resolved number);
+    // its numeric quantity stays empty since the reference owns the amount.
+    quantity:
+      i.quantifierId != null && i.quantifierName
+        ? i.quantifierName
+        : quantityToInputString(i.quantity),
     quantityLow: quantityToInputString(i.quantityLow ?? null),
     isRange: i.quantityLow != null,
+    quantifierId: i.quantifierId ?? null,
+    quantifierName: i.quantifierName ?? null,
+    // For a NUMERIC quantifier the parser sets `quantity` to the resolved value
+    // (a preview convenience); capture it as the quantifier's effective number.
+    quantifierValue: i.quantifierId != null ? i.quantity : null,
     unit:
       i.unit && unitDisplayName !== null
         ? { id: i.unit.id, name: unitDisplayName }
@@ -364,6 +399,7 @@ export function emptyIngredient(): DraftIngredient {
     quantity: "",
     quantityLow: "",
     isRange: false,
+    quantifierId: null,
     unit: null,
     notes: "",
     isOptional: false,
@@ -438,9 +474,18 @@ export function recipeToDraft(recipe: RecipeView): DraftRecipe {
         candidates: [],
         addAsAlias: false,
         unassigned: i.ingredientId == null,
-        quantity: quantityToInputString(i.quantity),
+        // A row backed by a quantifier shows the quantifier WORDING ("einige",
+        // "zwei") in the amount field; the numeric quantity stays empty since
+        // the reference owns the amount.
+        quantity:
+          i.quantifierId != null && i.quantifierName
+            ? i.quantifierName
+            : quantityToInputString(i.quantity),
         quantityLow: quantityToInputString(i.quantityLow ?? null),
         isRange: i.quantityLow != null,
+        quantifierId: i.quantifierId,
+        quantifierName: i.quantifierName,
+        quantifierValue: i.quantifierValue,
         unit:
           i.unitId !== null && i.unitName
             ? { id: i.unitId, name: i.unitName }
@@ -485,6 +530,7 @@ export function emptyRecipe(): DraftRecipe {
             quantity: "",
             quantityLow: "",
             isRange: false,
+            quantifierId: null,
             unit: null,
             notes: "",
             isOptional: false,

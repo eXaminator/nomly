@@ -1,4 +1,5 @@
 import { Fragment, type ReactNode } from "react";
+import * as Popover from "@radix-ui/react-popover";
 import { CornerDownRight, Lock } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { IngredientLine } from "@/components/recipes/ingredient-line";
@@ -42,6 +43,32 @@ export function formatAmount(
   return `${formatQuantity(quantityLow, opts)}–${high}`;
 }
 
+/**
+ * Determine the effective display string for an ingredient amount, taking
+ * quantifiers into account:
+ * - If `quantity` is set, it (and any `quantityLow`) format as a normal
+ *   amount/range.
+ * - If `quantity` is null but `quantifierValue` is set, the quantifier's
+ *   numeric value is used as the effective high bound.
+ * - If both are null but `quantifierName` is set, the name is returned
+ *   verbatim ("einige").
+ * - Otherwise returns "".
+ */
+export function displayAmount(
+  a: {
+    quantity: number | null;
+    quantityLow?: number | null;
+    quantifierName?: string | null;
+    quantifierValue?: number | null;
+  },
+  opts?: { fraction?: boolean },
+): string {
+  const effHigh = a.quantity ?? a.quantifierValue ?? null;
+  if (effHigh != null) return formatAmount(effHigh, a.quantityLow ?? null, opts);
+  if (a.quantifierName) return a.quantifierName;
+  return "";
+}
+
 /** Which fields differ from the other side of a diff — used to color-highlight
  *  the changed parts. */
 export type LineHighlight = {
@@ -63,6 +90,18 @@ export type ReadLineProps = {
   quantity: number | null;
   /** Low bound of an amount range, else null → renders "low–high". */
   quantityLow?: number | null;
+  /** Name of the quantifier ("einige"), displayed verbatim when no numeric
+   *  amount is available. */
+  quantifierName?: string | null;
+  /** Numeric value of the quantifier — used as the effective amount when
+   *  `quantity` is null. */
+  quantifierValue?: number | null;
+  /** When true AND the amount is backed by a quantifier (`quantifierName` set,
+   *  with a `quantifierId`/`quantifierValue`), render the amount with a
+   *  dotted-underline hover popover revealing the quantifier wording
+   *  ("Entspricht: zwei"). Used by the bulk-reparse diff; the recipe-detail read
+   *  view leaves it off so a quantifier-backed amount just renders its number. */
+  quantifierTooltip?: boolean;
   unitLabel: string | null;
   /** When true, the line's unit is flagged for fraction display; the quantity
    *  renders as a fraction when it resolves to one. */
@@ -103,6 +142,9 @@ export type ReadLineProps = {
 export function RecipeIngredientReadLine({
   quantity,
   quantityLow = null,
+  quantifierName = null,
+  quantifierValue = null,
+  quantifierTooltip = false,
   unitLabel,
   displayFraction = false,
   name,
@@ -126,6 +168,41 @@ export function RecipeIngredientReadLine({
         "rounded bg-[color-mix(in_srgb,#ef4444,transparent_80%)] px-0.5 dark:bg-[#ff000099]";
   const mark = (on: boolean | undefined, node: ReactNode) =>
     on && tone ? <span className={hlClass}>{node}</span> : node;
+  const amountText = displayAmount(
+    { quantity, quantityLow, quantifierName, quantifierValue },
+    { fraction: displayFraction },
+  );
+  // The amount is backed by a quantifier when a quantifier name is present.
+  // In the diff view (quantifierTooltip), reveal that wording on hover/tap with
+  // a dotted-underline popover; elsewhere render the plain number.
+  const showQuantifierTooltip = quantifierTooltip && quantifierName != null;
+  const amountNode = showQuantifierTooltip ? (
+    <Popover.Root>
+      <Popover.Trigger asChild>
+        <button
+          type="button"
+          className="cursor-pointer underline decoration-dotted decoration-[var(--color-muted-fg)] underline-offset-4 focus-visible:rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+        >
+          {amountText} {unitLabel ?? ""}
+        </button>
+      </Popover.Trigger>
+      <Popover.Portal>
+        <Popover.Content
+          side="top"
+          align="start"
+          sideOffset={6}
+          collisionPadding={8}
+          className="z-50 max-w-xs rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-card)] px-3 py-1.5 text-xs text-[var(--color-fg)] shadow-md"
+        >
+          Entspricht: <strong>{quantifierName}</strong>
+        </Popover.Content>
+      </Popover.Portal>
+    </Popover.Root>
+  ) : (
+    <span>
+      {amountText} {unitLabel ?? ""}
+    </span>
+  );
   return (
     <div
       className={cn(
@@ -155,13 +232,7 @@ export function RecipeIngredientReadLine({
         {fixedAmount ? (
           <Lock className="size-3 shrink-0" aria-label="Feste Menge" />
         ) : null}
-        {mark(
-          highlight?.amount,
-          <span>
-            {formatAmount(quantity, quantityLow, { fraction: displayFraction })}{" "}
-            {unitLabel ?? ""}
-          </span>,
-        )}
+        {mark(highlight?.amount, amountNode)}
       </span>
       <span className="flex-1">
         {mark(

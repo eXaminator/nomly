@@ -8,6 +8,7 @@ export type EntityKind =
   | "ingredient"
   | "product"
   | "unit"
+  | "quantifier"
   | "category"
   | "tag"
   | "supermarket";

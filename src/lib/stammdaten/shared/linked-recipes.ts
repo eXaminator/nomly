@@ -111,6 +111,16 @@ export function linkedRecipesForUnits(
   );
 }
 
+export function linkedRecipesForQuantifiers(
+  quantifierIds: number[],
+): Map<number, RecipeLink[]> {
+  return collectRecipeJoin(
+    quantifierIds,
+    recipeIngredient.quantifierId,
+    /* viaSection */ true,
+  );
+}
+
 /**
  * For each unit, the articles whose per-ingredient conversions reference it —
  * on EITHER side of the edge (`from_unit_id` or `to_unit_id`). The unit-side
@@ -216,7 +226,10 @@ export function linkedRecipesForTags(
 
 function collectRecipeJoin(
   ids: number[],
-  ownerColumn: typeof recipeIngredient.ingredientId | typeof recipeIngredient.unitId,
+  ownerColumn:
+    | typeof recipeIngredient.ingredientId
+    | typeof recipeIngredient.unitId
+    | typeof recipeIngredient.quantifierId,
   viaSection: boolean,
 ): Map<number, RecipeLink[]> {
   const out = new Map<number, RecipeLink[]>();

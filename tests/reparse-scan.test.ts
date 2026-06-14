@@ -74,6 +74,7 @@ function cur(over: Partial<CurrentRow> = {}): CurrentRow {
     name: "Tomate",
     quantity: 2,
     quantityLow: null,
+    quantifierId: null,
     unitId: 3,
     notes: null,
     isOptional: false,

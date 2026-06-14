@@ -13,7 +13,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { DietBadge } from "@/components/recipes/diet-badge";
 import { IngredientLine } from "@/components/recipes/ingredient-line";
-import { formatQuantity } from "@/components/recipes/ingredient-read-line";
+import { displayAmount } from "@/components/recipes/ingredient-read-line";
 import { NeedsUpdateToggle } from "@/components/recipes/needs-update-toggle";
 import {
   UpcomingUsesButton,
@@ -224,9 +224,14 @@ function RecipeBody({ recipeId, mealPlanId }: { recipeId: number; mealPlanId: nu
                             />
                           ) : null}
                           <span>
-                            {formatQuantity(ing.quantity, {
-                              fraction: ing.displayFraction,
-                            })}{" "}
+                            {displayAmount(
+                              {
+                                quantity: ing.quantity,
+                                quantifierName: ing.quantifierName,
+                                quantifierValue: ing.quantifierValue,
+                              },
+                              { fraction: ing.displayFraction },
+                            )}{" "}
                             {ing.unitName ?? ""}
                           </span>
                         </span>

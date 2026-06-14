@@ -7,6 +7,7 @@ import {
   tidyRemainderFragment,
 } from "@/lib/recipe-import/ingredient";
 import { parseIngredientLines, type ParseLookups } from "@/lib/recipe-import";
+import { testQuantifierLookup } from "./_helpers/quantifiers";
 import { segmentLine, type LineSegment } from "@/lib/recipe-import/ast/segment-line";
 import { lex } from "@/lib/recipe-import/ast/lexer";
 
@@ -119,6 +120,7 @@ const TEST_LOOKUPS: ParseLookups = {
   },
   ingredients: new Map(),
   ingredientCatalog: [],
+  quantifiers: testQuantifierLookup(),
 };
 
 /** Run the full production pipeline on a single line and adapt the

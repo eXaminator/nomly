@@ -52,7 +52,6 @@ import { ingredientToPayload, toNumberOrNull } from "./payload";
 import { buildUnitInflector, type UnitInflector } from "./unit-inflect";
 import type { UnitForm } from "@/lib/recipes/reparse-scan";
 import {
-  formatAmount,
   RecipeIngredientReadLine,
   type LineHighlight,
 } from "./ingredient-read-line";
@@ -215,12 +214,35 @@ function aliasWarningText(w: AliasWarning): string {
     : `Alias „${w.aliasName}“ angelegt — kollidiert mit einem Alias von ${others}`;
 }
 
-function amountStr(
-  q: number | null,
-  qLow: number | null,
-  unit: string | null,
-): string {
-  return `${formatAmount(q, qLow)} ${unit ?? ""}`.replace(/\s+/g, " ").trim();
+/** The amount REPRESENTATION of one diff side — what the amount diff compares.
+ *  A literal amount and a quantifier with the same effective number differ in
+ *  representation (one has a `quantifierId`, the other doesn't), so they read
+ *  as a change even though they render the same string. */
+export type AmountRepresentation = {
+  quantity: number | null;
+  quantityLow: number | null;
+  quantifierId: number | null;
+  unitLabel: string | null;
+};
+
+/**
+ * True when two amount sides differ in REPRESENTATION rather than just rendered
+ * text: the tuple (quantity, quantityLow, quantifierId, unitLabel). So a
+ * literal `2` vs a quantifier `zwei` (effective 2) is a change, while identical
+ * quantifiers — or identical literals — are not. The unit label is compared
+ * already inflected by the caller (so a pure singular/plural difference is not
+ * a change).
+ */
+export function amountRepresentationChanged(
+  cur: AmountRepresentation,
+  prop: AmountRepresentation,
+): boolean {
+  return (
+    cur.quantity !== prop.quantity ||
+    cur.quantityLow !== prop.quantityLow ||
+    cur.quantifierId !== prop.quantifierId ||
+    (cur.unitLabel ?? "") !== (prop.unitLabel ?? "")
+  );
 }
 /** Stable identity of a row's ingredient mapping — what the diff compares to
  *  decide if the mapping CHANGED. A catalog id for matched rows, the sentinel
@@ -310,20 +332,29 @@ function computeHighlights(
       continue;
     }
     const flags: LineHighlight = {
-      // Compare the quantity-inflected unit label on both sides, so a pure
-      // singular/plural difference collapses to the same string (no highlight)
-      // while a real quantity or unit/alias change still differs.
-      // An unassigned draft is pure text — its amount is dropped on save, so
-      // compare it as amountless (mirrors the masked current side).
-      amount:
-        amountStr(c.quantity, c.quantityLow, inflect(c.unitLabel, c.quantity)) !==
-        (d.unassigned
-          ? ""
-          : amountStr(
-              toNumberOrNull(d.quantity),
-              d.isRange ? toNumberOrNull(d.quantityLow) : null,
-              inflect(d.unit?.name ?? null, toNumberOrNull(d.quantity)),
-            )),
+      // Compare the amount REPRESENTATION (quantity, quantityLow, quantifierId,
+      // inflected unit label), not just the rendered string: a literal `2` and a
+      // quantifier `zwei` (effective 2) read the same but differ in
+      // representation, so that's a change. The unit label is pre-inflected by
+      // quantity on both sides so a pure singular/plural difference is NOT a
+      // change. An unassigned draft is pure text — its amount is dropped on
+      // save, so compare it as fully empty (mirrors the masked current side).
+      amount: amountRepresentationChanged(
+        {
+          quantity: c.quantity,
+          quantityLow: c.quantityLow,
+          quantifierId: c.quantifierId,
+          unitLabel: inflect(c.unitLabel, c.quantity),
+        },
+        d.unassigned
+          ? { quantity: null, quantityLow: null, quantifierId: null, unitLabel: null }
+          : {
+              quantity: toNumberOrNull(d.quantity),
+              quantityLow: d.isRange ? toNumberOrNull(d.quantityLow) : null,
+              quantifierId: d.quantifierId,
+              unitLabel: inflect(d.unit?.name ?? null, toNumberOrNull(d.quantity)),
+            },
+      ),
       name: c.name.trim() !== d.name.trim(),
       notes: (c.notes ?? "").trim() !== d.notes.trim(),
       // Identity comparison, not label text: "Brauner Zucker" vs the lowercased
@@ -350,6 +381,9 @@ type ScanRowSummary = {
   canonicalName: string | null;
   quantity: number | null;
   quantityLow: number | null;
+  quantifierId: number | null;
+  quantifierName: string | null;
+  quantifierValue: number | null;
   unitLabel: string | null;
   displayFraction: boolean;
   notes: string | null;
@@ -1098,7 +1132,13 @@ export function BulkReparseDialog({
                                               key={k}
                                               quantity={c.quantity}
                                               quantityLow={c.quantityLow}
-                                              unitLabel={inflect(c.unitLabel, c.quantity)}
+                                              quantifierName={c.quantifierName}
+                                              quantifierValue={c.quantifierValue}
+                                              quantifierTooltip
+                                              unitLabel={inflect(
+                                                c.unitLabel,
+                                                c.quantity ?? c.quantifierValue,
+                                              )}
                                               displayFraction={c.displayFraction}
                                               name={c.name}
                                               canonicalName={c.canonicalName}
@@ -1151,12 +1191,24 @@ export function BulkReparseDialog({
                                                       ? null
                                                       : toNumberOrNull(d.quantityLow)
                                                   }
+                                                  quantifierName={
+                                                    d.unassigned
+                                                      ? null
+                                                      : (d.quantifierName ?? null)
+                                                  }
+                                                  quantifierValue={
+                                                    d.unassigned
+                                                      ? null
+                                                      : (d.quantifierValue ?? null)
+                                                  }
+                                                  quantifierTooltip
                                                   unitLabel={
                                                     d.unassigned
                                                       ? null
                                                       : inflect(
                                                           d.unit?.name ?? null,
-                                                          toNumberOrNull(d.quantity),
+                                                          toNumberOrNull(d.quantity) ??
+                                                            (d.quantifierValue ?? null),
                                                         )
                                                   }
                                                   displayFraction={
