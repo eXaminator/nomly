@@ -1,5 +1,4 @@
 import {
-  isColorAdjective,
   isStandaloneDescriptor,
   normalizeForMatch,
   preIsHeadlessModifier,
@@ -1155,10 +1154,19 @@ function conjunctionSplit(
     // Dash-compound: "Weizen- und …" (the leaf before the separator is a dash,
     // i.e. the preceding token ends with a dash — even across whitespace).
     if (all[sep.at - 1]?.kind === "dash") return false;
-    // Color-adjective guard: parallel adjectives modify one downstream noun.
+    // Parallel-modifier guard: when the words IMMEDIATELY flanking the
+    // conjunction are both bare descriptors with no head noun of their own
+    // ("gelbe und rote", "yellow and red"), they modify one shared downstream
+    // noun — not two ingredients. Generalises the old color-only guard to the
+    // descriptor vocabulary (colors are a subset), the spec's allowed home.
     const before = prevContentWord(all, sep.at, from);
     const after = nextContentWord(all, sep.at + sep.span, to);
-    if (before && after && isColorAdjective(before.text) && isColorAdjective(after.text)) {
+    if (
+      before &&
+      after &&
+      isStandaloneDescriptor(before.text) &&
+      isStandaloneDescriptor(after.text)
+    ) {
       return false;
     }
     return true;
@@ -1201,4 +1209,3 @@ function conjunctionSplit(
 }
 
 void normalizeForMatch;
-void isStandaloneDescriptor;
