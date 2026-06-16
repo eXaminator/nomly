@@ -27,6 +27,7 @@ function item(overrides: Partial<ShoppingItemView>): ShoppingItemView {
     fullyStocked: false,
     defaultUnitId: null,
     defaultUnitName: null,
+    unspecifiedSourceCount: 0,
     ...overrides,
   };
 }

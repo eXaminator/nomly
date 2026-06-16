@@ -484,6 +484,39 @@ describe("shopping merge-on-add", () => {
     expect(amounts[1].quantity).toBe(4);
   });
 
+  it("counts sources with no quantity in unspecifiedSourceCount", async () => {
+    const { db } = await import("@/db");
+    const { recipeIngredient } = await import("@/db/schema");
+    // Tomate already contributes 500 g; add a second Tomate line with no
+    // amount at all so the item mixes a quantified and an un-quantified source.
+    db.insert(recipeIngredient)
+      .values({
+        sectionId: ctx.sectionId,
+        ingredientId: ctx.ingredientIds.tomate,
+        quantity: null,
+        unitId: null,
+      })
+      .run();
+    const { previewMeals } = await import("@/lib/shopping/preview");
+    const { addMealsToList } = await import("@/lib/shopping/merge");
+    const { listShoppingItems } = await import("@/lib/shopping/items");
+    const meals = previewMeals("2026-05-23", 1);
+    addMealsToList([
+      {
+        mealPlanId: ctx.mealPlanId,
+        ingredients: meals[0].sections
+          .flatMap((s) => s.ingredients)
+          .map((i) => ({ recipeIngredientId: i.recipeIngredientId })),
+      },
+    ]);
+    const tomate = listShoppingItems().find((i) => i.name === "Tomate");
+    expect(tomate?.unspecifiedSourceCount).toBe(1);
+    // The quantified demand still aggregates as usual (500 g × 2 = 1 kg).
+    const mass = tomate?.amounts.find((a) => a.dimension === "mass");
+    expect(mass?.quantity).toBe(1);
+    expect(mass?.unitName).toBe("kg");
+  });
+
   it("exposes per-source recipe notes on each item", async () => {
     const { db } = await import("@/db");
     const { recipeIngredient } = await import("@/db/schema");

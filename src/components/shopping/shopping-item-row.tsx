@@ -68,6 +68,10 @@ export function ShoppingItemRow({
   const isUnavailableHere =
     activeSupermarketId != null &&
     item.unavailableSupermarketIds.includes(activeSupermarketId);
+  // The "ohne Menge" count is shown on the aggregate only once a quantified
+  // amount is present; mirror that gate for the per-source flag so the
+  // all-unspecified case stays exactly as it was.
+  const flagUnspecified = item.amounts.some((a) => a.quantity != null);
 
   return (
     <div
@@ -112,7 +116,10 @@ export function ShoppingItemRow({
             )}
           >
             <span className="font-medium" data-item-name>{item.name}</span>
-            <AmountList amounts={item.amounts} />
+            <AmountList
+              amounts={item.amounts}
+              unspecifiedCount={item.unspecifiedSourceCount}
+            />
             {item.note ? (
               <span className="text-xs text-[var(--color-muted-fg)]">
                 · {item.note}
@@ -130,13 +137,25 @@ export function ShoppingItemRow({
           item.stock?.quantity != null ? (
             <ul className="flex flex-col gap-0.5 text-xs text-[var(--color-muted-fg)]">
               {item.sources.map((s) => (
-                <SourceLine key={`src-${s.sourceId}`} source={s} />
+                <SourceLine
+                  key={`src-${s.sourceId}`}
+                  source={s}
+                  flagUnspecified={flagUnspecified}
+                />
               ))}
               {item.stapleSources.map((s) => (
-                <StapleLine key={`stp-${s.sourceId}`} staple={s} />
+                <StapleLine
+                  key={`stp-${s.sourceId}`}
+                  staple={s}
+                  flagUnspecified={flagUnspecified}
+                />
               ))}
               {item.manualAmounts.map((m) => (
-                <ManualLine key={`man-${m.id}`} manual={m} />
+                <ManualLine
+                  key={`man-${m.id}`}
+                  manual={m}
+                  flagUnspecified={flagUnspecified}
+                />
               ))}
               {item.stock?.quantity != null ? (
                 <StockLine stock={item.stock} />
@@ -205,21 +224,58 @@ export function ShoppingItemRow({
   );
 }
 
-function ManualLine({ manual }: { manual: ShoppingItemManualAmount }) {
+/** The dot-separated amount that trails a source/staple/manual row. A row with
+ *  no number shows "· ohne Menge" (matching the aggregate's count) when the
+ *  item is in the count-shown state; otherwise it falls back to a bare unit or
+ *  nothing, leaving the all-unspecified case untouched. */
+function AmountSegment({
+  quantity,
+  unitName,
+  flagUnspecified,
+}: {
+  quantity: number | null;
+  unitName: string | null;
+  flagUnspecified: boolean;
+}) {
+  if (quantity != null) {
+    return (
+      <span>
+        · {formatQty(quantity)}
+        {unitName ? ` ${unitName}` : ""}
+      </span>
+    );
+  }
+  if (flagUnspecified) return <span className="italic">· ohne Menge</span>;
+  if (unitName) return <span>· {unitName}</span>;
+  return null;
+}
+
+function ManualLine({
+  manual,
+  flagUnspecified,
+}: {
+  manual: ShoppingItemManualAmount;
+  flagUnspecified: boolean;
+}) {
   return (
     <li className="inline-flex flex-wrap items-baseline gap-x-1.5 px-1">
       <span className="font-medium text-[var(--color-fg)]/80">Manuell</span>
-      {manual.quantity != null || manual.unitName ? (
-        <span>
-          {manual.quantity != null ? formatQty(manual.quantity) : ""}
-          {manual.unitName ? ` ${manual.unitName}` : ""}
-        </span>
-      ) : null}
+      <AmountSegment
+        quantity={manual.quantity}
+        unitName={manual.unitName}
+        flagUnspecified={flagUnspecified}
+      />
     </li>
   );
 }
 
-function SourceLine({ source }: { source: ShoppingItemSourceView }) {
+function SourceLine({
+  source,
+  flagUnspecified,
+}: {
+  source: ShoppingItemSourceView;
+  flagUnspecified: boolean;
+}) {
   return (
     <li className="inline-flex flex-wrap items-baseline gap-x-1.5 px-1">
       {source.recipeNeedsUpdate ? (
@@ -229,27 +285,12 @@ function SourceLine({ source }: { source: ShoppingItemSourceView }) {
         />
       ) : null}
       <span className="font-medium text-[var(--color-fg)]/80">{source.recipeTitle}</span>
-      {(() => {
-        const parts = [
-          source.mealDate ? formatDate(source.mealDate) : null,
-          source.mealServings != null
-            ? `${source.mealServings} ${source.mealServings === 1 ? "Portion" : "Portionen"}`
-            : null,
-        ].filter(Boolean);
-        return parts.length > 0 ? <span>({parts.join(" · ")})</span> : null;
-      })()}
-      {(() => {
-        const unitLabel = source.contributedUnit;
-        if (source.contributedQuantity == null && !unitLabel) return null;
-        return (
-          <span>
-            {source.contributedQuantity != null
-              ? formatQty(source.contributedQuantity)
-              : ""}
-            {unitLabel ? ` ${unitLabel}` : ""}
-          </span>
-        );
-      })()}
+      {source.mealDate ? <span>({formatDate(source.mealDate)})</span> : null}
+      <AmountSegment
+        quantity={source.contributedQuantity}
+        unitName={source.contributedUnit}
+        flagUnspecified={flagUnspecified}
+      />
       {source.recipeNotes ? <span>· {source.recipeNotes}</span> : null}
       {source.mealNote ? (
         <span className="italic">· {source.mealNote}</span>
@@ -270,20 +311,23 @@ function StockLine({ stock }: { stock: ShoppingItemStock }) {
   );
 }
 
-function StapleLine({ staple }: { staple: ShoppingItemStapleSourceView }) {
+function StapleLine({
+  staple,
+  flagUnspecified,
+}: {
+  staple: ShoppingItemStapleSourceView;
+  flagUnspecified: boolean;
+}) {
   return (
     <li className="inline-flex flex-wrap items-baseline gap-x-1.5 px-1">
       <span className="font-medium text-[var(--color-fg)]/80">
         {staple.stapleGroupName}
       </span>
-      {staple.contributedQuantity != null || staple.contributedUnit ? (
-        <span>
-          {staple.contributedQuantity != null
-            ? formatQty(staple.contributedQuantity)
-            : ""}
-          {staple.contributedUnit ? ` ${staple.contributedUnit}` : ""}
-        </span>
-      ) : null}
+      <AmountSegment
+        quantity={staple.contributedQuantity}
+        unitName={staple.contributedUnit}
+        flagUnspecified={flagUnspecified}
+      />
     </li>
   );
 }

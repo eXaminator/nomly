@@ -145,6 +145,12 @@ export type ShoppingItemView = {
    *  new manual amounts and the "Auf Lager" stock line. */
   defaultUnitId: number | null;
   defaultUnitName: string | null;
+  /** How many contributing sources (meals, staples, manual amounts) carry no
+   *  specific quantity — a blank amount, a unit without a number, or an
+   *  unspecific unit like "etwas". The display surfaces this as "+ N ohne
+   *  Menge" next to the aggregated total so un-quantified demand isn't hidden
+   *  behind the sum of the quantified sources. */
+  unspecifiedSourceCount: number;
 };
 
 export function listShoppingItems(
@@ -435,6 +441,10 @@ export function listShoppingItems(
       (a) => !(a.quantity != null && a.quantity <= 0),
     );
     const fullyStocked = rawAmounts.length > 0 && amounts.length === 0;
+    const unspecifiedSourceCount =
+      sources.filter((s) => s.contributedQuantity == null).length +
+      stapleSources.filter((s) => s.contributedQuantity == null).length +
+      manuals.filter((m) => m.quantity == null).length;
     const unavailable = ingredientUnavailable.get(r.refId as number) ?? [];
     return {
       id: r.id,
@@ -482,6 +492,7 @@ export function listShoppingItems(
       defaultUnitName: r.defaultUnitId != null
         ? (r.defaultUnitDisplay ?? r.defaultUnitName)
         : stueck.unitName,
+      unspecifiedSourceCount,
     };
   });
 

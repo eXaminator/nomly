@@ -175,7 +175,11 @@ function StockCheckBody({
                       ) ? (
                         <p className="truncate text-xs text-[var(--color-muted-fg)]">
                           Benötigt:{" "}
-                          <AmountList amounts={i.requiredAmounts} className="text-xs" />
+                          <AmountList
+                            amounts={i.requiredAmounts}
+                            unspecifiedCount={i.unspecifiedSourceCount}
+                            className="text-xs"
+                          />
                         </p>
                       ) : null}
                     </div>
