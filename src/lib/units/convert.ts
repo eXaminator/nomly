@@ -242,17 +242,25 @@ export function aggregateContributions(
       const toContainer = convert(base, containerEdge.from);
       const qty =
         baseTotal == null || toContainer == null ? null : ceilWhole(baseTotal * toContainer);
+      const baseUnit = units.get(base);
       // Surface the summed base total (the contributing sub-units) so the
       // display can read "2 Stück (12 Zehen)" — the pack count rounds up, the
-      // parenthetical shows what actually accrued.
-      const baseUnit = units.get(base);
+      // parenthetical shows what actually accrued. Only do this when demand was
+      // actually expressed in a smaller unit, though: a contribution made
+      // directly in the purchase unit ("2 Stück") has nothing to break down, so
+      // showing "(16 Scheiben)" for it would be noise.
+      const hasSubUnitDemand = comp.some(
+        (id) => id !== containerEdge.from && contribByUnit.has(id),
+      );
       lines.push({
         unitId: containerEdge.from,
         unitName: container ? pluralizeLabel(container, qty) : String(containerEdge.from),
         quantity: qty,
         dimension: container?.dimension ?? "none",
-        baseQuantity: baseTotal == null ? null : round3(baseTotal),
-        baseUnitName: baseUnit ? pluralizeLabel(baseUnit, baseTotal) : null,
+        baseQuantity:
+          hasSubUnitDemand && baseTotal != null ? round3(baseTotal) : null,
+        baseUnitName:
+          hasSubUnitDemand && baseUnit ? pluralizeLabel(baseUnit, baseTotal) : null,
       });
       continue;
     }

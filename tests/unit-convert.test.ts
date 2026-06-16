@@ -103,6 +103,52 @@ describe("aggregateContributions", () => {
     ]);
   });
 
+  it("does not break a direct container contribution down to sub-units", () => {
+    const edges: ConversionEdge[] = [
+      { from: STUECK, to: ZEHE, factor: 10, isContainer: true }, // 1 Stück = 10 Zehen
+    ];
+    // The recipe asked for whole Stück, so there is no smaller-unit demand to
+    // reference — no "(… Zehen)" breakdown should appear.
+    const out = aggregateContributions(
+      [{ unitId: STUECK, quantity: 2 }],
+      edges,
+      units(),
+    );
+    expect(out).toEqual([
+      {
+        unitId: STUECK,
+        unitName: "Stück",
+        quantity: 2,
+        dimension: "count",
+        baseQuantity: null,
+        baseUnitName: null,
+      },
+    ]);
+  });
+
+  it("still shows the breakdown when a sub-unit contributes alongside the container", () => {
+    const edges: ConversionEdge[] = [
+      { from: STUECK, to: ZEHE, factor: 10, isContainer: true },
+    ];
+    // 2 Stück (=20 Zehen) + 5 Zehen = 25 Zehen → ceil(25/10) = 3 Stück, and the
+    // breakdown stays because demand was expressed in Zehen.
+    const out = aggregateContributions(
+      [{ unitId: STUECK, quantity: 2 }, { unitId: ZEHE, quantity: 5 }],
+      edges,
+      units(),
+    );
+    expect(out).toEqual([
+      {
+        unitId: STUECK,
+        unitName: "Stück",
+        quantity: 3,
+        dimension: "count",
+        baseQuantity: 25,
+        baseUnitName: "Zehen",
+      },
+    ]);
+  });
+
   it("keeps disconnected components as separate lines (Glas + Packung)", () => {
     const edges: ConversionEdge[] = [
       { from: ML, to: G, factor: 0.5, isContainer: false },
