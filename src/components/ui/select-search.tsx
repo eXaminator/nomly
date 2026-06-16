@@ -4,6 +4,7 @@ import * as React from "react";
 import * as Popover from "@radix-ui/react-popover";
 import { Check, ChevronDown, Loader2, Plus, Search, X } from "lucide-react";
 import { cn } from "@/lib/cn";
+import { useScrollLockBypass } from "@/lib/use-scroll-lock-bypass";
 import { Input } from "./input.tsx";
 
 export type SelectSearchItem = {
@@ -142,40 +143,9 @@ export function SelectSearch({
     }
   }, [open]);
 
-  // Touch twin of the onWheel workaround below: inside a Radix Dialog/Drawer,
-  // `react-remove-scroll` preventDefaults touchmove on anything outside the
-  // dialog body — including this portaled popover — so on mobile the list
-  // can't be scrolled by finger. Scroll it manually and preventDefault, but
-  // let the edges bubble so an overscroll doesn't feel stuck. A non-passive
-  // native listener is required because React's touchmove is passive (can't
-  // preventDefault).
-  React.useEffect(() => {
-    if (!open) return;
-    const el = listRef.current;
-    if (!el) return;
-    let lastY = 0;
-    const onTouchStart = (e: TouchEvent) => {
-      lastY = e.touches[0]?.clientY ?? 0;
-    };
-    const onTouchMove = (e: TouchEvent) => {
-      if (el.scrollHeight <= el.clientHeight) return;
-      const y = e.touches[0]?.clientY ?? lastY;
-      const dy = lastY - y; // >0 → finger up → scroll content down
-      lastY = y;
-      const atTop = dy < 0 && el.scrollTop <= 0;
-      const atBottom =
-        dy > 0 && Math.ceil(el.scrollTop + el.clientHeight) >= el.scrollHeight;
-      if (atTop || atBottom) return;
-      el.scrollTop += dy;
-      e.preventDefault();
-    };
-    el.addEventListener("touchstart", onTouchStart, { passive: true });
-    el.addEventListener("touchmove", onTouchMove, { passive: false });
-    return () => {
-      el.removeEventListener("touchstart", onTouchStart);
-      el.removeEventListener("touchmove", onTouchMove);
-    };
-  }, [open]);
+  // Inside a Radix Dialog/Drawer `react-remove-scroll` kills touch/wheel
+  // scrolling on this portaled popover; let the list scroll natively again.
+  useScrollLockBypass(listRef, open);
 
   // Keep the active option in view when keyboard navigation moves it past
   // the visible region of the (potentially long) list.
@@ -323,23 +293,6 @@ export function SelectSearch({
             ref={listRef}
             className="max-h-72 overflow-auto py-1 overscroll-contain"
             role="listbox"
-            onWheel={(e) => {
-              // Inside a Radix Dialog/Drawer the parent uses
-              // `react-remove-scroll`, which preventDefaults wheel events on
-              // anything outside the dialog body — including this portaled
-              // popover, leaving the listbox unscrollable. Scroll manually
-              // and preventDefault so this stays consistent inside and
-              // outside dialogs (no double-scroll).
-              const el = e.currentTarget;
-              if (el.scrollHeight <= el.clientHeight) return;
-              const atTop = e.deltaY < 0 && el.scrollTop === 0;
-              const atBottom =
-                e.deltaY > 0 &&
-                Math.ceil(el.scrollTop + el.clientHeight) >= el.scrollHeight;
-              if (atTop || atBottom) return;
-              el.scrollTop += e.deltaY;
-              e.preventDefault();
-            }}
           >
             {items.length === 0 && !canCreate ? (
               <li className="px-3 py-2 text-sm text-[var(--color-muted-fg)]">

@@ -4,6 +4,7 @@ import * as React from "react";
 import * as Popover from "@radix-ui/react-popover";
 import { Loader2, Plus, X } from "lucide-react";
 import { cn } from "@/lib/cn";
+import { useScrollLockBypass } from "@/lib/use-scroll-lock-bypass";
 import { Input } from "./input.tsx";
 
 export type ComboboxItem = {
@@ -49,6 +50,11 @@ export function Combobox({
   const [activeIdx, setActiveIdx] = React.useState(0);
   const reqRef = React.useRef(0);
   const inputRef = React.useRef<HTMLInputElement>(null);
+  const listRef = React.useRef<HTMLUListElement>(null);
+
+  // Inside a Radix Dialog/Drawer `react-remove-scroll` kills touch/wheel
+  // scrolling on this portaled popover; let the list scroll natively again.
+  useScrollLockBypass(listRef, open);
 
   React.useEffect(() => {
     if (!open) return;
@@ -196,7 +202,11 @@ export function Combobox({
           onOpenAutoFocus={(e) => e.preventDefault()}
           className="z-50 w-[var(--radix-popover-trigger-width)] overflow-hidden rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-card)] shadow-lg"
         >
-          <ul className="max-h-72 overflow-auto py-1" role="listbox">
+          <ul
+            ref={listRef}
+            className="max-h-72 overflow-auto py-1 overscroll-contain"
+            role="listbox"
+          >
             {items.length === 0 && !canCreate ? (
               <li className="px-3 py-2 text-sm text-[var(--color-muted-fg)]">
                 {query.trim().length === 0

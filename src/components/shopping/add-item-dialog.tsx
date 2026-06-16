@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useScrollLockBypass } from "@/lib/use-scroll-lock-bypass";
 import {
   CreateArticleDialog,
   type CreatedArticle,
@@ -71,36 +72,10 @@ export function AddItemDialog({ open, onClose, onAdded }: Props) {
     }
   }, [open]);
 
-  // Touch-scroll the portaled suggestion list on mobile. The dialog's
-  // `react-remove-scroll` preventDefaults touchmove outside its body — which
-  // includes this popover — so scroll it manually (mirrors select-search). A
-  // non-passive native listener is required to preventDefault.
-  React.useEffect(() => {
-    const el = suggestListRef.current;
-    if (!el) return;
-    let lastY = 0;
-    const onTouchStart = (e: TouchEvent) => {
-      lastY = e.touches[0]?.clientY ?? 0;
-    };
-    const onTouchMove = (e: TouchEvent) => {
-      if (el.scrollHeight <= el.clientHeight) return;
-      const y = e.touches[0]?.clientY ?? lastY;
-      const dy = lastY - y;
-      lastY = y;
-      const atTop = dy < 0 && el.scrollTop <= 0;
-      const atBottom =
-        dy > 0 && Math.ceil(el.scrollTop + el.clientHeight) >= el.scrollHeight;
-      if (atTop || atBottom) return;
-      el.scrollTop += dy;
-      e.preventDefault();
-    };
-    el.addEventListener("touchstart", onTouchStart, { passive: true });
-    el.addEventListener("touchmove", onTouchMove, { passive: false });
-    return () => {
-      el.removeEventListener("touchstart", onTouchStart);
-      el.removeEventListener("touchmove", onTouchMove);
-    };
-  }, [hits.length, suggestOpen]);
+  // The dialog's `react-remove-scroll` kills touch/wheel scrolling on this
+  // portaled suggestion list; let it scroll natively again (mirrors
+  // select-search).
+  useScrollLockBypass(suggestListRef, suggestOpen);
 
   // Fetch the generic "Stück" fallback once per open — used for brand-new
   // articles (which have no own default unit) and when no hit is selected yet.
