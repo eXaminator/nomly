@@ -145,7 +145,10 @@ export function SelectSearch({
 
   // Inside a Radix Dialog/Drawer `react-remove-scroll` kills touch/wheel
   // scrolling on this portaled popover; let the list scroll natively again.
-  useScrollLockBypass(listRef, open);
+  // Spread onto the list (instead of an `open`-keyed effect) so the listeners
+  // attach when Radix actually mounts the content, and keep `listRef` pointed
+  // at the live node for the scroll-into-view effect below.
+  const listCallbackRef = useScrollLockBypass(listRef);
 
   // Keep the active option in view when keyboard navigation moves it past
   // the visible region of the (potentially long) list.
@@ -290,7 +293,7 @@ export function SelectSearch({
             ) : null}
           </div>
           <ul
-            ref={listRef}
+            ref={listCallbackRef}
             className="max-h-72 overflow-auto py-1 overscroll-contain"
             role="listbox"
           >

@@ -50,11 +50,10 @@ export function Combobox({
   const [activeIdx, setActiveIdx] = React.useState(0);
   const reqRef = React.useRef(0);
   const inputRef = React.useRef<HTMLInputElement>(null);
-  const listRef = React.useRef<HTMLUListElement>(null);
 
   // Inside a Radix Dialog/Drawer `react-remove-scroll` kills touch/wheel
   // scrolling on this portaled popover; let the list scroll natively again.
-  useScrollLockBypass(listRef, open);
+  const listCallbackRef = useScrollLockBypass<HTMLUListElement>();
 
   React.useEffect(() => {
     if (!open) return;
@@ -203,7 +202,7 @@ export function Combobox({
           className="z-50 w-[var(--radix-popover-trigger-width)] overflow-hidden rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-card)] shadow-lg"
         >
           <ul
-            ref={listRef}
+            ref={listCallbackRef}
             className="max-h-72 overflow-auto py-1 overscroll-contain"
             role="listbox"
           >

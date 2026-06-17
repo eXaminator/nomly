@@ -16,28 +16,34 @@ import * as React from "react";
  * with `overscroll-behavior: contain` on the element so an over-scroll past an
  * edge doesn't chain into the locked background.
  *
+ * Returns a **callback ref** to spread onto the scroll container rather than
+ * keying an effect on an `open` flag: Radix mounts the popover content a beat
+ * after `open` flips, so an effect would run while the element is still null
+ * and never attach. A callback ref fires exactly when the node mounts (and its
+ * cleanup when it unmounts), so the listeners always land on the live element.
  * Native listeners are required: synthetic React events route through React's
  * own root, so stopping a synthetic event would not stop react-remove-scroll's
  * native `document` listener.
  *
- * @param ref     the scroll container (the element with `overflow: auto`)
- * @param enabled gate the listeners (e.g. only while the popover is open) so
- *                the ref is attached after the content has mounted
+ * @param ref optional mutable ref kept pointed at the live node, so callers can
+ *            still read the element from other effects (scroll-into-view, etc.)
  */
-export function useScrollLockBypass(
-  ref: React.RefObject<HTMLElement | null>,
-  enabled = true,
-) {
-  React.useEffect(() => {
-    if (!enabled) return;
-    const el = ref.current;
-    if (!el) return;
-    const stop = (e: Event) => e.stopPropagation();
-    el.addEventListener("touchmove", stop, { passive: true });
-    el.addEventListener("wheel", stop, { passive: true });
-    return () => {
-      el.removeEventListener("touchmove", stop);
-      el.removeEventListener("wheel", stop);
-    };
-  }, [ref, enabled]);
+export function useScrollLockBypass<T extends HTMLElement>(
+  ref?: { current: T | null },
+): (node: T | null) => void {
+  return React.useCallback(
+    (node: T | null) => {
+      if (ref) ref.current = node;
+      if (!node) return;
+      const stop = (e: Event) => e.stopPropagation();
+      node.addEventListener("touchmove", stop, { passive: true });
+      node.addEventListener("wheel", stop, { passive: true });
+      return () => {
+        node.removeEventListener("touchmove", stop);
+        node.removeEventListener("wheel", stop);
+        if (ref) ref.current = null;
+      };
+    },
+    [ref],
+  );
 }

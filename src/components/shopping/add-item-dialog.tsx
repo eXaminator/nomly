@@ -55,7 +55,10 @@ export function AddItemDialog({ open, onClose, onAdded }: Props) {
   const [createOpen, setCreateOpen] = React.useState(false);
   // Whether the suggestion popover is open (anchored under the name field).
   const [suggestOpen, setSuggestOpen] = React.useState(false);
-  const suggestListRef = React.useRef<HTMLUListElement>(null);
+  // The dialog's `react-remove-scroll` kills touch/wheel scrolling on this
+  // portaled suggestion list; let it scroll natively again (mirrors
+  // select-search). Callback ref so the listeners attach when the list mounts.
+  const suggestListCallbackRef = useScrollLockBypass<HTMLUListElement>();
 
   React.useEffect(() => {
     if (!open) {
@@ -72,10 +75,6 @@ export function AddItemDialog({ open, onClose, onAdded }: Props) {
     }
   }, [open]);
 
-  // The dialog's `react-remove-scroll` kills touch/wheel scrolling on this
-  // portaled suggestion list; let it scroll natively again (mirrors
-  // select-search).
-  useScrollLockBypass(suggestListRef, suggestOpen);
 
   // Fetch the generic "Stück" fallback once per open — used for brand-new
   // articles (which have no own default unit) and when no hit is selected yet.
@@ -233,7 +232,7 @@ export function AddItemDialog({ open, onClose, onAdded }: Props) {
                   >
                     {hits.length > 0 ? (
                       <ul
-                        ref={suggestListRef}
+                        ref={suggestListCallbackRef}
                         className="flex max-h-60 flex-col divide-y divide-[var(--color-border)] overflow-y-auto overscroll-contain"
                       >
                         {hits.map((h) => (
