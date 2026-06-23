@@ -19,7 +19,7 @@ export function SupermarketFilter({
   onChange,
 }: Props) {
   return (
-    <label className="flex items-center gap-2 text-sm text-[var(--color-muted-fg)]">
+    <label className="flex w-full items-center gap-2 text-sm text-[var(--color-muted-fg)] sm:w-auto">
       <span className="hidden sm:inline">Supermarkt</span>
       <select
         aria-label="Supermarkt"
@@ -28,7 +28,7 @@ export function SupermarketFilter({
           const raw = e.target.value;
           onChange(raw === "" ? null : Number(raw));
         }}
-        className="h-9 max-w-[8rem] rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-bg)] px-2 text-sm text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] sm:max-w-none"
+        className="h-9 w-full rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-bg)] px-2 text-sm text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] sm:w-auto"
       >
         <option value="">Ohne</option>
         {supermarkets.map((s) => {

@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { Ban, BookOpen, Check, MoreVertical, Pencil, Tags, Trash2, Wrench } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -65,6 +65,15 @@ export function ShoppingItemRow({
   disabledOffline = false,
   trailingAction,
 }: Props) {
+  // Radix opens the action menu on `pointerdown`, which on touch fires the
+  // moment a finger lands on the ⋮ button — so a scroll gesture that starts
+  // there pops the menu open. We control the menu ourselves: suppress the
+  // pointerdown-open for touch/pen and open on `click` instead (a click only
+  // fires on a real tap, never when the gesture turns into a scroll). Mouse
+  // keeps its native open-on-pointerdown behaviour.
+  const [menuOpen, setMenuOpen] = useState(false);
+  const lastPointerType = useRef<string>("mouse");
+
   const isUnavailableHere =
     activeSupermarketId != null &&
     item.unavailableSupermarketIds.includes(activeSupermarketId);
@@ -167,8 +176,20 @@ export function ShoppingItemRow({
 
       <div className="flex shrink-0 items-center gap-1" onClick={(e) => e.stopPropagation()}>
         {trailingAction ?? (
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
+        <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
+          <DropdownMenuTrigger
+            asChild
+            onPointerDown={(e) => {
+              lastPointerType.current = e.pointerType;
+              // Block Radix's open-on-pointerdown for touch/pen so a scroll
+              // starting on the button doesn't open the menu.
+              if (e.pointerType !== "mouse") e.preventDefault();
+            }}
+            onClick={() => {
+              // Mouse already toggled on pointerdown; touch/pen opens here.
+              if (lastPointerType.current !== "mouse") setMenuOpen((v) => !v);
+            }}
+          >
             <Button variant="ghost" size="icon" aria-label="Aktionen" title="Aktionen">
               <MoreVertical className="size-4" />
             </Button>

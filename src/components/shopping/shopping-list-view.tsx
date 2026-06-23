@@ -559,10 +559,11 @@ export function ShoppingListView({
             setActiveTab(v as "open" | "checked" | "unavailable")
           }
         >
-          {/* Sticky shelf: tabs pinned left, supermarket select pinned right.
+          {/* Sticky shelf: on mobile the supermarket select stacks below the
+              tabs (no room beside them); from sm up it sits pinned to the right.
               Sits below the AppShell topbar (h-16) at z-20 so it doesn't
               outrank it. */}
-          <div className="sticky top-16 z-20 -mx-4 flex items-center justify-between gap-2 border-b border-[var(--color-border)] bg-[var(--color-bg)]/95 px-4 py-2 backdrop-blur supports-[backdrop-filter]:bg-[var(--color-bg)]/80 md:-mx-6 md:gap-3 md:px-6">
+          <div className="sticky top-16 z-20 -mx-4 flex flex-col gap-2 border-b border-[var(--color-border)] bg-[var(--color-bg)]/95 px-4 py-2 backdrop-blur supports-[backdrop-filter]:bg-[var(--color-bg)]/80 sm:flex-row sm:items-center sm:justify-between md:-mx-6 md:gap-3 md:px-6">
             <TabsList>
               <TabsTrigger value="open">
                 Offen
