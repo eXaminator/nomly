@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { db } from "../../db/index.ts";
 import { unaccent } from "../autocomplete.ts";
 import {
@@ -57,6 +57,36 @@ export type ShoppingItemSourceView = {
    *  recipe servings). Null once the meal link is gone (deleted). */
   mealServings: number | null;
 };
+
+/**
+ * The set of `recipe_ingredient` ids this meal actually contributed to the
+ * shopping list. Used by the recipe view (when opened for a specific meal, via
+ * the `?meal=` param) to emphasize which alternative was picked and mute the
+ * ones that weren't.
+ *
+ * Only rows whose soft `recipe_ingredient_id` link still resolves are returned:
+ * a recipe that was re-parsed/edited after being added detaches the link
+ * (ON DELETE SET NULL), so we simply surface no markers rather than misleading
+ * stale ones. An empty set (meal never added to the list) likewise means the
+ * view falls back to its default rendering.
+ */
+export function getMealShoppingChoices(mealPlanId: number): Set<number> {
+  const rows = db
+    .select({ recipeIngredientId: shoppingItemSource.recipeIngredientId })
+    .from(shoppingItemSource)
+    .where(
+      and(
+        eq(shoppingItemSource.mealPlanId, mealPlanId),
+        isNotNull(shoppingItemSource.recipeIngredientId),
+      ),
+    )
+    .all();
+  return new Set(
+    rows
+      .map((r) => r.recipeIngredientId)
+      .filter((id): id is number => id != null),
+  );
+}
 
 export type ShoppingItemStapleSourceView = {
   sourceId: number;

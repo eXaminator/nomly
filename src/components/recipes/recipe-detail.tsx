@@ -55,11 +55,19 @@ function FixedAmountMarker({ fixed }: { fixed: boolean }) {
 export function RecipeDetail({
   recipe,
   mealPlanId,
+  chosenIngredientIds,
   showEdit,
   showTitle = true,
 }: {
   recipe: RecipeView;
   mealPlanId: number | null;
+  /** When viewing the recipe for a specific meal (`?meal=`), the set of
+   *  recipe-ingredient ids this meal actually put on the shopping list. Within
+   *  an alternative group that has any chosen member, the chosen row(s) are
+   *  emphasized and the others muted, so the picked alternative is obvious.
+   *  Undefined (no meal context / meal not on the list) leaves the default
+   *  rendering untouched. */
+  chosenIngredientIds?: Set<number>;
   showEdit: boolean;
   /** When false, the recipe-name heading is hidden — used by the embed view
    *  where the surrounding chrome (e.g. the HA popup header) already shows it. */
@@ -244,6 +252,11 @@ export function RecipeDetail({
             const renderIngredient = (
               ing: IngredientRow,
               asAlternative = false,
+              // Within an alternative group that this meal chose from:
+              // "chosen" = added to the shopping list (emphasized), "muted" =
+              // not added (faded harder than the default optional dimming).
+              // "default" = no meal decision applies, render as usual.
+              emphasis: "chosen" | "muted" | "default" = "default",
             ) => {
               // "Nicht zugeordnet": pure-text line with no article. Rendered
               // as optional (free-text lines are garnish/leftover-style
@@ -257,10 +270,17 @@ export function RecipeDetail({
                 // top when a long ingredient name + notes wraps onto a
                 // second line. Alternatives go through `isOptionalIngredient`
                 // so they share the same dimmed treatment as explicit
-                // optionals (italic + 65% opacity).
+                // optionals (italic + 65% opacity). When this meal picked from
+                // the group, the chosen row is un-dimmed + emphasized and the
+                // rest are muted further, overriding the default treatment.
                 className={cn(
                   "flex items-start gap-2",
-                  (isOptionalIngredient(ing) || unassigned) && "italic opacity-65",
+                  emphasis === "chosen"
+                    ? "font-medium text-[var(--color-fg)]"
+                    : emphasis === "muted"
+                      ? "italic opacity-40"
+                      : (isOptionalIngredient(ing) || unassigned) &&
+                          "italic opacity-65",
                 )}
               >
                 <UpcomingUsesButton
@@ -337,12 +357,33 @@ export function RecipeDetail({
 
             const renderList = (rows: IngredientRow[]) => (
               <ul className="space-y-1 text-sm text-[var(--color-fg)]">
-                {groupByPrimary(rows).map(({ primary, alternatives }) => (
-                  <Fragment key={primary.id}>
-                    {renderIngredient(primary)}
-                    {alternatives.map((alt) => renderIngredient(alt, true))}
-                  </Fragment>
-                ))}
+                {groupByPrimary(rows).map(({ primary, alternatives }) => {
+                  // A group is "decided" only when it has alternatives AND this
+                  // meal put at least one of the group's rows on the shopping
+                  // list. Then chosen rows are emphasized and the rest muted;
+                  // otherwise every row renders with its default treatment.
+                  const members = [primary, ...alternatives];
+                  const decided =
+                    chosenIngredientIds != null &&
+                    alternatives.length > 0 &&
+                    members.some((m) => chosenIngredientIds.has(m.id));
+                  const emphasisFor = (
+                    m: IngredientRow,
+                  ): "chosen" | "muted" | "default" =>
+                    !decided
+                      ? "default"
+                      : chosenIngredientIds!.has(m.id)
+                        ? "chosen"
+                        : "muted";
+                  return (
+                    <Fragment key={primary.id}>
+                      {renderIngredient(primary, false, emphasisFor(primary))}
+                      {alternatives.map((alt) =>
+                        renderIngredient(alt, true, emphasisFor(alt)),
+                      )}
+                    </Fragment>
+                  );
+                })}
               </ul>
             );
 

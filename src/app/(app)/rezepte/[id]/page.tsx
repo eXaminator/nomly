@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { RecipeDetail } from "@/components/recipes/recipe-detail";
 import { getRecipe } from "@/lib/recipes/service";
+import { getMealShoppingChoices } from "@/lib/shopping/items";
 import { getCurrentUser } from "@/lib/users/current";
 
 export const dynamic = "force-dynamic";
@@ -43,5 +44,19 @@ export default async function RecipeViewPage({
       ? mealParam
       : null;
 
-  return <RecipeDetail recipe={recipe} mealPlanId={mealPlanId} showEdit />;
+  // With a meal in context, load which recipe-ingredient rows this meal put on
+  // the shopping list, so the ingredient view can highlight the chosen
+  // alternative. Empty when the meal was never added — the view falls back to
+  // its default rendering.
+  const chosenIngredientIds =
+    mealPlanId != null ? getMealShoppingChoices(mealPlanId) : undefined;
+
+  return (
+    <RecipeDetail
+      recipe={recipe}
+      mealPlanId={mealPlanId}
+      chosenIngredientIds={chosenIngredientIds}
+      showEdit
+    />
+  );
 }
