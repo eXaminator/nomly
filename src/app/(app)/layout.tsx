@@ -1,5 +1,6 @@
 import { RegisterSW } from "@/components/pwa/register-sw";
 import { PullToRefresh } from "@/components/pwa/pull-to-refresh";
+import { SessionGuard } from "@/components/auth/session-guard";
 import { AppShell } from "@/components/layout/app-shell";
 
 /**
@@ -14,6 +15,7 @@ export default function AppLayout({
 }>) {
   return (
     <>
+      <SessionGuard />
       <RegisterSW />
       <PullToRefresh />
       <AppShell>{children}</AppShell>

@@ -35,6 +35,26 @@ function isApiPath(pathname: string): boolean {
   return pathname.startsWith("/api/");
 }
 
+/**
+ * True only for a genuine top-level document navigation — the one kind of
+ * request that may safely be answered with a redirect to the (cross-origin)
+ * IdP, because the browser follows it as a full-page navigation, which is not
+ * subject to CORS.
+ *
+ * Everything else here is a `fetch()` issued by client code — an RSC refresh
+ * (`router.refresh()`), a `<Link>` prefetch, or an API call. Those carry the
+ * `RSC` / `Next-Router-Prefetch` headers or `Sec-Fetch-Dest: empty`; a real
+ * document load sends `Sec-Fetch-Dest: document`. Older webviews omit the
+ * `Sec-Fetch-*` family entirely — fall back to the `Accept` header.
+ */
+function isDocumentNavigation(request: NextRequest): boolean {
+  const h = request.headers;
+  if (h.has("rsc") || h.has("next-router-prefetch")) return false;
+  const dest = h.get("sec-fetch-dest");
+  if (dest) return dest === "document";
+  return (h.get("accept") ?? "").includes("text/html");
+}
+
 function isEmbedPath(pathname: string): boolean {
   return pathname === "/embed" || pathname.startsWith("/embed/");
 }
@@ -114,9 +134,19 @@ export async function proxy(request: NextRequest) {
     return authorizeScope(embed.scope, pathname, request.method);
   }
 
-  // Path 5: reject.
-  if (isApiPath(pathname)) {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  // Path 5: reject. Only a real top-level document navigation is redirected to
+  // the IdP — the browser follows that as a full-page navigation (no CORS). A
+  // fetch()/RSC/prefetch request must NOT be redirected cross-origin: the
+  // browser would follow the 302 chain to Authentik in `cors` mode, Authentik
+  // sends no `Access-Control-Allow-Origin`, and the fetch dies with a CORS
+  // error. Next then hard-reloads, the service worker re-serves the cached
+  // page, and the refresh fires again — an endless reload loop. Answer those
+  // with a same-origin 401 plus a re-auth hint the client turns into a single
+  // top-level navigation to login (see components/auth/session-guard.tsx).
+  if (isApiPath(pathname) || !isDocumentNavigation(request)) {
+    const res = NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    res.headers.set("x-nomly-reauth", "1");
+    return res;
   }
   const loginUrl = new URL("/api/auth/login", request.url);
   loginUrl.searchParams.set("next", pathname + request.nextUrl.search);
