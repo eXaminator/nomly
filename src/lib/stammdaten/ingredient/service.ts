@@ -12,6 +12,10 @@ import {
   supermarket as supermarketTable,
   unit as unitTable,
 } from "../../../db/schema.ts";
+import {
+  loadPurchaseStats,
+  type IngredientPurchaseStats,
+} from "../../ingredients/purchase-stats.ts";
 import { getImpact } from "../shared/impact.ts";
 import { linkedRecipesForIngredients } from "../shared/linked-recipes.ts";
 import {
@@ -78,6 +82,8 @@ export type IngredientListItem = {
    *  unavailable`). The shopping list mutes these in the active store's view. */
   excludedSupermarkets: Array<{ id: number; name: string }>;
   recipeRefCount: number;
+  /** Buying cadence derived from recorded purchases (check-offs). */
+  purchaseStats: IngredientPurchaseStats;
 };
 
 export type IngredientDetail = IngredientListItem;
@@ -359,6 +365,7 @@ export function listIngredients(query?: string): IngredientListItem[] {
   const excludedSupermarkets = loadExcludedSupermarkets(ids);
   const unitNames = loadUnitNames(baseRows.map((r) => r.defaultUnitId ?? -1));
   const recipeCounts = loadRecipeRefCounts(ids);
+  const purchaseStats = loadPurchaseStats(ids);
   return baseRows.map((row) => ({
     id: row.id,
     name: row.name,
@@ -377,6 +384,7 @@ export function listIngredients(query?: string): IngredientListItem[] {
     dietaryClass: row.dietaryClass,
     excludedSupermarkets: excludedSupermarkets.get(row.id) ?? [],
     recipeRefCount: recipeCounts.get(row.id) ?? 0,
+    purchaseStats: purchaseStats.get(row.id) ?? emptyPurchaseStats(),
   }));
 }
 
@@ -410,6 +418,7 @@ function listIngredientsByIds(ids: number[]): IngredientListItem[] {
   const excludedSupermarkets = loadExcludedSupermarkets(ids);
   const unitNames = loadUnitNames(baseRows.map((r) => r.defaultUnitId ?? -1));
   const recipeCounts = loadRecipeRefCounts(ids);
+  const purchaseStats = loadPurchaseStats(ids);
   return baseRows.map((row) => ({
     id: row.id,
     name: row.name,
@@ -428,7 +437,12 @@ function listIngredientsByIds(ids: number[]): IngredientListItem[] {
     dietaryClass: row.dietaryClass,
     excludedSupermarkets: excludedSupermarkets.get(row.id) ?? [],
     recipeRefCount: recipeCounts.get(row.id) ?? 0,
+    purchaseStats: purchaseStats.get(row.id) ?? emptyPurchaseStats(),
   }));
+}
+
+function emptyPurchaseStats(): IngredientPurchaseStats {
+  return { lastPurchasedAt: null, purchaseCount: 0, averageIntervalDays: null };
 }
 
 function validateInput(

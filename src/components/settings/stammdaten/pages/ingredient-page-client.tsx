@@ -14,6 +14,7 @@ import {
   type IngredientItem,
 } from "../edit-forms/ingredient-form";
 import { ListShell, type ColumnDef } from "../list-shell";
+import { formatPurchaseStatsShort } from "@/lib/ingredients/purchase-stats-format";
 
 type DietFilter = "all" | "vegan" | "vegetarian" | "meat" | "unknown";
 
@@ -175,6 +176,20 @@ const columns: ColumnDef<IngredientItem>[] = [
       </span>
     ),
     sortValue: (item) => item.recipeRefCount,
+  },
+  {
+    key: "purchase",
+    header: "Einkauf",
+    cell: (item) => {
+      const text = formatPurchaseStatsShort(item.purchaseStats);
+      return text ? (
+        <span className="text-[var(--color-muted-fg)]">{text}</span>
+      ) : (
+        <span className="text-[var(--color-muted-fg)] opacity-50">–</span>
+      );
+    },
+    // Sort by recency of the last purchase; never-bought (null) sinks last.
+    sortValue: (item) => item.purchaseStats.lastPurchasedAt,
   },
 ];
 

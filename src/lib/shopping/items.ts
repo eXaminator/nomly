@@ -21,6 +21,10 @@ import {
   type NameCandidate,
 } from "./byName.ts";
 import { getStueckUnit } from "./default-unit.ts";
+import {
+  recordPurchaseForCheck,
+  retractPurchaseForItem,
+} from "./purchase-record.ts";
 import type { Dimension } from "./format.ts";
 import { pluralizeLabel } from "../units/label.ts";
 import { sweepCheckedItems } from "./sweeper.ts";
@@ -885,10 +889,13 @@ function addIngredientItem(
       Math.floor(Date.now() / 1000) - existing.checkedAt < GRACE_SECONDS
     ) {
       // Reactivate: drop any prior manual overrides (the previously-checked
-      // amounts are "gone" from the user's perspective) and start over.
+      // amounts are "gone" from the user's perspective) and start over. The
+      // item is back "to buy", so the purchase its check-off recorded is
+      // retracted — a fresh check later records the real repurchase.
       tx.delete(shoppingItemAmount)
         .where(eq(shoppingItemAmount.itemId, existing.id))
         .run();
+      retractPurchaseForItem(tx, existing.id);
       tx.update(shoppingItem)
         .set({
           checked: false,
@@ -1022,6 +1029,7 @@ export function patchItem(
   const existing = db
     .select({
       id: shoppingItem.id,
+      ingredientId: shoppingItem.ingredientId,
       checked: shoppingItem.checked,
       updatedAt: shoppingItem.updatedAt,
     })
@@ -1072,14 +1080,26 @@ export function patchItem(
   // must not lower updatedAt below "now" via a stale client timestamp.
   const stamp = wantsCheckedChange ? (cappedClientSeconds ?? nowSeconds) : nowSeconds;
 
-  db.update(shoppingItem)
-    .set({
-      ...set,
-      version: sql`${shoppingItem.version} + 1`,
-      updatedAt: stamp,
-    })
-    .where(eq(shoppingItem.id, id))
-    .run();
+  db.transaction((tx) => {
+    tx.update(shoppingItem)
+      .set({
+        ...set,
+        version: sql`${shoppingItem.version} + 1`,
+        updatedAt: stamp,
+      })
+      .where(eq(shoppingItem.id, id))
+      .run();
+    // A check toggle is a purchase event: checking records that the item was
+    // bought (at the same stamp used for checkedAt), un-checking retracts it.
+    // This survives the later sweep of the checked row (see purchase-record).
+    if (wantsCheckedChange) {
+      if (patch.checked) {
+        recordPurchaseForCheck(tx, id, existing.ingredientId, stamp);
+      } else {
+        retractPurchaseForItem(tx, id);
+      }
+    }
+  });
   // Skip sweep on the post-update read: when the client legitimately stamps
   // an old (capped) checkedAt — say from a delayed offline replay — the
   // sweep would 86 the row before we can return its view.

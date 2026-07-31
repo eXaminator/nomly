@@ -1,6 +1,7 @@
 import { eq, sql } from "drizzle-orm";
 import { db } from "../../db/index.ts";
 import { ingredient, shoppingItem } from "../../db/schema.ts";
+import { retractPurchaseForItem } from "./purchase-record.ts";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -84,6 +85,8 @@ export function upsertShoppingItemForIngredient(
       })
       .where(eq(shoppingItem.id, existing.id))
       .run();
+    // Back "to buy" — undo the purchase its previous check-off recorded.
+    retractPurchaseForItem(tx, existing.id);
     return { itemId: existing.id, created: false, reactivated: true };
   }
 

@@ -3,6 +3,7 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import {
+  CalendarClock,
   CalendarPlus,
   EyeOff,
   ListPlus,
@@ -27,6 +28,7 @@ import { ShoppingDoneState } from "./shopping-done";
 import { AddItemDialog } from "./add-item-dialog";
 import { AddMealsDialog } from "./add-meals-dialog";
 import { AddStaplesDialog } from "./add-staples-dialog";
+import { AddDueSoonDialog } from "./add-due-soon-dialog";
 import { SupermarketFilter } from "./supermarket-filter";
 import { ClearListDialog } from "./clear-list-dialog";
 import { EditItemDialog } from "./edit-item-dialog";
@@ -90,6 +92,7 @@ export function ShoppingListView({
   const [addItemOpen, setAddItemOpen] = React.useState(false);
   const [addMealsOpen, setAddMealsOpen] = React.useState(false);
   const [addStaplesOpen, setAddStaplesOpen] = React.useState(false);
+  const [addDueSoonOpen, setAddDueSoonOpen] = React.useState(false);
   const [previewRecipeId, setPreviewRecipeId] = React.useState<number | null>(null);
   // The item whose recipes are being picked for "needs update" (multi-recipe
   // items only; single-recipe items mark directly).
@@ -515,6 +518,15 @@ export function ShoppingListView({
         </Button>
         <Button
           variant="outline"
+          onClick={() => setAddDueSoonOpen(true)}
+          aria-label="Fällige Zutaten hinzufügen"
+          disabled={disabledOffline}
+        >
+          <CalendarClock className="size-4" />
+          <span className="hidden sm:inline">Fällige Zutaten…</span>
+        </Button>
+        <Button
+          variant="outline"
           onClick={() => setAddItemOpen(true)}
           aria-label="Artikel hinzufügen"
           disabled={disabledOffline}
@@ -692,6 +704,14 @@ export function ShoppingListView({
         onClose={() => setAddStaplesOpen(false)}
         onAdded={() => {
           setAddStaplesOpen(false);
+          router.refresh();
+        }}
+      />
+      <AddDueSoonDialog
+        open={addDueSoonOpen}
+        onClose={() => setAddDueSoonOpen(false)}
+        onAdded={() => {
+          setAddDueSoonOpen(false);
           router.refresh();
         }}
       />

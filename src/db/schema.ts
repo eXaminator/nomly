@@ -621,6 +621,41 @@ export const shoppingItemSource = sqliteTable(
   ],
 );
 
+/**
+ * One purchase event per ingredient: written when a shopping item is checked
+ * off ("bought"). Retained forever — the source `shopping_item` is swept 24 h
+ * after being checked (and dropped outright on "Liste leeren"), so this table
+ * is the *only* durable record of buying cadence. It feeds the per-ingredient
+ * "zuletzt gekauft" / "im Schnitt alle N Tage" statistics and the "fällige
+ * Zutaten" suggestions when building a new list.
+ *
+ * `shopping_item_id` is a SOFT correlation (a plain integer, NOT a foreign
+ * key): it lets an un-check retract exactly the purchase a check created,
+ * while the row survives the item's later deletion. Ids never repeat
+ * (AUTOINCREMENT), so a stale value can't collide with a future item.
+ */
+export const ingredientPurchase = sqliteTable(
+  "ingredient_purchase",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    ingredientId: integer("ingredient_id")
+      .notNull()
+      .references(() => ingredient.id, { onDelete: "cascade" }),
+    /** Soft link to the checked-off `shopping_item` (see table note). */
+    shoppingItemId: integer("shopping_item_id"),
+    /** When the item was checked off (unix seconds) — the purchase moment. */
+    purchasedAt: integer("purchased_at").notNull(),
+    createdAt: integer("created_at").notNull().default(now),
+  },
+  (t) => [
+    index("ingredient_purchase_ingredient_idx").on(
+      t.ingredientId,
+      t.purchasedAt,
+    ),
+    index("ingredient_purchase_item_idx").on(t.shoppingItemId),
+  ],
+);
+
 export const stapleGroup = sqliteTable("staple_group", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   name: text("name").notNull().unique(),
@@ -772,3 +807,5 @@ export type StapleGroupItem = typeof stapleGroupItem.$inferSelect;
 export type ShoppingItemStapleSource = typeof shoppingItemStapleSource.$inferSelect;
 export type IcalFeed = typeof icalFeed.$inferSelect;
 export type NewIcalFeed = typeof icalFeed.$inferInsert;
+export type IngredientPurchase = typeof ingredientPurchase.$inferSelect;
+export type NewIngredientPurchase = typeof ingredientPurchase.$inferInsert;

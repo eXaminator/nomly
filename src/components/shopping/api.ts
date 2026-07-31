@@ -6,6 +6,7 @@ import type {
 } from "@/lib/shopping/items";
 import type { PreviewMeal } from "@/lib/shopping/preview";
 import type { StaplePreviewGroup } from "@/lib/staples/preview";
+import type { DueSoonPreview } from "@/lib/shopping/due-soon";
 
 async function jsonOrThrow(res: Response): Promise<unknown> {
   if (!res.ok) {
@@ -54,6 +55,32 @@ export async function clearListSelective(input: {
     itemsDeleted?: number;
     itemsUpdated?: number;
     deletedCount?: number;
+  };
+}
+
+export async function previewDueSoon(): Promise<DueSoonPreview> {
+  const res = await fetch("/api/v1/shopping/preview-due-soon", {
+    cache: "no-store",
+  });
+  return (await jsonOrThrow(res)) as DueSoonPreview;
+}
+
+export async function addDueSoonToList(ingredientIds: number[]): Promise<{
+  itemsCreated: number;
+  itemsIncremented: number;
+  itemsReactivated: number;
+  affectedItemIds: number[];
+}> {
+  const res = await fetch("/api/v1/shopping/add-due-soon", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ ingredientIds }),
+  });
+  return (await jsonOrThrow(res)) as {
+    itemsCreated: number;
+    itemsIncremented: number;
+    itemsReactivated: number;
+    affectedItemIds: number[];
   };
 }
 

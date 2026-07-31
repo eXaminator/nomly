@@ -39,6 +39,11 @@ import {
 } from "../impact-section";
 import { computeRenamePairs } from "../rename-pairs";
 import type { EditFormProps } from "../list-shell";
+import {
+  formatAverageInterval,
+  formatLastPurchasedRelative,
+  formatPurchaseDate,
+} from "@/lib/ingredients/purchase-stats-format";
 
 export type IngredientItem = {
   id: number;
@@ -72,6 +77,12 @@ export type IngredientItem = {
   /** Supermarkets this article is marked unavailable at. */
   excludedSupermarkets: Array<{ id: number; name: string }>;
   recipeRefCount: number;
+  /** Buying cadence derived from recorded purchases (check-offs). */
+  purchaseStats: {
+    lastPurchasedAt: number | null;
+    purchaseCount: number;
+    averageIntervalDays: number | null;
+  };
 };
 
 const DIET_OPTIONS = [
@@ -319,6 +330,8 @@ export function IngredientForm({
         value={excludedSupermarkets}
         onChange={setExcludedSupermarkets}
       />
+
+      {item ? <PurchaseStatsPanel stats={item.purchaseStats} /> : null}
     </div>
   );
 
@@ -391,5 +404,47 @@ export function IngredientForm({
         </TabsContent>
       ) : null}
     </Tabs>
+  );
+}
+
+/**
+ * Read-only "Einkaufsstatistik" panel shown in the ingredient detail drawer.
+ * Surfaces when the article was last bought (checked off on a shopping list)
+ * and — once at least three purchases are on record — the average buying
+ * interval. Nothing is shown for never-bought articles beyond a hint.
+ */
+function PurchaseStatsPanel({
+  stats,
+}: {
+  stats: IngredientItem["purchaseStats"];
+}) {
+  return (
+    <div className="flex flex-col gap-2">
+      <Label>Einkaufsstatistik</Label>
+      {stats.lastPurchasedAt == null ? (
+        <p className="text-xs text-[var(--color-muted-fg)]">
+          Noch nie eingekauft. Sobald der Artikel auf einer Einkaufsliste
+          abgehakt wird, erscheint hier, wann er zuletzt gekauft wurde.
+        </p>
+      ) : (
+        <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
+          <dt className="text-[var(--color-muted-fg)]">Zuletzt gekauft</dt>
+          <dd>
+            {formatPurchaseDate(stats.lastPurchasedAt)}{" "}
+            <span className="text-[var(--color-muted-fg)]">
+              ({formatLastPurchasedRelative(stats.lastPurchasedAt)})
+            </span>
+          </dd>
+          <dt className="text-[var(--color-muted-fg)]">Gekauft</dt>
+          <dd>{stats.purchaseCount}×</dd>
+          {stats.averageIntervalDays != null ? (
+            <>
+              <dt className="text-[var(--color-muted-fg)]">Im Schnitt</dt>
+              <dd>{formatAverageInterval(stats.averageIntervalDays)}</dd>
+            </>
+          ) : null}
+        </dl>
+      )}
+    </div>
   );
 }
