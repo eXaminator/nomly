@@ -211,7 +211,7 @@ describe("previewDueSoonIngredients", () => {
     expect(within30.map((i) => i.ingredientName)).toContain("Reis");
   });
 
-  it("flags ingredients already on the list", async () => {
+  it("never proposes an ingredient already on the list", async () => {
     const { previewDueSoonIngredients, addDueSoonToList } = await import(
       "@/lib/shopping/due-soon"
     );
@@ -221,12 +221,16 @@ describe("previewDueSoonIngredients", () => {
     await seedPurchase(salz, now - 14 * DAY);
     await seedPurchase(salz, now - 7 * DAY);
 
-    expect(
-      previewDueSoonIngredients(14, now)[0]?.alreadyOnList,
-    ).toBe(false);
+    // Due, and not on the list yet → suggested.
+    expect(previewDueSoonIngredients(14, now).map((i) => i.ingredientName)).toContain(
+      "Salz",
+    );
 
+    // Once it's on the list, it drops out of the suggestions entirely.
     const res = addDueSoonToList([salz]);
     expect(res.itemsCreated).toBe(1);
-    expect(previewDueSoonIngredients(14, now)[0]?.alreadyOnList).toBe(true);
+    expect(previewDueSoonIngredients(14, now).map((i) => i.ingredientName)).not.toContain(
+      "Salz",
+    );
   });
 });

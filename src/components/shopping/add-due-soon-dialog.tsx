@@ -62,15 +62,8 @@ export function AddDueSoonDialog({ open, onClose, onAdded }: Props) {
         if (cancelled) return;
         setItems(data.items);
         setWithinDays(data.withinDays);
-        // Default selection: everything not already on the list (adding an
-        // already-listed item is a no-op increment, so leave those opt-in).
-        setSelected(
-          new Set(
-            data.items
-              .filter((i) => !i.alreadyOnList)
-              .map((i) => i.ingredientId),
-          ),
-        );
+        // The preview already excludes anything on the list, so pre-select all.
+        setSelected(new Set(data.items.map((i) => i.ingredientId)));
       })
       .catch((e: unknown) => {
         if (!cancelled) setError(e instanceof Error ? e.message : "Fehler beim Laden");
@@ -220,11 +213,6 @@ function DueRow({
             >
               {due.text}
             </span>
-            {item.alreadyOnList ? (
-              <span className="rounded-full bg-[var(--color-muted)] px-2 py-0.5 text-xs text-[var(--color-muted-fg)]">
-                Bereits auf der Liste
-              </span>
-            ) : null}
           </span>
           <span className="text-xs text-[var(--color-muted-fg)]">
             {formatLastPurchasedRelative(item.lastPurchasedAt)} gekauft ·{" "}

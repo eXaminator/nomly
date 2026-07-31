@@ -23,8 +23,6 @@ export type DueSoonItem = {
   nextDueAt: number;
   /** Whole days until due, relative to "now". Negative = already overdue. */
   dueInDays: number;
-  /** True when the ingredient is already on the current shopping list. */
-  alreadyOnList: boolean;
 };
 
 export type DueSoonPreview = {
@@ -55,8 +53,7 @@ export function previewDueSoonIngredients(
   const stats = loadPurchaseStats(purchasedIds);
   const threshold = nowSeconds + withinDays * SECONDS_PER_DAY;
 
-  const due: Array<Omit<DueSoonItem, "ingredientName" | "categoryName" | "alreadyOnList">> =
-    [];
+  const due: Array<Omit<DueSoonItem, "ingredientName" | "categoryName">> = [];
   for (const [ingredientId, s] of stats) {
     if (s.lastPurchasedAt == null || s.averageIntervalDays == null) continue;
     const nextDueAt = Math.round(
@@ -86,6 +83,9 @@ export function previewDueSoonIngredients(
     .all();
   const infoById = new Map(info.map((r) => [r.id, r] as const));
 
+  // Ingredients already on the current list are never suggested — the point is
+  // to surface things that AREN'T queued yet. A shopping_item row (open or
+  // recently checked) means it's already handled this cycle.
   const onListRows = db
     .select({ ingredientId: shoppingItem.ingredientId })
     .from(shoppingItem)
@@ -95,13 +95,13 @@ export function previewDueSoonIngredients(
 
   const items: DueSoonItem[] = [];
   for (const d of due) {
+    if (onList.has(d.ingredientId)) continue; // already on the list — skip
     const meta = infoById.get(d.ingredientId);
     if (!meta) continue; // ingredient deleted since the purchase — skip
     items.push({
       ...d,
       ingredientName: meta.name,
       categoryName: meta.categoryName,
-      alreadyOnList: onList.has(d.ingredientId),
     });
   }
   items.sort(
