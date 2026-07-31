@@ -153,6 +153,32 @@ describe("purchase recording via patchItem", () => {
     expect(getPurchaseStats(id).purchaseCount).toBe(1);
   });
 
+  it("uncheck removes the buy log, so re-checking leaves exactly one purchase", async () => {
+    const { patchItem } = await import("@/lib/shopping/items");
+    const { getPurchaseStats } = await import("@/lib/ingredients/purchase-stats");
+    const { db } = await import("@/db");
+    const { ingredientPurchase } = await import("@/db/schema");
+    const id = await makeIngredient("Joghurt");
+    const itemId = await addAndGetItem(id);
+
+    // Check → uncheck (undo) → re-check: the undo must delete the log entry so
+    // the re-check does not add a second one.
+    patchItem(itemId, { checked: true });
+    patchItem(itemId, { checked: false });
+    expect(getPurchaseStats(id).purchaseCount).toBe(0);
+
+    patchItem(itemId, { checked: true });
+    expect(getPurchaseStats(id).purchaseCount).toBe(1);
+
+    // And there is a single physical row, not two.
+    const rows = db
+      .select()
+      .from(ingredientPurchase)
+      .all()
+      .filter((r) => r.ingredientId === id);
+    expect(rows.length).toBe(1);
+  });
+
   it("keeps the purchase after the checked item is swept", async () => {
     const { patchItem } = await import("@/lib/shopping/items");
     const { sweepCheckedItems } = await import("@/lib/shopping/sweeper");
