@@ -1,6 +1,7 @@
 import {
   getMostEatenRecipes,
   listByDateRange,
+  MOST_EATEN_WINDOW_MONTHS,
 } from "@/lib/meal-plans/service";
 import { addDays, todayIso } from "@/lib/meal-plans/dates";
 import { listShoppingItems } from "@/lib/shopping/items";
@@ -73,7 +74,10 @@ export default function Home() {
             openCount={shoppingSummary.openCount}
             stores={shoppingSummary.stores}
           />
-          <TopRecipesCard recipes={topRecipes} />
+          <TopRecipesCard
+            recipes={topRecipes}
+            windowMonths={MOST_EATEN_WINDOW_MONTHS}
+          />
           <NeedsUpdateCard recipes={needsUpdateRecipes} />
         </div>
       </div>

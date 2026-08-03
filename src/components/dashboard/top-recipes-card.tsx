@@ -1,6 +1,7 @@
 import {
   Card,
   CardContent,
+  CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
@@ -9,24 +10,30 @@ import type { MostEatenRecipe } from "@/lib/meal-plans/service";
 
 /**
  * Dashboard card: the most-cooked recipes from the meal-plan history
- * (leftover days don't count). Empty until some history accumulates.
+ * (leftover days don't count). `windowMonths` is how far back the counts
+ * reach — spelled out in the header so the ranking isn't read as all-time.
+ * Empty until some history accumulates.
  */
 export function TopRecipesCard({
   recipes,
+  windowMonths,
   className,
 }: {
   recipes: MostEatenRecipe[];
+  windowMonths: number;
   className?: string;
 }) {
   return (
     <Card className={className}>
       <CardHeader>
         <CardTitle>Am häufigsten gekocht</CardTitle>
+        <CardDescription>Letzte {windowMonths} Monate</CardDescription>
       </CardHeader>
       <CardContent>
         {recipes.length === 0 ? (
           <p className="text-sm text-[var(--color-muted-fg)]">
-            Noch keine Historie — plane ein paar Mahlzeiten.
+            Noch keine Historie in den letzten {windowMonths} Monaten — plane
+            ein paar Mahlzeiten.
           </p>
         ) : (
           <ol className="flex flex-col gap-1.5">

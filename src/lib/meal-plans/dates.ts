@@ -20,6 +20,21 @@ export function addDays(iso: string, n: number): string {
   return dt.toISOString().slice(0, 10);
 }
 
+/**
+ * Shift an ISO date by whole months. The day-of-month is clamped to the
+ * target month's length, so 2026-03-31 minus one month is 2026-02-28 and
+ * 2028-02-29 minus twelve months is 2027-02-28.
+ */
+export function addMonths(iso: string, n: number): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  const total = y * 12 + (m - 1) + n;
+  const year = Math.floor(total / 12);
+  const month = total - year * 12; // 0-based, always 0…11
+  const lastDay = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+  const day = Math.min(d, lastDay);
+  return `${String(year).padStart(4, "0")}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
 /** Returns ISO weekday (1=Mon … 7=Sun) for an ISO date string. */
 export function isoWeekday(iso: string): number {
   const dt = new Date(`${iso}T00:00:00Z`);

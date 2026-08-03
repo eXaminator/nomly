@@ -10,7 +10,7 @@ import {
   ingredient as ingredientTable,
 } from "../../db/schema.ts";
 import { deriveDiet, type IngredientDietaryClass, type RecipeDiet } from "../recipes/diet.ts";
-import { addDays } from "./dates.ts";
+import { addDays, addMonths } from "./dates.ts";
 import {
   defaultMealPortions,
   type MealPlanCreateInput,
@@ -446,18 +446,29 @@ export type MostEatenRecipe = {
   recipeId: number;
   title: string;
   photoPath: string | null;
-  /** Past cook days (today included), leftover days excluded. */
+  /** Cook days inside the window (today included), leftover days excluded. */
   count: number;
 };
 
 /**
- * The most-cooked recipes for the dashboard: meal-plan history up to and
- * including today, grouped per recipe. Leftover days are excluded — like
- * {@link getRecipeUsageStats}, the count reflects how often a recipe was
- * actually cooked, not re-eaten. Ties break alphabetically by title.
+ * How far back {@link getMostEatenRecipes} looks. The dashboard card labels
+ * this window, so both stay in sync off this constant.
+ */
+export const MOST_EATEN_WINDOW_MONTHS = 12;
+
+/**
+ * The most-cooked recipes for the dashboard: meal-plan history over the last
+ * {@link MOST_EATEN_WINDOW_MONTHS} months up to and including today, grouped
+ * per recipe. Leftover days are excluded — like {@link getRecipeUsageStats},
+ * the count reflects how often a recipe was actually cooked, not re-eaten.
+ * Ties break alphabetically by title.
+ *
+ * The window's lower bound is exclusive, so it spans exactly the twelve
+ * months ending today rather than a year plus a day.
  */
 export function getMostEatenRecipes(today: string, limit: number): MostEatenRecipe[] {
   assertIsoDate(today);
+  const windowStart = addMonths(today, -MOST_EATEN_WINDOW_MONTHS);
   const count = sql<number>`COUNT(*)`.as("count");
   const rows = db
     .select({
@@ -468,7 +479,13 @@ export function getMostEatenRecipes(today: string, limit: number): MostEatenReci
     })
     .from(mealPlan)
     .innerJoin(recipe, eq(recipe.id, mealPlan.recipeId))
-    .where(and(sql`${mealPlan.date} <= ${today}`, eq(mealPlan.isLeftover, false)))
+    .where(
+      and(
+        sql`${mealPlan.date} > ${windowStart}`,
+        sql`${mealPlan.date} <= ${today}`,
+        eq(mealPlan.isLeftover, false),
+      ),
+    )
     .groupBy(mealPlan.recipeId)
     .all();
 

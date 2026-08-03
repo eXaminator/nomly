@@ -370,6 +370,34 @@ describe("most eaten recipes", () => {
     expect(top.find((t) => t.recipeId === curryId)?.count).toBe(1);
   });
 
+  it("only counts the last 12 months", async () => {
+    const { createMeal, getMostEatenRecipes, MOST_EATEN_WINDOW_MONTHS } =
+      await import("@/lib/meal-plans/service");
+    expect(MOST_EATEN_WINDOW_MONTHS).toBe(12);
+    const today = "2026-06-03";
+    // Curry: two cook days inside the window, two outside (one exactly on the
+    // exclusive lower bound, one well before it).
+    createMeal({ recipeId: curryId, date: "2025-06-04" });
+    createMeal({ recipeId: curryId, date: "2026-01-15" });
+    createMeal({ recipeId: curryId, date: "2025-06-03" });
+    createMeal({ recipeId: curryId, date: "2024-12-01" });
+    createMeal({ recipeId: salatId, date: "2026-05-20" });
+
+    const top = getMostEatenRecipes(today, 5);
+    expect(top.find((t) => t.recipeId === curryId)?.count).toBe(2);
+    expect(top.find((t) => t.recipeId === salatId)?.count).toBe(1);
+  });
+
+  it("drops recipes cooked only before the window", async () => {
+    const { createMeal, getMostEatenRecipes } = await import(
+      "@/lib/meal-plans/service"
+    );
+    const today = "2026-06-03";
+    createMeal({ recipeId: suppeId, date: "2024-03-10" });
+
+    expect(getMostEatenRecipes(today, 5)).toEqual([]);
+  });
+
   it("breaks count ties by title and returns [] without history", async () => {
     const { createMeal, getMostEatenRecipes } = await import(
       "@/lib/meal-plans/service"
