@@ -125,6 +125,13 @@ function isRecipePhoto(req, url) {
 function isNavigation(req) {
   return req.mode === "navigate";
 }
+// A response that says "you are signed out": either the proxy's re-auth 401 or
+// the opaque redirect a navigation gets when the proxy sends it to the IdP.
+function isSessionGone(res) {
+  return res.type === "opaqueredirect"
+    || res.redirected
+    || (res.status === 401 && res.headers.get("x-nomly-reauth") !== null);
+}
 
 self.addEventListener("fetch", (event) => {
   const req = event.request;
@@ -194,6 +201,16 @@ async function dashboardNavigationStrategy(event) {
     const revalidate = (async () => {
       try {
         const res = await fetch(req);
+        // The session is gone: drop the snapshot. Serving it again would hide
+        // the server's login redirect behind a cached page that immediately
+        // re-fetches, 401s and reloads — the expired-session loop. Without a
+        // snapshot the next navigation reaches the network and lands on the
+        // IdP. (`opaqueredirect` is what the login 307 looks like from here,
+        // because a navigation request carries redirect: "manual".)
+        if (isSessionGone(res)) {
+          await cache.delete("/");
+          return res;
+        }
         // Only a good same-origin 200 may overwrite the snapshot — a 500 or
         // a login redirect must never eat a working offline dashboard.
         if (res.ok && res.type === "basic" && !res.redirected) {

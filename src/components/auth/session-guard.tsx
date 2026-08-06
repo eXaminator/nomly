@@ -50,6 +50,14 @@ function installFetchGuard(): void {
       // bouncing to a login page we can't reach.
       if (navigator.onLine && res.headers.get(REAUTH_HEADER)) {
         goToLogin();
+        // Withhold the response from the caller. Handing this 401 back to the
+        // Next router makes it treat the non-RSC body as an MPA navigation and
+        // hard-assign `location` to the *current* URL — which cancels the login
+        // navigation we just started and, when the page came from the service
+        // worker cache, re-serves it and starts the whole cycle again. That
+        // race is the endless reload loop. This document is on its way out, so
+        // a promise that never settles is the honest answer.
+        return new Promise<Response>(() => {});
       }
     } catch {
       // The guard must never break a fetch — swallow anything and pass through.
