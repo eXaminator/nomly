@@ -15,6 +15,17 @@ export function renderMarkdown(input: string | null | undefined): string | null 
 }
 
 const MIN_MENTION_LENGTH = 2;
+/**
+ * Below this length a spelling may only pick up a plural-ish suffix, never an
+ * arbitrary compound tail. The open-ended tail is what lets "Zwiebel" cover
+ * "Zwiebeln" and "Knoblauch" cover "Knoblauchzehen", but on a two-letter
+ * spelling it also swallows filler: "Ei" would light up every "Eine",
+ * "Einen", "Eingeweichte" in the prose.
+ */
+const SHORT_SPELLING_LENGTH = 4;
+/** Inflection endings a short spelling may take ("Ei" → "Eier", "Öl" →
+ *  "Öle"), anchored at a word end so nothing longer sneaks through. */
+const SHORT_SPELLING_SUFFIX = "(?:e|n|s|en|er|es)?(?![\\p{L}])";
 /** Tags whose text content must never be highlighted (code samples, anchor
  *  labels). Matching inside these would either corrupt code or fight with the
  *  link styling. */
@@ -54,9 +65,11 @@ export type IngredientMention = {
  * Matching is case-insensitive, anchored at a word start, and extends across
  * trailing letters — so a stored singular ("Zwiebel") highlights the whole
  * inflected word as it appears ("Zwiebeln") without firing mid-word ("zwei").
- * Spellings are matched longest-first so a compound ("Tomatenmark") wins over a
- * prefix ("Tomate") and resolves to the right id. Text inside
- * `<code>`/`<pre>`/`<a>` and HTML tags/attributes is left untouched.
+ * Spellings shorter than {@link SHORT_SPELLING_LENGTH} only take a plural
+ * ending, so they can't swallow filler words. Spellings are matched
+ * longest-first so a compound ("Tomatenmark") wins over a prefix ("Tomate")
+ * and resolves to the right id. Text inside `<code>`/`<pre>`/`<a>` and HTML
+ * tags/attributes is left untouched.
  *
  * The HTML is assumed already sanitized (entities escaped, well-formed tags) as
  * it comes from {@link renderMarkdown}; the inserted markup is a fixed safe
@@ -84,9 +97,22 @@ export function highlightIngredientMentions(
   const spellingsByLength = [...idBySpelling.keys()].sort(
     (a, b) => b.length - a.length,
   );
-  const alternation = spellingsByLength.map(escapeRegex).join("|");
+  // Two branches, long spellings first so the more specific one wins at a
+  // given position: a long spelling absorbs whatever letters follow (German
+  // compounds/inflections), a short one only a plural ending.
+  const branches: string[] = [];
+  const long = spellingsByLength.filter((s) => s.length >= SHORT_SPELLING_LENGTH);
+  const short = spellingsByLength.filter((s) => s.length < SHORT_SPELLING_LENGTH);
+  if (long.length > 0) {
+    branches.push(`(?:${long.map(escapeRegex).join("|")})[\\p{L}]*`);
+  }
+  if (short.length > 0) {
+    branches.push(
+      `(?:${short.map(escapeRegex).join("|")})${SHORT_SPELLING_SUFFIX}`,
+    );
+  }
   const mention = new RegExp(
-    `(?<![\\p{L}\\p{N}])(?:${alternation})[\\p{L}]*`,
+    `(?<![\\p{L}\\p{N}])(?:${branches.join("|")})`,
     "giu",
   );
 

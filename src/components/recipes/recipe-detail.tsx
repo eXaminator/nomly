@@ -15,10 +15,8 @@ import { DietMarker } from "@/components/recipes/diet-marker";
 import { NeedsUpdateToggle } from "@/components/recipes/needs-update-toggle";
 import { FavoriteToggle } from "@/components/recipes/favorite-toggle";
 import { IngredientLine } from "@/components/recipes/ingredient-line";
-import {
-  InstructionBody,
-  type MentionTips,
-} from "@/components/recipes/instruction-body";
+import { buildIngredientMentions } from "@/components/recipes/ingredient-mentions";
+import { InstructionBody } from "@/components/recipes/instruction-body";
 import { displayAmount } from "@/components/recipes/ingredient-read-line";
 import {
   UpcomingUsesButton,
@@ -183,65 +181,26 @@ export function RecipeDetail({
           {recipe.sections.map((section) => {
             const consumables = section.ingredients.filter((i) => !i.isEquipment);
             const equipment = section.ingredients.filter((i) => i.isEquipment);
-            // Underline mentions of this section's food ingredients in the
-            // instructions, with the full list line (colors + diet icon) shown
-            // as a hover/tap tooltip by <InstructionBody>. We feed every
-            // spelling we know — display name, canonical name, and accrued
-            // aliases — so a step written with a different inflection/synonym
-            // than the list row still lights up. Equipment (pots/pans) is
-            // intentionally excluded. The mention id is the index into
-            // `mentionTips`, which <InstructionBody> resolves to render the
-            // tooltip.
-            // Group rows that are the same ingredient (same catalog id, or
-            // same name when unassigned) so a word listed more than once in a
-            // section — e.g. sugar for the dough and again for the topping —
-            // resolves to one mention whose tooltip stacks every entry. The
-            // group's index is the mention id; its spellings are the union of
-            // all member rows' spellings.
-            const mentionGroups: {
-              spellings: Set<string>;
-              tips: MentionTips[number];
-            }[] = [];
-            const groupIndexByKey = new Map<string, number>();
-            for (const i of consumables) {
-              const key =
-                i.ingredientId != null
-                  ? `id:${i.ingredientId}`
-                  : `name:${i.ingredientName.toLowerCase()}`;
-              let gi = groupIndexByKey.get(key);
-              if (gi === undefined) {
-                gi = mentionGroups.length;
-                groupIndexByKey.set(key, gi);
-                mentionGroups.push({ spellings: new Set(), tips: [] });
-              }
-              const group = mentionGroups[gi];
-              for (const s of [
-                i.ingredientName,
-                i.canonicalIngredientName,
-                ...i.aliases,
-              ]) {
-                if (s) group.spellings.add(s);
-              }
-              group.tips.push({
-                quantity: i.quantity,
-                quantityLow: i.quantityLow,
-                quantifierName: i.quantifierName,
-                quantifierValue: i.quantifierValue,
-                quantifierSource: i.quantifierSource,
-                unitLabel: i.unitLabel,
-                name: i.ingredientName,
-                canonicalName: i.canonicalIngredientName,
-                notes: i.notes,
-                isOptional: i.isOptional,
-                fixedAmount: i.fixedAmount,
-                dietaryClass: i.dietaryClass,
-              });
-            }
-            const ingredientMentions = mentionGroups.map((g, index) => ({
-              spellings: [...g.spellings],
-              id: String(index),
-            }));
-            const mentionTips: MentionTips = mentionGroups.map((g) => g.tips);
+            // Underline mentions of the recipe's food ingredients in this
+            // section's instructions, with the full list line (colors + diet
+            // icon) shown as a hover/tap tooltip by <InstructionBody>.
+            // Spellings, grouping and the partial-match rules live in
+            // {@link buildIngredientMentions}.
+            //
+            // Deliberately NOT limited to this section's own ingredients: a
+            // multi-section import keeps every step on the first section while
+            // the ingredients stay grouped ("Für den Teig" / "Für den Belag"),
+            // so scoping the match per section left most of the steps'
+            // ingredients unhighlighted. This section's own rows go first, so
+            // when an ingredient is listed both here and elsewhere its local
+            // line leads the tooltip.
+            const { mentions: ingredientMentions, tips: mentionTips } =
+              buildIngredientMentions([
+                ...section.ingredients,
+                ...recipe.sections
+                  .filter((s) => s.id !== section.id)
+                  .flatMap((s) => s.ingredients),
+              ]);
             const rendered = renderMarkdown(section.instructions);
             const html = rendered
               ? highlightIngredientMentions(rendered, ingredientMentions)
