@@ -23,6 +23,7 @@ import {
   UpcomingUsesProvider,
 } from "@/components/recipes/ingredient-upcoming-uses";
 import { cn } from "@/lib/cn";
+import { mealEmphasisFor } from "@/lib/recipes/meal-emphasis";
 import { isOptionalIngredient } from "@/lib/recipes/optional";
 import type { RecipeView } from "@/lib/recipes/types";
 import { highlightIngredientMentions, renderMarkdown } from "@/lib/markdown";
@@ -195,12 +196,15 @@ export function RecipeDetail({
             // when an ingredient is listed both here and elsewhere its local
             // line leads the tooltip.
             const { mentions: ingredientMentions, tips: mentionTips } =
-              buildIngredientMentions([
-                ...section.ingredients,
-                ...recipe.sections
-                  .filter((s) => s.id !== section.id)
-                  .flatMap((s) => s.ingredients),
-              ]);
+              buildIngredientMentions(
+                [
+                  ...section.ingredients,
+                  ...recipe.sections
+                    .filter((s) => s.id !== section.id)
+                    .flatMap((s) => s.ingredients),
+                ],
+                chosenIngredientIds,
+              );
             const rendered = renderMarkdown(section.instructions);
             const html = rendered
               ? highlightIngredientMentions(rendered, ingredientMentions)
@@ -317,23 +321,12 @@ export function RecipeDetail({
             const renderList = (rows: IngredientRow[]) => (
               <ul className="space-y-1 text-sm text-[var(--color-fg)]">
                 {groupByPrimary(rows).map(({ primary, alternatives }) => {
-                  // A group is "decided" only when it has alternatives AND this
-                  // meal put at least one of the group's rows on the shopping
-                  // list. Then chosen rows are emphasized and the rest muted;
-                  // otherwise every row renders with its default treatment.
+                  // Same rule the instruction-mention tooltip applies, so the
+                  // list and the tooltip always agree on which alternative
+                  // this meal picked.
                   const members = [primary, ...alternatives];
-                  const decided =
-                    chosenIngredientIds != null &&
-                    alternatives.length > 0 &&
-                    members.some((m) => chosenIngredientIds.has(m.id));
-                  const emphasisFor = (
-                    m: IngredientRow,
-                  ): "chosen" | "muted" | "default" =>
-                    !decided
-                      ? "default"
-                      : chosenIngredientIds!.has(m.id)
-                        ? "chosen"
-                        : "muted";
+                  const emphasisFor = (m: IngredientRow) =>
+                    mealEmphasisFor(m, members, chosenIngredientIds);
                   return (
                     <Fragment key={primary.id}>
                       {renderIngredient(primary, false, emphasisFor(primary))}

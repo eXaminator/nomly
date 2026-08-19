@@ -126,6 +126,46 @@ describe("buildIngredientMentions", () => {
       expect(built.tips[0]).toHaveLength(2);
     });
 
+    it("marks which alternative the meal bought", () => {
+      // ?meal=<id> resolved to "the cook took the black lentils".
+      const built = buildIngredientMentions(lentilGroup(), new Set([11]));
+      expect(built.tips[0].map((t) => [t.name, t.emphasis])).toEqual([
+        ["green lentils", "muted"],
+        ["black lentils", "chosen"],
+        ["beluga lentils", "muted"],
+      ]);
+      // Matching the alternative shows the same decision.
+      expect(built.tips[1].map((t) => t.emphasis)).toEqual([
+        "muted",
+        "chosen",
+        "muted",
+      ]);
+    });
+
+    it("emphasizes the primary when the meal kept it", () => {
+      const built = buildIngredientMentions(lentilGroup(), new Set([10]));
+      expect(built.tips[0].map((t) => t.emphasis)).toEqual([
+        "chosen",
+        "muted",
+        "muted",
+      ]);
+    });
+
+    it("leaves the tooltip untouched without a meal in context", () => {
+      const built = buildIngredientMentions(lentilGroup());
+      expect(built.tips[0].map((t) => t.emphasis)).toEqual([
+        "default",
+        "default",
+        "default",
+      ]);
+    });
+
+    it("never lets the meal's choice change which spellings match", () => {
+      const plain = buildIngredientMentions(lentilGroup());
+      const withMeal = buildIngredientMentions(lentilGroup(), new Set([11]));
+      expect(withMeal.mentions).toEqual(plain.mentions);
+    });
+
     it("marks a plain ingredient as not-alternative", () => {
       const built = buildIngredientMentions([
         row({ ingredientId: 1, ingredientName: "Mehl" }),

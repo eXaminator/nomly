@@ -2,9 +2,12 @@
 
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { CornerDownRight } from "lucide-react";
 import { DietMarker } from "@/components/recipes/diet-marker";
 import { RecipeIngredientReadLine } from "@/components/recipes/ingredient-read-line";
+import { cn } from "@/lib/cn";
 import type { IngredientDietaryClass } from "@/lib/recipes/diet";
+import type { MealEmphasis } from "@/lib/recipes/meal-emphasis";
 
 /** The subset of an ingredient row needed to render one tooltip line. */
 export type MentionTip = {
@@ -25,6 +28,10 @@ export type MentionTip = {
   /** True when this row is an alternative to the group's primary. Renders with
    *  the indent arrow + dimming that the ingredient list gives alternatives. */
   isAlternative: boolean;
+  /** This meal's shopping decision for the row's alternative group — the
+   *  picked row is emphasized, the passed-over ones fade. "default" outside a
+   *  meal context. */
+  emphasis: MealEmphasis;
   fixedAmount: boolean;
   dietaryClass: IngredientDietaryClass;
 };
@@ -143,7 +150,34 @@ export function InstructionBody({
               }}
             >
               {active.rows.map((row, i) => (
-                <div key={i} className="flex items-start gap-2">
+                // Laid out like a row of the ingredient list: arrow column for
+                // an alternative, then the diet marker, then the line. The
+                // indent + dimming live HERE rather than in
+                // <RecipeIngredientReadLine> because a chosen alternative has
+                // to come back to full strength, and the read line's own
+                // dimming can't be undone from the outside — so it is told
+                // neither `isAlternative` nor (for an alternative) `isOptional`,
+                // which is also exactly when the list omits "(optional)".
+                <div
+                  key={i}
+                  className={cn(
+                    "flex items-start gap-2",
+                    row.emphasis === "chosen"
+                      ? "font-medium text-[var(--color-fg)]"
+                      : row.emphasis === "muted"
+                        ? "italic opacity-40"
+                        : (row.isOptional || row.isAlternative) &&
+                          "italic opacity-65",
+                  )}
+                >
+                  {row.isAlternative ? (
+                    <span className="inline-flex h-[1lh] w-3 shrink-0 items-center justify-center">
+                      <CornerDownRight
+                        className="size-3 text-[var(--color-muted-fg)]"
+                        aria-hidden="true"
+                      />
+                    </span>
+                  ) : null}
                   <DietMarker kind={row.dietaryClass} />
                   <RecipeIngredientReadLine
                     quantity={row.quantity}
@@ -155,8 +189,8 @@ export function InstructionBody({
                     name={row.name}
                     canonicalName={row.canonicalName}
                     notes={row.notes}
-                    isOptional={row.isOptional}
-                    isAlternative={row.isAlternative}
+                    isOptional={row.isAlternative ? false : row.isOptional}
+                    isAlternative={false}
                     fixedAmount={row.fixedAmount}
                   />
                 </div>

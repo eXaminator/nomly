@@ -3,6 +3,7 @@ import { Soup } from "lucide-react";
 import { RecipeDetail } from "@/components/recipes/recipe-detail";
 import { getRecipe } from "@/lib/recipes/service";
 import { isMealLeftover } from "@/lib/meal-plans/service";
+import { getMealShoppingChoices } from "@/lib/shopping/items";
 
 export const dynamic = "force-dynamic";
 
@@ -40,6 +41,11 @@ export default async function EmbedRecipePage({
       : null;
   const showTitle = rawTitle !== "0";
   const leftover = mealPlanId != null && isMealLeftover(mealPlanId);
+  // Which rows this meal actually put on the shopping list, so the picked
+  // alternative is marked here too — the HA popup is opened straight off a
+  // planned meal, so it is exactly where that matters.
+  const chosenIngredientIds =
+    mealPlanId != null ? getMealShoppingChoices(mealPlanId) : undefined;
 
   return (
     <main className="min-h-screen bg-[var(--color-bg)]">
@@ -59,6 +65,7 @@ export default async function EmbedRecipePage({
         <RecipeDetail
           recipe={recipe}
           mealPlanId={mealPlanId}
+          chosenIngredientIds={chosenIngredientIds}
           showEdit={false}
           showTitle={showTitle}
         />

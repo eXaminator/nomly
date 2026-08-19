@@ -1,4 +1,8 @@
 import type { IngredientMention } from "@/lib/markdown";
+import {
+  mealEmphasisFor,
+  type MealEmphasis,
+} from "@/lib/recipes/meal-emphasis";
 import type { RecipeIngredientView } from "@/lib/recipes/types";
 import type { MentionTip, MentionTips } from "./instruction-body";
 
@@ -20,6 +24,10 @@ import type { MentionTip, MentionTips } from "./instruction-body";
  * them the way the ingredient list does. Matching any member shows all of
  * them: a step saying "lentils" should reveal that black lentils are an
  * accepted stand-in for the green ones, whichever spelling hit.
+ *
+ * With a meal in context the group also carries that meal's shopping decision
+ * ({@link mealEmphasisFor}), so the tooltip can say which alternative was
+ * actually bought instead of only which ones were allowed.
  *
  * Two kinds of spelling feed the matcher:
  *   - FULL spellings — the row's display name, the ingredient's canonical
@@ -151,8 +159,9 @@ function rootOf(row: MentionRow): number {
   return row.alternativeForId ?? row.id;
 }
 
-function tipOf(row: MentionRow): MentionTip {
+function tipOf(row: MentionRow, emphasis: MealEmphasis): MentionTip {
   return {
+    emphasis,
     quantity: row.quantity,
     quantityLow: row.quantityLow,
     quantifierName: row.quantifierName,
@@ -178,8 +187,15 @@ function tipOf(row: MentionRow): MentionTip {
  * that should lead a stacked tooltip first. Ambiguity for partial matches is
  * judged within whatever set is passed: "lentils" resolves to "green lentils"
  * only while nothing else in that set is also lentils.
+ *
+ * `chosenIngredientIds` is the meal's shopping decision when the recipe was
+ * opened for one (`?meal=<id>`) — the row ids that meal put on the list. It
+ * only marks up the tooltip; which spelling matches never depends on it.
  */
-export function buildIngredientMentions(rows: readonly MentionRow[]): {
+export function buildIngredientMentions(
+  rows: readonly MentionRow[],
+  chosenIngredientIds?: ReadonlySet<number>,
+): {
   mentions: IngredientMention[];
   tips: MentionTips;
 } {
@@ -237,8 +253,11 @@ export function buildIngredientMentions(rows: readonly MentionRow[]): {
     const root = rootOf(row);
     if (!group.roots.has(root)) {
       group.roots.add(root);
-      for (const member of membersByRoot.get(root) ?? [row]) {
-        group.tips.push(tipOf(member));
+      const members = membersByRoot.get(root) ?? [row];
+      for (const member of members) {
+        group.tips.push(
+          tipOf(member, mealEmphasisFor(member, members, chosenIngredientIds)),
+        );
       }
     }
   }
