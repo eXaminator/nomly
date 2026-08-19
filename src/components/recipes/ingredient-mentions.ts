@@ -10,9 +10,10 @@ import type { MentionTip, MentionTips } from "./instruction-body";
  *
  * Rows that are the same ingredient (same catalog id, or same name when
  * unassigned) collapse into ONE mention whose tooltip stacks every entry — so
- * sugar listed twice in a section (dough + topping) lights up once and shows
- * both lines. Equipment (pots, baking paper) is excluded: it isn't food and
- * shouldn't compete with ingredients in the prose.
+ * sugar listed twice (once for the dough, once for the topping) lights up once
+ * and shows both lines, in the order the rows were passed. Equipment (pots,
+ * baking paper) is excluded: it isn't food and shouldn't compete with
+ * ingredients in the prose.
  *
  * Two kinds of spelling feed the matcher:
  *   - FULL spellings — the row's display name, the ingredient's canonical
@@ -138,11 +139,12 @@ type Group = {
 /**
  * Build the mention list + tooltip rows for a set of ingredient rows.
  *
- * Pass a section's rows to light up that section's instructions; pass every
- * section's rows to light up the recipe description (which isn't scoped to a
- * section). Ambiguity for partial matches is judged within whatever set is
- * passed — "lentils" resolves to "green lentils" only while nothing else in
- * that set is also lentils.
+ * Callers pass every ingredient the prose could name — for a section's
+ * instructions that's the whole recipe, not just that section, because a
+ * multi-section import keeps all the steps on the first section. Put the rows
+ * that should lead a stacked tooltip first. Ambiguity for partial matches is
+ * judged within whatever set is passed: "lentils" resolves to "green lentils"
+ * only while nothing else in that set is also lentils.
  */
 export function buildIngredientMentions(rows: readonly MentionRow[]): {
   mentions: IngredientMention[];

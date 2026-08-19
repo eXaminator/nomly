@@ -71,20 +71,7 @@ export function RecipeDetail({
    *  where the surrounding chrome (e.g. the HA popup header) already shows it. */
   showTitle?: boolean;
 }) {
-  // The description gets the same ingredient underlines + tooltips as the
-  // instructions. It isn't scoped to a section, so it matches against EVERY
-  // section's ingredients — which is also the set a partial match has to be
-  // unambiguous within.
-  const descriptionMentions = buildIngredientMentions(
-    recipe.sections.flatMap((s) => s.ingredients),
-  );
-  const renderedDescription = renderMarkdown(recipe.description);
-  const descriptionHtml = renderedDescription
-    ? highlightIngredientMentions(
-        renderedDescription,
-        descriptionMentions.mentions,
-      )
-    : null;
+  const descriptionHtml = renderMarkdown(recipe.description);
 
   return (
     <UpcomingUsesProvider mealPlanId={mealPlanId}>
@@ -184,10 +171,9 @@ export function RecipeDetail({
         ) : null}
 
         {descriptionHtml ? (
-          <InstructionBody
-            html={descriptionHtml}
-            tips={descriptionMentions.tips}
+          <div
             className="markdown mt-6 text-[var(--color-fg)]"
+            dangerouslySetInnerHTML={{ __html: descriptionHtml }}
           />
         ) : null}
 
@@ -195,14 +181,26 @@ export function RecipeDetail({
           {recipe.sections.map((section) => {
             const consumables = section.ingredients.filter((i) => !i.isEquipment);
             const equipment = section.ingredients.filter((i) => i.isEquipment);
-            // Underline mentions of this section's food ingredients in the
-            // instructions, with the full list line (colors + diet icon) shown
-            // as a hover/tap tooltip by <InstructionBody>. Spellings, grouping
-            // and the partial-match rules all live in
-            // {@link buildIngredientMentions}; ambiguity is judged per section,
-            // so "Linsen" resolves to this section's lentils only.
+            // Underline mentions of the recipe's food ingredients in this
+            // section's instructions, with the full list line (colors + diet
+            // icon) shown as a hover/tap tooltip by <InstructionBody>.
+            // Spellings, grouping and the partial-match rules live in
+            // {@link buildIngredientMentions}.
+            //
+            // Deliberately NOT limited to this section's own ingredients: a
+            // multi-section import keeps every step on the first section while
+            // the ingredients stay grouped ("Für den Teig" / "Für den Belag"),
+            // so scoping the match per section left most of the steps'
+            // ingredients unhighlighted. This section's own rows go first, so
+            // when an ingredient is listed both here and elsewhere its local
+            // line leads the tooltip.
             const { mentions: ingredientMentions, tips: mentionTips } =
-              buildIngredientMentions(section.ingredients);
+              buildIngredientMentions([
+                ...section.ingredients,
+                ...recipe.sections
+                  .filter((s) => s.id !== section.id)
+                  .flatMap((s) => s.ingredients),
+              ]);
             const rendered = renderMarkdown(section.instructions);
             const html = rendered
               ? highlightIngredientMentions(rendered, ingredientMentions)

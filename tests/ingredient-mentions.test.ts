@@ -65,6 +65,18 @@ describe("buildIngredientMentions", () => {
     expect(built.tips[0].map((t) => t.quantity)).toEqual([100, 20]);
   });
 
+  it("orders a stacked tooltip by the order the rows come in", () => {
+    // The recipe view passes the section's own rows first, so a section that
+    // lists an ingredient the other sections also list leads with its own.
+    const built = buildIngredientMentions([
+      row({ ingredientId: 7, ingredientName: "Zucker", quantity: 100 }),
+      row({ ingredientId: 7, ingredientName: "Zucker", quantity: 50 }),
+      row({ ingredientId: 8, ingredientName: "Zimt", quantity: 1 }),
+    ]);
+    expect(built.tips[0].map((t) => t.quantity)).toEqual([100, 50]);
+    expect(built.mentions[1].spellings).toContain("Zimt");
+  });
+
   it("keeps unassigned rows apart by name", () => {
     const built = buildIngredientMentions([
       row({ ingredientName: "Deko" }),
