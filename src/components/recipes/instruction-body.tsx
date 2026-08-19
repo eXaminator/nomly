@@ -22,14 +22,18 @@ export type MentionTip = {
   canonicalName: string | null;
   notes: string | null;
   isOptional: boolean;
+  /** True when this row is an alternative to the group's primary. Renders with
+   *  the indent arrow + dimming that the ingredient list gives alternatives. */
+  isAlternative: boolean;
   fixedAmount: boolean;
   dietaryClass: IngredientDietaryClass;
 };
 
 /** All the rows for one mention. Index in the outer array is the `data-mention`
  *  id emitted by highlightIngredientMentions; the inner array is every list
- *  entry for that ingredient (>1 when it's listed multiple times in a section,
- *  e.g. once for the dough and once for the topping). */
+ *  entry behind that mention — more than one when the ingredient is listed
+ *  several times (dough + topping) or takes part in an alternative group, whose
+ *  primary and alternatives are all shown. */
 export type MentionTips = MentionTip[][];
 
 type Active = { rows: MentionTip[]; x: number; y: number; below: boolean };
@@ -152,7 +156,7 @@ export function InstructionBody({
                     canonicalName={row.canonicalName}
                     notes={row.notes}
                     isOptional={row.isOptional}
-                    isAlternative={false}
+                    isAlternative={row.isAlternative}
                     fixedAmount={row.fixedAmount}
                   />
                 </div>

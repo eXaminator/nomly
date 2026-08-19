@@ -15,6 +15,12 @@ import type { MentionTip, MentionTips } from "./instruction-body";
  * baking paper) is excluded: it isn't food and shouldn't compete with
  * ingredients in the prose.
  *
+ * A row that belongs to an alternative group pulls its WHOLE group into the
+ * tooltip — the primary plus every alternative, flagged so the tooltip indents
+ * them the way the ingredient list does. Matching any member shows all of
+ * them: a step saying "lentils" should reveal that black lentils are an
+ * accepted stand-in for the green ones, whichever spelling hit.
+ *
  * Two kinds of spelling feed the matcher:
  *   - FULL spellings — the row's display name, the ingredient's canonical
  *     name, and every accrued alias. Always matched.
@@ -27,6 +33,7 @@ import type { MentionTip, MentionTips } from "./instruction-body";
  *  {@link RecipeIngredientView} so callers can pass recipe rows straight in. */
 export type MentionRow = Pick<
   RecipeIngredientView,
+  | "id"
   | "ingredientId"
   | "ingredientName"
   | "canonicalIngredientName"
@@ -133,8 +140,34 @@ type Group = {
   /** True when at least one member row is a primary (not an alternative).
    *  Primaries win a partial that several ingredients could claim. */
   hasPrimary: boolean;
+  /** Alternative-group roots already folded into {@link tips}, so a group
+   *  whose rows share a root doesn't stack it twice. */
+  roots: Set<number>;
   tips: MentionTip[];
 };
+
+/** The row that heads `row`'s alternative group — itself when it's a primary. */
+function rootOf(row: MentionRow): number {
+  return row.alternativeForId ?? row.id;
+}
+
+function tipOf(row: MentionRow): MentionTip {
+  return {
+    quantity: row.quantity,
+    quantityLow: row.quantityLow,
+    quantifierName: row.quantifierName,
+    quantifierValue: row.quantifierValue,
+    quantifierSource: row.quantifierSource,
+    unitLabel: row.unitLabel,
+    name: row.ingredientName,
+    canonicalName: row.canonicalIngredientName,
+    notes: row.notes,
+    isOptional: row.isOptional,
+    isAlternative: row.alternativeForId != null,
+    fixedAmount: row.fixedAmount,
+    dietaryClass: row.dietaryClass,
+  };
+}
 
 /**
  * Build the mention list + tooltip rows for a set of ingredient rows.
@@ -153,8 +186,25 @@ export function buildIngredientMentions(rows: readonly MentionRow[]): {
   const groups: Group[] = [];
   const indexByKey = new Map<string, number>();
 
-  for (const row of rows) {
-    if (row.isEquipment) continue;
+  const consumables = rows.filter((r) => !r.isEquipment);
+  // Alternative groups, keyed by the primary's row id. Primaries sort ahead of
+  // their alternatives so the tooltip reads top-down like the ingredient list
+  // even if the caller handed us the rows out of order.
+  const membersByRoot = new Map<number, MentionRow[]>();
+  for (const row of consumables) {
+    const root = rootOf(row);
+    const members = membersByRoot.get(root) ?? [];
+    members.push(row);
+    membersByRoot.set(root, members);
+  }
+  for (const members of membersByRoot.values()) {
+    members.sort(
+      (a, b) =>
+        Number(a.alternativeForId != null) - Number(b.alternativeForId != null),
+    );
+  }
+
+  for (const row of consumables) {
     const key =
       row.ingredientId != null
         ? `id:${row.ingredientId}`
@@ -163,7 +213,12 @@ export function buildIngredientMentions(rows: readonly MentionRow[]): {
     if (gi === undefined) {
       gi = groups.length;
       indexByKey.set(key, gi);
-      groups.push({ spellings: new Set(), hasPrimary: false, tips: [] });
+      groups.push({
+        spellings: new Set(),
+        hasPrimary: false,
+        roots: new Set(),
+        tips: [],
+      });
     }
     const group = groups[gi];
     if (row.alternativeForId == null) group.hasPrimary = true;
@@ -175,20 +230,17 @@ export function buildIngredientMentions(rows: readonly MentionRow[]): {
       const spelling = s?.trim();
       if (spelling) group.spellings.add(spelling);
     }
-    group.tips.push({
-      quantity: row.quantity,
-      quantityLow: row.quantityLow,
-      quantifierName: row.quantifierName,
-      quantifierValue: row.quantifierValue,
-      quantifierSource: row.quantifierSource,
-      unitLabel: row.unitLabel,
-      name: row.ingredientName,
-      canonicalName: row.canonicalIngredientName,
-      notes: row.notes,
-      isOptional: row.isOptional,
-      fixedAmount: row.fixedAmount,
-      dietaryClass: row.dietaryClass,
-    });
+    // Spellings stay this ingredient's own — only the tooltip widens. The
+    // whole alternative group goes in, so hitting either "green lentils" or
+    // "black lentils" reveals both, and each mention keeps resolving to the
+    // ingredient the prose actually named.
+    const root = rootOf(row);
+    if (!group.roots.has(root)) {
+      group.roots.add(root);
+      for (const member of membersByRoot.get(root) ?? [row]) {
+        group.tips.push(tipOf(member));
+      }
+    }
   }
 
   // Full spellings are authoritative: a partial that collides with one is
