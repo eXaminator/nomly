@@ -120,6 +120,38 @@ describe("highlightIngredientMentions", () => {
     expect(out).toBe(`<p>in ${span("Öl", "0")} braten</p>`);
   });
 
+  it("lets a short spelling take a plural ending", () => {
+    const out = highlightIngredientMentions("<p>zwei Eier und Öle</p>", [
+      { spellings: ["Ei"], id: "0" },
+      { spellings: ["Öl"], id: "1" },
+    ]);
+    expect(out).toContain(span("Eier", "0"));
+    expect(out).toContain(span("Öle", "1"));
+  });
+
+  it("does not let a short spelling swallow a filler word", () => {
+    // "Ei" + an open-ended letter tail used to light up "Eine"/"Einen".
+    const out = highlightIngredientMentions(
+      "<p>Eine Prise Salz, einen Schuss Öl, eingeweichte Bohnen</p>",
+      [
+        { spellings: ["Ei"], id: "0" },
+        { spellings: ["Öl"], id: "1" },
+      ],
+    );
+    // Only the real "Öl" lights up; "Eine", "einen" and "eingeweichte" stay
+    // plain text.
+    expect(out).toBe(
+      `<p>Eine Prise Salz, einen Schuss ${span("Öl", "1")}, eingeweichte Bohnen</p>`,
+    );
+  });
+
+  it("still extends a long spelling across a compound tail", () => {
+    const out = highlightIngredientMentions("<p>Knoblauchzehen hacken</p>", [
+      { spellings: ["Knoblauch"], id: "0" },
+    ]);
+    expect(out).toBe(`<p>${span("Knoblauchzehen", "0")} hacken</p>`);
+  });
+
   it("ignores spellings shorter than two characters", () => {
     const out = highlightIngredientMentions("<p>a b c</p>", [
       { spellings: ["a"], id: "0" },

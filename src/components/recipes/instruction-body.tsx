@@ -51,9 +51,15 @@ const FLIP_THRESHOLD = 150;
 export function InstructionBody({
   html,
   tips,
+  className = "markdown markdown-steps text-[var(--color-fg)]",
 }: {
   html: string;
   tips: MentionTips;
+  /** Wrapper classes. Defaults to the step-card treatment used for section
+   *  instructions; the recipe description passes plain `.markdown` so its
+   *  lists stay ordinary. Must keep `.markdown` — the mention underline is
+   *  scoped to it. */
+  className?: string;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [active, setActive] = useState<Active | null>(null);
@@ -116,7 +122,7 @@ export function InstructionBody({
     <>
       <div
         ref={containerRef}
-        className="markdown markdown-steps text-[var(--color-fg)]"
+        className={className}
         dangerouslySetInnerHTML={{ __html: html }}
       />
       {active && typeof document !== "undefined"
