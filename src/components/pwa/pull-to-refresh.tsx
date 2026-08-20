@@ -4,6 +4,7 @@ import * as React from "react";
 import { RefreshCw } from "lucide-react";
 
 import { cn } from "@/lib/cn";
+import { getConnectivity } from "@/lib/shopping/offline/connectivity";
 
 const THRESHOLD = 70; // px (after damping) needed to trigger a refresh
 const MAX_PULL = 110; // visual cap on how far the indicator travels
@@ -17,6 +18,12 @@ const DAMP = 0.5; // resistance so the pull feels rubber-banded
  * update and reloads — which, with the network-first shell, pulls in the
  * latest deployed version. Doesn't preventDefault, so normal scrolling is
  * untouched.
+ *
+ * The reload is skipped while we know the server is unreachable: it would be
+ * answered from the service-worker cache and re-run the same failing request,
+ * i.e. hand-crank the very loop the request guard exists to prevent. The
+ * connection banner is already explaining the situation, so the gesture just
+ * springs back.
  */
 export function PullToRefresh() {
   const [pull, setPull] = React.useState(0);
@@ -94,6 +101,13 @@ export function PullToRefresh() {
           await reg?.update?.();
         } catch {
           // best-effort update nudge; reload regardless
+        }
+        const state = getConnectivity();
+        if (state === "offline" || state === "serverError") {
+          refreshingRef.current = false;
+          setRefreshing(false);
+          applyPull(0);
+          return;
         }
         window.location.reload();
       })();

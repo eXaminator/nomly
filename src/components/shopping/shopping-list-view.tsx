@@ -51,10 +51,8 @@ import {
 } from "./api";
 import { EditArticleDialog } from "@/components/articles/edit-article-dialog";
 import { useShoppingRealtime } from "./use-shopping-realtime";
-import {
-  getConnectivity,
-  subscribeConnectivity,
-} from "@/lib/shopping/offline/connectivity";
+import { getConnectivity } from "@/lib/shopping/offline/connectivity";
+import { useConnectivity } from "./offline-indicator";
 import { openOfflineDb } from "@/lib/shopping/offline/db";
 import {
   hydrateFromIDB,
@@ -124,11 +122,11 @@ export function ShoppingListView({
     "open" | "checked" | "unavailable"
   >("open");
 
-  const [connectivity, setConnectivityState] = React.useState(getConnectivity());
-
   // The connectivity watcher is owned app-wide by the header
-  // (ConnectivityStatus); here we just subscribe to read the state.
-  React.useEffect(() => subscribeConnectivity(setConnectivityState), []);
+  // (ConnectivityStatus); here we just read the state. Via the shared hook, so
+  // this cannot drift back into the subscribe-in-effect pattern that loses the
+  // first write (see useConnectivity).
+  const connectivity = useConnectivity();
 
   // Realtime sync: when another device changes the list, refetch and replace.
   // Only active while online (the WS hook handles connect/reconnect).

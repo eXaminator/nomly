@@ -5,6 +5,7 @@ import { TopNav } from "./top-nav";
 import { BottomNav } from "./bottom-nav";
 import { UserMenu, UserMenuFallback } from "./user-menu";
 import { ConnectivityStatus } from "./connectivity-status";
+import { ConnectionBanner } from "./connection-banner";
 
 export async function AppShell({ children }: { children: React.ReactNode }) {
   const session = await getSession();
@@ -34,6 +35,9 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
           </div>
         </div>
       </header>
+      {/* Sits between the header and the content: always visible, never
+          covering the nav or the offline-capable list underneath. */}
+      <ConnectionBanner />
       <main className="flex-1 pb-24 md:pb-12">
         <div className="mx-auto max-w-screen-2xl px-4 py-6 md:px-6">{children}</div>
       </main>

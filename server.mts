@@ -83,6 +83,16 @@ async function main() {
   // out to subscribers, who then refetch the list (Epic 9 realtime sync).
   const wss = new WebSocketServer({ noServer: true });
 
+  // `ws` emits socket-level failures as 'error' events, and an unhandled one
+  // becomes an uncaughtException that takes the whole process down — the entire
+  // app, for every user, because one client sent a frame it did not like (a
+  // malformed or unmasked frame is enough, and it need not be deliberate). The
+  // hub is a best-effort refetch nudge, so a broken socket is worth exactly one
+  // log line.
+  wss.on("error", (err) => {
+    console.warn("[ws] server error", err);
+  });
+
   // Sockets currently subscribed to the "shopping" topic.
   const shoppingSubscribers = new Set<WebSocket>();
   onShoppingChanged(() => {
@@ -111,6 +121,12 @@ async function main() {
 
   wss.on("connection", (ws: WebSocket) => {
     const subscriptions = new Set<string>();
+    // Per-socket, for the same reason: without this a single bad frame from one
+    // client is an uncaughtException, not a dropped connection.
+    ws.on("error", (err) => {
+      console.warn("[ws] connection error", err);
+      shoppingSubscribers.delete(ws);
+    });
     ws.on("message", (raw) => {
       let msg: { op?: string; topic?: string };
       try {

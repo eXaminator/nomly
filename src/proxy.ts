@@ -130,7 +130,7 @@ export async function proxy(request: NextRequest) {
   // then hard-reloads, the service worker re-serves the cached page, and the
   // refresh fires again — an endless reload loop. Answer those with a
   // same-origin 401 plus a re-auth hint the client turns into a single
-  // top-level navigation to login (see components/auth/session-guard.tsx).
+  // top-level navigation to login (see components/auth/request-guard.tsx).
   if (
     isApiPath(pathname)
     || !isTopLevelNavigation(request.headers, request.nextUrl.searchParams)
