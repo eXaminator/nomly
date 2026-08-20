@@ -33,6 +33,9 @@ function row(
     isOptional,
     fixedAmount: false,
     isAlternative,
+    quantityLow: "",
+    isRange: false,
+    quantifierId: null,
   };
 }
 

@@ -127,6 +127,13 @@ function isNavigation(req) {
 }
 // A response that says "you are signed out": either the proxy's re-auth 401 or
 // the opaque redirect a navigation gets when the proxy sends it to the IdP.
+// A response that means the server — or the reverse proxy in front of it — is
+// broken. Treated exactly like a thrown fetch: the cached shell beats the
+// gateway's 503 page, which would otherwise leave the user with nothing at all
+// on a hard reload while the container is down.
+function isServerFailure(res) {
+  return res.status >= 500;
+}
 function isSessionGone(res) {
   return res.type === "opaqueredirect"
     || res.redirected
@@ -171,19 +178,24 @@ async function shellNavigationStrategy(req) {
   // offline fallback — we deliberately do NOT cache.put the live
   // response, because that would re-introduce the "cached SSR snapshot
   // carries baked-in items" bug.
+  let failure = null;
   try {
-    return await fetch(req);
+    const res = await fetch(req);
+    if (!isServerFailure(res)) return res;
+    failure = res;
   } catch {
-    const cache = await caches.open(SHELL_CACHE);
-    const cached = await cache.match("/einkauf");
-    if (cached) return cached;
-    const offline = await cache.match("/offline");
-    if (offline) return offline;
-    return new Response(
-      "<!doctype html><meta charset=utf-8><title>nomly offline</title><p>Offline — Einkaufsliste konnte nicht geladen werden. Öffne die Seite einmal online, dann steht sie auch offline bereit.</p>",
-      { headers: { "content-type": "text/html;charset=utf-8" }, status: 503 },
-    );
+    // unreachable — fall through to the cache
   }
+  const cache = await caches.open(SHELL_CACHE);
+  const cached = await cache.match("/einkauf");
+  if (cached) return cached;
+  const offline = await cache.match("/offline");
+  if (offline) return offline;
+  if (failure) return failure;
+  return new Response(
+    "<!doctype html><meta charset=utf-8><title>nomly offline</title><p>Offline — Einkaufsliste konnte nicht geladen werden. Öffne die Seite einmal online, dann steht sie auch offline bereit.</p>",
+    { headers: { "content-type": "text/html;charset=utf-8" }, status: 503 },
+  );
 }
 
 async function dashboardNavigationStrategy(event) {
@@ -231,9 +243,10 @@ async function dashboardNavigationStrategy(event) {
       return cached;
     }
     const res = await revalidate;
-    if (res) return res;
+    if (res && !isServerFailure(res)) return res;
     const offline = await cache.match("/offline");
     if (offline) return offline;
+    if (res) return res;
     return new Response(
       "<!doctype html><meta charset=utf-8><title>nomly offline</title><p>Offline — das Dashboard konnte nicht geladen werden. Öffne die Seite einmal online, dann steht sie auch offline bereit.</p>",
       { headers: { "content-type": "text/html;charset=utf-8" }, status: 503 },
@@ -247,20 +260,25 @@ async function dashboardNavigationStrategy(event) {
 
 async function navigationFallbackStrategy(req) {
   const cache = await caches.open(SHELL_CACHE);
+  let failure = null;
   try {
-    return await fetch(req);
+    const res = await fetch(req);
+    if (!isServerFailure(res)) return res;
+    failure = res;
   } catch {
-    // Serve the page itself when it was precached (e.g. /start), else the
-    // generic offline fallback.
-    const cached = await cache.match(new URL(req.url).pathname);
-    if (cached) return cached;
-    const offline = await cache.match("/offline");
-    if (offline) return offline;
-    return new Response(
-      "<!doctype html><meta charset=utf-8><title>nomly offline</title><p>Offline.</p>",
-      { headers: { "content-type": "text/html;charset=utf-8" }, status: 503 },
-    );
+    // unreachable — fall through to the cache
   }
+  // Serve the page itself when it was precached (e.g. /start), else the
+  // generic offline fallback.
+  const cached = await cache.match(new URL(req.url).pathname);
+  if (cached) return cached;
+  const offline = await cache.match("/offline");
+  if (offline) return offline;
+  if (failure) return failure;
+  return new Response(
+    "<!doctype html><meta charset=utf-8><title>nomly offline</title><p>Offline.</p>",
+    { headers: { "content-type": "text/html;charset=utf-8" }, status: 503 },
+  );
 }
 
 async function networkFirst(req, cacheName) {

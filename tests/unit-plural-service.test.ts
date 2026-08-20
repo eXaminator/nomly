@@ -44,6 +44,7 @@ describe("unit service — plurals round-trip", () => {
       baseUnitId: null,
       factor: 1,
       isContainer: true,
+      displayFraction: false,
     });
     const detail = getUnitDetail(created.id)!;
     expect(detail.plural).toBe("Dosen");
@@ -61,6 +62,7 @@ describe("unit service — plurals round-trip", () => {
       baseUnitId: null,
       factor: 1,
       isContainer: true,
+      displayFraction: false,
     });
     const updated = updateUnit(created.id, {
       name: "Glas",
@@ -71,6 +73,7 @@ describe("unit service — plurals round-trip", () => {
       baseUnitId: null,
       factor: 1,
       isContainer: true,
+      displayFraction: false,
     });
     expect(updated.plural).toBeNull();
     expect(updated.aliasPlurals).toEqual({});
@@ -91,6 +94,7 @@ describe("getImpactForUnits — linked ingredient conversions", () => {
       baseUnitId: null,
       factor: 1,
       isContainer: false,
+      displayFraction: false,
     });
     const zehe = createUnit({
       name: "Zehe (impact)",
@@ -101,6 +105,7 @@ describe("getImpactForUnits — linked ingredient conversions", () => {
       baseUnitId: null,
       factor: 1,
       isContainer: false,
+      displayFraction: false,
     });
 
     const [knoblauch] = db
@@ -143,6 +148,7 @@ describe("getImpactForUnits — linked ingredient conversions", () => {
       baseUnitId: null,
       factor: 1,
       isContainer: false,
+      displayFraction: false,
     });
     const [impact] = getImpactForUnits([lonely.id]);
     expect(impact.linkedIngredients).toEqual([]);
@@ -161,6 +167,7 @@ describe("unit service — global default unit", () => {
       factor: 1,
       isContainer: false,
       setAsGlobalDefault: true,
+      displayFraction: false,
     });
     expect(getUnitDetail(a.id)?.isGlobalDefault).toBe(true);
 
@@ -175,6 +182,7 @@ describe("unit service — global default unit", () => {
       factor: 1,
       isContainer: false,
       setAsGlobalDefault: true,
+      displayFraction: false,
     });
     expect(getUnitDetail(b.id)?.isGlobalDefault).toBe(true);
     expect(getUnitDetail(a.id)?.isGlobalDefault).toBe(false);
@@ -190,6 +198,7 @@ describe("unit service — global default unit", () => {
       factor: 1,
       isContainer: false,
       setAsGlobalDefault: true,
+      displayFraction: false,
     });
     expect(getUnitDetail(a.id)?.isGlobalDefault).toBe(true);
     expect(getUnitDetail(b.id)?.isGlobalDefault).toBe(false);

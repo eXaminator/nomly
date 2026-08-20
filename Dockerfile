@@ -1,7 +1,21 @@
 # syntax=docker/dockerfile:1.7
 
+# Node base image, pinned to an exact patch — never a floating tag like
+# `node:24-alpine`. A rebuild must not be able to change the runtime underneath
+# us: that is what took prod down once already. Node 24.19.0 gave
+# `node::ObjectWrap` a cleanup hook whose destructor aborts the process when it
+# runs without an entered V8 context (nodejs/node#63642), and better-sqlite3 12
+# derived its Database/Statement objects from exactly that class — so a rebuild
+# carrying no code change of ours started crash-looping the server
+# (WiseLibs/better-sqlite3#1515).
+#
+# better-sqlite3 13 fixes that at the root by moving to `Napi::ObjectWrap`
+# (node-addon-api), which never touches the aborting API, so this no longer
+# needs to sit on 24.18. Bumping it stays a deliberate, reviewable edit.
+ARG NODE_IMAGE=node:24.19.0-alpine
+
 # ---------- Builder ----------
-FROM node:24-alpine AS builder
+FROM ${NODE_IMAGE} AS builder
 
 # Build deps for native modules (better-sqlite3, sharp)
 RUN apk add --no-cache python3 make g++ libc6-compat
@@ -28,7 +42,7 @@ RUN npm run build
 RUN npm prune --omit=dev
 
 # ---------- Runtime ----------
-FROM node:24-alpine AS runtime
+FROM ${NODE_IMAGE} AS runtime
 
 # Runtime deps: tini for proper PID-1 signal handling, libc6-compat for native
 # modules built on Alpine, wget for the HEALTHCHECK probe.

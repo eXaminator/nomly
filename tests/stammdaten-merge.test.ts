@@ -60,6 +60,7 @@ describe("unit stammdaten merge", () => {
       baseUnitId: null,
       factor: 1,
       isContainer: false,
+      displayFraction: false,
     });
     const ml = unit.createUnit({
       name: "Milliliter",
@@ -68,6 +69,7 @@ describe("unit stammdaten merge", () => {
       baseUnitId: null,
       factor: 1,
       isContainer: false,
+      displayFraction: false,
     });
     expect(() => unit.mergeUnits(gram.id, [ml.id])).toThrow(/Dimension/);
   });
@@ -81,6 +83,7 @@ describe("unit stammdaten merge", () => {
       baseUnitId: null,
       factor: 1000,
       isContainer: false,
+      displayFraction: false,
     });
     const g = unit.listUnitsManaged().find((u) => u.name === "Gramm")!;
     expect(() => unit.mergeUnits(g.id, [kg.id])).toThrow(/Faktor/);
@@ -95,6 +98,7 @@ describe("unit stammdaten merge", () => {
       baseUnitId: null,
       factor: 1,
       isContainer: false,
+      displayFraction: false,
     });
     const piece = unit.createUnit({
       name: "Piece",
@@ -103,6 +107,7 @@ describe("unit stammdaten merge", () => {
       baseUnitId: null,
       factor: 1,
       isContainer: false,
+      displayFraction: false,
     });
     const result = unit.mergeUnits(stk.id, [piece.id]);
     expect(result.deletedIds).toEqual([piece.id]);
@@ -124,6 +129,7 @@ describe("unit stammdaten merge", () => {
       baseUnitId: null,
       factor: 1,
       isContainer: false,
+      displayFraction: false,
     });
     // Loser has a canonical plural ("Dosen") and an alias with its own plural
     // ("can" → "cans") — both must survive the merge as winner-alias plurals.
@@ -136,6 +142,7 @@ describe("unit stammdaten merge", () => {
       baseUnitId: null,
       factor: 1,
       isContainer: false,
+      displayFraction: false,
     });
     unit.mergeUnits(winner.id, [loser.id]);
     const after = unit.getUnitDetail(winner.id)!;

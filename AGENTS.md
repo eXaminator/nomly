@@ -31,3 +31,32 @@ DATABASE_URL=./data/nomly-prodtest.db npm run migrate
 DATABASE_URL=./data/nomly-prodtest.db npm run dev
 ```
 Note: only the DB is copied — prod photos and the live OIDC issuer (`.env.local`) are unchanged, so referenced images may be missing and login still hits the real IdP.
+
+# Tests
+
+`npm test` runs the unit suite (vitest) — fast, no browser, no server.
+
+`npm run test:e2e` builds and runs the Playwright suite. It boots the app itself
+against a disposable `data/e2e.db` (rebuilt and reseeded on every run) and puts a
+**fault-injecting proxy** in front of it on port 3100, which the browser talks to:
+
+```bash
+npm run test:e2e                       # everything
+npx playwright test --grep 503         # one scenario, against an existing build
+```
+
+Two details worth knowing before touching it:
+
+- **Auth is bypassed without a test-only code path.** `tests/e2e/support/global-setup.ts`
+  mints a real iron-session cookie with the same secret the app boots with, so no
+  IdP is contacted and the app carries no test hooks. The minted session has no
+  refresh token on purpose.
+- **The proxy is how "the server goes down" is simulated** (`GET /__mode/fail` →
+  everything answers 503 text/html, `/__mode/pass` → back to normal). It has to
+  be a real proxy rather than Playwright request interception, because the
+  service worker must see the same responses the browser does — the reload loop
+  those specs guard against is an interaction between the router, the service
+  worker and the network.
+
+Set `E2E_CHROMIUM_PATH` to use a Chromium already on the machine instead of the
+build Playwright wants to download.

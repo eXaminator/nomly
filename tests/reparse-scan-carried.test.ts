@@ -13,7 +13,7 @@ process.env.DATABASE_URL = join(tempDir, "test.db");
   const sqlite = new Database(process.env.DATABASE_URL);
   migrate(drizzle(sqlite), { migrationsFolder: "./drizzle" });
   sqlite.prepare("INSERT INTO unit (name, dimension, factor) VALUES ('EL', 'volume', 15)").run();
-  const unitId = Number(sqlite.prepare("SELECT id FROM unit WHERE name = 'EL'").get()!.id);
+  const unitId = Number((sqlite.prepare("SELECT id FROM unit WHERE name = 'EL'").get() as { id: number }).id);
   const oel = sqlite.prepare("INSERT INTO ingredient (name) VALUES ('Olivenöl')").run();
   const olivenId = Number(oel.lastInsertRowid);
   const raps = sqlite.prepare("INSERT INTO ingredient (name) VALUES ('Rapsöl')").run();

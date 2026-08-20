@@ -15,6 +15,8 @@ const { renewSessionIfStale } = await import("@/lib/session-renewal");
 const { REFRESH_AT_SEC } = await import("@/lib/session");
 
 const NOW = 1_800_000_000;
+/** Mirrors `RETRY_AFTER_SEC` in the module under test. */
+const RETRY_AFTER_SEC = 5 * 60;
 
 /** A session object shaped like iron-session's, minus the persistence. */
 function session(
@@ -83,12 +85,39 @@ describe("renewSessionIfStale", () => {
   it("keeps the user signed in when the IdP call fails", async () => {
     refreshTokenGrant.mockRejectedValue(new Error("idp down"));
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const s = session();
+    // Its own token: a failure puts that token on cooldown, and reusing
+    // "rt-old" here would suppress the renewal the other cases expect.
+    const s = session({ refreshToken: "rt-idp-down" });
     const before = s.issuedAt;
 
     expect(await renewSessionIfStale(s, NOW)).toBe(false);
     expect(s.issuedAt).toBe(before);
-    expect(s.refreshToken).toBe("rt-old");
+    expect(s.refreshToken).toBe("rt-idp-down");
+    warn.mockRestore();
+  });
+
+  it("stops re-spending a refresh token the IdP has rejected", async () => {
+    // `invalid_grant` is terminal: the session stays live for the whole
+    // inactivity window and `issuedAt` never moves, so without a cooldown every
+    // single request would await the same doomed token round trip.
+    refreshTokenGrant.mockRejectedValue(new Error("invalid_grant"));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    expect(
+      await renewSessionIfStale(session({ refreshToken: "rt-dead" }), NOW),
+    ).toBe(false);
+    expect(
+      await renewSessionIfStale(session({ refreshToken: "rt-dead" }), NOW + 1),
+    ).toBe(false);
+    expect(refreshTokenGrant).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledTimes(1);
+
+    // ...but it is a cooldown, not a blocklist: an IdP that recovers is picked
+    // back up without the user having to sign in again.
+    refreshTokenGrant.mockResolvedValue(grantOk());
+    const back = session({ refreshToken: "rt-dead" });
+    expect(await renewSessionIfStale(back, NOW + RETRY_AFTER_SEC)).toBe(true);
+    expect(back.refreshToken).toBe("rt-new");
     warn.mockRestore();
   });
 

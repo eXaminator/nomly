@@ -60,3 +60,6 @@ next-env.d.ts
 
 .claude/
 .superpowers/
+tests/e2e/.auth/
+test-results/
+playwright-report/
