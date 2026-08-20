@@ -14,6 +14,7 @@ describe("parsedIngredientToDraft", () => {
       canonicalIngredientName: "Oregano",
       notes: null,
       foldedIngredients: [{ range: [10, 20], label: "Schabziger" }],
+      quantityLow: null,
     });
     expect(draft.foldedIngredients).toEqual([{ range: [10, 20], label: "Schabziger" }]);
   });

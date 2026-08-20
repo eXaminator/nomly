@@ -3,12 +3,13 @@ import { buildUnitInflector } from "@/components/recipes/unit-inflect";
 import type { UnitForm } from "@/lib/recipes/reparse-scan";
 
 const FORMS: UnitForm[] = [
-  { id: 1, name: "g", plural: null, aliases: [] },
+  { id: 1, name: "g", plural: null, aliases: [], displayFraction: false },
   {
     id: 2,
     name: "Zehe",
     plural: "Zehen",
     aliases: [{ name: "clove", plural: "cloves" }],
+    displayFraction: false,
   },
 ];
 

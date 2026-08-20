@@ -16,7 +16,8 @@ process.env.DATABASE_URL = join(tempDir, "test.db");
   // so the stale quantity/unit are still stored on the row.
   sqlite.prepare("INSERT INTO unit (name, dimension) VALUES ('EL', 'volume')").run();
   const unitId = Number(
-    sqlite.prepare("SELECT id FROM unit WHERE name = 'EL'").get()!.id,
+    (sqlite.prepare("SELECT id FROM unit WHERE name = 'EL'").get() as { id: number })
+      .id,
   );
   const r = sqlite.prepare("INSERT INTO recipe (title) VALUES ('R')").run();
   const recipeId = Number(r.lastInsertRowid);

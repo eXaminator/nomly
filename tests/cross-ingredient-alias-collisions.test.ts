@@ -42,6 +42,7 @@ describe("findCrossIngredientAliasCollisions", () => {
       baseUnitId: null,
       factor: 1,
       isContainer: true,
+      displayFraction: false,
     });
     const fresh = createIngredient({
       name: "Frischtomate",
