@@ -13,14 +13,16 @@
 #   Assertion failed: (env) != nullptr
 #
 # better-sqlite3 sits squarely in the blast radius: Database, Statement,
-# StatementIterator and Backup all derive from `node::ObjectWrap`, and it never
-# calls `MakeWeak()`, so its instances live until the environment is torn down
-# and are freed in a batch that mutates the very hook set teardown is walking.
+# StatementIterator and Backup all derive from `node::ObjectWrap`, and
+# `ObjectWrap::Wrap()` makes every instance weak, so each one is freed by a GC
+# weak callback during normal operation — every prepared statement we hand to
+# drizzle is eventually destroyed through that new code path.
 #
-# The abort is timing-dependent, not deterministic: the server boots, serves
-# traffic, then dies minutes later with no JS stack, and Docker restarts it into
-# the same fate. That restart loop is what users see as a 503 in a fresh browser
-# and an endless reload in one that already has the app cached.
+# Which of those frees actually finds no context entered is timing-dependent, so
+# the abort is not deterministic: the server boots, serves traffic, then dies
+# minutes later with no JS stack, and Docker restarts it into the same fate.
+# That restart loop is what users see as a 503 in a fresh browser and an endless
+# reload in one that already has the app cached.
 #
 # `node:24-alpine` started resolving to 24.19.0, which is how a rebuild carrying
 # no code change of ours took prod down. Keep the pin until better-sqlite3 ships
