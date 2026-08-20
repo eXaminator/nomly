@@ -184,16 +184,16 @@ summary {
   color: var(--color-muted-fg);
 }
 /* Ingredient mentions detected in section instructions (see
-   highlightIngredientMentions): a dotted accent underline that scans without
-   competing with bold/italic markdown. A rich tooltip (the full ingredient
-   line, colors + diet icon) is shown by <InstructionBody> on hover / keyboard
-   focus / tap — the span is tabindex-focusable, which is what makes it work on
-   touch. */
+   highlightIngredientMentions): the accent color carries them, so a step reads
+   as prose with the ingredients standing out in it — no underline competing
+   with bold/italic markdown or with real links. Slightly heavier than the
+   surrounding text so the color isn't the only cue. A rich tooltip (the full
+   ingredient line, colors + diet icon) is shown by <InstructionBody> on hover /
+   keyboard focus / tap — the span is tabindex-focusable, which is what makes it
+   work on touch. */
 .markdown .ingredient-mention {
-  text-decoration: underline dotted;
-  text-decoration-color: var(--color-accent);
-  text-decoration-thickness: 1.5px;
-  text-underline-offset: 2px;
+  color: var(--color-accent);
+  font-weight: 500;
   cursor: help;
 }
 .markdown .ingredient-mention[data-mention] {
