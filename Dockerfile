@@ -1,7 +1,39 @@
 # syntax=docker/dockerfile:1.7
 
+# Node base image, pinned on purpose — do not float this back to `node:24-alpine`.
+#
+# Node 24.19.0 (2026-08-03) gave `node::ObjectWrap` its own environment cleanup
+# hook (nodejs/node#63642): `~ObjectWrap()` now calls
+# `node::RemoveEnvironmentCleanupHook()`, which 24.18.x never did. That call
+# CHECKs that `Environment::GetCurrent(isolate)` is non-null, and it only is
+# while a V8 context is entered — so a wrapped object destroyed off that path
+# aborts the whole process:
+#
+#   node[6]: void node::RemoveEnvironmentCleanupHook(...) at ../src/api/hooks.cc:142
+#   Assertion failed: (env) != nullptr
+#
+# better-sqlite3 sits squarely in the blast radius: Database, Statement,
+# StatementIterator and Backup all derive from `node::ObjectWrap`, and it never
+# calls `MakeWeak()`, so its instances live until the environment is torn down
+# and are freed in a batch that mutates the very hook set teardown is walking.
+#
+# The abort is timing-dependent, not deterministic: the server boots, serves
+# traffic, then dies minutes later with no JS stack, and Docker restarts it into
+# the same fate. That restart loop is what users see as a 503 in a fresh browser
+# and an endless reload in one that already has the app cached.
+#
+# `node:24-alpine` started resolving to 24.19.0, which is how a rebuild carrying
+# no code change of ours took prod down. Keep the pin until better-sqlite3 ships
+# a fix for the new hook lifecycle, then bump deliberately.
+#
+# 24.18.1 is the last release on the 24.18 line: it carries the July security
+# fixes (12 CVEs) without the 24.19 `ObjectWrap` change. Both stages read this
+# one ARG so the headers better-sqlite3 compiles against in the builder can
+# never drift from the Node that loads it at runtime.
+ARG NODE_IMAGE=node:24.18.1-alpine
+
 # ---------- Builder ----------
-FROM node:24-alpine AS builder
+FROM ${NODE_IMAGE} AS builder
 
 # Build deps for native modules (better-sqlite3, sharp)
 RUN apk add --no-cache python3 make g++ libc6-compat
@@ -28,7 +60,7 @@ RUN npm run build
 RUN npm prune --omit=dev
 
 # ---------- Runtime ----------
-FROM node:24-alpine AS runtime
+FROM ${NODE_IMAGE} AS runtime
 
 # Runtime deps: tini for proper PID-1 signal handling, libc6-compat for native
 # modules built on Alpine, wget for the HEALTHCHECK probe.
