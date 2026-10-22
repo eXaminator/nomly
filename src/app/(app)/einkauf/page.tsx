@@ -1,6 +1,7 @@
 import { headers } from "next/headers";
 import { ShoppingListView } from "@/components/shopping/shopping-list-view";
 import { listShoppingItems } from "@/lib/shopping/items";
+import { loadLearnedOrders } from "@/lib/shopping/learned-order-db";
 import {
   getSupermarketDetail,
   listSupermarkets,
@@ -22,6 +23,9 @@ export default async function ShoppingPage() {
   // request and get the full list.
   const items = isShellPrecache ? [] : listShoppingItems();
   const supermarketList = listSupermarkets();
+  // Learned walking order per store, frozen at page load on purpose: it must
+  // not reshuffle the open list mid-trip as the user checks things off.
+  const learnedOrders = loadLearnedOrders();
   const supermarkets = supermarketList
     .map((s) => getSupermarketDetail(s.id))
     .filter((s): s is NonNullable<typeof s> => s != null)
@@ -32,6 +36,7 @@ export default async function ShoppingPage() {
         categoryId: c.categoryId,
         sortOrder: c.sortOrder,
       })),
+      learnedOrder: learnedOrders.get(s.id),
     }));
   const planner = getPlannerSettings();
   const today = todayIso();

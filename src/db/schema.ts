@@ -631,7 +631,9 @@ export const shoppingItemSource = sqliteTable(
  *
  * `shopping_item_id` is a SOFT correlation (a plain integer, NOT a foreign
  * key): it lets an un-check retract exactly the purchase a check created,
- * while the row survives the item's later deletion. Ids never repeat
+ * while the row survives the item's later deletion. Reactivating a checked
+ * item (re-adding it within the grace window) nulls the link instead, so the
+ * purchase stays as history. Ids never repeat
  * (AUTOINCREMENT), so a stale value can't collide with a future item.
  */
 export const ingredientPurchase = sqliteTable(
@@ -645,6 +647,16 @@ export const ingredientPurchase = sqliteTable(
     shoppingItemId: integer("shopping_item_id"),
     /** When the item was checked off (unix seconds) — the purchase moment. */
     purchasedAt: integer("purchased_at").notNull(),
+    /**
+     * The supermarket filter that was active when the item was checked off,
+     * or null when none was. The sequence of check-offs per store is what the
+     * shopping list's learned walking order is computed from (see
+     * `lib/shopping/learned-order.ts`). SET NULL on store deletion so the
+     * row keeps feeding the buying-cadence statistics.
+     */
+    supermarketId: integer("supermarket_id").references(() => supermarket.id, {
+      onDelete: "set null",
+    }),
     createdAt: integer("created_at").notNull().default(now),
   },
   (t) => [
@@ -653,6 +665,7 @@ export const ingredientPurchase = sqliteTable(
       t.purchasedAt,
     ),
     index("ingredient_purchase_item_idx").on(t.shoppingItemId),
+    index("ingredient_purchase_store_idx").on(t.supermarketId, t.purchasedAt),
   ],
 );
 
@@ -755,6 +768,29 @@ export const ingredientSupermarketUnavailable = sqliteTable(
       .references(() => supermarket.id, { onDelete: "cascade" }),
   },
   (t) => [primaryKey({ columns: [t.ingredientId, t.supermarketId] })],
+);
+
+/**
+ * "Gab es hier heute nicht": the shopping item `shopping_item_id` was not in
+ * stock at `supermarket_id` on the calendar day `skipped_on` (ISO date, the
+ * device's local day). Unlike `ingredient_supermarket_unavailable` this is
+ * bound to the list entry and expires with the day — the item stays on the
+ * general list and only drops out of that store's view until tomorrow. No
+ * purchase is recorded, so a skip never feeds the store's learned order.
+ * Expired rows are purged by the shopping sweep.
+ */
+export const shoppingItemSkip = sqliteTable(
+  "shopping_item_skip",
+  {
+    shoppingItemId: integer("shopping_item_id")
+      .notNull()
+      .references(() => shoppingItem.id, { onDelete: "cascade" }),
+    supermarketId: integer("supermarket_id")
+      .notNull()
+      .references(() => supermarket.id, { onDelete: "cascade" }),
+    skippedOn: text("skipped_on").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.shoppingItemId, t.supermarketId] })],
 );
 
 export const icalFeed = sqliteTable("ical_feed", {

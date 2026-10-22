@@ -10,9 +10,11 @@ import {
   recipe,
   shoppingItem,
   shoppingItemAmount,
+  shoppingItemSkip,
   shoppingItemSource,
   shoppingItemStapleSource,
   shoppingItemStock,
+  supermarket,
   unit,
 } from "../../db/schema.ts";
 import {
@@ -25,6 +27,7 @@ import {
   recordPurchaseForCheck,
   retractPurchaseForItem,
 } from "./purchase-record.ts";
+import { resetItemForReactivation } from "./item-reactivation.ts";
 import type { Dimension } from "./format.ts";
 import { pluralizeLabel } from "../units/label.ts";
 import { sweepCheckedItems } from "./sweeper.ts";
@@ -141,6 +144,8 @@ export type ShoppingItemStock = {
   dimension: AmountDimension;
 };
 
+export type ShoppingItemSkipView = { supermarketId: number; on: string };
+
 export type ShoppingItemView = {
   id: number;
   /** Retained for API compatibility — always "ingredient" after the
@@ -164,6 +169,13 @@ export type ShoppingItemView = {
   createdAt: number;
   updatedAt: number;
   unavailableSupermarketIds: number[];
+  /**
+   * "Gab es hier heute nicht" markers on this list entry: the item was out of
+   * stock at `supermarketId` on the local calendar day `on` (ISO date). Only
+   * a marker for *today* hides the item at that store; older ones are inert
+   * until the sweep purges them.
+   */
+  skippedAt: ShoppingItemSkipView[];
   sources: ShoppingItemSourceView[];
   stapleSources: ShoppingItemStapleSourceView[];
   /** Individual user-added manual amounts (additive on top of sources). */
@@ -429,6 +441,24 @@ export function listShoppingItems(
     }
   }
 
+  const skipsByItem = new Map<number, ShoppingItemSkipView[]>();
+  if (itemIds.length > 0) {
+    const rows = db
+      .select({
+        itemId: shoppingItemSkip.shoppingItemId,
+        supermarketId: shoppingItemSkip.supermarketId,
+        on: shoppingItemSkip.skippedOn,
+      })
+      .from(shoppingItemSkip)
+      .where(inArray(shoppingItemSkip.shoppingItemId, itemIds))
+      .all();
+    for (const r of rows) {
+      const arr = skipsByItem.get(r.itemId) ?? [];
+      arr.push({ supermarketId: r.supermarketId, on: r.on });
+      skipsByItem.set(r.itemId, arr);
+    }
+  }
+
   const stueck = getStueckUnit();
   const all: ShoppingItemView[] = baseRows.map((r) => {
     const sources = sourcesByItem.get(r.id) ?? [];
@@ -497,6 +527,7 @@ export function listShoppingItems(
       createdAt: r.createdAt,
       updatedAt: r.updatedAt,
       unavailableSupermarketIds: unavailable,
+      skippedAt: skipsByItem.get(r.id) ?? [],
       sources: sources.map((s) => ({
         sourceId: s.sourceId,
         mealPlanId: s.mealPlanId,
@@ -888,14 +919,9 @@ function addIngredientItem(
       existing.checkedAt != null &&
       Math.floor(Date.now() / 1000) - existing.checkedAt < GRACE_SECONDS
     ) {
-      // Reactivate: drop any prior manual overrides (the previously-checked
-      // amounts are "gone" from the user's perspective) and start over. The
-      // item is back "to buy", so the purchase its check-off recorded is
-      // retracted — a fresh check later records the real repurchase.
-      tx.delete(shoppingItemAmount)
-        .where(eq(shoppingItemAmount.itemId, existing.id))
-        .run();
-      retractPurchaseForItem(tx, existing.id);
+      // Reactivate: the checked amount was bought, so the item starts from
+      // zero — only the amount added now counts (see resetItemForReactivation).
+      resetItemForReactivation(tx, existing.id);
       tx.update(shoppingItem)
         .set({
           checked: false,
@@ -1014,7 +1040,33 @@ export type PatchOptions = {
    * unconditionally even when `clientStampedAt` is present.
    */
   clientStampedAt?: number;
+  /**
+   * The supermarket filter that was active when the user toggled the item.
+   * Recorded on the purchase a check creates so the store's check-off
+   * sequence can be learned. An id that no longer exists (store deleted while
+   * the toggle sat in an offline queue) is dropped to null — a stale store
+   * hint must never make the check itself fail.
+   */
+  supermarketId?: number | null;
+  /**
+   * False checks the item off WITHOUT recording a purchase — "erledigt, aber
+   * nicht gekauft" (still had it, skipped it, …). It neither feeds the buying
+   * cadence nor the store's learned order. Default true. Only meaningful with
+   * `checked: true`.
+   */
+  countAsPurchase?: boolean;
 };
+
+/** `id` when that supermarket exists, else null. */
+function existingSupermarketId(id: number | null | undefined): number | null {
+  if (id == null) return null;
+  const row = db
+    .select({ id: supermarket.id })
+    .from(supermarket)
+    .where(eq(supermarket.id, id))
+    .get();
+  return row ? row.id : null;
+}
 
 /**
  * Updates only the item-level fields (checked / note). Amount edits go
@@ -1092,9 +1144,19 @@ export function patchItem(
     // A check toggle is a purchase event: checking records that the item was
     // bought (at the same stamp used for checkedAt), un-checking retracts it.
     // This survives the later sweep of the checked row (see purchase-record).
+    // A check that doesn't count as a purchase records nothing (and drops a
+    // purchase a previous check of this row may have left).
     if (wantsCheckedChange) {
-      if (patch.checked) {
-        recordPurchaseForCheck(tx, id, existing.ingredientId, stamp);
+      if (patch.checked && options.countAsPurchase === false) {
+        retractPurchaseForItem(tx, id);
+      } else if (patch.checked) {
+        recordPurchaseForCheck(
+          tx,
+          id,
+          existing.ingredientId,
+          stamp,
+          existingSupermarketId(options.supermarketId),
+        );
       } else {
         retractPurchaseForItem(tx, id);
       }

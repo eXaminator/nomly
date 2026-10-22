@@ -657,6 +657,7 @@ describe("shopping merge-on-add", () => {
     const items = listShoppingItems();
     const tomate = items.find((i) => i.name === "Tomate");
     expect(tomate).toBeDefined();
+    const amountsBefore = tomate!.amounts;
     db.update(shoppingItem)
       .set({
         checked: true,
@@ -684,6 +685,41 @@ describe("shopping merge-on-add", () => {
     const tomateAfter = after.filter((i) => i.name === "Tomate");
     expect(tomateAfter).toHaveLength(1);
     expect(tomateAfter[0].checked).toBe(false);
+    // The checked amount was bought: re-adding the same meal owes it once,
+    // not on top of the old contribution.
+    expect(tomateAfter[0].sources).toHaveLength(1);
+    expect(tomateAfter[0].amounts).toEqual(amountsBefore);
+  });
+
+  it("re-adding a checked meal item by hand keeps only the new manual amount", async () => {
+    const { previewMeals } = await import("@/lib/shopping/preview");
+    const { addMealsToList } = await import("@/lib/shopping/merge");
+    const { addManualItem, listShoppingItems } = await import("@/lib/shopping/items");
+    const { db } = await import("@/db");
+    const { shoppingItem } = await import("@/db/schema");
+    const { eq } = await import("drizzle-orm");
+
+    const meals = previewMeals("2026-05-23", 1);
+    addMealsToList([
+      {
+        mealPlanId: ctx.mealPlanId,
+        ingredients: meals[0].sections.flatMap((s) => s.ingredients).map((i) => ({ recipeIngredientId: i.recipeIngredientId })),
+      },
+    ]);
+    const tomate = listShoppingItems().find((i) => i.name === "Tomate")!;
+    db.update(shoppingItem)
+      .set({ checked: true, checkedAt: Math.floor(Date.now() / 1000) - 600 })
+      .where(eq(shoppingItem.id, tomate.id))
+      .run();
+
+    const { item, action } = addManualItem({
+      ingredientId: ctx.ingredientIds.tomate,
+      quantity: 2,
+      unitId: ctx.unitIds.stk,
+    });
+    expect(action).toBe("reactivated");
+    expect(item.sources).toEqual([]);
+    expect(item.manualAmounts.map((m) => m.quantity)).toEqual([2]);
   });
 
   it("snapshots the ingredient's default category onto the item", async () => {

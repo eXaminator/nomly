@@ -1,15 +1,30 @@
 import type { ShoppingItemView } from "@/lib/shopping/items";
+import type { LearnedOrder } from "@/lib/shopping/learned-order";
+import { isSkippedToday, localDateIso } from "@/lib/shopping/local-date";
 
 export type SupermarketSummary = {
   id: number;
   name: string;
   categories: Array<{ categoryId: number; sortOrder: number }>;
+  /** Walking order learned from past check-offs at this store, when any. */
+  learnedOrder?: LearnedOrder;
 };
 
 export type ShoppingGroup = {
   key: string;
-  label: string;
+  /** Section heading; null for the single flat group of the learned order. */
+  label: string | null;
   items: ShoppingItemView[];
+};
+
+/** "category": aisle groups by the store's category order (the default).
+ *  "learned": one flat list in the store's learned check-off order. */
+export type ShoppingSortMode = "category" | "learned";
+
+export type GroupOptions = {
+  sortMode?: ShoppingSortMode;
+  /** Device-local ISO date; a skip marker only hides its item on this day. */
+  today?: string;
 };
 
 export type GroupedShoppingItems = {
@@ -33,22 +48,76 @@ export type GroupedShoppingItems = {
    * no store is selected.
    */
   unavailableHere: ShoppingItemView[];
+  /**
+   * Open items marked "gab es hier heute nicht" at the active store today
+   * (and not also permanently unavailable there). Hidden from the open list;
+   * listed on the "Nicht verfügbar" tab where the marker can be lifted.
+   */
+  skippedHere: ShoppingItemView[];
+  /** True when the open list is in learned order (mode on, store selected and
+   *  the store has learned data); false when it fell back to categories. */
+  learnedOrderApplied: boolean;
 };
 
 /**
- * Returns true when `item` should be hidden for the given supermarket: either
- * the user marked it unavailable there, or its category isn't carried by that
- * store. Uncategorized items always pass — the user hasn't tagged them either
- * way, so we surface them rather than risk dropping them silently.
+ * Returns true when `item` should be hidden for the given supermarket: the
+ * user marked it unavailable there, it is still open and was skipped there
+ * today, or its category isn't carried by that store. Uncategorized items
+ * always pass — the user hasn't tagged them either way, so we surface them
+ * rather than risk dropping them silently.
  */
 function hiddenAtStore(
   item: ShoppingItemView,
   storeId: number | null,
   allowedCategoryIds: Set<number> | null,
+  today: string,
 ): boolean {
   if (storeId == null || allowedCategoryIds == null) return false;
   if (item.unavailableSupermarketIds.includes(storeId)) return true;
+  if (!item.checked && isSkippedToday(item, storeId, today)) return true;
   return item.categoryId != null && !allowedCategoryIds.has(item.categoryId);
+}
+
+const byName = (a: ShoppingItemView, b: ShoppingItemView) =>
+  a.name.localeCompare(b.name, "de", { sensitivity: "base" });
+
+/**
+ * Sorts open items into the store's learned walking order. Key, in order of
+ * preference: the article's own learned score; its category's learned score;
+ * after everything learned, the category's position in the store's configured
+ * order; uncategorized articles without a score last. Ties by name.
+ */
+function sortByLearnedOrder(
+  items: ShoppingItemView[],
+  store: SupermarketSummary,
+  order: LearnedOrder,
+): ShoppingItemView[] {
+  const ingredientScore = new Map(
+    order.ingredients.map((e) => [e.ingredientId, e.score]),
+  );
+  const categoryScore = new Map(
+    order.categories.map((e) => [e.categoryId, e.score]),
+  );
+  const configured = [...store.categories].sort(
+    (a, b) => a.sortOrder - b.sortOrder,
+  );
+  const configuredRank = new Map(
+    configured.map((c, i) => [c.categoryId, (i + 1) / (configured.length + 1)]),
+  );
+  const key = (item: ShoppingItemView): number => {
+    const own = ingredientScore.get(item.refId);
+    if (own != null) return own;
+    if (item.categoryId != null) {
+      const cat = categoryScore.get(item.categoryId);
+      if (cat != null) return cat;
+      const rank = configuredRank.get(item.categoryId);
+      if (rank != null) return 1 + rank;
+    }
+    return 3;
+  };
+  const keyed = items.map((item) => ({ item, key: key(item) }));
+  keyed.sort((a, b) => a.key - b.key || byName(a.item, b.item));
+  return keyed.map((e) => e.item);
 }
 
 /**
@@ -61,7 +130,9 @@ export function groupShoppingItems(
   items: ShoppingItemView[],
   supermarketId: number | null,
   supermarkets: SupermarketSummary[],
+  options: GroupOptions = {},
 ): GroupedShoppingItems {
+  const today = options.today ?? localDateIso();
   const sm =
     supermarketId != null
       ? supermarkets.find((s) => s.id === supermarketId) ?? null
@@ -76,15 +147,17 @@ export function groupShoppingItems(
   const open: ShoppingItemView[] = [];
   const checked: ShoppingItemView[] = [];
   const unavailableHere: ShoppingItemView[] = [];
+  const skippedHere: ShoppingItemView[] = [];
   let hiddenOpen = 0;
   let hiddenChecked = 0;
   for (const item of items) {
-    const hidden = hiddenAtStore(item, supermarketId, allowedCategoryIds);
-    if (
-      supermarketId != null &&
-      item.unavailableSupermarketIds.includes(supermarketId)
-    ) {
-      unavailableHere.push(item);
+    const hidden = hiddenAtStore(item, supermarketId, allowedCategoryIds, today);
+    if (supermarketId != null) {
+      if (item.unavailableSupermarketIds.includes(supermarketId)) {
+        unavailableHere.push(item);
+      } else if (!item.checked && isSkippedToday(item, supermarketId, today)) {
+        skippedHere.push(item);
+      }
     }
     if (item.checked) {
       if (hidden) hiddenChecked += 1;
@@ -94,6 +167,17 @@ export function groupShoppingItems(
       else open.push(item);
     }
   }
+
+  // Learned order: one flat, headerless group in the store's walking order.
+  // Falls back to the category groups when the store has nothing learned yet.
+  const learned =
+    options.sortMode === "learned" &&
+    sm != null &&
+    sm.learnedOrder != null &&
+    (sm.learnedOrder.ingredients.length > 0 ||
+      sm.learnedOrder.categories.length > 0)
+      ? sm.learnedOrder
+      : null;
 
   type Bucket = {
     categoryId: number | null;
@@ -112,9 +196,7 @@ export function groupShoppingItems(
     buckets.set(key, b);
   }
   for (const b of buckets.values()) {
-    b.items.sort((a, b2) =>
-      a.name.localeCompare(b2.name, "de", { sensitivity: "base" }),
-    );
+    b.items.sort(byName);
   }
 
   // Uncategorized always sinks to the bottom of the open section, regardless
@@ -136,11 +218,16 @@ export function groupShoppingItems(
     });
   });
 
-  const openGroups: ShoppingGroup[] = ordered.map((b) => ({
-    key: `cat-${b.categoryId ?? "none"}`,
-    label: b.categoryName,
-    items: b.items,
-  }));
+  const openGroups: ShoppingGroup[] =
+    learned && sm
+      ? open.length > 0
+        ? [{ key: "learned", label: null, items: sortByLearnedOrder(open, sm, learned) }]
+        : []
+      : ordered.map((b) => ({
+          key: `cat-${b.categoryId ?? "none"}`,
+          label: b.categoryName,
+          items: b.items,
+        }));
 
   // Sort by checkedAt desc so the most-recently-checked item is at the top;
   // items without a checkedAt (legacy or imported) fall to the bottom.
@@ -157,8 +244,8 @@ export function groupShoppingItems(
     visibleChecked: checked.length,
     hiddenOpen,
     hiddenChecked,
-    unavailableHere: unavailableHere.sort((a, b) =>
-      a.name.localeCompare(b.name, "de", { sensitivity: "base" }),
-    ),
+    unavailableHere: unavailableHere.sort(byName),
+    skippedHere: skippedHere.sort(byName),
+    learnedOrderApplied: learned != null,
   };
 }

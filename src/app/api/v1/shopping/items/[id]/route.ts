@@ -13,6 +13,11 @@ const patchSchema = z
     note: z.string().nullable().optional(),
     mutationId: z.string().uuid().optional(),
     clientStampedAt: z.number().int().positive().optional(),
+    // Active store filter at toggle time; recorded on the purchase so the
+    // store's check-off order can be learned.
+    supermarketId: z.number().int().positive().nullable().optional(),
+    // false: check off without recording a purchase ("nicht gekauft").
+    countAsPurchase: z.boolean().optional(),
   })
   .strict();
 
@@ -36,13 +41,14 @@ export async function PATCH(
       { status: 400 },
     );
   }
-  const { mutationId, clientStampedAt, ...patch } = parsed.data;
+  const { mutationId, clientStampedAt, supermarketId, countAsPurchase, ...patch } =
+    parsed.data;
   if (mutationId) {
     const cached = recallMutation<{ item: unknown }>(mutationId);
     if (cached) return NextResponse.json(cached);
   }
   try {
-    const item = patchItem(id, patch, { clientStampedAt });
+    const item = patchItem(id, patch, { clientStampedAt, supermarketId, countAsPurchase });
     const payload = { item };
     if (mutationId) recordMutation(mutationId, payload);
     publishShoppingChanged();

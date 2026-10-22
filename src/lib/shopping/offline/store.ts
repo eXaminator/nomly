@@ -47,6 +47,8 @@ export async function hydrateFromIDB(
 export async function toggleItemOptimistic(
   itemId: number,
   nextChecked: boolean,
+  supermarketId: number | null = null,
+  options: { countAsPurchase?: boolean } = {},
 ): Promise<void> {
   const db = await openOfflineDb();
   const mutationId = crypto.randomUUID();
@@ -66,6 +68,10 @@ export async function toggleItemOptimistic(
     itemId,
     type: nextChecked ? "check" : "uncheck",
     queuedAt: now,
+    supermarketId,
+    ...(nextChecked && options.countAsPurchase === false
+      ? { countAsPurchase: false }
+      : {}),
     attempts: 0,
   });
   await tx.done;

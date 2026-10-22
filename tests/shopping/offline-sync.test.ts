@@ -9,7 +9,7 @@ function makeItem(over: Partial<ShoppingItemView> = {}): ShoppingItemView {
     amounts: [], requiredAmounts: [], categoryId: null, categoryName: null,
     checked: false, checkedAt: null, note: null,
     sortOrder: 0, version: 1, createdAt: 0, updatedAt: 0,
-    unavailableSupermarketIds: [], sources: [], stapleSources: [], manualAmounts: [],
+    unavailableSupermarketIds: [], skippedAt: [], sources: [], stapleSources: [], manualAmounts: [],
     stock: null, fullyStocked: false, defaultUnitId: null, defaultUnitName: null,
     unspecifiedSourceCount: 0,
     ...over,
@@ -105,5 +105,50 @@ describe("drainQueueOnce", () => {
     expect(body.clientStampedAt).toBe(42_000);
     expect(body.checked).toBe(true);
     expect(body.mutationId).toBe("m1");
+  });
+
+  it("sends the queued store with the PATCH, null for legacy entries", async () => {
+    const db = await openOfflineDb();
+    await db.put("items", makeItem({ id: 1 }));
+    await db.put("items", makeItem({ id: 2 }));
+    await db.put("mutationQueue", {
+      mutationId: "m1", itemId: 1, type: "check", queuedAt: 100, attempts: 0,
+      supermarketId: 7,
+    });
+    // Queued before the field existed.
+    await db.put("mutationQueue", {
+      mutationId: "m2", itemId: 2, type: "check", queuedAt: 200, attempts: 0,
+    });
+
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
+      new Response(JSON.stringify({ item: makeItem({ id: 1, checked: true }) }),
+        { status: 200, headers: { "content-type": "application/json" } }),
+    );
+
+    await drainQueueOnce();
+    const bodies = fetchMock.mock.calls.map((c) => JSON.parse(String(c[1]?.body)));
+    expect(bodies[0]).toMatchObject({ checked: true, supermarketId: 7 });
+    expect(bodies[1]).toMatchObject({ checked: true, supermarketId: null });
+  });
+
+  it("forwards a no-purchase check, and only that one", async () => {
+    const db = await openOfflineDb();
+    await db.put("items", makeItem({ id: 1 }));
+    await db.put("items", makeItem({ id: 2 }));
+    await db.put("mutationQueue", {
+      mutationId: "m1", itemId: 1, type: "check", queuedAt: 100, attempts: 0,
+      countAsPurchase: false,
+    });
+    await db.put("mutationQueue", {
+      mutationId: "m2", itemId: 2, type: "check", queuedAt: 200, attempts: 0,
+    });
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
+      new Response(JSON.stringify({ item: makeItem({ id: 1, checked: true }) }),
+        { status: 200, headers: { "content-type": "application/json" } }),
+    );
+    await drainQueueOnce();
+    const bodies = fetchMock.mock.calls.map((c) => JSON.parse(String(c[1]?.body)));
+    expect(bodies[0]).toMatchObject({ checked: true, countAsPurchase: false });
+    expect(bodies[1]).not.toHaveProperty("countAsPurchase");
   });
 });

@@ -19,7 +19,7 @@ function makeItem(overrides: Partial<ShoppingItemView> = {}): ShoppingItemView {
     version: 1,
     createdAt: 0,
     updatedAt: 0,
-    unavailableSupermarketIds: [],
+    unavailableSupermarketIds: [], skippedAt: [],
     sources: [],
     stapleSources: [],
     manualAmounts: [],
@@ -150,5 +150,21 @@ describe("reconcileFromServer", () => {
     const meta = await db.get("meta", "shoppingFetchedAt");
     expect(meta).toBeDefined();
     expect(meta!.value).toBeGreaterThanOrEqual(before);
+  });
+
+  it("freezes the active store into the queue entry at toggle time", async () => {
+    await hydrateFromIDB([makeItem({ id: 1 })]);
+    await toggleItemOptimistic(1, true, 42);
+    const db = await openOfflineDb();
+    const queue = await db.getAll("mutationQueue");
+    expect(queue[0]).toMatchObject({ itemId: 1, type: "check", supermarketId: 42 });
+  });
+
+  it("marks a check that must not count as a purchase", async () => {
+    await hydrateFromIDB([makeItem({ id: 1 })]);
+    await toggleItemOptimistic(1, true, 42, { countAsPurchase: false });
+    const db = await openOfflineDb();
+    const [entry] = await db.getAll("mutationQueue");
+    expect(entry).toMatchObject({ type: "check", supermarketId: 42, countAsPurchase: false });
   });
 });

@@ -1,0 +1,24 @@
+{
+  "worktree": {
+    "setup": [
+      "if [ -f \"$PASEO_SOURCE_CHECKOUT_PATH/.env.local\" ]; then ln -sfn \"$PASEO_SOURCE_CHECKOUT_PATH/.env.local\" .env.local; else echo 'paseo setup: no .env.local in source checkout, skipping'; fi",
+      "npm ci || { echo 'paseo setup: npm ci failed (native build?), retrying without install scripts; better-sqlite3 ships prebuilt binaries'; npm ci --ignore-scripts; }"
+    ]
+  },
+  "scripts": {
+    "dev": {
+      "type": "service",
+      "command": "scripts/paseo-dev.sh local"
+    },
+    "dev-prod": {
+      "type": "service",
+      "command": "scripts/paseo-dev.sh prod"
+    },
+    "db-reset": {
+      "command": "DATABASE_URL=\"$(sed -n 's/^DATABASE_URL=//p' .env.local 2>/dev/null | tail -n1)\"; export DATABASE_URL=\"${DATABASE_URL:-./data/nomly.db}\"; npm run seed:dev:load -- --force && echo 'Restart the dev service to pick up the new database.'"
+    },
+    "test": {
+      "command": "npm test"
+    }
+  }
+}
