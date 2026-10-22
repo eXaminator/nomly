@@ -10,7 +10,8 @@ The dev server reads `DATABASE_URL` from `.env.local` (defaults to `./data/nomly
 
 **Databases under `data/`:**
 - `data/nomly.db` — the normal local dev DB (`.env.local` default).
-- `data/prod/nomly.db` — **most recent prod copy.** Pulled manually with `scp docker-1:/DATA/AppData/nomly/data/nomly.db ./data/prod/`. Treat as pristine; never point the server at it directly (it would mutate the dump).
+- `data/prod/nomly.db` — **most recent prod copy.** Pulled manually with `scp 'docker-1:/DATA/AppData/nomly/data/nomly.db*' ./data/prod/` — the glob matters: prod runs in WAL mode, and recent changes can still sit in `nomly.db-wal`; copying only `nomly.db` silently drops them. Treat as pristine; never point the server at it directly (it would mutate the dump).
+- `data/dev-seed/nomly-dev.{db,json}` — **dev seed:** a sanitized prod snapshot (no API tokens, no iCal feeds, no photo paths) built by `npm run seed:dev:create` from `data/prod/`. It is prod data, so it stays in the gitignored `data/` of the main checkout; worktrees find it there.
 - `data/nomly-prodtest.db` — disposable working copy of prod used to run dev against real data.
 
 **Kill the dev server (port 3000):**
@@ -23,14 +24,23 @@ lsof -ti tcp:3000 | xargs kill
 npm run dev
 ```
 
+**Load the dev seed** into the local dev DB (migrates it too; dates move forward in whole weeks so the plan and purchase cadence line up with today). Only fills a missing/empty DB unless forced — stop the dev server before forcing:
+```bash
+npm run seed:dev:load            # empty DB only
+npm run seed:dev:load -- --force # reset to the seed
+```
+
 **Start dev against the latest prod data:** refresh the working copy from the prod dump, migrate it to the current head, then serve it:
 ```bash
 rm -f data/nomly-prodtest.db data/nomly-prodtest.db-shm data/nomly-prodtest.db-wal
 cp data/prod/nomly.db data/nomly-prodtest.db
+[ -f data/prod/nomly.db-wal ] && cp data/prod/nomly.db-wal data/nomly-prodtest.db-wal
 DATABASE_URL=./data/nomly-prodtest.db npm run migrate
 DATABASE_URL=./data/nomly-prodtest.db npm run dev
 ```
 Note: only the DB is copied — prod photos and the live OIDC issuer (`.env.local`) are unchanged, so referenced images may be missing and login still hits the real IdP.
+
+**Under Paseo** (`paseo.json`): the `dev` service runs `scripts/paseo-dev.sh local` (migrates; an empty DB gets the dev seed, else the base seed), `dev-prod` does the prod-copy dance above, `db-reset` force-loads the dev seed. The script binds Paseo's port/host and sets `BASE_URL` to the service's proxy URL. Worktrees link `.env.local` to the main checkout's.
 
 # Tests
 
