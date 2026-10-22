@@ -1,7 +1,7 @@
 import { eq, sql } from "drizzle-orm";
 import { db } from "../../db/index.ts";
 import { ingredient, shoppingItem } from "../../db/schema.ts";
-import { retractPurchaseForItem } from "./purchase-record.ts";
+import { resetItemForReactivation } from "./item-reactivation.ts";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -21,7 +21,8 @@ export type UpsertResult = {
  * Side effects:
  *   - created   → inserts a row with `categoryId = ingredient.defaultCategoryId`,
  *                 `version=1`, sortOrder appended.
- *   - reactivated → un-checks the existing row, clears manual quantity/unit,
+ *   - reactivated → un-checks the existing row, clears manual quantity/unit
+ *                   and every old contribution (resetItemForReactivation),
  *                   bumps version, touches updatedAt.
  *   - neither   → bumps version + updatedAt only.
  */
@@ -85,8 +86,9 @@ export function upsertShoppingItemForIngredient(
       })
       .where(eq(shoppingItem.id, existing.id))
       .run();
-    // Back "to buy" — undo the purchase its previous check-off recorded.
-    retractPurchaseForItem(tx, existing.id);
+    // Back "to buy" from zero: the checked amount was bought, so only the
+    // contributions the caller adds next count (see resetItemForReactivation).
+    resetItemForReactivation(tx, existing.id);
     return { itemId: existing.id, created: false, reactivated: true };
   }
 

@@ -8,10 +8,14 @@
  * SupermarketSummary satisfy them structurally), which keeps it unit-testable.
  */
 
+import { isSkippedToday, localDateIso } from "./local-date.ts";
+
 export type NeededItem = {
   checked: boolean;
   categoryId: number | null;
   unavailableSupermarketIds: number[];
+  /** "Gab es hier heute nicht" markers; only today's hide the item. */
+  skippedAt?: ReadonlyArray<{ supermarketId: number; on: string }>;
 };
 
 export type SupermarketCarry = {
@@ -21,13 +25,14 @@ export type SupermarketCarry = {
 
 /**
  * Returns a Map of supermarket id → count of unchecked items that store
- * carries. A store carries an item when it isn't marked unavailable there and
- * either the item is uncategorized (shows everywhere) or the item's category
- * is in the store's ordering.
+ * carries. A store carries an item when it isn't marked unavailable there,
+ * wasn't skipped there on `today`, and either the item is uncategorized
+ * (shows everywhere) or the item's category is in the store's ordering.
  */
 export function countNeededItemsPerSupermarket(
   items: ReadonlyArray<NeededItem>,
   supermarkets: ReadonlyArray<SupermarketCarry>,
+  today: string = localDateIso(),
 ): Map<number, number> {
   const counts = new Map<number, number>();
   const carriedById = new Map<number, Set<number>>();
@@ -41,6 +46,7 @@ export function countNeededItemsPerSupermarket(
     const unavailable = new Set(item.unavailableSupermarketIds);
     for (const s of supermarkets) {
       if (unavailable.has(s.id)) continue;
+      if (isSkippedToday(item, s.id, today)) continue;
       if (
         item.categoryId != null &&
         !carriedById.get(s.id)!.has(item.categoryId)

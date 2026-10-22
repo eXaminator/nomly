@@ -133,6 +133,8 @@ export async function patchItem(
     note?: string | null;
     mutationId?: string;
     clientStampedAt?: number;
+    supermarketId?: number | null;
+    countAsPurchase?: boolean;
   },
 ): Promise<ShoppingItemView> {
   const res = await fetch(`/api/v1/shopping/items/${id}`, {
@@ -379,6 +381,29 @@ export async function markRecipesNeedUpdate(recipeIds: number[]): Promise<void> 
       await jsonOrThrow(res);
     }),
   );
+}
+
+/**
+ * "Gab es hier heute nicht": mark the list entry as out of stock at the store
+ * for the device-local day `on` (ISO date), or lift the marker with null.
+ */
+export async function setSkipped(
+  itemId: number,
+  supermarketId: number,
+  on: string | null,
+): Promise<void> {
+  const res =
+    on != null
+      ? await fetch(`/api/v1/shopping/items/${itemId}/skip`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ supermarketId, on }),
+        })
+      : await fetch(
+          `/api/v1/shopping/items/${itemId}/skip?supermarketId=${supermarketId}`,
+          { method: "DELETE" },
+        );
+  await jsonOrThrow(res);
 }
 
 export async function setUnavailable(

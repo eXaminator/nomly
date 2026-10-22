@@ -15,12 +15,18 @@ type Db = typeof db | Tx;
  *
  * The `shopping_item_id` link is soft (see the table note in schema.ts): the
  * item may be swept/cleared later while this purchase row lives on as history.
+ *
+ * `supermarketId` is the store filter that was active at check-off (null when
+ * none was); the per-store check-off sequence feeds the learned walking order.
+ * The caller must pass an existing store id or null — the column is a real
+ * foreign key.
  */
 export function recordPurchaseForCheck(
   handle: Db,
   itemId: number,
   ingredientId: number,
   purchasedAt: number,
+  supermarketId: number | null = null,
 ): void {
   handle
     .delete(ingredientPurchase)
@@ -28,19 +34,33 @@ export function recordPurchaseForCheck(
     .run();
   handle
     .insert(ingredientPurchase)
-    .values({ ingredientId, shoppingItemId: itemId, purchasedAt })
+    .values({ ingredientId, shoppingItemId: itemId, purchasedAt, supermarketId })
     .run();
 }
 
 /**
  * Retract the purchase a check created for `itemId`, if any. Used when an
- * item is un-checked or reactivated (re-added to the list within the 24 h
- * grace window) — the "bought" event is undone. No-op when the item has no
- * recorded purchase.
+ * item is un-checked — the check was a mistake, so the "bought" event is
+ * undone. No-op when the item has no recorded purchase.
  */
 export function retractPurchaseForItem(handle: Db, itemId: number): void {
   handle
     .delete(ingredientPurchase)
+    .where(eq(ingredientPurchase.shoppingItemId, itemId))
+    .run();
+}
+
+/**
+ * Cut the link between `itemId` and the purchase its check created, keeping
+ * the purchase as history. Used when a checked item is reactivated (re-added
+ * within the 24 h grace window): the item was bought and is simply needed
+ * again — the earlier purchase stays (buying cadence, the store's learned
+ * walking order) and the next check records a purchase of its own.
+ */
+export function detachPurchaseFromItem(handle: Db, itemId: number): void {
+  handle
+    .update(ingredientPurchase)
+    .set({ shoppingItemId: null })
     .where(eq(ingredientPurchase.shoppingItemId, itemId))
     .run();
 }

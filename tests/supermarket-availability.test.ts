@@ -74,4 +74,13 @@ describe("countNeededItemsPerSupermarket", () => {
     expect(counts.get(10)).toBe(3);
     expect(counts.get(20)).toBe(2);
   });
+
+  it("drops an item skipped at a store today, but only there and only today", () => {
+    const skipped = item({ skippedAt: [{ supermarketId: 10, on: "2026-10-22" }] });
+    const today = countNeededItemsPerSupermarket([skipped], SUPERMARKETS, "2026-10-22");
+    expect(today.get(10)).toBe(0);
+    expect(today.get(20)).toBe(1);
+    const tomorrow = countNeededItemsPerSupermarket([skipped], SUPERMARKETS, "2026-10-23");
+    expect(tomorrow.get(10)).toBe(1);
+  });
 });

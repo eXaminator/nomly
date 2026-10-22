@@ -1,6 +1,7 @@
 import { and, eq, isNotNull, lt } from "drizzle-orm";
 import { db } from "../../db/index.ts";
 import { shoppingItem } from "../../db/schema.ts";
+import { purgeExpiredSkips } from "./skip.ts";
 
 const GRACE_SECONDS = 24 * 60 * 60;
 
@@ -16,6 +17,9 @@ const GRACE_SECONDS = 24 * 60 * 60;
 export function sweepCheckedItems(nowSeconds = Math.floor(Date.now() / 1000)): {
   deletedIds: number[];
 } {
+  // Expired "gab es hier heute nicht" markers ride along: they are inert
+  // after their day, so this is housekeeping, not a visible change.
+  purgeExpiredSkips(nowSeconds);
   const cutoff = nowSeconds - GRACE_SECONDS;
   const stale = db
     .select({ id: shoppingItem.id })

@@ -29,6 +29,8 @@ export async function drainQueueOnce(): Promise<DrainResult> {
         checked: entry.type === "check",
         mutationId: entry.mutationId,
         clientStampedAt: entry.queuedAt,
+        supermarketId: entry.supermarketId ?? null,
+        ...(entry.countAsPurchase === false ? { countAsPurchase: false } : {}),
       });
       const writeTx = db.transaction(["items", "mutationQueue"], "readwrite");
       await writeTx.objectStore("items").put(updated);

@@ -75,8 +75,8 @@ type ContributionLine = {
  * (plus the item's own manual `quantity`/`unit_id` for hand-added entries).
  *
  * Reactivate rule: when the existing item is `checked` and the check
- * happened within the 24 h grace window, the add un-checks it and clears
- * the manual quantity (the user already grabbed the previously-checked
+ * happened within the 24 h grace window, the add un-checks it and drops all
+ * of its old contributions (the user already grabbed the previously-checked
  * amount). The fresh sources then describe what's owed now.
  */
 export function addMealsToList(

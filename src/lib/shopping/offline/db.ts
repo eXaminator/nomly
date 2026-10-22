@@ -1,5 +1,6 @@
 import { openDB, type IDBPDatabase, type DBSchema } from "idb";
 import type { ShoppingItemView } from "@/lib/shopping/items";
+import type { LearnedOrder } from "@/lib/shopping/learned-order";
 
 export type OfflineShoppingItem = ShoppingItemView;
 
@@ -7,6 +8,7 @@ export type OfflineSupermarket = {
   id: number;
   name: string;
   categories: Array<{ categoryId: number; sortOrder: number }>;
+  learnedOrder?: LearnedOrder;
 };
 
 export type OfflineCategory = { id: number; name: string };
@@ -16,6 +18,12 @@ export type OfflineMutation = {
   itemId: number;
   type: "check" | "uncheck";
   queuedAt: number;
+  /** Store filter active at toggle time (frozen then, not read at drain
+   *  time — the user may have switched stores meanwhile). Absent on entries
+   *  queued before the field existed. */
+  supermarketId?: number | null;
+  /** false: a check that must not record a purchase. Absent = a purchase. */
+  countAsPurchase?: boolean;
   attempts: number;
   lastError?: string;
 };

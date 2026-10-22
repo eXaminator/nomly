@@ -3,8 +3,10 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import {
+  ArrowDownUp,
   CalendarClock,
   CalendarPlus,
+  ChevronDown,
   EyeOff,
   ListPlus,
   PackageCheck,
@@ -13,13 +15,22 @@ import {
   Trash2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/cn";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Tabs, TabsContent, TabsList, TabsTrigger, TabCount } from "@/components/ui/tabs";
 import { RecipePreviewDialog } from "@/components/planner/recipe-preview-dialog";
 import type { ShoppingItemView } from "@/lib/shopping/items";
 import {
   groupShoppingItems,
+  type ShoppingSortMode,
   type SupermarketSummary,
 } from "@/lib/shopping/group-items";
+import { localDateIso } from "@/lib/shopping/local-date";
 import { countNeededItemsPerSupermarket } from "@/lib/shopping/supermarket-availability";
 import { resolveSupermarketDeepLink } from "@/lib/shopping/supermarket-deep-link";
 import { ShoppingItemRow } from "./shopping-item-row";
@@ -47,6 +58,7 @@ import {
   setItemStock as apiSetStock,
   setManualAmountQuantity as apiSetManualQty,
   setSourceQuantity as apiSetSourceQty,
+  setSkipped as apiSetSkipped,
   setUnavailable as apiSetUnavailable,
 } from "./api";
 import { EditArticleDialog } from "@/components/articles/edit-article-dialog";
@@ -63,6 +75,8 @@ import {
 import { kickSync } from "@/lib/shopping/offline/sync";
 
 const STORAGE_KEY = "nomly.shopping.supermarketId";
+/** Per-device opt-in for the learned walking order ("learned" | absent). */
+const SORT_MODE_KEY = "nomly.shopping.sortMode";
 
 export type { SupermarketSummary } from "@/lib/shopping/group-items";
 
@@ -87,6 +101,18 @@ export function ShoppingListView({
   // the data-less offline shell) overwrite live local state. The mount
   // effect below seeds IDB from `initialItems` only when IDB is empty.
   const [supermarketId, setSupermarketId] = React.useState<number | null>(null);
+  const [sortMode, setSortMode] = React.useState<ShoppingSortMode>("category");
+  // The device's calendar day — "gab es hier heute nicht" markers only hide
+  // their item on that day. Unknown ("") during SSR/hydration so the server's
+  // (possibly differently zoned) day can't cause a mismatch; re-checked every
+  // minute so the markers lapse at local midnight without a reload.
+  const [today, setToday] = React.useState("");
+  React.useEffect(() => {
+    const tick = () => setToday(localDateIso());
+    tick();
+    const id = window.setInterval(tick, 60_000);
+    return () => window.clearInterval(id);
+  }, []);
   const [addItemOpen, setAddItemOpen] = React.useState(false);
   const [addMealsOpen, setAddMealsOpen] = React.useState(false);
   const [addStaplesOpen, setAddStaplesOpen] = React.useState(false);
@@ -203,7 +229,19 @@ export function ShoppingListView({
     } else if (action.storage === "clear") {
       window.localStorage.removeItem(STORAGE_KEY);
     }
+    if (window.localStorage.getItem(SORT_MODE_KEY) === "learned") {
+      setSortMode("learned");
+    }
   }, [supermarkets]);
+
+  function toggleSortMode() {
+    setSortMode((prev) => {
+      const next: ShoppingSortMode = prev === "learned" ? "category" : "learned";
+      if (next === "learned") window.localStorage.setItem(SORT_MODE_KEY, "learned");
+      else window.localStorage.removeItem(SORT_MODE_KEY);
+      return next;
+    });
+  }
 
   function persistSupermarket(id: number | null) {
     setSupermarketId(id);
@@ -217,7 +255,14 @@ export function ShoppingListView({
     }
   }
 
-  async function onToggleCheck(item: ShoppingItemView) {
+  /**
+   * Toggles the check. `countAsPurchase: false` checks off without recording a
+   * purchase (the swipe-right gesture: "erledigt, aber nicht gekauft").
+   */
+  async function onToggleCheck(
+    item: ShoppingItemView,
+    options: { countAsPurchase?: boolean } = {},
+  ) {
     const nextChecked = !item.checked;
     // Optimistic local toggle + queued mutation; the sync engine drives the network.
     setItems((prev) =>
@@ -235,7 +280,9 @@ export function ShoppingListView({
       const without = prev.filter((id) => id !== item.id);
       return nextChecked ? [...without, item.id] : without;
     });
-    await toggleItemOptimistic(item.id, nextChecked);
+    // The active store rides along so the check-off feeds that store's
+    // learned walking order.
+    await toggleItemOptimistic(item.id, nextChecked, supermarketId, options);
     if (connectivity === "online") {
       await kickSync();
       const refreshed = await readItemsFromIDB();
@@ -420,26 +467,52 @@ export function ShoppingListView({
     }
   }
 
+  async function onSetSkipped(
+    item: ShoppingItemView,
+    storeId: number,
+    skipped: boolean,
+  ) {
+    const on = localDateIso();
+    // Optimistic so the row drops out of (or back into) the store view at once.
+    setItems((prev) =>
+      prev.map((i) => {
+        if (i.id !== item.id) return i;
+        const others = (i.skippedAt ?? []).filter((s) => s.supermarketId !== storeId);
+        return {
+          ...i,
+          skippedAt: skipped ? [...others, { supermarketId: storeId, on }] : others,
+        };
+      }),
+    );
+    try {
+      await apiSetSkipped(item.id, storeId, skipped ? on : null);
+    } catch {
+      router.refresh();
+    }
+  }
+
   const grouped = React.useMemo(
-    () => groupShoppingItems(items, supermarketId, supermarkets),
-    [items, supermarketId, supermarkets],
+    () =>
+      groupShoppingItems(items, supermarketId, supermarkets, { sortMode, today }),
+    [items, supermarketId, supermarkets, sortMode, today],
   );
+  const notHereCount = grouped.unavailableHere.length + grouped.skippedHere.length;
 
   // Leaving the "Nicht verfügbar" tab once its last article has been made
   // available again (the tab trigger is gone, so its content would orphan).
   React.useEffect(() => {
-    if (activeTab === "unavailable" && grouped.unavailableHere.length === 0) {
+    if (activeTab === "unavailable" && notHereCount === 0) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setActiveTab("open");
     }
-  }, [activeTab, grouped.unavailableHere.length]);
+  }, [activeTab, notHereCount]);
 
   // How many still-needed items each supermarket carries — drives the count
   // shown next to each store in the filter so it's easy to see which stores
   // still have something to buy.
   const neededCounts = React.useMemo(
-    () => countNeededItemsPerSupermarket(items, supermarkets),
-    [items, supermarkets],
+    () => countNeededItemsPerSupermarket(items, supermarkets, today),
+    [items, supermarkets, today],
   );
 
   // Stores that still have unchecked items, most-loaded first. Shown on the
@@ -463,11 +536,13 @@ export function ShoppingListView({
         item={item}
         activeSupermarketId={supermarketId}
         onPreviewRecipe={(id) => setPreviewRecipeId(id)}
-        onToggle={onToggleCheck}
+        onToggle={(i) => onToggleCheck(i)}
+        onCheckWithoutPurchase={(i) => onToggleCheck(i, { countAsPurchase: false })}
         onEdit={(i) => setEditingItemId(i.id)}
         onEditArticle={setEditingArticleId}
         onDelete={onDelete}
         onToggleUnavailable={onToggleUnavailable}
+        onSkipToday={(i, storeId) => onSetSkipped(i, storeId, true)}
         onMarkRecipesNeedUpdate={(ids) => void apiMarkRecipesNeedUpdate(ids)}
         onRequestMarkRecipeUpdate={setMarkUpdateItem}
         disabledOffline={disabledOffline}
@@ -476,104 +551,96 @@ export function ShoppingListView({
     </li>
   );
 
+  const learnedWanted = sortMode === "learned" && supermarketId != null;
+
   return (
-    <div className="flex flex-col gap-4">
-      {/* Title row: headline on the left, undo aligned to its right. */}
-      <div className="flex items-center justify-between gap-2">
-        <h1 className="text-2xl font-semibold tracking-tight">Einkaufsliste</h1>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={onUndoLastCheck}
-          disabled={!undoAvailable || disabledOffline}
-          aria-label="Letzten Haken zurücknehmen"
-          title="Letzten Haken zurücknehmen"
-          className="shrink-0"
-        >
-          <RotateCcw className="size-4" />
-          <span className="hidden sm:inline">Rückgängig</span>
-        </Button>
-      </div>
-
-      {/* Action buttons — common to both tabs, so they sit above the tab bar. */}
-      <div className="flex flex-wrap items-center gap-2">
-        <Button
-          onClick={() => setAddMealsOpen(true)}
-          aria-label="Mahlzeiten hinzufügen"
-          disabled={disabledOffline}
-        >
-          <CalendarPlus className="size-4" />
-          <span className="hidden sm:inline">Mahlzeiten hinzufügen</span>
-        </Button>
-        <Button
-          variant="outline"
-          onClick={() => setAddStaplesOpen(true)}
-          aria-label="Standards hinzufügen"
-          disabled={disabledOffline}
-        >
-          <ListPlus className="size-4" />
-          <span className="hidden sm:inline">Standards…</span>
-        </Button>
-        <Button
-          variant="outline"
-          onClick={() => setAddDueSoonOpen(true)}
-          aria-label="Fällige Zutaten hinzufügen"
-          disabled={disabledOffline}
-        >
-          <CalendarClock className="size-4" />
-          <span className="hidden sm:inline">Fällige Zutaten…</span>
-        </Button>
-        <Button
-          variant="outline"
-          onClick={() => setAddItemOpen(true)}
-          aria-label="Artikel hinzufügen"
-          disabled={disabledOffline}
-        >
-          <Plus className="size-4" />
-          <span className="hidden sm:inline">Artikel hinzufügen</span>
-        </Button>
-        {items.length > 0 ? (
-          <Button
-            variant="outline"
-            onClick={() => setStockCheckOpen(true)}
-            aria-label="Auf Lager prüfen"
-            disabled={disabledOffline}
-          >
-            <PackageCheck className="size-4" />
-            <span className="hidden sm:inline">Auf Lager…</span>
-          </Button>
-        ) : null}
-        {items.length > 0 ? (
-          <Button
-            variant="ghost"
-            className="text-[var(--color-danger)]"
-            onClick={() => setClearOpen(true)}
-            aria-label="Liste leeren"
-            disabled={disabledOffline}
-          >
-            <Trash2 className="size-4" />
-            <span className="hidden sm:inline">Liste leeren</span>
-          </Button>
-        ) : null}
-      </div>
-
-      {items.length === 0 ? (
-        <div className="rounded-[var(--radius)] border border-dashed border-[var(--color-border)] px-6 py-12 text-center text-sm text-[var(--color-muted-fg)]">
-          Noch keine Artikel auf der Liste. Füge Mahlzeiten aus dem Plan hinzu
-          oder einen Artikel manuell.
+    <Tabs
+      value={activeTab}
+      onValueChange={(v) => setActiveTab(v as "open" | "checked" | "unavailable")}
+      className="flex flex-col gap-4"
+    >
+      {/* Sticky head: headline + actions, and (with items) tabs + store filter.
+          Docks flush under the AppShell topbar (h-16): -mt-6 cancels the
+          shell's top padding. z-20 so it never outranks the topbar. */}
+      <div className="sticky top-16 z-20 -mx-4 -mt-6 flex flex-col gap-3 border-b border-[var(--color-border)] bg-[var(--color-bg)]/95 px-4 pb-2 pt-4 backdrop-blur supports-[backdrop-filter]:bg-[var(--color-bg)]/80 md:-mx-6 md:px-6">
+        <div className="flex items-center justify-between gap-2">
+          <h1 className="min-w-0 truncate text-2xl font-semibold tracking-tight">
+            Einkaufsliste
+          </h1>
+          <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
+            {items.length > 0 ? (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setStockCheckOpen(true)}
+                aria-label="Auf Lager prüfen"
+                title="Auf Lager prüfen"
+                disabled={disabledOffline}
+              >
+                <PackageCheck className="size-4" />
+                <span className="hidden sm:inline">Auf Lager…</span>
+              </Button>
+            ) : null}
+            {items.length > 0 ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-[var(--color-danger)]"
+                onClick={() => setClearOpen(true)}
+                aria-label="Liste leeren"
+                title="Liste leeren"
+                disabled={disabledOffline}
+              >
+                <Trash2 className="size-4" />
+                <span className="hidden sm:inline">Liste leeren</span>
+              </Button>
+            ) : null}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild disabled={disabledOffline}>
+                <Button size="sm" aria-label="Hinzufügen" title="Hinzufügen">
+                  <Plus className="size-4" />
+                  <span className="hidden sm:inline">Hinzufügen</span>
+                  <ChevronDown className="hidden size-4 sm:inline" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={() => setAddMealsOpen(true)}>
+                  <CalendarPlus className="mr-2 size-4" />
+                  Mahlzeiten hinzufügen
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setAddStaplesOpen(true)}>
+                  <ListPlus className="mr-2 size-4" />
+                  Standards…
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setAddDueSoonOpen(true)}>
+                  <CalendarClock className="mr-2 size-4" />
+                  Fällige Zutaten…
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setAddItemOpen(true)}>
+                  <Plus className="mr-2 size-4" />
+                  Artikel hinzufügen
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            {/* Undo stays the right-most action, where it has always been. */}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={onUndoLastCheck}
+              disabled={!undoAvailable || disabledOffline}
+              aria-label="Letzten Haken zurücknehmen"
+              title="Letzten Haken zurücknehmen"
+            >
+              <RotateCcw className="size-4" />
+              <span className="hidden sm:inline">Rückgängig</span>
+            </Button>
+          </div>
         </div>
-      ) : (
-        <Tabs
-          value={activeTab}
-          onValueChange={(v) =>
-            setActiveTab(v as "open" | "checked" | "unavailable")
-          }
-        >
-          {/* Sticky shelf: on mobile the supermarket select stacks below the
-              tabs (no room beside them); from sm up it sits pinned to the right.
-              Sits below the AppShell topbar (h-16) at z-20 so it doesn't
-              outrank it. */}
-          <div className="sticky top-16 z-20 -mx-4 flex flex-col gap-2 border-b border-[var(--color-border)] bg-[var(--color-bg)]/95 px-4 py-2 backdrop-blur supports-[backdrop-filter]:bg-[var(--color-bg)]/80 sm:flex-row sm:items-center sm:justify-between md:-mx-6 md:gap-3 md:px-6">
+
+        {items.length > 0 ? (
+          // On mobile the store filter stacks below the tabs (no room beside
+          // them); from sm up it sits pinned to the right.
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between md:gap-3">
             <TabsList>
               <TabsTrigger value="open">
                 Offen
@@ -583,14 +650,36 @@ export function ShoppingListView({
                 Erledigt
                 <TabCount count={grouped.visibleChecked} />
               </TabsTrigger>
-              {supermarketId != null && grouped.unavailableHere.length > 0 ? (
+              {supermarketId != null && notHereCount > 0 ? (
                 <TabsTrigger value="unavailable">
                   Nicht verfügbar
-                  <TabCount count={grouped.unavailableHere.length} />
+                  <TabCount count={notHereCount} />
                 </TabsTrigger>
               ) : null}
             </TabsList>
-            <div className="shrink-0">
+            <div className="flex items-center gap-1 sm:shrink-0">
+              {/* Sort toggle sits left of the store picker it belongs to. */}
+              {supermarketId != null ? (
+                <Button
+                  variant={sortMode === "learned" ? "secondary" : "ghost"}
+                  size="sm"
+                  className={cn(
+                    "shrink-0",
+                    sortMode === "learned" && "text-[var(--color-accent)]",
+                  )}
+                  onClick={toggleSortMode}
+                  aria-pressed={sortMode === "learned"}
+                  aria-label="Gelernte Reihenfolge"
+                  title={
+                    sortMode === "learned"
+                      ? "Gelernte Reihenfolge aktiv – tippen für Sortierung nach Kategorien"
+                      : "In der gelernten Abhak-Reihenfolge dieses Supermarkts sortieren"
+                  }
+                >
+                  <ArrowDownUp className="size-4" />
+                  <span className="hidden lg:inline">Gelernt</span>
+                </Button>
+              ) : null}
               <SupermarketFilter
                 value={supermarketId}
                 supermarkets={supermarkets}
@@ -599,8 +688,17 @@ export function ShoppingListView({
               />
             </div>
           </div>
+        ) : null}
+      </div>
 
-          <TabsContent value="open" className="mt-4 flex flex-col gap-6">
+      {items.length === 0 ? (
+        <div className="rounded-[var(--radius)] border border-dashed border-[var(--color-border)] px-6 py-12 text-center text-sm text-[var(--color-muted-fg)]">
+          Noch keine Artikel auf der Liste. Füge Mahlzeiten aus dem Plan hinzu
+          oder einen Artikel manuell.
+        </div>
+      ) : (
+        <>
+          <TabsContent value="open" className="flex flex-col gap-6">
             {grouped.visibleOpen === 0 ? (
               <ShoppingDoneState
                 checkedCount={grouped.visibleChecked}
@@ -616,12 +714,22 @@ export function ShoppingListView({
                     onShowAll={() => persistSupermarket(null)}
                   />
                 ) : null}
+                {learnedWanted && !grouped.learnedOrderApplied ? (
+                  <p className="text-sm text-[var(--color-muted-fg)]">
+                    Für diesen Supermarkt gibt es noch keine gelernte
+                    Reihenfolge. Hake beim Einkaufen mit gewähltem Supermarkt
+                    ab, dann lernt Nomly mit. Bis dahin wird nach Kategorien
+                    sortiert.
+                  </p>
+                ) : null}
                 {grouped.openGroups.map((group) => (
                   <section key={group.key} className="flex flex-col gap-2">
-                    <h2 className="text-xs font-medium uppercase tracking-wider text-[var(--color-muted-fg)]">
-                      {group.label}
-                    </h2>
-                    <ul className="flex flex-col divide-y divide-[var(--color-border)] rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-card)]">
+                    {group.label != null ? (
+                      <h2 className="text-xs font-medium uppercase tracking-wider text-[var(--color-muted-fg)]">
+                        {group.label}
+                      </h2>
+                    ) : null}
+                    <ul className="flex flex-col divide-y divide-[var(--color-border)] overflow-hidden rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-card)]">
                       {group.items.map((i) => renderRow(i))}
                     </ul>
                   </section>
@@ -630,7 +738,7 @@ export function ShoppingListView({
             )}
           </TabsContent>
 
-          <TabsContent value="checked" className="mt-4 flex flex-col gap-6">
+          <TabsContent value="checked" className="flex flex-col gap-6">
             {grouped.hiddenChecked > 0 ? (
               <HiddenByStoreBanner
                 count={grouped.hiddenChecked}
@@ -642,41 +750,82 @@ export function ShoppingListView({
                 Noch nichts abgehakt.
               </div>
             ) : (
-              <ul className="flex flex-col divide-y divide-[var(--color-border)] rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-card)] opacity-70">
+              <ul className="flex flex-col divide-y divide-[var(--color-border)] overflow-hidden rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-card)] opacity-70">
                 {grouped.checkedItems.map((i) => renderRow(i))}
               </ul>
             )}
           </TabsContent>
 
-          <TabsContent value="unavailable" className="mt-4 flex flex-col gap-3">
-            <p className="text-sm text-[var(--color-muted-fg)]">
-              Diese Artikel hast du hier als nicht verfügbar markiert – kauf sie
-              woanders. Hebe die Markierung auf, um sie wieder einzublenden.
-            </p>
-            <ul className="flex flex-col divide-y divide-[var(--color-border)] rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-card)]">
-              {grouped.unavailableHere.map((item) =>
-                renderRow(
-                  item,
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="shrink-0"
-                    disabled={disabledOffline || supermarketId == null}
-                    onClick={() =>
-                      supermarketId != null
-                        ? void onToggleUnavailable(item, supermarketId)
-                        : undefined
-                    }
-                  >
-                    <RotateCcw className="mr-2 size-4" />
-                    <span className="hidden sm:inline">Hier verfügbar machen</span>
-                    <span className="sm:hidden">Verfügbar</span>
-                  </Button>,
-                ),
-              )}
-            </ul>
+          <TabsContent value="unavailable" className="flex flex-col gap-6">
+            {grouped.skippedHere.length > 0 ? (
+              <section className="flex flex-col gap-2">
+                <h2 className="text-xs font-medium uppercase tracking-wider text-[var(--color-muted-fg)]">
+                  Heute nicht da
+                </h2>
+                <p className="text-sm text-[var(--color-muted-fg)]">
+                  Gab es hier heute nicht – bleibt auf der Liste für andere
+                  Supermärkte und taucht hier morgen wieder auf.
+                </p>
+                <ul className="flex flex-col divide-y divide-[var(--color-border)] overflow-hidden rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-card)]">
+                  {grouped.skippedHere.map((item) =>
+                    renderRow(
+                      item,
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="shrink-0"
+                        disabled={disabledOffline || supermarketId == null}
+                        onClick={() =>
+                          supermarketId != null
+                            ? void onSetSkipped(item, supermarketId, false)
+                            : undefined
+                        }
+                      >
+                        <RotateCcw className="size-4" />
+                        <span className="hidden sm:inline">Wieder einblenden</span>
+                        <span className="sm:hidden">Einblenden</span>
+                      </Button>,
+                    ),
+                  )}
+                </ul>
+              </section>
+            ) : null}
+            {grouped.unavailableHere.length > 0 ? (
+              <section className="flex flex-col gap-2">
+                <h2 className="text-xs font-medium uppercase tracking-wider text-[var(--color-muted-fg)]">
+                  Dauerhaft nicht verfügbar
+                </h2>
+                <p className="text-sm text-[var(--color-muted-fg)]">
+                  Diese Artikel hast du hier als nicht verfügbar markiert – kauf
+                  sie woanders. Hebe die Markierung auf, um sie wieder
+                  einzublenden.
+                </p>
+                <ul className="flex flex-col divide-y divide-[var(--color-border)] overflow-hidden rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-card)]">
+                  {grouped.unavailableHere.map((item) =>
+                    renderRow(
+                      item,
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="shrink-0"
+                        disabled={disabledOffline || supermarketId == null}
+                        onClick={() =>
+                          supermarketId != null
+                            ? void onToggleUnavailable(item, supermarketId)
+                            : undefined
+                        }
+                      >
+                        <RotateCcw className="size-4" />
+                        <span className="hidden sm:inline">Hier verfügbar machen</span>
+                        <span className="sm:hidden">Verfügbar</span>
+                      </Button>,
+                    ),
+                  )}
+                </ul>
+              </section>
+            ) : null}
           </TabsContent>
-        </Tabs>
+        </>
       )}
 
       <AddItemDialog
@@ -764,7 +913,7 @@ export function ShoppingListView({
           }}
         />
       ) : null}
-    </div>
+    </Tabs>
   );
 }
 

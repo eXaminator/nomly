@@ -1,5 +1,6 @@
 import { listShoppingItems } from "./items.ts";
 import { countNeededItemsPerSupermarket } from "./supermarket-availability.ts";
+import { todayIso } from "../meal-plans/dates.ts";
 import {
   getSupermarketDetail,
   listSupermarkets,
@@ -29,7 +30,9 @@ export function getStoreAvailability(): StoreAvailability[] {
       categories: s.orderedCategories.map((c) => ({ categoryId: c.categoryId })),
     }));
 
-  const counts = countNeededItemsPerSupermarket(items, supermarkets);
+  // Skip markers are stamped with the device's local day; the server's local
+  // day is the best stand-in here (both live in the same household).
+  const counts = countNeededItemsPerSupermarket(items, supermarkets, todayIso());
   return supermarkets.map((s) => ({
     id: s.id,
     name: s.name,
