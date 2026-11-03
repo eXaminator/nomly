@@ -27,6 +27,7 @@ import { RecipePreviewDialog } from "@/components/planner/recipe-preview-dialog"
 import type { ShoppingItemView } from "@/lib/shopping/items";
 import {
   groupShoppingItems,
+  isOpenAtStore,
   type ShoppingSortMode,
   type SupermarketSummary,
 } from "@/lib/shopping/group-items";
@@ -58,11 +59,10 @@ import {
   setItemStock as apiSetStock,
   setManualAmountQuantity as apiSetManualQty,
   setSourceQuantity as apiSetSourceQty,
-  setSkipped as apiSetSkipped,
-  setUnavailable as apiSetUnavailable,
 } from "./api";
 import { EditArticleDialog } from "@/components/articles/edit-article-dialog";
 import { useShoppingRealtime } from "./use-shopping-realtime";
+import { nextGhosts, withGhosts, type GhostMap } from "@/lib/shopping/ghost-items";
 import { getConnectivity } from "@/lib/shopping/offline/connectivity";
 import { useConnectivity } from "./offline-indicator";
 import { openOfflineDb } from "@/lib/shopping/offline/db";
@@ -70,6 +70,12 @@ import {
   hydrateFromIDB,
   readItemsFromIDB,
   reconcileFromServer,
+  reconcileIfCurrent,
+  currentDrainEpoch,
+  applyMutation,
+  enqueueMutation,
+  skipMutation,
+  unavailableMutation,
   toggleItemOptimistic,
 } from "@/lib/shopping/offline/store";
 import { kickSync } from "@/lib/shopping/offline/sync";
@@ -156,17 +162,90 @@ export function ShoppingListView({
 
   // Realtime sync: when another device changes the list, refetch and replace.
   // Only active while online (the WS hook handles connect/reconnect).
-  useShoppingRealtime(
-    React.useCallback(async () => {
+  //
+  // Rows another device takes off the open list (checked, skipped today,
+  // unavailable, deleted) are not dropped right away — that would shift the
+  // rows under the user's finger. They linger as greyed-out ghosts until this
+  // user acts on the list, or comes back to the app.
+  const [ghosts, setGhosts] = React.useState<GhostMap>(new Map());
+  const isOpen = React.useCallback(
+    (i: ShoppingItemView) => isOpenAtStore(i, supermarketId, supermarkets, today),
+    [supermarketId, supermarkets, today],
+  );
+  const itemsRef = React.useRef(items);
+  const isOpenRef = React.useRef(isOpen);
+  React.useEffect(() => {
+    itemsRef.current = items;
+    isOpenRef.current = isOpen;
+  });
+  const clearGhosts = React.useCallback(() => {
+    setGhosts((g) => (g.size === 0 ? g : new Map()));
+  }, []);
+  // Set while the page is (or just was) hidden, until a catch-up refetch has
+  // landed: events buffered across a screen-off must not turn what changed
+  // meanwhile into ghosts — on return the list should simply be current.
+  const catchingUpRef = React.useRef(false);
+  // Only the newest refetch may write: an older response landing late would
+  // roll the list back (and diff against the wrong baseline).
+  const refetchSeqRef = React.useRef(0);
+  const refetchRemote = React.useCallback(
+    async (reason: "event" | "reconcile") => {
+      const seq = ++refetchSeqRef.current;
+      const epoch = currentDrainEpoch();
       try {
         const { items: fresh } = await fetchItems();
-        const merged = await reconcileFromServer(fresh);
+        if (seq !== refetchSeqRef.current) return;
+        const merged = await reconcileIfCurrent(fresh, epoch);
+        if (seq !== refetchSeqRef.current) return;
+        if (merged == null) {
+          // One of our own queued changes landed on the server while this
+          // snapshot was in flight; it may not include it. Ask again rather
+          // than flash the change undone (and then mistake it for a remote one).
+          void refetchRemoteRef.current(reason);
+          return;
+        }
+        // Only live pushes while the screen is up keep ghosts; catching up
+        // after a reconnect or a background trip applies immediately.
+        if (reason === "event" && !document.hidden && !catchingUpRef.current) {
+          setGhosts((g) => nextGhosts(itemsRef.current, merged, g, isOpenRef.current));
+        } else {
+          setGhosts((g) => (g.size === 0 ? g : new Map()));
+          if (reason === "reconcile" && !document.hidden) catchingUpRef.current = false;
+        }
         setItems(merged);
       } catch {
         // Transient — connectivity watcher will flip if it's real.
       }
-    }, []),
+    },
+    [],
   );
+  const refetchRemoteRef = React.useRef(refetchRemote);
+  useShoppingRealtime(refetchRemote);
+
+  // Coming back (screen on, app foregrounded, tab shown): show the truth now.
+  React.useEffect(() => {
+    const onVisibility = () => {
+      if (document.visibilityState !== "visible") {
+        catchingUpRef.current = true;
+        return;
+      }
+      clearGhosts();
+      // Offline the list can't be refreshed; the reconnect path catches up.
+      if (getConnectivity() === "online") void refetchRemote("reconcile");
+      else catchingUpRef.current = false;
+    };
+    const onPageHide = () => {
+      catchingUpRef.current = true;
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("pageshow", onVisibility);
+    window.addEventListener("pagehide", onPageHide);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("pageshow", onVisibility);
+      window.removeEventListener("pagehide", onPageHide);
+    };
+  }, [clearGhosts, refetchRemote]);
 
   // Mount: hydrate UI from IDB, mirror supermarkets cache, then attempt
   // a sync drain only if connectivity has already resolved to online.
@@ -244,6 +323,7 @@ export function ShoppingListView({
   }
 
   function persistSupermarket(id: number | null) {
+    clearGhosts();
     setSupermarketId(id);
     // The "Nicht verfügbar" tab only exists while a store is selected; fall
     // back to "Offen" when the store is cleared from under it.
@@ -264,6 +344,8 @@ export function ShoppingListView({
     options: { countAsPurchase?: boolean } = {},
   ) {
     const nextChecked = !item.checked;
+    // The user acted: let rows checked elsewhere finally disappear.
+    clearGhosts();
     // Optimistic local toggle + queued mutation; the sync engine drives the network.
     setItems((prev) =>
       prev.map((i) =>
@@ -283,14 +365,18 @@ export function ShoppingListView({
     // The active store rides along so the check-off feeds that store's
     // learned walking order.
     await toggleItemOptimistic(item.id, nextChecked, supermarketId, options);
-    if (connectivity === "online") {
-      await kickSync();
-      const refreshed = await readItemsFromIDB();
-      setItems(refreshed);
-    }
+    await syncQueued();
+  }
+
+  /** After queueing a change: drain now if online, then show IDB's view. */
+  async function syncQueued() {
+    if (getConnectivity() !== "online") return;
+    await kickSync();
+    setItems(await readItemsFromIDB());
   }
 
   async function onUndoLastCheck() {
+    clearGhosts();
     // Pop the most recent id, skipping any that are no longer checked or no
     // longer on the list (deleted, swept, etc.). Mutates a local copy of the
     // stack so we only setState once.
@@ -420,6 +506,7 @@ export function ShoppingListView({
   }
 
   async function onDelete(id: number) {
+    clearGhosts();
     setItems((prev) => prev.filter((i) => i.id !== id));
     try {
       await apiDelete(id);
@@ -450,21 +537,13 @@ export function ShoppingListView({
   async function onToggleUnavailable(item: ShoppingItemView, supermarketId: number) {
     const isUnavailable = item.unavailableSupermarketIds.includes(supermarketId);
     const next = !isUnavailable;
-    // Optimistic toggle so the row chip flips immediately.
-    setItems((prev) =>
-      prev.map((i) => {
-        if (i.id !== item.id) return i;
-        const set = new Set(i.unavailableSupermarketIds);
-        if (next) set.add(supermarketId);
-        else set.delete(supermarketId);
-        return { ...i, unavailableSupermarketIds: Array.from(set) };
-      }),
-    );
-    try {
-      await apiSetUnavailable(item.refType, item.refId, supermarketId, next);
-    } catch {
-      router.refresh();
-    }
+    clearGhosts();
+    // Optimistic (IDB + queue, like a check-off) so the row chip flips at
+    // once and the change survives being offline; the sync engine sends it.
+    const entry = unavailableMutation(item, supermarketId, next);
+    setItems((prev) => prev.map((i) => applyMutation(i, entry)));
+    await enqueueMutation(entry);
+    await syncQueued();
   }
 
   async function onSetSkipped(
@@ -473,30 +552,35 @@ export function ShoppingListView({
     skipped: boolean,
   ) {
     const on = localDateIso();
-    // Optimistic so the row drops out of (or back into) the store view at once.
-    setItems((prev) =>
-      prev.map((i) => {
-        if (i.id !== item.id) return i;
-        const others = (i.skippedAt ?? []).filter((s) => s.supermarketId !== storeId);
-        return {
-          ...i,
-          skippedAt: skipped ? [...others, { supermarketId: storeId, on }] : others,
-        };
-      }),
-    );
-    try {
-      await apiSetSkipped(item.id, storeId, skipped ? on : null);
-    } catch {
-      router.refresh();
-    }
+    clearGhosts();
+    // Optimistic so the row drops out of (or back into) the store view at
+    // once; queued like a check-off, so it works offline too.
+    const entry = skipMutation(item.id, storeId, skipped ? on : null);
+    setItems((prev) => prev.map((i) => applyMutation(i, entry)));
+    await enqueueMutation(entry);
+    await syncQueued();
   }
 
   const grouped = React.useMemo(
     () =>
-      groupShoppingItems(items, supermarketId, supermarkets, { sortMode, today }),
-    [items, supermarketId, supermarkets, sortMode, today],
+      groupShoppingItems(withGhosts(items, ghosts, isOpen), supermarketId, supermarkets, {
+        sortMode,
+        today,
+      }),
+    [items, ghosts, isOpen, supermarketId, supermarkets, sortMode, today],
   );
   const notHereCount = grouped.unavailableHere.length + grouped.skippedHere.length;
+
+  // Ghost rows are the snapshot objects themselves (see withGhosts).
+  const ghostRows = React.useMemo(() => new Set(ghosts.values()), [ghosts]);
+  // If every open row left is a ghost, there is nothing to tap that would
+  // clear them — drop them now so the done screen can show.
+  React.useEffect(() => {
+    if (ghostRows.size === 0) return;
+    const open = grouped.openGroups.flatMap((g) => g.items);
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (open.every((i) => ghostRows.has(i))) clearGhosts();
+  }, [grouped, ghostRows, clearGhosts]);
 
   // Leaving the "Nicht verfügbar" tab once its last article has been made
   // available again (the tab trigger is gone, so its content would orphan).
@@ -531,7 +615,16 @@ export function ShoppingListView({
   );
 
   const renderRow = (item: ShoppingItemView, trailingAction?: React.ReactNode) => (
-    <li key={item.id}>
+    <li
+      key={item.id}
+      {...(ghostRows.has(item)
+        ? {
+            inert: true,
+            "aria-disabled": true,
+            className: "pointer-events-none opacity-40 grayscale",
+          }
+        : {})}
+    >
       <ShoppingItemRow
         item={item}
         activeSupermarketId={supermarketId}
@@ -774,7 +867,7 @@ export function ShoppingListView({
                         variant="outline"
                         size="sm"
                         className="shrink-0"
-                        disabled={disabledOffline || supermarketId == null}
+                        disabled={supermarketId == null}
                         onClick={() =>
                           supermarketId != null
                             ? void onSetSkipped(item, supermarketId, false)
@@ -808,7 +901,7 @@ export function ShoppingListView({
                         variant="outline"
                         size="sm"
                         className="shrink-0"
-                        disabled={disabledOffline || supermarketId == null}
+                        disabled={supermarketId == null}
                         onClick={() =>
                           supermarketId != null
                             ? void onToggleUnavailable(item, supermarketId)

@@ -1,5 +1,50 @@
-import { openOfflineDb } from "./db";
+import { openOfflineDb, type OfflineMutation } from "./db";
 import type { ShoppingItemView } from "@/lib/shopping/items";
+
+/** What a queued mutation does to one list entry (unchanged if unrelated). */
+export function applyMutation(
+  item: ShoppingItemView,
+  m: OfflineMutation,
+): ShoppingItemView {
+  switch (m.type) {
+    case "check":
+    case "uncheck":
+      if (item.id !== m.itemId) return item;
+      return {
+        ...item,
+        checked: m.type === "check",
+        checkedAt: m.type === "check" ? Math.floor(m.queuedAt / 1000) : null,
+      };
+    case "skip": {
+      if (item.id !== m.itemId) return item;
+      const others = (item.skippedAt ?? []).filter(
+        (s) => s.supermarketId !== m.supermarketId,
+      );
+      return {
+        ...item,
+        skippedAt:
+          m.on != null ? [...others, { supermarketId: m.supermarketId, on: m.on }] : others,
+      };
+    }
+    case "unavailable": {
+      if (item.refType !== m.refType || item.refId !== m.refId) return item;
+      const ids = new Set(item.unavailableSupermarketIds);
+      if (m.unavailable) ids.add(m.supermarketId);
+      else ids.delete(m.supermarketId);
+      return { ...item, unavailableSupermarketIds: Array.from(ids) };
+    }
+  }
+}
+
+/** Every pending mutation, oldest first, laid over `items`. */
+export function overlayPending(
+  items: ShoppingItemView[],
+  queue: readonly OfflineMutation[],
+): ShoppingItemView[] {
+  if (queue.length === 0) return items;
+  const ordered = [...queue].sort((a, b) => a.queuedAt - b.queuedAt);
+  return items.map((item) => ordered.reduce(applyMutation, item));
+}
 
 /**
  * Read-authoritative hydration for the /einkauf mount.
@@ -31,17 +76,42 @@ export async function hydrateFromIDB(
   const queueEntries = await db.getAll("mutationQueue");
   if (queueEntries.length === 0) return localItems;
 
-  const byId = new Map(localItems.map((i) => [i.id, i] as const));
-  for (const entry of queueEntries) {
-    const base = byId.get(entry.itemId);
-    if (!base) continue;
-    byId.set(entry.itemId, {
-      ...base,
-      checked: entry.type === "check",
-      checkedAt: entry.type === "check" ? Math.floor(entry.queuedAt / 1000) : null,
-    });
+  return overlayPending(localItems, queueEntries);
+}
+
+type Fields<T extends OfflineMutation["type"]> = Omit<
+  Extract<OfflineMutation, { type: T }>,
+  "mutationId" | "queuedAt" | "attempts"
+>;
+type NewMutation = Fields<"check" | "uncheck"> | Fields<"skip"> | Fields<"unavailable">;
+
+/** A fresh queue entry (not stored yet) — apply it to the UI, then enqueue it. */
+export function newMutation(input: NewMutation): OfflineMutation {
+  return {
+    ...input,
+    mutationId: crypto.randomUUID(),
+    queuedAt: Date.now(),
+    attempts: 0,
+  } as OfflineMutation;
+}
+
+/**
+ * Applies a mutation to the IDB rows it touches and queues it for the sync
+ * engine, in one transaction.
+ */
+export async function enqueueMutation(entry: OfflineMutation): Promise<void> {
+  const db = await openOfflineDb();
+  const tx = db.transaction(["items", "mutationQueue"], "readwrite");
+  const items = tx.objectStore("items");
+  const targets =
+    entry.type === "unavailable" ? await items.getAll() : [await items.get(entry.itemId)];
+  for (const current of targets) {
+    if (!current) continue;
+    const next = applyMutation(current, entry);
+    if (next !== current) await items.put(next);
   }
-  return Array.from(byId.values());
+  await tx.objectStore("mutationQueue").put(entry);
+  await tx.done;
 }
 
 export async function toggleItemOptimistic(
@@ -50,31 +120,41 @@ export async function toggleItemOptimistic(
   supermarketId: number | null = null,
   options: { countAsPurchase?: boolean } = {},
 ): Promise<void> {
-  const db = await openOfflineDb();
-  const mutationId = crypto.randomUUID();
-  const now = Date.now();
+  await enqueueMutation(
+    newMutation({
+      itemId,
+      type: nextChecked ? "check" : "uncheck",
+      supermarketId,
+      ...(nextChecked && options.countAsPurchase === false
+        ? { countAsPurchase: false }
+        : {}),
+    }),
+  );
+}
 
-  const tx = db.transaction(["items", "mutationQueue"], "readwrite");
-  const current = await tx.objectStore("items").get(itemId);
-  if (current) {
-    await tx.objectStore("items").put({
-      ...current,
-      checked: nextChecked,
-      checkedAt: nextChecked ? Math.floor(now / 1000) : null,
-    });
-  }
-  await tx.objectStore("mutationQueue").put({
-    mutationId,
-    itemId,
-    type: nextChecked ? "check" : "uncheck",
-    queuedAt: now,
+/** "Gibt's hier heute nicht" (on = device-local day) or lift it (on = null). */
+export function skipMutation(
+  itemId: number,
+  supermarketId: number,
+  on: string | null,
+): OfflineMutation {
+  return newMutation({ type: "skip", itemId, supermarketId, on });
+}
+
+/** "Hier (nicht) verfügbar" for the item's article at one store. */
+export function unavailableMutation(
+  item: Pick<ShoppingItemView, "id" | "refType" | "refId">,
+  supermarketId: number,
+  unavailable: boolean,
+): OfflineMutation {
+  return newMutation({
+    type: "unavailable",
+    itemId: item.id,
+    refType: item.refType,
+    refId: item.refId,
     supermarketId,
-    ...(nextChecked && options.countAsPurchase === false
-      ? { countAsPurchase: false }
-      : {}),
-    attempts: 0,
+    unavailable,
   });
-  await tx.done;
 }
 
 export async function readItemsFromIDB(): Promise<ShoppingItemView[]> {
@@ -89,9 +169,9 @@ export async function readPendingQueue() {
 }
 
 /**
- * Replaces the IDB items store with `serverItems`, preserving rows whose
- * id has a pending entry in `mutationQueue` — the queued toggle stays
- * applied until it's drained. Updates `meta.shoppingFetchedAt`.
+ * Replaces the IDB items store with `serverItems`, with every pending entry
+ * in `mutationQueue` (toggle, skip, unavailable) laid on top — queued changes
+ * stay applied until they're drained. Updates `meta.shoppingFetchedAt`.
  *
  * Only call this after a confirmed `offline -> online` transition or when
  * a realtime "shopping" event fires while online. Never on mount.
@@ -99,29 +179,45 @@ export async function readPendingQueue() {
 export async function reconcileFromServer(
   serverItems: ShoppingItemView[],
 ): Promise<ShoppingItemView[]> {
-  const db = await openOfflineDb();
-  const queueEntries = await db.getAll("mutationQueue");
-  const pendingById = new Map(queueEntries.map((e) => [e.itemId, e] as const));
+  return (await reconcileIfCurrent(serverItems, null)) ?? serverItems;
+}
 
-  const tx = db.transaction(["items", "meta"], "readwrite");
-  await tx.objectStore("items").clear();
-  const merged: ShoppingItemView[] = [];
-  for (const item of serverItems) {
-    const pending = pendingById.get(item.id);
-    if (pending) {
-      const overlay: ShoppingItemView = {
-        ...item,
-        checked: pending.type === "check",
-        checkedAt:
-          pending.type === "check" ? Math.floor(pending.queuedAt / 1000) : null,
-      };
-      await tx.objectStore("items").put(overlay);
-      merged.push(overlay);
-    } else {
-      await tx.objectStore("items").put(item);
-      merged.push(item);
-    }
+/**
+ * Bumped by the sync engine the moment the server confirms a queue entry —
+ * before the entry leaves the queue. A server snapshot fetched before that
+ * may not contain the change yet, and once the entry is gone nothing would
+ * overlay it any more.
+ */
+let drainEpoch = 0;
+export function noteDrained(): void {
+  drainEpoch += 1;
+}
+export function currentDrainEpoch(): number {
+  return drainEpoch;
+}
+
+/**
+ * `reconcileFromServer` for a snapshot whose fetch started at drain epoch
+ * `fetchedAtEpoch`. If an entry was confirmed since, the snapshot may predate
+ * it: nothing is written and null is returned — fetch again. (Entries still
+ * in the queue are fine: they're overlaid. The queue is read inside the
+ * write transaction, so the drain can't delete one in between.)
+ */
+export async function reconcileIfCurrent(
+  serverItems: ShoppingItemView[],
+  fetchedAtEpoch: number | null,
+): Promise<ShoppingItemView[] | null> {
+  const db = await openOfflineDb();
+  const tx = db.transaction(["items", "meta", "mutationQueue"], "readwrite");
+  const queueEntries = await tx.objectStore("mutationQueue").getAll();
+  if (fetchedAtEpoch != null && fetchedAtEpoch !== drainEpoch) {
+    tx.abort();
+    await tx.done.catch(() => {});
+    return null;
   }
+  const merged = overlayPending(serverItems, queueEntries);
+  await tx.objectStore("items").clear();
+  for (const item of merged) await tx.objectStore("items").put(item);
   await tx.objectStore("meta").put({
     key: "shoppingFetchedAt",
     value: Date.now(),

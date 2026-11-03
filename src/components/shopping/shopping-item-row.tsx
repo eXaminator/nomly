@@ -59,7 +59,8 @@ type Props = {
   /** Opens the recipe-picker dialog to mark a subset — used when the item has
    *  more than one associated recipe. */
   onRequestMarkRecipeUpdate: (item: ShoppingItemView) => void;
-  /** When true, all non-toggle actions (edit, delete, unavailable) are disabled. */
+  /** When true, actions that need the server right away (edit, delete, …) are
+   *  disabled. Check-off, skip and unavailable go through the offline queue. */
   disabledOffline?: boolean;
   /** When set, replaces the 3-dots action menu with this node (e.g. the
    *  "Hier verfügbar machen" button on the unavailable tab). The row keeps its
@@ -108,8 +109,7 @@ export function ShoppingItemRow({
   const canSkip =
     !item.checked &&
     trailingAction == null &&
-    activeSupermarketId != null &&
-    !disabledOffline;
+    activeSupermarketId != null;
   const swipe = useRowSwipe({
     maxRight: canCheckWithoutPurchase ? MAX_RIGHT : 0,
     maxLeft: canSkip ? -MAX_LEFT : 0,
@@ -312,7 +312,7 @@ export function ShoppingItemRow({
                       ? void onSkipToday(item, activeSupermarketId)
                       : undefined
                   }
-                  disabled={activeSupermarketId == null || disabledOffline}
+                  disabled={activeSupermarketId == null}
                   className="text-[var(--color-fg)]"
                 >
                   <PackageX className="mr-2 size-4" />
@@ -325,7 +325,7 @@ export function ShoppingItemRow({
                     ? void onToggleUnavailable(item, activeSupermarketId)
                     : undefined
                 }
-                disabled={activeSupermarketId == null || disabledOffline}
+                disabled={activeSupermarketId == null}
                 className="text-[var(--color-fg)]"
               >
                 <Ban className="mr-2 size-4" />

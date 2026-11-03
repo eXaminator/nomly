@@ -121,6 +121,26 @@ function sortByLearnedOrder(
 }
 
 /**
+ * Whether the item shows in the open ("still to buy") list for this store
+ * filter — the same rule `groupShoppingItems` sorts by: not checked, not
+ * marked unavailable or skipped today at the store, category carried there.
+ */
+export function isOpenAtStore(
+  item: ShoppingItemView,
+  supermarketId: number | null,
+  supermarkets: SupermarketSummary[],
+  today: string,
+): boolean {
+  if (item.checked) return false;
+  const sm =
+    supermarketId != null
+      ? supermarkets.find((s) => s.id === supermarketId) ?? null
+      : null;
+  const allowed = sm ? new Set(sm.categories.map((c) => c.categoryId)) : null;
+  return !hiddenAtStore(item, supermarketId, allowed, today);
+}
+
+/**
  * Splits the shopping items into the open (still-to-buy) groups and the flat
  * checked list, applying the active supermarket filter uniformly to both. The
  * filter narrows the visible shopping route; the returned `hidden*` counts let
