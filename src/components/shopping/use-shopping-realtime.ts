@@ -6,7 +6,7 @@ import { useConnectivity } from "./offline-indicator";
 
 /**
  * Realtime shopping-list sync. While online, holds a WebSocket to `/ws`,
- * subscribes to the "shopping" topic, and invokes `onChanged` (debounced)
+ * subscribes to the "shopping" topic, and invokes `onChanged` (debounced; reason "event", or "reconcile" on (re)connect)
  * whenever the server broadcasts a change — the caller refetches the list.
  *
  * - Connects only when online (the offline queue covers the disconnected
@@ -16,7 +16,11 @@ import { useConnectivity } from "./offline-indicator";
  * - Cookies authenticate the handshake (same-origin), matching the server's
  *   session/bearer upgrade gate.
  */
-export function useShoppingRealtime(onChanged: () => void): void {
+export type RealtimeReason = "event" | "reconcile";
+
+export function useShoppingRealtime(
+  onChanged: (reason: RealtimeReason) => void,
+): void {
   const state = useConnectivity();
   // Don't bother connecting when offline or when the session is dead (the
   // upgrade would just 401-loop). Skip 'checking' too — wait for the probe
@@ -40,7 +44,7 @@ export function useShoppingRealtime(onChanged: () => void): void {
 
     const refetchSoon = () => {
       if (debounceTimer) clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(() => onChangedRef.current(), 250);
+      debounceTimer = setTimeout(() => onChangedRef.current("event"), 250);
     };
 
     const connect = () => {
@@ -52,7 +56,7 @@ export function useShoppingRealtime(onChanged: () => void): void {
         attempt = 0;
         ws.send(JSON.stringify({ op: "subscribe", topic: "shopping" }));
         // Reconcile whatever changed while we were disconnected.
-        onChangedRef.current();
+        onChangedRef.current("reconcile");
       };
       ws.onmessage = (ev) => {
         let msg: { op?: string; topic?: string };

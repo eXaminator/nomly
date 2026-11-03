@@ -13,20 +13,43 @@ export type OfflineSupermarket = {
 
 export type OfflineCategory = { id: number; name: string };
 
-export type OfflineMutation = {
+type MutationBase = {
   mutationId: string;
+  /** The list entry acted on (for "unavailable" the one the user tapped). */
   itemId: number;
-  type: "check" | "uncheck";
   queuedAt: number;
+  attempts: number;
+  lastError?: string;
+};
+
+/** Check / uncheck — the original (and only pre-union) entry shape. */
+export type ToggleMutation = MutationBase & {
+  type: "check" | "uncheck";
   /** Store filter active at toggle time (frozen then, not read at drain
    *  time — the user may have switched stores meanwhile). Absent on entries
    *  queued before the field existed. */
   supermarketId?: number | null;
   /** false: a check that must not record a purchase. Absent = a purchase. */
   countAsPurchase?: boolean;
-  attempts: number;
-  lastError?: string;
 };
+
+/** "Gibt's hier heute nicht": mark (`on` = device-local day) or lift (null). */
+export type SkipMutation = MutationBase & {
+  type: "skip";
+  supermarketId: number;
+  on: string | null;
+};
+
+/** "Hier nicht verfügbar" — per article, so every entry of it is affected. */
+export type UnavailableMutation = MutationBase & {
+  type: "unavailable";
+  refType: "ingredient";
+  refId: number;
+  supermarketId: number;
+  unavailable: boolean;
+};
+
+export type OfflineMutation = ToggleMutation | SkipMutation | UnavailableMutation;
 
 export type OfflineMeta =
   | { key: "shoppingFetchedAt"; value: number }
