@@ -10,6 +10,7 @@
  * the grouping is skipped.
  */
 import { parse, type HTMLElement, NodeType } from "node-html-parser";
+import { extractMicrodataIngredientGroups } from "./microdata.ts";
 
 export type HtmlIngredientGroup = {
   /** Group heading text (null = unnamed lead group before the first heading). */
@@ -26,7 +27,14 @@ export function extractIngredientGroupsFromHtml(
   } catch {
     return null;
   }
-  for (const extract of [extractWprm, extractTasty, extractMvCreate]) {
+  // Plugin markup first; Microdata (lists of itemprop="recipeIngredient"
+  // with a heading before each) is the generic fallback.
+  for (const extract of [
+    extractWprm,
+    extractTasty,
+    extractMvCreate,
+    extractMicrodataIngredientGroups,
+  ]) {
     let groups: HtmlIngredientGroup[] | null;
     try {
       groups = extract(root);
