@@ -47,8 +47,10 @@ type Props = {
 
 function importedToDraft(
   imported: ImportedRecipeResponse,
+  requestedUrl: string,
 ): DraftRecipe {
   return {
+    importedFromUrl: requestedUrl.trim(),
     title: imported.title,
     description: imported.description ?? "",
     servings: String(imported.servings),
@@ -138,7 +140,8 @@ export function ImportFlow({
   const [mountKey, setMountKey] = React.useState(0);
   const [failures, setFailures] = React.useState(initialFailures);
 
-  // Every import attempt records/clears its URL server-side; mirror that.
+  // A failed attempt records its URL server-side (saving the imported recipe
+  // clears it later); mirror the list.
   async function reloadFailures() {
     try {
       const res = await fetch("/api/v1/recipes/import-failures");
@@ -185,7 +188,7 @@ export function ImportFlow({
       if (!res.ok) {
         throw new Error(data.error ?? `HTTP ${res.status}`);
       }
-      setDraft(importedToDraft(data as ImportedRecipeResponse));
+      setDraft(importedToDraft(data as ImportedRecipeResponse, target));
       setMountKey((k) => k + 1);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Import fehlgeschlagen.");

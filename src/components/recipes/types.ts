@@ -225,6 +225,9 @@ export type DraftRecipe = {
   tags: string[];
   sections: DraftSection[];
   reminders: DraftReminder[];
+  /** URL a URL import was started with (before redirects). Saving the new
+   *  recipe drops that URL from the failed-imports list. */
+  importedFromUrl?: string;
 };
 
 /** Editable advance reminder on the recipe form. */

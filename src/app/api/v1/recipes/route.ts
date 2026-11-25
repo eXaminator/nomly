@@ -4,6 +4,7 @@ import { toListOptions } from "@/lib/recipes/list-query";
 import { getCurrentUser } from "@/lib/users/current";
 import type { PlannerRecipe } from "@/lib/recipes/types";
 import { recipeInputSchema } from "@/lib/recipes/validate";
+import { clearImportFailureForUrl } from "@/lib/recipes/import-failures";
 import {
   PhotoUrlError,
   resolvePhotoFromInput,
@@ -53,9 +54,10 @@ export async function POST(request: Request) {
       { status: 400 },
     );
   }
+  const { importedFromUrl, ...recipeData } = parsed.data;
   let resolved;
   try {
-    resolved = await resolvePhotoFromInput(parsed.data);
+    resolved = await resolvePhotoFromInput(recipeData);
   } catch (e) {
     if (e instanceof PhotoUrlError) {
       return NextResponse.json({ error: e.message }, { status: 422 });
@@ -63,5 +65,10 @@ export async function POST(request: Request) {
     throw e;
   }
   const id = createRecipe(resolved);
+  // The recipe exists now, so its page is no longer a pending failed import:
+  // drop it under the URL the import started from and under the final one.
+  for (const u of [importedFromUrl, resolved.sourceUrl]) {
+    if (u) clearImportFailureForUrl(u);
+  }
   return NextResponse.json({ id }, { status: 201 });
 }

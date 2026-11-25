@@ -61,7 +61,7 @@ export function recordImportFailure(
   return { id: row.id };
 }
 
-/** A successful import of `url` clears it from the list. */
+/** Saving a recipe imported from `url` clears it from the list. */
 export function clearImportFailureForUrl(url: string): void {
   db.delete(importFailure).where(eq(importFailure.url, url.trim())).run();
 }
