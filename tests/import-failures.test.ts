@@ -1,4 +1,12 @@
-import { describe, it, expect, afterAll, beforeAll, beforeEach } from "vitest";
+import { describe, it, expect, afterAll, beforeAll, beforeEach, vi } from "vitest";
+
+// The URL importer itself is network-bound; these tests only care about what
+// the routes do with the failed list around it.
+const importMock = vi.hoisted(() => ({ fn: vi.fn() }));
+vi.mock("@/lib/recipe-import", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/recipe-import")>()),
+  importRecipeFromUrl: importMock.fn,
+}));
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -21,11 +29,35 @@ afterAll(() => {
 let svc: typeof import("@/lib/recipes/import-failures");
 let listRoute: typeof import("@/app/api/v1/recipes/import-failures/route");
 let itemRoute: typeof import("@/app/api/v1/recipes/import-failures/[id]/route");
+let importUrlRoute: typeof import("@/app/api/v1/recipes/import-url/route");
+let recipesRoute: typeof import("@/app/api/v1/recipes/route");
 
 beforeAll(async () => {
   svc = await import("@/lib/recipes/import-failures");
   listRoute = await import("@/app/api/v1/recipes/import-failures/route");
   itemRoute = await import("@/app/api/v1/recipes/import-failures/[id]/route");
+  importUrlRoute = await import("@/app/api/v1/recipes/import-url/route");
+  recipesRoute = await import("@/app/api/v1/recipes/route");
+});
+
+const post = (body: unknown) =>
+  new Request("http://t", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+const minimalRecipe = (extra: Record<string, unknown>) => ({
+  title: "Kürbiskuchen",
+  description: null,
+  servings: 4,
+  prepTimeMin: null,
+  cookTimeMin: null,
+  sourceUrl: null,
+  photoPath: null,
+  tags: [],
+  sections: [{ title: null, instructions: "Backen.", ingredients: [] }],
+  ...extra,
 });
 
 beforeEach(() => {
@@ -50,7 +82,7 @@ describe("import failures", () => {
     });
   });
 
-  it("clears an entry when that URL imports successfully", () => {
+  it("clearImportFailureForUrl drops only that URL", () => {
     svc.recordImportFailure("https://x.test/a", "noRecipe", "m");
     svc.recordImportFailure("https://x.test/b", "noRecipe", "m");
     svc.clearImportFailureForUrl("https://x.test/a");
@@ -77,6 +109,56 @@ describe("import failures", () => {
 
     const all = await listRoute.DELETE().json();
     expect(all.removed).toBe(1);
+    expect(svc.listImportFailures()).toEqual([]);
+  });
+
+  it("keeps the entry when a retry imports fine but nothing is saved", async () => {
+    svc.recordImportFailure("https://x.test/r", "noRecipe", "m");
+    importMock.fn.mockResolvedValueOnce({ title: "ok", sections: [] });
+    const res = await importUrlRoute.POST(post({ url: "https://x.test/r" }));
+    expect(res.status).toBe(200);
+    expect(svc.listImportFailures().map((f) => f.url)).toEqual([
+      "https://x.test/r",
+    ]);
+  });
+
+  it("records a failed retry as another attempt", async () => {
+    svc.recordImportFailure("https://x.test/r", "noRecipe", "m");
+    const { ImportError } = await import("@/lib/recipe-import");
+    importMock.fn.mockRejectedValueOnce(new ImportError("kaputt", "parse"));
+    const res = await importUrlRoute.POST(post({ url: "https://x.test/r" }));
+    expect(res.status).toBe(422);
+    expect(svc.listImportFailures()[0]).toMatchObject({
+      attempts: 2,
+      errorCode: "parse",
+    });
+  });
+
+  it("drops the entry once the imported recipe is saved", async () => {
+    svc.recordImportFailure("https://x.test/start", "noRecipe", "m");
+    svc.recordImportFailure("https://x.test/other", "noRecipe", "m");
+    // The page redirected: sourceUrl is the final URL, importedFromUrl the
+    // one on the failed list.
+    const res = await recipesRoute.POST(
+      post(
+        minimalRecipe({
+          sourceUrl: "https://x.test/final",
+          importedFromUrl: "https://x.test/start",
+        }),
+      ),
+    );
+    expect(res.status).toBe(201);
+    expect(svc.listImportFailures().map((f) => f.url)).toEqual([
+      "https://x.test/other",
+    ]);
+  });
+
+  it("drops the entry when a saved recipe's source URL matches it", async () => {
+    svc.recordImportFailure("https://x.test/manual", "noRecipe", "m");
+    const res = await recipesRoute.POST(
+      post(minimalRecipe({ sourceUrl: "https://x.test/manual" })),
+    );
+    expect(res.status).toBe(201);
     expect(svc.listImportFailures()).toEqual([]);
   });
 });

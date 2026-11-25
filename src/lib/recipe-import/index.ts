@@ -22,6 +22,7 @@ import {
   alignHtmlGroupsToLines,
   extractIngredientGroupsFromHtml,
 } from "./html-groups.ts";
+import { extractMicrodataRecipe } from "./microdata.ts";
 import { parseIsoDurationToMinutes } from "./duration.ts";
 import { parseSegment, parseLeaves, assembleRowNote, type NoteContext } from "./ast/parse-line.ts";
 import { lex } from "./ast/lexer.ts";
@@ -1927,10 +1928,11 @@ export async function importRecipeFromUrl(
   }
 
   const html = fetched.body.toString("utf8");
-  const recipe = extractJsonLdRecipe(html);
+  // JSON-LD is the common form; some sites only carry Microdata attributes.
+  const recipe = extractJsonLdRecipe(html) ?? extractMicrodataRecipe(html);
   if (!recipe) {
     throw new ImportError(
-      "Keine maschinenlesbaren Rezeptdaten (schema.org/Recipe) gefunden.",
+      "Keine maschinenlesbaren Rezeptdaten (schema.org/Recipe als JSON-LD oder Microdata) gefunden.",
       "noRecipe",
     );
   }

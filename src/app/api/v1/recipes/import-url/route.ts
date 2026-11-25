@@ -1,10 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { ImportError, importRecipeFromUrl } from "@/lib/recipe-import";
-import {
-  clearImportFailureForUrl,
-  recordImportFailure,
-} from "@/lib/recipes/import-failures";
+import { recordImportFailure } from "@/lib/recipes/import-failures";
 
 const schema = z.object({
   url: z.string().url(),
@@ -21,9 +18,10 @@ export async function POST(request: Request) {
   }
   const url = parsed.data.url;
   try {
+    // A success leaves a failed-list entry in place: it is cleared when the
+    // imported recipe is saved (POST /api/v1/recipes), so a discarded draft
+    // keeps the URL on the list.
     const recipe = await importRecipeFromUrl(url);
-    // The importer handles this page now — drop it from the failed list.
-    clearImportFailureForUrl(url);
     return NextResponse.json(recipe);
   } catch (e) {
     if (e instanceof ImportError) {

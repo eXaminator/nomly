@@ -59,6 +59,7 @@ function buildPayload(draft: DraftRecipe) {
     prepTimeMin: toNumberOrNull(draft.prepTimeMin),
     cookTimeMin: toNumberOrNull(draft.cookTimeMin),
     sourceUrl: draft.sourceUrl.trim() || null,
+    importedFromUrl: draft.importedFromUrl?.trim() || null,
     photoPath: draft.photoPath,
     photoUrl: draft.photoUrl.trim() || null,
     tags: draft.tags,

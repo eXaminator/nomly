@@ -49,8 +49,9 @@ export function ImportFailureList({ failures, onRetry, onRemove, busy }: Props) 
           Fehlgeschlagene Importe
         </h2>
         <p className="text-sm text-[var(--color-muted-fg)]">
-          Diese Links konnten nicht importiert werden. Ein erfolgreicher
-          erneuter Import entfernt den Eintrag automatisch.
+          Diese Links konnten nicht importiert werden. Sobald du ein Rezept
+          von einem dieser Links importiert und gespeichert hast, verschwindet
+          der Eintrag automatisch.
         </p>
       </div>
       <ul className="divide-y divide-[var(--color-border)] rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-card)]">

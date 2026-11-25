@@ -61,6 +61,9 @@ export const recipeInputSchema = z.object({
   prepTimeMin: z.number().int().nonnegative().nullable(),
   cookTimeMin: z.number().int().nonnegative().nullable(),
   sourceUrl: z.string().nullable(),
+  /** URL a URL import started from (before redirects). Creating the recipe
+   *  drops it from the failed-imports list; it is not stored on the recipe. */
+  importedFromUrl: z.string().nullable().optional(),
   photoPath: z.string().nullable(),
   /** Optional alternative to photoPath — server downloads and replaces. */
   photoUrl: z.string().nullable().optional(),
